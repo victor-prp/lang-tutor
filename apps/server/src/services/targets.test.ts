@@ -642,7 +642,7 @@ describe('end', () => {
   });
 });
 
-describe('list and get (spec D4, D11, rulings R-D4, R-D11)', () => {
+describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
   const READ = ['g_casa', 'g_lupo', 'g_gatto', 'g_cane', 'g_sole'];
   const MEMORY = [
     ...memory('g_casa', ALL_SKILLS, solid),
@@ -661,7 +661,7 @@ describe('list and get (spec D4, D11, rulings R-D4, R-D11)', () => {
       devices: { listening: true, speaking: true },
     });
 
-    expect(await service.get(OWNER, 't1')).toEqual({
+    expect(await service.getTarget(OWNER, 't1')).toEqual({
       id: 't1',
       kind: 'exam',
       due_on: DUE,
@@ -680,14 +680,14 @@ describe('list and get (spec D4, D11, rulings R-D4, R-D11)', () => {
 
   it('reads the bars of the target’s kind: what is "almost" for an exam is ready for homework', async () => {
     const { service } = world({ saved: READ, targets: [target({ kind: 'homework', words: READ })], memory: MEMORY, devices: { listening: true, speaking: true } });
-    const homework = await service.get(OWNER, 't1');
+    const homework = await service.getTarget(OWNER, 't1');
     expect(homework.words.find((kept) => kept.gloss_id === 'g_sole')?.readiness).toBe('ready');
     expect(homework.ready_count).toBe(3);
   });
 
   it('reads the live skills of the newest session: with no device to speak or listen, the spoken ones do not count', async () => {
     const { service } = world({ saved: READ, targets: [target({ words: READ })], memory: MEMORY });
-    const read = await service.get(OWNER, 't1');
+    const read = await service.getTarget(OWNER, 't1');
     expect(read.words.find((kept) => kept.gloss_id === 'g_gatto')?.readiness).toBe('ready');
     expect(read.ready_count).toBe(3);
   });
@@ -721,12 +721,12 @@ describe('list and get (spec D4, D11, rulings R-D4, R-D11)', () => {
 
   it('reads one target ended early, or past its date, too', async () => {
     const { service } = world({ saved: ['g_casa'], targets: [target({ dueOn: '2026-10-12', endedAt: new Date(NOW - 86_400_000 * 5) })] });
-    expect(await service.get(OWNER, 't1')).toMatchObject({ id: 't1', due_on: '2026-10-12', days_left: -3, word_count: 1 });
+    expect(await service.getTarget(OWNER, 't1')).toMatchObject({ id: 't1', due_on: '2026-10-12', days_left: -3, word_count: 1 });
   });
 
   it('answers TargetNotFound for a target that does not exist', async () => {
     const { service } = world();
-    await expect(service.get(OWNER, 't_none')).rejects.toBeInstanceOf(TargetNotFound);
+    await expect(service.getTarget(OWNER, 't_none')).rejects.toBeInstanceOf(TargetNotFound);
   });
 });
 
@@ -782,7 +782,7 @@ describe('authorization (spec D2)', () => {
   const asked = { photo_import_ids: ['i_a'], entries: [entry('g_gatto')] };
   it.each<[string, (service: TargetService, actor: string) => Promise<unknown>]>([
     ['list', (service, actor) => service.list(actor, 'e1')],
-    ['get', (service, actor) => service.get(actor, 't1')],
+    ['getTarget', (service, actor) => service.getTarget(actor, 't1')],
     ['create', (service, actor) => service.create(actor, 'e1', createRequest(asked))],
     ['addWords', (service, actor) => service.addWords(actor, 't1', asked)],
     ['removeWord', (service, actor) => service.removeWord(actor, 't1', 'g_casa')],

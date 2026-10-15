@@ -188,7 +188,7 @@ export function createTargetService({
       }),
 
     /** Any of the learner's targets, an ended or past one too: its screen. */
-    get: (actorUserId: string, targetId: string): Promise<Target> =>
+    getTarget: (actorUserId: string, targetId: string): Promise<Target> =>
       transaction(async (repos) => {
         const { found, enrolled } = await authorizeTarget(repos, actorUserId, targetId);
         return viewOne(repos, enrolled, await learnerDay(repos, enrolled.user_id, now()), found);

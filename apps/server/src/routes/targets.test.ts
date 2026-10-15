@@ -71,7 +71,7 @@ function build({ failure = null, signedIn = true }: { failure?: Error | null; si
     };
   const targets: TargetService = {
     list: run('list', LIST),
-    get: run('get', TARGET),
+    getTarget: run('getTarget', TARGET),
     create: run('create', TARGET),
     addWords: run('addWords', TARGET),
     removeWord: run('removeWord', undefined),
@@ -120,7 +120,7 @@ describe('the target routes, answering', () => {
     const res = await send(app, 'get');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(TARGET);
-    expect(calls).toEqual([{ method: 'get', args: [ACTOR, T] }]);
+    expect(calls).toEqual([{ method: 'getTarget', args: [ACTOR, T] }]);
   });
 
   it('moves the date: 200 with the target', async () => {
@@ -159,7 +159,7 @@ describe('the target routes, answering', () => {
     const { app, calls } = build();
     const res = await app.request('/api/targets/' + T, { headers: { 'x-test-actor': 'u_2', 'x-acting-user-id': 'u_2' } });
     expect(res.status).toBe(200);
-    expect(calls).toEqual([{ method: 'get', args: [ACTOR, T] }]);
+    expect(calls).toEqual([{ method: 'getTarget', args: [ACTOR, T] }]);
   });
 });
 
@@ -279,7 +279,7 @@ describe('the target routes behind the session', () => {
     };
     const app = createApp({
       ...base,
-      targets: { list: unreachable, get: unreachable, create: unreachable, addWords: unreachable, removeWord: unreachable, changeDate: unreachable, end: unreachable },
+      targets: { list: unreachable, getTarget: unreachable, create: unreachable, addWords: unreachable, removeWord: unreachable, changeDate: unreachable, end: unreachable },
       signedIn: { sessionOf: async () => ({ userId: ACTOR, email: ACTOR + '@test.invalid' }) },
       users: { ...base.users, hasProfile: async () => false },
     });

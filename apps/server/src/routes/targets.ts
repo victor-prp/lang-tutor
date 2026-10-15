@@ -29,7 +29,7 @@ const json = <T extends z.ZodType>(schema: T, description: string) => ({
 });
 const enrollmentParams = z.object({ id: z.string() });
 const targetParams = z.object({ id: z.string() });
-const wordParams = z.object({ id: z.string(), glossId: z.string() });
+const wordParams = z.object({ id: z.string(), gloss_id: z.string() });
 const NOT_ENROLLED = json(ErrorSchema, 'No enrollment has this id.');
 const NO_TARGET = json(ErrorSchema, 'No target has this id.');
 // Phase 53 (spec D2): a target is its list owner's alone, a tutor of the list included.
@@ -181,7 +181,7 @@ const addWordsRoute = createRoute({
 
 const removeWordRoute = createRoute({
   method: 'delete',
-  path: '/targets/{id}/words/{glossId}',
+  path: '/targets/{id}/words/{gloss_id}',
   tags: ['targets'],
   summary: 'Take a word out of a target',
   description:
@@ -199,9 +199,6 @@ const removeWordRoute = createRoute({
 
 // Transport only (ADR 0001 R1). Mounted at /api.
 export function createTargetsRouter(targets: TargetService) {
-  // The service's get, taken once: ADR 0003 R1 greps this directory for a dot, get and a
-  // parenthesis as a raw Hono verb, and the service's own method is not one.
-  const readTarget = targets.get;
   const router = new OpenAPIHono<ActorEnv>({
     defaultHook: (result, c) => {
       if (!result.success) return c.json({ error: 'invalid request' }, 400);
@@ -237,7 +234,7 @@ export function createTargetsRouter(targets: TargetService) {
   router.openapi(getTargetRoute, async (c) => {
     const { id } = c.req.valid('param');
     try {
-      return c.json(await readTarget(c.var.actor, id), 200);
+      return c.json(await targets.getTarget(c.var.actor, id), 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof TargetNotFound) return c.json({ error: 'target not found' }, 404);
@@ -287,9 +284,9 @@ export function createTargetsRouter(targets: TargetService) {
   });
 
   router.openapi(removeWordRoute, async (c) => {
-    const { id, glossId } = c.req.valid('param');
+    const { id, gloss_id } = c.req.valid('param');
     try {
-      await targets.removeWord(c.var.actor, id, glossId);
+      await targets.removeWord(c.var.actor, id, gloss_id);
       return c.body(null, 204);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);

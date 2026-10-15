@@ -150,7 +150,7 @@ describe('the document as a whole', () => {
       '/api/targets/{id}',
       '/api/targets/{id}/end',
       '/api/targets/{id}/words',
-      '/api/targets/{id}/words/{glossId}',
+      '/api/targets/{id}/words/{gloss_id}',
       '/api/translations',
       '/api/users',
       '/health',
@@ -507,7 +507,7 @@ describe('the target endpoints in the published document (phase 53)', () => {
   const TARGET = '/api/targets/{id}';
   const END = '/api/targets/{id}/end';
   const WORDS = '/api/targets/{id}/words';
-  const WORD = '/api/targets/{id}/words/{glossId}';
+  const WORD = '/api/targets/{id}/words/{gloss_id}';
 
   it.each([
     [TARGETS, 'get', ['200', '401', '403', '404']],
@@ -614,7 +614,7 @@ describe('the target endpoints in the published document (phase 53)', () => {
     const doc = await openApiDocument();
     expect(doc.paths[WORD].delete.parameters).toEqual([
       { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
-      { name: 'glossId', in: 'path', required: true, schema: { type: 'string' } },
+      { name: 'gloss_id', in: 'path', required: true, schema: { type: 'string' } },
     ]);
     expect(doc.paths[TARGET].get.parameters).toEqual([{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }]);
   });
@@ -695,7 +695,7 @@ describe('the 403 of an owner-only or granted route in the published document', 
     ['/api/targets/{id}', 'patch', OWNER_ONLY],
     ['/api/targets/{id}/end', 'post', OWNER_ONLY],
     ['/api/targets/{id}/words', 'post', OWNER_ONLY],
-    ['/api/targets/{id}/words/{glossId}', 'delete', OWNER_ONLY],
+    ['/api/targets/{id}/words/{gloss_id}', 'delete', OWNER_ONLY],
     ['/api/translations', 'post', /another learner's enrollment/],
     ['/api/grants/{id}/accept', 'post', /owner, who alone may accept or decline an invite/],
     ['/api/grants/{id}', 'delete', /neither party to this grant/],

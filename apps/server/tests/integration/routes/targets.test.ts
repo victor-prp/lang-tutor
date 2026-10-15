@@ -414,7 +414,7 @@ describe('POST /api/targets/{id}/words', () => {
   });
 });
 
-describe('DELETE /api/targets/{id}/words/{glossId}', () => {
+describe('DELETE /api/targets/{id}/words/{gloss_id}', () => {
   it('takes the word out of the target and answers 204 with no body; the word stays saved', async () => {
     const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
     const created = await made('exam', DUE, apple, bread);

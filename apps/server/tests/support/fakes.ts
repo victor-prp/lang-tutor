@@ -117,7 +117,7 @@ export function createFakeAppDeps(): AppDeps {
   };
   const targets: TargetService = {
     list: unreachable,
-    get: unreachable,
+    getTarget: unreachable,
     create: unreachable,
     addWords: unreachable,
     removeWord: unreachable,

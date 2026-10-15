@@ -98,7 +98,7 @@ describe('create (spec D10, ruling R-D9)', () => {
     expect(await readTargetEvents(t.db, made.id)).toEqual([
       { kind: 'created', before: null, after: { kind: 'exam', due_on: DUE, gloss_ids: union }, actorUserId: 'u_1', sessionId: null },
     ]);
-    expect(await deps.targets.get('u_1', made.id)).toEqual(made);
+    expect(await deps.targets.getTarget('u_1', made.id)).toEqual(made);
     expect((await deps.targets.list('u_1', E)).targets.map((listed) => listed.id)).toEqual([made.id]);
     expect(logger.events).toContainEqual({ event: 'target_created', enrollment_id: E, target_id: made.id, kind: 'exam', word_count: 4 });
   });
@@ -123,7 +123,7 @@ describe('unsave (spec D1)', () => {
 
     await deps.vocabulary.unsave('u_1', E, apple.gloss_id);
 
-    expect((await deps.targets.get('u_1', made.id)).words.map((kept) => kept.gloss_id)).toEqual([bread.gloss_id]);
+    expect((await deps.targets.getTarget('u_1', made.id)).words.map((kept) => kept.gloss_id)).toEqual([bread.gloss_id]);
     expect((await readTargetEvents(t.db, made.id)).map(({ kind, before, after, actorUserId }) => ({ kind, before, after, actorUserId }))).toEqual([
       { kind: 'created', before: null, after: { kind: 'exam', due_on: DUE, gloss_ids: [apple.gloss_id, bread.gloss_id] }, actorUserId: 'u_1' },
       { kind: 'words_removed', before: { gloss_ids: [apple.gloss_id] }, after: { reason: 'unsaved' }, actorUserId: 'u_1' },
