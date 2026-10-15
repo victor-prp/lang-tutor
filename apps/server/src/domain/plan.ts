@@ -18,7 +18,8 @@ import { READ_ALOUD_MAX_LEVEL } from './progress';
  *  `clozeGap`: its saved example holds the form exactly once, so it can be
  *  blanked (phase 27 D7). `dimension`, `rung`, `level` and `r` come from the
  *  word choice (D5): `r` is null for a dimension with no memory yet. `step`: a
- *  same-day return (phase 37 D1), asked after every other card (D6).
+ *  same-day return (phase 37 D1), asked after every other card (D6) but a
+ *  ladder's, whose cards it can go between (phase 54, spec D5).
  *  `meanings`: phase 34 (spec D3), every meaning the dictionary knows for its
  *  word and the word's homographs; none when absent. `knownMeanings`: phase 39
  *  (spec D6), the meanings already learned of a word whose new gloss this is.
@@ -267,31 +268,36 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
   const ladders = picks.flatMap((pick, index) => (pick.ladder ? [index] : []));
   const stream: Unit[] = LADDER_TYPES.flatMap((type) => ladders.map((index) => ({ indices: [index], type, p: 1, step: false })));
 
-  // Merged evenly with the other cards, ordered as before: the stream places its
-  // next card when its share of the stream placed is no more than the other
-  // cards' share. A ladder card never follows its own word while another card is
-  // left to put between them.
+  // Phase 37 (spec D6): the returns after every other card, so each is at least
+  // the rest of the session away from the answer that owed it. Phase 54 (spec D5,
+  // as ruled): they are the last of the other cards, ordered as before, so they
+  // follow every other card but can go between a ladder's cards: a session of one
+  // ladder and its returns does not ask the ladder back to back. With no ladder,
+  // the returns come last, as before.
   const first = ordered(units.filter((unit) => !unit.step), null);
+  const returns = ordered(units.filter((unit) => unit.step), first.last);
+  const others = [...first.out, ...returns.out];
+
+  // Merged evenly with the other cards: the stream places its next card when its
+  // share of the stream placed is no more than the other cards' share. A ladder
+  // card never follows its own word while another card is left to put between
+  // them.
   const merged: Unit[] = [];
   let a = 0;
   let b = 0;
-  while (a < stream.length || b < first.out.length) {
+  while (a < stream.length || b < others.length) {
     const L = stream.length;
-    const O = first.out.length;
+    const O = others.length;
     let fromStream = b >= O || (a < L && (a + 0.5) / L <= (b + 0.5) / O);
     const last = merged[merged.length - 1];
     if (fromStream && b < O && last && last.indices.includes(stream[a].indices[0])) fromStream = false;
-    merged.push(fromStream ? stream[a++] : first.out[b++]);
+    merged.push(fromStream ? stream[a++] : others[b++]);
   }
-
-  // Phase 37 (spec D6): the returns after every other card, so each is at least
-  // the rest of the session away from the answer that owed it.
-  const returns = ordered(units.filter((unit) => unit.step), merged.at(-1)?.type ?? null);
 
   const order: number[] = [];
   const types: QuestionType[] = [];
   let start: number | null = null;
-  for (const unit of [...merged, ...returns.out]) {
+  for (const unit of merged) {
     if (unit.type === 'matching') start = order.length;
     for (const index of unit.indices) {
       order.push(index);

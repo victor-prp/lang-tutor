@@ -527,21 +527,53 @@ describe('planCards: a ladder', () => {
     expect(plan.board).toBeNull();
   });
 
-  it('asks the returns after every ladder card', () => {
+  it('asks the returns after every other card, as the last of the cards a ladder merges with', () => {
+    // The other cards are 2 (reverse choice) and 3 (listening), then the returns 4 and 5: O = 4,
+    // and the stream is eight cards, L = 8. The stream places its next card while
+    // (a + ½) / 8 ≤ (b + ½) / 4: M0, 2, M1, P1₀, 3, P1₁, P2₀, 4, P2₁, P3₀, 5, P3₁.
     const list = [ladder(0), ladder(1), at(2, WP, 1), at(3, SR, 1), back(4, WR), back(5, WP, { r: 0.8 })];
     const plan = planCards(list, ALL);
-    const lastLadder = Math.max(...plan.order.flatMap((index, position) => (index <= 1 ? [position] : [])));
-    const firstReturn = Math.min(...plan.order.flatMap((index, position) => (index >= 4 ? [position] : [])));
-    expect(firstReturn).toBeGreaterThan(lastLadder);
-    expect(plan.order.slice(-2)).toEqual([4, 5]);
-    expect(typesOf(plan, 0)).toEqual(LADDER_TYPES);
-    expect(typesOf(plan, 1)).toEqual(LADDER_TYPES);
+    expect(plan.order).toEqual([0, 2, 1, 0, 3, 1, 0, 4, 1, 0, 5, 1]);
+    expect(plan.types).toEqual([
+      'meet',
+      'reverse_choice',
+      'meet',
+      'multiple_choice',
+      'listen_choice',
+      'multiple_choice',
+      'reverse_choice',
+      'typed_meaning',
+      'reverse_choice',
+      'typed_translation',
+      'typed_translation',
+      'typed_translation',
+    ]);
+    // Still after every card that is neither a return nor a ladder's.
+    expect(Math.min(...positionsOf(plan, 4), ...positionsOf(plan, 5))).toBeGreaterThan(Math.max(...positionsOf(plan, 2), ...positionsOf(plan, 3)));
+    expect(adjacent(plan)).toEqual([]);
   });
 
-  it('asks a return after a lone ladder\'s four cards', () => {
+  it("puts a lone ladder's return between its meet card and its first practice card", () => {
+    // O = 1, L = 4. The meet card first (½ / 4 ≤ ½ / 1); the multiple choice would follow it, so
+    // the return goes first; then nothing is left to part the three practice cards.
     const plan = planCards([ladder(0), back(1, WR)], ALL);
-    expect(plan.order).toEqual([0, 0, 0, 0, 1]);
-    expect(plan.types).toEqual([...LADDER_TYPES, 'typed_meaning']);
+    expect(plan.order).toEqual([0, 1, 0, 0, 0]);
+    expect(plan.types).toEqual(['meet', 'typed_meaning', 'multiple_choice', 'reverse_choice', 'typed_translation']);
+  });
+
+  it('parts one ladder with one other card and two returns: no two of its cards in a row', () => {
+    // O = 3: the other card, then the returns. L = 4: M, 1, P1, 2, P2, 3, P3.
+    const plan = planCards([ladder(0), at(1, WP, 1), back(2, WR), back(3, WP, { r: 0.8 })], ALL);
+    expect(plan.order).toEqual([0, 1, 0, 2, 0, 3, 0]);
+    expect(adjacent(plan)).toEqual([]);
+    expect(typesOf(plan, 0)).toEqual(LADDER_TYPES);
+  });
+
+  it('asks the returns last when the session has no ladder, as before', () => {
+    const list = [at(0, WP, 1), at(1, SR, 1), back(2, WR), back(3, WP, { r: 0.8 })];
+    const plan = planCards(list, ALL);
+    expect(plan.order).toEqual([0, 1, 2, 3]);
+    expect(plan.types).toEqual(['reverse_choice', 'listen_choice', 'typed_meaning', 'typed_translation']);
   });
 
   it('plans a pick without a ladder flag exactly as before', () => {
