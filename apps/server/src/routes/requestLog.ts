@@ -12,8 +12,9 @@ export const MAX_LOGGED_STRING_CHARS = 2_000;
 const MASKED = '<masked>';
 // The session cookie, and the bearer secrets of the bot route and the reminder tick.
 const MASKED_HEADERS = new Set(['cookie', 'authorization']);
-// Better Auth's `token`, the email code's `otp`, a push device's `token`.
-const MASKED_FIELD = /(token|password|secret|otp)$/i;
+// Better Auth's `token`, the email code's `otp`, a push device's `token`, the
+// bot sign-in's session `cookie`.
+const MASKED_FIELD = /(token|password|secret|otp|cookie)$/i;
 
 /** Every header by its lower-case name, credentials masked. */
 export function redactHeaders(headers: Headers): Record<string, string> {
@@ -41,16 +42,21 @@ export function redactBody(value: unknown): unknown {
 
 // What a request or response body becomes in the log. A copy is read, never the
 // original, so the handler (Better Auth reads the raw request) still gets it.
+// Only a JSON request body that declares a length within the limit is read at
+// all: one with no length could be any size, and is read before any route's own
+// limit. A response is this server's own JSON, which Hono sends without a
+// length, so it is read and then held to the same limit.
 // Anything that goes wrong here is a line in the log, never a failed request.
-async function loggedBody(message: Request | Response): Promise<unknown> {
+async function loggedBody(message: Request | Response, side: 'request' | 'response'): Promise<unknown> {
   try {
     // A plain object, by lower-case name: Headers lower-cases them as it iterates.
     const headers: Record<string, string> = Object.fromEntries(message.headers);
-    const declared = Number(headers['content-length'] ?? NaN);
-    if (declared > MAX_LOGGED_BODY_BYTES) return `<omitted: ${declared} bytes>`;
+    const length = headers['content-length'];
+    if (length === undefined && side === 'request') return '<omitted: no content-length>';
+    if (length !== undefined && !(Number(length) <= MAX_LOGGED_BODY_BYTES)) return `<omitted: ${length} bytes>`;
     const type = headers['content-type'] ?? 'no content-type';
+    if (!type.includes('json')) return `<omitted: ${type}${length === undefined ? '' : `, ${length} bytes`}>`;
     const text = await message.clone().text();
-    if (!type.includes('json')) return `<omitted: ${type}, ${Buffer.byteLength(text)} bytes>`;
     if (text.length > MAX_LOGGED_BODY_BYTES) return `<omitted: ${Buffer.byteLength(text)} bytes>`;
     try {
       return redactBody(JSON.parse(text));
@@ -67,10 +73,12 @@ async function loggedBody(message: Request | Response): Promise<unknown> {
 export const passRequestsThrough: MiddlewareHandler = (_c, next) => next();
 
 /**
- * Two lines per request, through the one Logger: `request_started` when it
- * arrives and `request_finished` when its response is ready, joined by `req`.
- * A request that never finishes is a started line with no finished line, which
- * is what makes a stalled request findable after the fact.
+ * Lines per request, through the one Logger, joined by `req`: `request_started`
+ * the moment it arrives, `request_body` once its body has arrived, and
+ * `request_finished` when its response is ready. A request that never finishes
+ * is a started line with no finished line, which is what makes a stalled
+ * request findable after the fact; the started line never waits on the body,
+ * so a slow upload is on record too.
  *
  * `req` is a counter this closure holds: short enough to grep, no randomness to
  * inject (ADR 0002), and the timestamps around the line tell two runs apart.
@@ -84,14 +92,16 @@ export function createRequestLog({ logger, now, bodies }: { logger: Logger; now:
     const url = new URL(c.req.url);
     const line = { req, method: c.req.method, path: url.pathname };
     const startedAt = now();
-    const hasBody = c.req.raw.body !== null;
     logger.info({
       event: 'request_started',
       ...line,
       query: url.search.replace(/^\?/, ''),
       headers: redactHeaders(c.req.raw.headers),
-      ...(bodies && hasBody ? { body: await loggedBody(c.req.raw) } : {}),
     });
+    // Read beside the handler, never ahead of it: loggedBody does not reject.
+    if (bodies && c.req.raw.body !== null) {
+      void loggedBody(c.req.raw, 'request').then((body) => logger.info({ event: 'request_body', req, body }));
+    }
 
     await next();
 
@@ -100,7 +110,7 @@ export function createRequestLog({ logger, now, bodies }: { logger: Logger; now:
       ...line,
       status: c.res.status,
       duration_ms: now() - startedAt,
-      ...(bodies && c.res.body !== null ? { body: await loggedBody(c.res) } : {}),
+      ...(bodies && c.res.body !== null ? { body: await loggedBody(c.res, 'response') } : {}),
     });
   };
 }

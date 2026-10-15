@@ -91,8 +91,8 @@ server is answering for, and any database whose worktree is gone.
 **Read the lane's logs before asking for terminal output.** `npm run server` and
 `npm run mobile` also write everything they print to `$LANE_LOGS/server.log` and
 `$LANE_LOGS/metro.log` (`<checkout>/.logs/`), each line timestamped. Every `/api` request
-logs `request_started` and `request_finished` with the same `req` id, so a request with a
-started line and no finished line is one that never came back. Prod writes the same lines;
+logs `request_started`, `request_body` and `request_finished` with the same `req` id, so a
+request with a started line and no finished line is one that never came back. Prod writes the same lines;
 read them with `aws lightsail get-container-log --region eu-central-1 --service-name
 wordspal --container-name app`. A server started before this existed writes no file until
 it is restarted.

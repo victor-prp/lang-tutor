@@ -53,11 +53,15 @@ A middleware registered first on `/api/*` in `app.ts` writes, through the existi
 `Logger.info`:
 
 ```json
-{"event":"request_started","req":"r17","method":"POST","path":"/api/sessions/08f5…/next-step","query":"","headers":{…},"body":{…}}
+{"event":"request_started","req":"r17","method":"POST","path":"/api/sessions/08f5…/next-step","query":"","headers":{…}}
+{"event":"request_body","req":"r17","body":{…}}
 {"event":"request_finished","req":"r17","method":"POST","path":"/api/sessions/08f5…/next-step","status":200,"duration_ms":31204,"body":{…}}
 ```
 
 A request that never finishes is a `request_started` with no `request_finished` for its `req`.
+The started line is written the moment the request arrives and never waits for the body: the
+body is read beside the handler and logged on its own `request_body` line once it has arrived,
+so a slow upload is on record from its first byte (final review, re-graded).
 That is the whole of done-means 1: a hung request stands out by what is missing, so nothing has
 to time it out.
 
@@ -77,15 +81,18 @@ A body is logged only when it is JSON (`content-type` contains `json`). Anything
 as the string `<omitted: <content-type>, <n> bytes>`. A JSON body is read from a clone of the
 request or response, so the handler, Better Auth included, still reads the original. Then:
 
-- **Size.** A request body whose `content-length` is over 256 KB is not read at all:
-  `<omitted: <n> bytes>`. A photo import is about 2.7 MB of base64 and is never even parsed for
+- **Size.** A request body is read only when it declares a `content-length` of at most 256 KB.
+  Over that it is `<omitted: <n> bytes>`; with none it is `<omitted: no content-length>`, since a
+  chunked body could be any size and the log reads it before any route's own limit (final
+  review). A response is the server's own JSON, sent without a length, so it is read and then
+  held to the same 256 KB. A photo import is about 2.7 MB of base64 and is never even parsed for
   logging.
 - **Media.** Any string over 2 000 characters becomes `<omitted: <n> chars>`. Base64 media is the
   only data this API carries in strings that long, so a voice clip under 256 KB is left out too.
 - **Credentials.** Headers `cookie` and `authorization` (the session, and the bot route's and
   the reminder tick's bearer secrets) become `<masked>`. So does any JSON field, at any depth, whose name ends in `token`,
-  `password`, `secret` or `otp`, any case. That covers Better Auth's `token`, the email code's
-  `otp` and a push device's `token`.
+  `password`, `secret`, `otp` or `cookie`, any case. That covers Better Auth's `token`, the email
+  code's `otp`, a push device's `token` and the bot sign-in's session `cookie`.
 
 The rules live in a pure module (`apps/server/src/routes/requestLog.ts`, exported
 `redactBody` and `redactHeaders`) that the tests reach without a server.
