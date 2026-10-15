@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import type { ClozeChoiceQuestion, ClozeTypedQuestion, LetterTilesQuestion, MatchingQuestion, SentenceTranslationQuestion } from '@lang-tutor/core/api';
+import type { ClozeChoiceQuestion, ClozeTypedQuestion, LetterTilesQuestion, MatchingQuestion, ReadAloudQuestion, SentenceTranslationQuestion } from '@lang-tutor/core/api';
 import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
@@ -95,7 +95,11 @@ const HEAR: Card = { dimension: 'spoken_receptive', rung: 1, level: 1, r: 0.64 }
 const produce = (r: number): Card => ({ dimension: 'written_productive', rung: 2, level: 3, r });
 
 /** Saves `words` and enqueues a list session's job with one pick each, carrying `cards[i]`. */
-async function enqueueSession(words: Record<string, string>, cards: Card[], opts: { listening: boolean; example?: { target: string } }) {
+async function enqueueSession(
+  words: Record<string, string>,
+  cards: Card[],
+  opts: { listening: boolean; speaking?: boolean; example?: { target: string } },
+) {
   const picks: PrepareSessionPayload['picks'] = [];
   for (const [i, [lemma, translation]] of Object.entries(words).entries()) {
     const example = opts.example && { source: `We saw the ${lemma} there.`, target: opts.example.target };
@@ -114,7 +118,7 @@ async function enqueueSession(words: Record<string, string>, cards: Card[], opts
   }
   return withTx(t.db, async (tx) => {
     const sessionId = await createSessionRepo(tx).insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON);
-    await createJobRepo(tx, boss).enqueue(PREPARE_SESSION, { session_id: sessionId, picks, listening: opts.listening, speaking: false });
+    await createJobRepo(tx, boss).enqueue(PREPARE_SESSION, { session_id: sessionId, picks, listening: opts.listening, speaking: opts.speaking ?? false });
     return sessionId;
   });
 }
@@ -159,24 +163,85 @@ it('prepares a ten-word session with listening on: the board, then each card by 
   expect(tiles.tiles).toHaveLength([...tiles.answer].length + 2);
 });
 
-// Phase 54 (spec D3, D7). A new word's first session through the queue: its pick,
-// stored as a ladder, is asked as four cards, the meet card first, and the meet
-// card is written as the database takes it.
-it('prepares a ladder pick as a meet card, a multiple choice, a reverse choice and a typed translation (phase 54, spec D3, D7)', async () => {
-  // Tome's meet card q1, which asks nothing, sprint's multiple choice q2, then
-  // tome's choice q3, its reversed card q4 and its typed card q5.
-  await expectDistractors(ns, { tasks: [null, 'meaning', 'meaning', 'word', 'typed'] });
-  await expectCheck(ns);
-  const sessionId = await enqueueSession({ tome: 'ספר', sprint: 'ריצה' }, [{ ladder: true }, RECOGNISE], { listening: false });
+// Phase 54 (spec D3, D7); phase 55 (spec D2, D3). A new word's first session through
+// the queue: its pick, stored as a ladder, is asked as its intro stage (the meet card,
+// a read aloud when the session speaks, the letter tiles or a typed translation) and
+// three practice cards. The meet card is written as the database takes it.
+describe('a ladder through the queue (phase 54, spec D3, D7; phase 55, spec D2, D3)', () => {
+  const PRACTICE = ['multiple_choice', 'reverse_choice', 'typed_translation'];
+  const cardsOf = (questions: { type: string; vocab_term_id: string }[], lexemeId: string) =>
+    questions.filter((q) => q.vocab_term_id === lexemeId).map((q) => q.type);
 
-  await waitFor(async () => (await statusOf(sessionId)) === 'ready');
-  const { questions } = await deps.sessions.getSession('u_1', sessionId);
-  expect(questions.map((q) => q.type)).toEqual(['meet', 'multiple_choice', 'multiple_choice', 'reverse_choice', 'typed_translation']);
-  const [meet] = questions;
-  expect(meet).toEqual({ id: meet.id, vocab_term_id: meet.vocab_term_id, type: 'meet', question: 'tome', meaning: 'ספר' });
-  expect(questions.filter((q) => q.vocab_term_id === meet.vocab_term_id).map((q) => q.type)).toEqual([
-    'meet', 'multiple_choice', 'reverse_choice', 'typed_translation',
-  ]);
+  it('prepares a ladder pick on a tile form as a meet card, a read aloud, letter tiles and three practice cards', async () => {
+    // Tome's intro q1-q3 asks nothing, sprint's multiple choice q4 and tome's choice
+    // q5, then its reversed card q6 and its typed card q7.
+    await expectDistractors(ns, { tasks: [null, null, null, 'meaning', 'meaning', 'word', 'typed'] });
+    await expectCheck(ns);
+    const sessionId = await enqueueSession({ tome: 'ספר', sprint: 'ריצה' }, [{ ladder: true }, RECOGNISE], { listening: false, speaking: true });
+
+    await waitFor(async () => (await statusOf(sessionId)) === 'ready');
+    const { questions } = await deps.sessions.getSession('u_1', sessionId);
+    expect(questions.map((q) => q.type)).toEqual([
+      'meet', 'read_aloud', 'letter_tiles', 'multiple_choice', 'multiple_choice', 'reverse_choice', 'typed_translation',
+    ]);
+    const [meet, aloud, tiles] = questions as [(typeof questions)[number], ReadAloudQuestion, LetterTilesQuestion];
+    expect(meet).toEqual({ id: meet.id, vocab_term_id: meet.vocab_term_id, type: 'meet', question: 'tome', meaning: 'ספר' });
+    expect(cardsOf(questions, meet.vocab_term_id)).toEqual(['meet', 'read_aloud', 'letter_tiles', ...PRACTICE]);
+    // The read aloud shows the word and keeps its meaning; the tiles ask the meaning and build the word from its letters and two more.
+    expect(aloud).toMatchObject({ vocab_term_id: meet.vocab_term_id, type: 'read_aloud', question: 'tome', meaning: 'ספר' });
+    expect(tiles).toMatchObject({ vocab_term_id: meet.vocab_term_id, type: 'letter_tiles', question: 'ספר', answer: 'tome' });
+    expect(tiles.tiles).toHaveLength([...'tome'].length + 2);
+    expect(tiles.tiles.length).toBeGreaterThanOrEqual(5);
+    expect(tiles.tiles.length).toBeLessThanOrEqual(12);
+  });
+
+  it('prepares the same pick without the read aloud when the session cannot speak', async () => {
+    await expectDistractors(ns, { tasks: [null, null, 'meaning', 'meaning', 'word', 'typed'] });
+    await expectCheck(ns);
+    const sessionId = await enqueueSession({ tome: 'ספר', sprint: 'ריצה' }, [{ ladder: true }, RECOGNISE], { listening: false });
+
+    await waitFor(async () => (await statusOf(sessionId)) === 'ready');
+    const { questions } = await deps.sessions.getSession('u_1', sessionId);
+    expect(questions.map((q) => q.type)).toEqual(['meet', 'letter_tiles', 'multiple_choice', 'multiple_choice', 'reverse_choice', 'typed_translation']);
+    expect(cardsOf(questions, questions[0].vocab_term_id)).toEqual(['meet', 'letter_tiles', ...PRACTICE]);
+  });
+
+  it('prepares a ladder pick on a form without tiles with a typed translation in place of them', async () => {
+    // A phrase cannot be built from tiles; it can be said. The ladder alone: its intro q1-q3
+    // asks nothing, then q4 to q6.
+    await expectDistractors(ns, { tasks: [null, null, null, 'meaning', 'word', 'typed'] });
+    await expectCheck(ns);
+    const sessionId = await enqueueSession({ 'take off': 'להמריא' }, [{ ladder: true }], { listening: false, speaking: true });
+
+    await waitFor(async () => (await statusOf(sessionId)) === 'ready');
+    const { questions } = await deps.sessions.getSession('u_1', sessionId);
+    // A session of one word: the plan's one-word rule leaves the ladder its read aloud.
+    expect(questions.map((q) => q.type)).toEqual(['meet', 'read_aloud', 'typed_translation', ...PRACTICE]);
+    expect(questions[2]).toMatchObject({ type: 'typed_translation', question: 'להמריא', answer: 'take off' });
+  });
+
+  it('prepares a payload of three ladders, as a stock chosen before the deploy holds, with all of their cards', async () => {
+    // Nine intro cards q1-q9 ask nothing, then the three ladders' practice cards, stage by stage.
+    await expectDistractors(ns, {
+      tasks: [...Array(9).fill(null), 'meaning', 'meaning', 'meaning', 'word', 'word', 'word', 'typed', 'typed', 'typed'],
+    });
+    await expectCheck(ns);
+    const sessionId = await enqueueSession(WORDS, [{ ladder: true }, { ladder: true }, { ladder: true }], { listening: false, speaking: true });
+
+    await waitFor(async () => (await statusOf(sessionId)) === 'ready');
+    const { questions } = await deps.sessions.getSession('u_1', sessionId);
+    const intro = ['meet', 'read_aloud', 'letter_tiles'];
+    expect(questions).toHaveLength(18);
+    // Each word's intro stage is three cards in a row; then the practice, stage by stage.
+    expect(questions.slice(0, 9).map((q) => q.type)).toEqual([...intro, ...intro, ...intro]);
+    expect(questions.slice(9).map((q) => q.type)).toEqual([
+      ...Array(3).fill('multiple_choice'), ...Array(3).fill('reverse_choice'), ...Array(3).fill('typed_translation'),
+    ]);
+    const lexemes = [...new Set(questions.map((q) => q.vocab_term_id))];
+    expect(lexemes).toHaveLength(3);
+    for (const lexemeId of lexemes) expect(cardsOf(questions, lexemeId)).toEqual([...intro, ...PRACTICE]);
+    for (const at of [0, 3, 6]) expect(new Set(questions.slice(at, at + 3).map((q) => q.vocab_term_id)).size).toBe(1);
+  });
 });
 
 // Phase 27 Part B (spec D5-D8): the three sentence cards, written by the job and
@@ -249,18 +314,20 @@ describe('sentence cards through the queue', () => {
 describe('prepare-session through the queue', () => {
   it('turns a list session ready, with its saved words as the prompts', async () => {
     await expectCheck(ns);
-    // Phase 54 (spec D3, D5): the three meet cards q1-q3 ask nothing, then the
-    // stages of the three ladders.
-    await expectDistractors(ns, { tasks: [null, null, null, 'meaning', 'meaning', 'meaning', 'word', 'word', 'word', 'typed', 'typed', 'typed'] });
+    // Phase 55 (spec D2, D3): each of the three ladders' intro stage, the meet card and the
+    // tiles (the session cannot speak), q1-q6, asks nothing, then the stages of the practice cards.
+    await expectDistractors(ns, { tasks: [null, null, null, null, null, null, 'meaning', 'meaning', 'meaning', 'word', 'word', 'word', 'typed', 'typed', 'typed'] });
     const sessionId = await requestListSession();
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
     const record = await deps.sessions.getSession('u_1', sessionId);
     // Phase 35 (spec D6): three new words, too few for a board. Phase 54 (spec D3,
-    // D5, D7): each a ladder, its pick stored as one, and the ladders stage by stage.
+    // D5, D7): each a ladder, its pick stored as one. Phase 55 (spec D2, D3): each word's
+    // intro stage is a meet card and the tiles, in a row, then the practice cards stage by stage.
     const stage = (type: string) => [type, type, type];
     expect(record.questions.map((q) => q.type)).toEqual([
-      ...stage('meet'), ...stage('multiple_choice'), ...stage('reverse_choice'), ...stage('typed_translation'),
+      'meet', 'letter_tiles', 'meet', 'letter_tiles', 'meet', 'letter_tiles',
+      ...stage('multiple_choice'), ...stage('reverse_choice'), ...stage('typed_translation'),
     ]);
     for (const choice of record.questions.filter((q) => q.type === 'multiple_choice')) {
       if (choice.type !== 'multiple_choice') throw new Error('unreachable');
@@ -271,7 +338,9 @@ describe('prepare-session through the queue', () => {
       if (meet.type !== 'meet') throw new Error('unreachable');
       expect(meet.meaning).toBe(WORDS[meet.question]);
     }
-    expect(new Set(record.questions.slice(0, 3).map((q) => (q as { question: string }).question))).toEqual(new Set(Object.keys(WORDS)));
+    // The tiles card follows its word's meet card.
+    for (const at of [0, 2, 4]) expect(record.questions[at + 1].vocab_term_id).toBe(record.questions[at].vocab_term_id);
+    expect(new Set([0, 2, 4].map((at) => (record.questions[at] as { question: string }).question))).toEqual(new Set(Object.keys(WORDS)));
   });
 
   it('writes each card the content its type needs', async () => {

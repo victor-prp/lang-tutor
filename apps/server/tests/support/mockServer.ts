@@ -392,12 +392,14 @@ export async function expectContext(
 
 /**
  * Phase 34 (spec D5). The checker's answer, matched on CHECK_MARKER and ranked
- * above a broader stub. One static answer serves any session of up to ten
- * cards: every key q1 to q10 calls each of its `options` (three, as
- * expectDistractors writes them) wrong, as an option and as a gap filler, and
+ * above a broader stub. One static answer serves any session of up to twenty
+ * cards (phase 55: a session is ten graded cards and the free cards of its
+ * ladders' intro stages, which ask nothing but hold a position): every key q1 to
+ * q20 calls each of its `options` (three, as expectDistractors writes them)
+ * wrong, as an option and as a gap filler, and
  * translates a sentence card's Hebrew as STUB_SENTENCE, which uses STUB_GAP, so
  * the stub's sentence cards are kept. It says nothing of a context sentence
- * (q1c to q10c), which the server then drops to its fallback: a test that
+ * (q1c to q20c), which the server then drops to its fallback: a test that
  * stubs the context call says, in `overrides`, how the checker reads each one.
  * Without this stub the checker finds no expectation, and the attempt fails.
  * `status` makes it a failed call; '' is the provider's "no content".
@@ -408,9 +410,9 @@ export async function expectCheck(
 ): Promise<void> {
   const wrong = Array.from({ length: opts.options ?? 3 }, () => false);
   const items = [
-    ...Array.from({ length: 10 }, (_, i) => ({ key: `q${i + 1}`, options: wrong, gap_fits: wrong, natural_translation: STUB_SENTENCE })),
+    ...Array.from({ length: 20 }, (_, i) => ({ key: `q${i + 1}`, options: wrong, gap_fits: wrong, natural_translation: STUB_SENTENCE })),
     ...Object.keys(opts.overrides ?? {})
-      .filter((key) => !/^q([1-9]|10)$/.test(key))
+      .filter((key) => !/^q([1-9]|1\d|20)$/.test(key))
       .map((key) => ({ key })),
   ].map((item) => ({ ...item, ...opts.overrides?.[item.key] }));
   const failed = opts.status !== undefined && opts.status !== 200;

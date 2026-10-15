@@ -267,8 +267,9 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
 
     // The retry reads again, and the queue keeps one job per rendering.
     await clearNamespace(ns);
-    // Phase 54 (spec D5): three ladders, stage by stage, their meet cards asking nothing.
-    await expectDistractors(ns, { tasks: [null, null, null, 'meaning', 'meaning', 'meaning', 'word', 'word', 'word', 'typed', 'typed', 'typed'] });
+    // Phase 54 (spec D5), phase 55 (spec D3): three ladders, their intro stages (a meet card and
+    // tiles each, q1-q6) asking nothing, then the practice cards stage by stage.
+    await expectDistractors(ns, { tasks: [null, null, null, null, null, null, 'meaning', 'meaning', 'meaning', 'word', 'word', 'word', 'typed', 'typed', 'typed'] });
     await expectCheck(ns);
     await deps().sessions.prepareSession(payload);
     expect(await acceptJobs()).toEqual(expected);
@@ -277,9 +278,9 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
 
   it("never writes a session's own typed alternatives into the dictionary", async () => {
     await expectAccept(ns, { answers: ['codex'], answer_form: null });
-    // Phase 54 (spec D5): the two new words' ladders, stage by stage, merged with
-    // tome's typed translation (q5): their meet cards q1-q2 ask nothing.
-    await expectDistractors(ns, { tasks: [null, null, 'meaning', 'meaning', 'typed', 'word', 'word', 'typed', 'typed'] });
+    // Phase 54 (spec D5), phase 55 (spec D3): the two new words' ladders, stage by stage, merged
+    // with tome's typed translation (q7): their intro stages q1-q4 ask nothing.
+    await expectDistractors(ns, { tasks: [null, null, null, null, 'meaning', 'meaning', 'typed', 'word', 'word', 'typed', 'typed'] });
     await expectCheck(ns);
     await registerWorkers(boss, deps(), { pollingIntervalSeconds: 0.5 });
     const { sessionId, saved } = await requestListSession({ typedTome: true });
