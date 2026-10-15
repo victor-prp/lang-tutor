@@ -1,4 +1,4 @@
-import type { CreateSessionResponse, NextStepResponse, Question, SessionView } from '@lang-tutor/core/api';
+import type { CreateSessionResponse, CurrentSessionResponse, NextStepResponse, Question, SessionView } from '@lang-tutor/core/api';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../../urls';
@@ -18,6 +18,20 @@ export async function enrollmentIdOf(request: APIRequestContext): Promise<string
 
 export async function skipSession(request: APIRequestContext, sessionId: string): Promise<void> {
   expect((await request.post(`${API_URL}/api/sessions/${sessionId}/skip`)).ok()).toBe(true);
+}
+
+/**
+ * Phase 54. Skips a list session stocked before every word of a burst of saves
+ * was in, so the next one holds them all. The seed's start asks for a stock
+ * (phase 43), and that job can land between two saves made a moment apart: it
+ * then holds only the first word. A learner never saves that fast; a spec does.
+ */
+export async function retireStock(request: APIRequestContext): Promise<void> {
+  const enrollmentId = await enrollmentIdOf(request);
+  const res = await request.get(`${API_URL}/api/enrollments/${enrollmentId}/sessions/current`);
+  expect(res.ok(), await res.text()).toBe(true);
+  const { current } = (await res.json()) as CurrentSessionResponse;
+  if (current && current.source === 'list' && current.answered === 0) await skipSession(request, current.session_id);
 }
 
 /**

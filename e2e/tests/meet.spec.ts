@@ -6,7 +6,7 @@ import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { SINGLE_WORDS } from './support/lexemes';
 import { clearGemini } from './support/mockServer';
-import { continueMeet } from './support/sessions';
+import { continueMeet, retireStock } from './support/sessions';
 import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
 import { spoken, withVoices } from './support/voices';
@@ -39,9 +39,11 @@ async function startSession(page: Page, request: APIRequestContext, username: st
   }
 
   // Phase 43 (spec D7). Home makes the session itself, so the stubs are in
-  // place before going back.
+  // place before going back. A stock that landed between two saves holds only
+  // the first word: retire it, so the session Home makes holds them all.
   await clearGemini(request);
   await expectGeneration(request);
+  await retireStock(page.request);
   await page.getByTestId('translate-back').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
 }
