@@ -6,7 +6,7 @@ import { expectGeneration } from './support/cards';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { FINGER, FINGER_RECONCILED, FINGERS, MOUSE } from './support/lexemes';
 import { clearGemini, expectGeminiMatching, userText } from './support/mockServer';
-import { answerChoiceRight, askedForm, enrollmentIdOf, readyListSession, skipSession } from './support/sessions';
+import { answerLadderRight, askedForm, enrollmentIdOf, readyListSession, skipSession } from './support/sessions';
 import { openApp, signUpLearner } from './support/users';
 
 // Phase 31, the spec's three e2e lines. MockServer is set up through the
@@ -49,13 +49,15 @@ test('two senses with one target word are one card, saved once, practised once, 
   await expect(page.getByTestId('vocabulary-sense-also')).toHaveText('גם: עכברון');
   await expect(page.getByTestId('vocabulary-sense-level')).toHaveCount(1);
 
-  // Practised once: one card in the session, and one level when it ends.
+  // Practised once: one word in the session, whose four cards are its ladder
+  // (met first, then asked three ways; phase 54), and one level when it ends.
   await clearGemini(request);
   await expectGeneration(request);
   const session = await readyListSession(page.request, enrollmentId);
-  expect(session.total).toBe(1);
+  expect(session.total).toBe(4);
+  expect(session.question.type).toBe('meet');
   expect(askedForm(session.question)).toBe('mouse');
-  const done = await answerChoiceRight(page.request, session.id, session.question);
+  const done = await answerLadderRight(page.request, session.id, session.question);
   expect(done.complete).toBe(true);
   if (done.complete) expect(done.progress).toHaveLength(1);
 

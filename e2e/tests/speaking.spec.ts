@@ -7,6 +7,7 @@ import { tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
 import { seedMemory, seededR, type MemorySeed } from './support/memory';
 import { clearGemini, expectGeminiMatching, expectSoundAlike, expectTranscription, userText } from './support/mockServer';
+import { continueMeet } from './support/sessions';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
@@ -23,6 +24,10 @@ test.use({
 const WORDS = BOARD_WORDS.slice(0, 4);
 const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.translation, w.form]));
 const MEANING_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.form, w.translation]));
+
+// Phase 54. Two cards for the two seeded words, and a ladder of four for each of the
+// two new ones.
+const CARDS = 10;
 
 /** Past a skipped seed, with the four words looked up and saved through the API. */
 async function saveFourWords(request: APIRequestContext): Promise<void> {
@@ -60,7 +65,8 @@ async function saveFourWords(request: APIRequestContext): Promise<void> {
  * Session 1:
  * - ромашка: SK at R 0.50 (S 1, 90 days), level 1: a read aloud.
  * - черепаха: SK at R 0.85 (S 10, 19 days), level 3: say the translation.
- * - подушка, зонтик: no memory, new words, a choice of meanings each.
+ * - подушка, зонтик: no memory, new words: a ladder each (phase 54), met first and
+ *   then asked as a choice of meanings, a choice of words and a typed translation.
  */
 const FIRST: MemorySeed[] = [
   { gloss: 'מרגנית', dimension: 'spoken_productive', stability: 1, daysAgo: 90, level: 1 },
@@ -74,17 +80,21 @@ const FIRST: MemorySeed[] = [
  * - ромашка: SK at R 0.74 (S 10, 62 days), level 1: below RUNG_R, so recognition,
  *   a read aloud, p = √0.74 = 0.86.
  * - черепаха: SK at R 0.79 (S 10, 38 days), level 4: say the translation, p = 0.79.
- * - подушка, зонтик: no memory, new words, a choice of meanings each, p = 1.
+ * - подушка, зонтик: no memory, new words: a ladder each (phase 54), whose cards
+ *   the plan spreads through the session (spec D5).
  */
 const CANT_SPEAK: MemorySeed[] = [
   { gloss: 'מרגנית', dimension: 'spoken_productive', stability: 10, daysAgo: 62, level: 1 },
   { gloss: 'צב', dimension: 'spoken_productive', stability: 10, daysAgo: 38, level: 4 },
 ];
 
-/** Gets past a card this spec is not about: a choice answered right, a typed
- *  meaning by the saved meaning, which is judged by rule. */
+/** Gets past a card this spec is not about: a meet card tapped through, a typed
+ *  meaning by the saved meaning, which is judged by rule, a typed translation by
+ *  its word, and a choice answered right. */
 async function pass(page: Page, card: Card) {
+  if (card.kind === 'meet') return continueMeet(page);
   if (card.kind === 'meaning') await answerMeaning(page, MEANING_OF[card.prompt]);
+  else if (card.kind === 'typed') await answerTyped(page, FORM_OF[card.prompt]);
   else await answerChoice(page, card, true);
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await page.getByTestId('continue-button').click();
@@ -99,8 +109,8 @@ test('speaking: read aloud and say the translation', async ({ page, request }) =
   await saveFourWords(page.request);
   await seedMemory('e2e_speak_ru', FIRST);
 
-  // Session 1: a read aloud, say the translation and two choices, in the order
-  // of their p, so each card is answered by its type.
+  // Session 1: a read aloud, say the translation and the two ladders, whose
+  // cards are placed by the plan, so each card is answered by its type.
   await clearGemini(request);
   await expectGeneration(request);
   // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
@@ -109,8 +119,8 @@ test('speaking: read aloud and say the translation', async ({ page, request }) =
   await tapUntil(page, 'start-button', 'progress-label');
 
   const kinds: CardKind[] = [];
-  for (let position = 1; position <= 4; position++) {
-    const card = await readCard(page, position, 4);
+  for (let position = 1; position <= CARDS; position++) {
+    const card = await readCard(page, position, CARDS);
     kinds.push(card.kind);
     if (card.kind === 'read') {
       // Read aloud: first not understood, then understood. Phase 50: the second
@@ -140,7 +150,7 @@ test('speaking: read aloud and say the translation', async ({ page, request }) =
       await pass(page, card);
     }
   }
-  expect(kinds.sort()).toEqual(['choice', 'choice', 'read', 'say']);
+  expect(kinds.sort()).toEqual(['choice', 'choice', 'meet', 'meet', 'read', 'reverse', 'reverse', 'say', 'typed', 'typed']);
 
   await expect(page.getByText(/דיבור/).first(), report()).toBeVisible();
   expect(diagnostics.pageErrors, report()).toEqual([]);
@@ -168,8 +178,8 @@ test("speaking: can't speak now passes the read aloud, and say the translation t
 
   let position = 1;
   for (; ; position++) {
-    expect(position, 'the session asked no read aloud').toBeLessThan(4);
-    const card = await readCard(page, position, 4);
+    expect(position, 'the session asked no read aloud').toBeLessThan(CARDS);
+    const card = await readCard(page, position, CARDS);
     if (card.kind === 'read') break;
     expect(card.kind, `position ${position}`).not.toBe('say');
     await pass(page, card);
@@ -177,17 +187,17 @@ test("speaking: can't speak now passes the read aloud, and say the translation t
   // "Can't speak now" passes the card unseen (spec D8 of phase 25): the next
   // card is up, and no banner or Continue came between.
   await page.getByTestId('speak-cant-speak').click();
-  await readCard(page, position + 1, 4);
+  await readCard(page, position + 1, CARDS);
   await expect(page.getByTestId('feedback-title')).toHaveCount(0);
   await expect(page.getByTestId('continue-button')).toHaveCount(0);
 
   // Say the translation renders as the typed card from now on: черепаха's card
-  // is the session's only typed one.
+  // is the one typed card that is not a new word's translation (phase 54).
   for (position += 1; ; position++) {
-    expect(position, 'the session asked no say the translation after the read aloud').toBeLessThanOrEqual(4);
-    const card = await readCard(page, position, 4);
+    expect(position, 'the session asked no say the translation after the read aloud').toBeLessThanOrEqual(CARDS);
+    const card = await readCard(page, position, CARDS);
     expect(card.kind, `position ${position}`).not.toBe('say');
-    if (card.kind === 'typed') {
+    if (card.kind === 'typed' && card.prompt === 'צב') {
       expect(card.prompt).toBe('צב');
       await answerTyped(page, FORM_OF[card.prompt]);
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
@@ -198,7 +208,7 @@ test("speaking: can't speak now passes the read aloud, and say the translation t
   }
   // The last card ends on the results; an earlier one is skipped back home. The results
   // keep home's start button mounted behind them, so each ending is checked on its own.
-  if (position < 4) {
+  if (position < CARDS) {
     await page.getByTestId('session-skip').click();
     // Phase 43 (spec D2, D3): the next session in stock, built while this one was played.
     await expect(page.getByTestId('start-button').or(page.getByTestId('preparing-label'))).toBeVisible();

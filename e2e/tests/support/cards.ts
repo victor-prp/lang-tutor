@@ -2,6 +2,7 @@ import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
 import { expectGeminiByTask } from './mockServer';
+import { continueMeet } from './sessions';
 import { stripIsolates } from './text';
 
 /** Wrong Hebrew meanings for today's card. None is a right answer anywhere. */
@@ -9,7 +10,7 @@ export const WRONG_HEBREW = ['דלת', 'קיר', 'תקרה'];
 /** Wrong Russian words for a reversed card. None is a saved form or lemma. */
 export const WRONG_RUSSIAN = ['писать', 'дверь', 'стена'];
 
-export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say' | 'meaning' | 'cloze-choice' | 'cloze-typed' | 'translate' | 'new-meaning';
+export type CardKind = 'meet' | 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say' | 'meaning' | 'cloze-choice' | 'cloze-typed' | 'translate' | 'new-meaning';
 
 export type Card = { kind: CardKind; prompt: string; options: string[] };
 
@@ -18,6 +19,8 @@ const HEBREW = /\p{Script=Hebrew}/u;
 /** The kind of the card on screen, from what it renders. */
 async function kindOnScreen(page: Page): Promise<CardKind> {
   const has = async (id: string) => (await page.getByTestId(id).count()) > 0;
+  // Phase 54. A new word's first card: its title is on no other card.
+  if (await has('meet-title')) return 'meet';
   if (await has('board')) return 'board';
   if (await has('tiles')) return 'tiles';
   if (await has('listen-play')) return (await has('typed-input')) ? 'dictation' : 'listen';
@@ -115,6 +118,20 @@ export async function answerChoice(page: Page, card: Card, right: boolean) {
   expect(index, card.options.join(' | ')).toBeGreaterThanOrEqual(0);
   await page.getByTestId(`option-${index}`).click();
   return card.options[index];
+}
+
+/**
+ * Phase 54. Plays the card on screen to its end, for a spec about what comes
+ * after it: a meet card is tapped through; a choice of meanings, of words or of
+ * a new meaning is answered right; a typed card is shown its answer. Then it
+ * moves on.
+ */
+export async function playOut(page: Page, card: Card) {
+  if (card.kind === 'meet') return continueMeet(page);
+  if (card.kind === 'choice' || card.kind === 'reverse' || card.kind === 'new-meaning') await answerChoice(page, card, true);
+  else if (card.kind === 'typed' || card.kind === 'meaning') await page.getByTestId('typed-show-answer').click();
+  else throw new Error(`no way to play a ${card.kind} card out`);
+  await page.getByTestId('continue-button').click();
 }
 
 /** Types an answer on a typed card and checks it. */

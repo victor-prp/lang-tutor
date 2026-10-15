@@ -1,5 +1,5 @@
 import type { CreateSessionResponse, NextStepResponse, Question, SessionView } from '@lang-tutor/core/api';
-import { expect, type APIRequestContext } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../../urls';
 
@@ -50,25 +50,49 @@ export async function readyListSession(
 }
 
 /**
- * The form a one-word session asks about. A word with no memory yet takes a
- * choice of meanings, and a word recalled well enough a typed meaning; both
- * show the form as `question` (phase 35, domain/plan.ts).
+ * The form a one-word session asks about. A word with no memory yet is met
+ * first (phase 54) and then asked as a choice of meanings, and a word recalled
+ * well enough a typed meaning; each shows the form as `question` (phase 35,
+ * domain/plan.ts).
  */
 export function askedForm(question: Question): string {
-  if (question.type === 'multiple_choice' || question.type === 'typed_meaning' || question.type === 'new_meaning') return question.question;
+  if (question.type === 'meet' || question.type === 'multiple_choice' || question.type === 'typed_meaning' || question.type === 'new_meaning') return question.question;
   throw new Error(`a one-word session asked a ${question.type} card`);
 }
 
-/** Answers a choice of meanings right, as the app does. */
-export async function answerChoiceRight(
+/**
+ * Answers a new word's four cards right over the API, as the app does: the
+ * meet card is seen (phase 54), the choices take their right option and the
+ * typed translation its word. Returns the last response, which completes a
+ * session of nothing else.
+ */
+export async function answerLadderRight(
   request: APIRequestContext,
   sessionId: string,
-  question: Question,
+  first: Question,
 ): Promise<NextStepResponse> {
-  if (question.type !== 'multiple_choice') throw new Error(`expected a choice of meanings, got ${question.type}`);
-  const res = await request.post(`${API_URL}/api/sessions/${sessionId}/next-step`, {
-    data: { question_id: question.id, option_index: question.correct_option },
-  });
-  expect(res.ok(), await res.text()).toBe(true);
-  return (await res.json()) as NextStepResponse;
+  let question = first;
+  for (;;) {
+    let data: object;
+    if (question.type === 'meet') data = { question_id: question.id, seen: true };
+    else if (question.type === 'multiple_choice' || question.type === 'reverse_choice') data = { question_id: question.id, option_index: question.correct_option };
+    else if (question.type === 'typed_translation') data = { question_id: question.id, text: question.answer };
+    else throw new Error(`a new word's ladder asked a ${question.type} card`);
+    const res = await request.post(`${API_URL}/api/sessions/${sessionId}/next-step`, { data });
+    expect(res.ok(), await res.text()).toBe(true);
+    const next = (await res.json()) as NextStepResponse;
+    if (next.complete) return next;
+    question = next.question;
+  }
+}
+
+/**
+ * Phase 54. Taps through the meet card on screen: it asks nothing, so no banner
+ * follows, and the counter moves on once the server has answered.
+ */
+export async function continueMeet(page: Page): Promise<void> {
+  const counter = page.getByTestId('progress-label');
+  const before = await counter.textContent();
+  await page.getByTestId('meet-continue').click();
+  await expect(counter).not.toHaveText(before ?? '');
 }
