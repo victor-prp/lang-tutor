@@ -194,6 +194,7 @@ function runDays(
         r: pick.r,
         step: pick.cls === 'STEP',
         knownMeanings: families.introductions.get(pick.glossId),
+        ladder: pick.ladder,
       }));
       const plan = planCards(planned, { listening: true, speaking: true });
 

@@ -21,7 +21,10 @@ import { READ_ALOUD_MAX_LEVEL } from './progress';
  *  same-day return (phase 37 D1), asked after every other card (D6).
  *  `meanings`: phase 34 (spec D3), every meaning the dictionary knows for its
  *  word and the word's homographs; none when absent. `knownMeanings`: phase 39
- *  (spec D6), the meanings already learned of a word whose new gloss this is. */
+ *  (spec D6), the meanings already learned of a word whose new gloss this is.
+ *  `ladder`: phase 54 (spec D3), a new word's first session: the pick is asked
+ *  as the four cards of LADDER_TYPES, whatever its rung, R, level and flags
+ *  say; absent is false. */
 export type PlanPick = {
   form: string;
   translation: string;
@@ -35,6 +38,7 @@ export type PlanPick = {
   step: boolean;
   meanings?: readonly string[];
   knownMeanings?: readonly string[];
+  ladder?: boolean;
 };
 
 /** `listening`: the app said its device has a voice for the target (phase 24 D5).
@@ -59,10 +63,16 @@ export const RUNGS: Readonly<Record<Dimension, readonly [readonly QuestionType[]
   spoken_productive: [['read_aloud'], ['say_translation']],
 };
 
+/** Phase 54 (spec D3). A ladder's cards, always in this order: the meet card,
+ *  then the practice a new word is asked in its first session. All three
+ *  practice types are always eligible, so every ladder has all four. */
+export const LADDER_TYPES: readonly QuestionType[] = ['meet', 'multiple_choice', 'reverse_choice', 'typed_translation'];
+
 /** Spec D6: no type is chosen more than this many times in one session. A new
  *  word's multiple choice, and the last resort's, are not chosen and do not
  *  count: four new words would otherwise send every recognised word to recall,
- *  though those four are about to become a board. */
+ *  though those four are about to become a board. A ladder's cards (phase 54,
+ *  spec D3) are not chosen either, and do not count. */
 export const MAX_PER_TYPE = 4;
 
 export const BOARD_SIZE = 4;
@@ -228,8 +238,11 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
   // "can't speak now" could pass, leaving nothing to score.
   const speaking = input.speaking && picks.length > 1;
 
+  // Phase 54 (spec D3). A ladder pick has no card of its own: its four are
+  // fixed, and it touches no type's count.
   const used = new Map<QuestionType, number>();
-  const cards = picks.map((pick) => {
+  const cards = picks.map((pick): Card | null => {
+    if (pick.ladder) return null;
     const { chosen, ...card } = cardFor(pick, used, input.listening, speaking);
     if (chosen) used.set(card.type, (used.get(card.type) ?? 0) + 1);
     return card;
@@ -238,25 +251,47 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
   // Spec D6, D10: in a session of at least BOARD_MIN_PICKS, four
   // multiple-choice picks whose forms and meanings all differ become one
   // matching board; otherwise there is none. A return is never on it: it is
-  // asked last (phase 37 D6).
-  const multipleChoice = cards.flatMap((card, index) => (card.type === 'multiple_choice' && !picks[index].step ? [index] : []));
+  // asked last (phase 37 D6). A ladder's multiple choice is never on it
+  // (phase 54, spec D3).
+  const multipleChoice = cards.flatMap((card, index) => (card?.type === 'multiple_choice' && !picks[index].step ? [index] : []));
   const board = picks.length >= BOARD_MIN_PICKS ? boardPicks(picks, multipleChoice) : null;
   const onBoard = new Set(board ?? []);
 
   const units: Unit[] = cards.flatMap((card, index) =>
-    onBoard.has(index) ? [] : [{ indices: [index], ...card, step: picks[index].step }],
+    card === null || onBoard.has(index) ? [] : [{ indices: [index], ...card, step: picks[index].step }],
   );
-  if (board) units.push({ indices: board, type: 'matching', p: Math.max(...board.map((index) => cards[index].p)), step: false });
+  if (board) units.push({ indices: board, type: 'matching', p: Math.max(...board.map((index) => cards[index]!.p)), step: false });
+
+  // Phase 54 (spec D5). The ladder stream, stage by stage: every meet card, then
+  // every first practice card, and so on, each stage in pick order.
+  const ladders = picks.flatMap((pick, index) => (pick.ladder ? [index] : []));
+  const stream: Unit[] = LADDER_TYPES.flatMap((type) => ladders.map((index) => ({ indices: [index], type, p: 1, step: false })));
+
+  // Merged evenly with the other cards, ordered as before: the stream places its
+  // next card when its share of the stream placed is no more than the other
+  // cards' share. A ladder card never follows its own word while another card is
+  // left to put between them.
+  const first = ordered(units.filter((unit) => !unit.step), null);
+  const merged: Unit[] = [];
+  let a = 0;
+  let b = 0;
+  while (a < stream.length || b < first.out.length) {
+    const L = stream.length;
+    const O = first.out.length;
+    let fromStream = b >= O || (a < L && (a + 0.5) / L <= (b + 0.5) / O);
+    const last = merged[merged.length - 1];
+    if (fromStream && b < O && last && last.indices.includes(stream[a].indices[0])) fromStream = false;
+    merged.push(fromStream ? stream[a++] : first.out[b++]);
+  }
 
   // Phase 37 (spec D6): the returns after every other card, so each is at least
   // the rest of the session away from the answer that owed it.
-  const first = ordered(units.filter((unit) => !unit.step), null);
-  const returns = ordered(units.filter((unit) => unit.step), first.last);
+  const returns = ordered(units.filter((unit) => unit.step), merged.at(-1)?.type ?? null);
 
   const order: number[] = [];
   const types: QuestionType[] = [];
   let start: number | null = null;
-  for (const unit of [...first.out, ...returns.out]) {
+  for (const unit of [...merged, ...returns.out]) {
     if (unit.type === 'matching') start = order.length;
     for (const index of unit.indices) {
       order.push(index);
