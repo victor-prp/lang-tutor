@@ -210,8 +210,12 @@ export function weekSummary(state: BotState, week: number, memory: BotMemory): W
   // Each word once, at its longest absence.
   const longest = cameBack.filter((c, i) => cameBack.findIndex((o) => o.word === c.word) === i);
 
+  // Phase 54 (spec D3). A word with a meet card in a session is a ladder there: its cards are the
+  // design, not the picker asking the same word again, so they do not count toward `repeated`.
+  const key = (c: { session: string; word: string | null }) => `${c.session}\u0000${c.word}`;
+  const laddered = new Set(state.log.filter((c) => c.type === 'meet' && c.word !== null).map(key));
   const perSession = new Map<string, number>();
-  for (const c of cards) if (c.word !== null) perSession.set(`${c.session}\u0000${c.word}`, (perSession.get(`${c.session}\u0000${c.word}`) ?? 0) + 1);
+  for (const c of cards) if (c.word !== null && !laddered.has(key(c))) perSession.set(key(c), (perSession.get(key(c)) ?? 0) + 1);
   const repeated = [...perSession]
     .filter(([, times]) => times >= REPEAT_TIMES)
     .map(([k, times]) => ({ word: k.split('\u0000')[1], times }))
