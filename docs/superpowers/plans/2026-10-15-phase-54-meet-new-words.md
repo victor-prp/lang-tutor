@@ -29,7 +29,7 @@
 2. A word answered wrong on every ladder card: next session it must come back as a ladder (meet again), not a cold recall card, and stop after `RETURNS_PER_DAY` — pinned in Task 2 and Task 5.
 3. A stock prepared before the deploy (picks without `ladder`): it must prepare exactly as before — pinned in Task 4.
 4. A ladder whose practice cards are all refused by validation or the checker: no lone meet card — pinned in Task 4.
-5. A session with one ladder and only one or two other cards: no two cards of the word adjacent while another card can go between — pinned in Task 3.
+5. A session with one ladder and only one or two other cards: two cards of the word adjacent only once no other card is left to put between them — pinned in Task 3.
 
 ---
 
@@ -132,7 +132,7 @@ const reserve = Math.min(
   1. One ladder pick among six others: its four positions carry `LADDER_TYPES` in order; the other six picks get the types they get today.
   2. Ladder cards do not count toward `MAX_PER_TYPE` (five non-ladder reverse-choice-eligible picks still get their usual types beside two ladders), and a ladder's `multiple_choice` is never on a board.
   3. Three ladders, no other cards: order is M_A M_B M_C A1 B1 C1 A2 B2 C2 A3 B3 C3 (by pick index).
-  4. Three ladders and one other card; two ladders and four others; one ladder and two others: no two adjacent positions share a pick index; every ladder's cards are in `LADDER_TYPES` order.
+  4. Three ladders and one other card; two ladders and four others; one ladder and three others: no two adjacent positions share a pick index; every ladder's cards are in `LADDER_TYPES` order. One ladder and two others (three separators needed, two exist): the only adjacent pair is the ladder's last two cards, after both others are placed.
   5. One ladder and nothing else: four positions in a row (`[0,0,0,0]`).
   6. Returns (`step: true`) are after every ladder card.
   7. A pick without `ladder` plans exactly as today (an existing test fixture, unchanged output).
