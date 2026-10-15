@@ -44,9 +44,11 @@ export function redactBody(value: unknown): unknown {
 // Anything that goes wrong here is a line in the log, never a failed request.
 async function loggedBody(message: Request | Response): Promise<unknown> {
   try {
-    const declared = Number(message.headers.get('content-length') ?? NaN);
+    // A plain object, by lower-case name: Headers lower-cases them as it iterates.
+    const headers: Record<string, string> = Object.fromEntries(message.headers);
+    const declared = Number(headers['content-length'] ?? NaN);
     if (declared > MAX_LOGGED_BODY_BYTES) return `<omitted: ${declared} bytes>`;
-    const type = message.headers.get('content-type') ?? 'no content-type';
+    const type = headers['content-type'] ?? 'no content-type';
     const text = await message.clone().text();
     if (!type.includes('json')) return `<omitted: ${type}, ${Buffer.byteLength(text)} bytes>`;
     if (text.length > MAX_LOGGED_BODY_BYTES) return `<omitted: ${Buffer.byteLength(text)} bytes>`;
@@ -59,6 +61,10 @@ async function loggedBody(message: Request | Response): Promise<unknown> {
     return '<omitted: unreadable>';
   }
 }
+
+/** What `/api/*` runs where no request is logged: a test's app, whose logger
+ *  keeps to the events the test asserts on. */
+export const passRequestsThrough: MiddlewareHandler = (_c, next) => next();
 
 /**
  * Two lines per request, through the one Logger: `request_started` when it

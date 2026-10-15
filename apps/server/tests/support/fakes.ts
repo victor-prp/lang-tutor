@@ -28,6 +28,7 @@ import type { GrantService } from '../../src/services/grants';
 import type { VocabularyService } from '../../src/services/vocabulary';
 import type { UserService } from '../../src/services/users';
 import type { BotService } from '../../src/services/bots';
+import { passRequestsThrough } from '../../src/routes/requestLog';
 
 export type FakeLogger = Logger & {
   events: Record<string, unknown>[];
@@ -139,6 +140,8 @@ export function createFakeAppDeps(): AppDeps {
     identity: { lane: 'test', database: 'test_db', port: 0, version: 'test', commit: 'test' },
     webDistDir: null,
     logger: createFakeLogger(),
+    // A pass-through: a shape test logs no requests.
+    requestLog: passRequestsThrough,
     auth: { handler: async () => new Response(null, { status: 500 }), paths: [] },
     signedIn: { sessionOf: async () => null },
     webOrigins: ['https://web.example.test'],

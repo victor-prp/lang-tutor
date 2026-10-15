@@ -75,6 +75,8 @@ export async function main(): Promise<void> {
     pushBaseUrl: config.pushBaseUrl,
     reminderSecret,
     boss,
+    // Bodies on everywhere, prod included, while only a few testers use it.
+    requestLog: { bodies: true },
   });
 
   await registerWorkers(boss, deps, { pollingIntervalSeconds: 2 });

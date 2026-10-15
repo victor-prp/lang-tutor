@@ -31,6 +31,7 @@ describe('createServerDeps', () => {
   it('passes the logger it is given straight through', () => {
     const logger = createFakeLogger();
     const deps = createServerDeps({
+      requestLog: null,
       db: t.db,
       logger,
       rng: testRng(7),

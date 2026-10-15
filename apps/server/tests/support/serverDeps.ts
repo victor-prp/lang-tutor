@@ -65,6 +65,8 @@ export function createTestServerDeps(io: {
   reminderSecret?: string | null;
 }): AppDeps {
   return createServerDeps({
+    // No request lines: a test's logger keeps to the events it asserts on.
+    requestLog: null,
     db: io.db,
     logger: io.logger,
     rng: io.rng,

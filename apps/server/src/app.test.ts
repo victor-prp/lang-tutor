@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createApp } from './app';
+import { createRequestLog } from './routes/requestLog';
 import type { AppDeps } from './composition';
 import type { EnrollmentService } from './services/enrollments';
 import type { SessionService } from './services/sessions';
@@ -127,7 +128,7 @@ const unreachableGrants: GrantService = {
 };
 const unreachablePhotoImports = createFakeAppDeps().photoImports;
 
-function depsWithPing(ok: boolean): AppDeps {
+function depsWithPing(ok: boolean, logger = createFakeLogger()): AppDeps {
   return {
     grants: unreachableGrants,
     reminders: createFakeAppDeps().reminders,
@@ -142,7 +143,8 @@ function depsWithPing(ok: boolean): AppDeps {
     health: { ping: async () => ok },
     identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001, version: 'v-test', commit: 'a3f9c21' },
     webDistDir: null,
-    logger: createFakeLogger(),
+    logger,
+    requestLog: createRequestLog({ logger, now: () => 0, bodies: true }),
     auth: createFakeAppDeps().auth,
     signedIn: createFakeAppDeps().signedIn,
     webOrigins: createFakeAppDeps().webOrigins,
@@ -153,6 +155,21 @@ function depsWithPing(ok: boolean): AppDeps {
 
 // No database: the health route's two branches are both reachable with a fake.
 // The app's one database-backed case lives in tests/integration/app.test.ts.
+// The request log is registered on /api/* only: /health is Lightsail's check,
+// every few seconds, and would drown every other line.
+describe('the request log', () => {
+  it('logs an /api request and leaves /health out', async () => {
+    const logger = createFakeLogger();
+    const app = createApp(depsWithPing(true, logger));
+    await app.request('/health');
+    await app.request('/api/auth/nowhere');
+    expect(logger.events).toEqual([
+      expect.objectContaining({ event: 'request_started', path: '/api/auth/nowhere' }),
+      expect.objectContaining({ event: 'request_finished', path: '/api/auth/nowhere', status: 404 }),
+    ]);
+  });
+});
+
 describe('GET /health', () => {
   it('returns 200 and names the lane that answered when the check passes', async () => {
     const res = await createApp(depsWithPing(true)).request('/health');
