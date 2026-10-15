@@ -114,8 +114,12 @@ const FRESH: DayList = {
  *  `phase`: the rhythm starts that many cards in, so a run can miss any card of the five.
  *  `forgets`: glosses the learner answers wrong on every card that asks something. */
 type Learner = { missEvery: number; phase?: number; forgets?: ReadonlySet<string> };
-/** Phase 37's learner. */
+/** Phase 37's learner, missing one card in five. */
 const PHASE_37_LEARNER: Learner = { missEvery: 5 };
+/** Phase 54. Phase 37's learner at each phase of its rhythm: missing the first card of five, the
+ *  second, and so on. One deterministic learner misses the same places of every ten-card session,
+ *  so a measure taken at one phase alone can sit at the rhythm's best or worst. */
+const EVERY_PHASE: readonly Learner[] = Array.from({ length: PHASE_37_LEARNER.missEvery }, (_, phase) => ({ ...PHASE_37_LEARNER, phase }));
 
 function answerOf(glossId: string, type: QuestionType, right: boolean): AnsweredQuestion {
   if (type === 'meet') return { glossId, type, verdict: 'seen' };
@@ -343,22 +347,24 @@ function expectSessionBounds(run: Run) {
 }
 
 /** Outcome 10 (phase 54, spec D5; done means 1: "practised three times, never back to back"). No two
- *  adjacent cards of a session share a gloss while the session has another card to put between them:
- *  a lone ladder's four cards need three others, a board counting as one card and a return as any
- *  other; with two ladders or more, the stream's stage order always has one. Returns the sessions with
- *  a ladder and another card, which the check covers. */
+ *  cards of one word sit side by side while the session has another card to put between them. A lone
+ *  ladder's four cards need three others: with `others` non-ladder units (a board counts as one, a
+ *  return as any other), at most max(0, 3 − others) of its cards follow one of its own. With two
+ *  ladders or more the stream's stage order always parts them: none does. Returns the sessions with a
+ *  ladder and another card, each of them checked. */
 function expectLaddersSpread(run: Run): number {
   let covered = 0;
   run.sessions.forEach(({ picks }, at) => {
-    const ladders = picks.filter((pick) => pick.ladder);
+    const ladders = picks.filter((pick) => pick.ladder).map((pick) => pick.glossId);
     if (ladders.length === 0 || picks.length === 1) return;
     covered++;
     const cards = cardsIn(run, at);
-    const others = (glossId: string) =>
-      cards.filter((card) => card.glossId !== glossId && card.type !== 'matching').length + (cards.some((card) => card.type === 'matching') ? 1 : 0);
-    const room = ladders.length > 1 || others(ladders[0].glossId) >= LADDER.length - 1;
-    const sideBySide = cards.flatMap((card, i) => (i > 0 && cards[i - 1].glossId === card.glossId ? [`${i - 1}-${i} ${card.glossId}`] : []));
-    expect({ at, sideBySide: room ? sideBySide : [] }).toEqual({ at, sideBySide: [] });
+    const others =
+      cards.filter((card) => !ladders.includes(card.glossId) && card.type !== 'matching').length + (cards.some((card) => card.type === 'matching') ? 1 : 0);
+    const bound = ladders.length > 1 ? 0 : Math.max(0, LADDER.length - 1 - others);
+    const sideBySide = cards.flatMap((card, i) => (i > 0 && cards[i - 1].glossId === card.glossId ? [card.glossId] : []));
+    const over = ladders.filter((glossId) => sideBySide.filter((pair) => pair === glossId).length > bound);
+    expect({ at, others, over, unlisted: sideBySide.filter((glossId) => !ladders.includes(glossId)) }).toEqual({ at, others, over: [], unlisted: [] });
   });
   return covered;
 }
@@ -447,9 +453,10 @@ describe.each(DAYS)('a day: %s (phase 37)', (_name, list, count, checkMet, withF
     const missed = log.filter((card) => !card.right && card.session < last);
     expect(missed.length).toBeGreaterThan(0);
     for (const card of missed) {
-      // D1: a word comes back at most RETURNS_PER_DAY times a day. Returns are asked
-      // last, and the last card of a ten-card session is always one this learner
-      // misses, so some words use them all.
+      // D1: a word comes back at most RETURNS_PER_DAY times a day. Returns follow every
+      // card that is not a return (phase 54: a ladder's cards can go between them), late
+      // in the session, where this learner misses the same places every session, so
+      // some words use them all.
       const returns = log.filter((earlier) => earlier.glossId === card.glossId && earlier.cls === 'STEP' && earlier.session <= card.session);
       if (returns.length >= RETURNS_PER_DAY) continue;
       const back = log.some((later) => later.glossId === card.glossId && later.session > card.session);
@@ -580,28 +587,35 @@ const FAMILIES: DayList = {
   progress: [],
 };
 
-/** Phase 46 (spec D6). Phase 37's learner, missing one card in five. Under phase 39's
- *  rule, every skill at the bar at the same moment, this learner never got a gloss of
- *  this list known: a miss drops the skill it tests, and at six sessions a day each of
- *  the seven glosses not waiting is missed about once a day. A skill now counts once it
- *  has reached the bar (D1, D2), so the second meanings come. */
-const MISS_EVERY = 5;
-
 describe('families over days: twenty-five days of six sessions, phase 37\'s learner (phase 39, phase 46)', () => {
-  // Phase 46 (spec D6): the five-meaning word, asked in every session, is known on day 20
-  // (session 118); five more days keep the test from turning red on a day's drift.
+  // Phase 46 (spec D6). Under phase 39's rule, every skill at the bar at the same moment, phase
+  // 37's learner never got a gloss of this list known: a miss drops the skill it tests, and at six
+  // sessions a day each of the seven glosses not waiting is missed about once a day. A skill now
+  // counts once it has reached the bar (D1, D2), so the second meanings come. The five-meaning
+  // word, asked in every session, is known on day 20 (session 118); five more days keep the test
+  // from turning red on a day's drift.
   //
-  // Phase 54. Whether that word is known in the run depends on which card of five the learner
-  // misses: in sessions of ten graded cards it misses the same places in every session, and the
-  // word asked there (the plan asks the weakest word and the returns last) is missed again each
-  // time, its skill never reaching the bar. Ladders change how many cards day 0 asks, so the
-  // places moved onto the five-meaning word: missing the first card of five, it is no longer known
-  // in 25 days, nor in 60. Phase 53's code, missing the third or fourth, never knew it in 25
-  // days either. So the two meaning outcomes are checked for the learner at each of the five
-  // places in its rhythm: wherever the first meaning is known, the second follows as a
-  // new_meaning; wherever it is not, no other meaning is asked; and some place knows it.
-  const runs = Array.from({ length: MISS_EVERY }, (_, phase) => runDays(FAMILIES, 25, 6, { missEvery: MISS_EVERY, phase }));
+  // Phase 54. Whether a word is known in the run depends on which card of five the learner misses:
+  // in sessions of ten graded cards it misses the same places in every session, and the word asked
+  // there (the plan asks the weakest word late, and the returns after every other card but a
+  // ladder's) is missed again each time, its skill never reaching the bar. Ladders change how many
+  // cards day 0 asks, which moves those places. So the two meaning outcomes are checked for the
+  // learner at each of the five places in its rhythm: wherever the first meaning is known, the
+  // second follows as a new_meaning; wherever it is not, no other meaning is asked; some place
+  // knows the first. Which word a place keeps missing moves with the rhythm, so how often words
+  // come to be known is counted over the whole list, against phase 53's code (KNOWN_ON_PHASE_53).
+  const runs = EVERY_PHASE.map((learner) => runDays(FAMILIES, 25, 6, learner));
   const [{ log, sessions }] = runs;
+
+  /** The seven glosses that do not wait: each word's current meaning, the five-meaning word's and
+   *  the shared spelling's first, and the five single words. */
+  const FREE = ['m0', 'h0', 's0', 's1', 's2', 's3', 's4'];
+
+  /** As ruled: the (gloss, phase) pairs of FREE known within the 25 days, over the five phases. Phase
+   *  53's code (origin/master a182c99a, this runner and learner) knows 11 (m0 3, h0 3, s0 3, s4 2);
+   *  phase 54 knows 14 (m0 3, h0 1, s0–s4 2 each). Over learners missing every 4th to 8th card, all
+   *  their phases: m0 21 → 19 of 30, h0 22 → 20 of 30, the single words 68 → 94 of 150. */
+  const KNOWN_ON_PHASE_53 = 11;
 
   it('6 and 7 have families to check, and a gloss that waits', () => {
     expect(familiesChecked(sessions)).toEqual({ families: true, waited: true });
@@ -621,7 +635,7 @@ describe('families over days: twenty-five days of six sessions, phase 37\'s lear
    *  none is asked; once it is, the first asked is `second`, at or after the session it was known in.
    *  And some phase knows `first` within the run, so the outcome is tested. */
   function expectSecondOnceKnown(first: string, others: readonly string[], second: Partial<Asked>) {
-    expect(runs.filter(({ knownIn }) => knownIn.has(first)).length).toBeGreaterThan(0);
+    expect({ first, knownAtSomePhase: runs.some(({ knownIn }) => knownIn.has(first)) }).toEqual({ first, knownAtSomePhase: true });
     runs.forEach(({ log: asked, knownIn }, phase) => {
       const word = asked.filter((card) => card.glossId === first || others.includes(card.glossId));
       expect({ phase, first: word[0]?.glossId }).toEqual({ phase, first });
@@ -640,6 +654,14 @@ describe('families over days: twenty-five days of six sessions, phase 37\'s lear
   it('asks the other reading of a shared spelling the same way, whichever card of five the learner misses', () => {
     expectSecondOnceKnown('h0', ['h1'], { glossId: 'h1', type: 'new_meaning', knownMeanings: ['see'] });
   });
+
+  const known = runs.flatMap(({ knownIn }) => FREE.filter((glossId) => knownIn.has(glossId))).length;
+
+  it(`gets the list's words known as often as phase 53 did, over the five phases: ${known} of ${FREE.length * runs.length} (pass ≥ ${KNOWN_ON_PHASE_53}) (phase 46)`, () => {
+    // FREE is what waits on nothing when the run starts.
+    expect(FAMILIES.saved.map(({ glossId }) => glossId).filter((glossId) => sessions[0].families.state.get(glossId) !== 'waiting')).toEqual(FREE);
+    expect(known).toBeGreaterThanOrEqual(KNOWN_ON_PHASE_53);
+  });
 });
 
 // Phase 53 (spec §2): the day simulation with targets.
@@ -653,13 +675,14 @@ const NEVER_MISSES = Number.POSITIVE_INFINITY;
  *  scenarios 1 and 2. Phase 54 (as ruled): scenario 1's is the mean over the five phases of the
  *  learner's miss rhythm; scenario 2's is still its first phase alone. */
 const READY_ON_DUE_PASS: Record<TargetKind, number> = {
-  // Phase 54 (as ruled): the mean over the rhythm's five phases. Phase 53's 0.65 was one phase, and
-  // it sat at the rhythm's best: on phase 53's code a single phase spans 0.40–0.65, and the five
-  // average 0.57. Phase 54 measures the five-phase mean: 0.55 before the returns could part a
-  // ladder's cards, 0.58 since (measured 2026-10-15; phases 0.70 0.50 0.60 0.60 0.50). The simulated
-  // learner models the ladder's cost in slots but not its benefit to encoding: it misses a word met
-  // on a meet card as often as one guessed at. Never lowered to let a change pass (spec §2).
-  exam: 0.55,
+  // Phase 54 (as ruled): the mean over the rhythm's five phases, at phase 53's own five-phase mean.
+  // Phase 53's 0.65 was one phase, and it sat at the rhythm's best: on phase 53's code a single
+  // phase spans 0.40–0.65, and the five average 0.57 (phases 0.65 0.65 0.55 0.40 0.60, measured
+  // the same way). Phase 54 measures 0.58 (measured 2026-10-15; phases 0.70 0.50 0.60 0.60 0.50).
+  // The simulated learner models the ladder's cost in slots but not its benefit to encoding: it
+  // misses a word met on a meet card as often as one guessed at. Never lowered to let a change
+  // pass (spec §2).
+  exam: 0.57,
   // Measured 2026-10-15: 0.85. Never lowered to let a change pass (spec §2).
   homework: 0.85,
 };
@@ -869,12 +892,12 @@ function itKeepsTheSessionRules(run: TargetRun, end: string) {
 
 describe("a target, phase 37's learner: an exam due in 14 days, twenty words (phase 53, spec §2 row 1)", () => {
   const exam: ActiveTarget = { id: 'exam', kind: 'exam', dueOn: dueIn(14), glossIds: listIds(1, 20) };
-  const run = runTargets(withList(20), 17, () => [exam]);
-  // Phase 54 (as ruled): the share at each of the five phases of the learner's miss rhythm, this
-  // run's first, and their mean.
-  const shares = Array.from({ length: MISS_EVERY }, (_, phase) =>
-    readyShareOnDue(phase === 0 ? run : runTargets(withList(20), 17, () => [exam], { ...PHASE_37_LEARNER, phase }), exam),
-  );
+  // Phase 54 (as ruled): the share at each of the five phases of the learner's miss rhythm, and
+  // their mean; the first phase's run is the one the other checks read.
+  const runAt = (learner: Learner) => runTargets(withList(20), 17, () => [exam], learner);
+  const runs = EVERY_PHASE.map(runAt);
+  const [run] = runs;
+  const shares = runs.map((one) => readyShareOnDue(one, exam));
   const share = shares.reduce((sum, one) => sum + one, 0) / shares.length;
   /** The exam's daysLeft in session `at`; 0 once it has ended. */
   const daysLeftIn = (at: number) => run.sessions[at].split[0]?.daysLeft ?? 0;
