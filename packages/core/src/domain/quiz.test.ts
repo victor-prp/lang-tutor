@@ -598,3 +598,48 @@ describe('the meet card and the seen answer (phase 54, spec D6)', () => {
     expect(shuffleOptions(MEET, seededRng(1))).toBe(MEET);
   });
 });
+
+// Phase 54 (final review). A ladder asks one word three ways in a session; the missed
+// list names a word once, by its first wrong card. `vocab_term_id` is the card's lexeme,
+// and a session asks one gloss of a family at most (phase 39 D5), one lexeme's glosses
+// being one family, so within a session it names the gloss.
+describe('missed, a ladder (phase 54)', () => {
+  const choice: MultipleChoiceQuestion = { ...makeQuestion(1), id: 'c1', vocab_term_id: 'l1', question: 'gatto' };
+  const reverse: Question = {
+    id: 'r1', type: 'reverse_choice', vocab_term_id: 'l1', question: 'חתול', part_of_speech: 'noun',
+    options: ['gatto', 'cane', 'casa', 'porta'], correct_option: 0, context: null,
+  };
+  const ladder: Question[] = [MEET, choice, reverse, typed];
+
+  it('lists a ladder whose three practice cards were all wrong once, by its first wrong card', () => {
+    const answers = [
+      evaluate(MEET, { seen: true }),
+      evaluate(choice, { option_index: 1 }),
+      evaluate(reverse, { option_index: 2 }),
+      evaluate(typed, { text: 'porta' }),
+    ];
+    expect(missed(ladder, answers)).toEqual([{ question: choice, correct_answer: 'a1' }]);
+  });
+
+  it('lists the first wrong card when the earlier ones were right', () => {
+    const answers = [
+      evaluate(MEET, { seen: true }),
+      evaluate(choice, { option_index: 0 }),
+      evaluate(reverse, { option_index: 2 }),
+      evaluate(typed, { text: 'porta' }),
+    ];
+    expect(missed(ladder, answers).map((item) => item.question.id)).toEqual(['r1']);
+  });
+
+  it('still lists two different words wrong as two rows', () => {
+    const other = makeQuestion(2);
+    const answers = [
+      evaluate(MEET, { seen: true }),
+      evaluate(choice, { option_index: 1 }),
+      evaluate(other, { option_index: 1 }),
+      evaluate(reverse, { option_index: 2 }),
+      evaluate(typed, { text: 'porta' }),
+    ];
+    expect(missed([...ladder, other], answers).map((item) => item.question.id)).toEqual(['c1', 'q2']);
+  });
+});

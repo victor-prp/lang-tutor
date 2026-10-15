@@ -93,9 +93,11 @@ test('a session moves the words it practised up the ladder, and the list filters
 
   // 3. Results: two practised words. The new meaning moved קשת's recognition
   // and not its badge (2,1,1,1,1 is 1.2), and says so; прочитала's ladder,
-  // answered wrong throughout, moves nothing, and the meet card is no miss.
+  // answered wrong throughout, moves nothing, the meet card is no miss, and the
+  // missed list names the word once, not once per wrong card.
   await expect(page.getByTestId('practised-row')).toHaveCount(2);
-  await expect(page.getByTestId('missed-row')).toHaveCount(3);
+  await expect(page.getByTestId('missed-row')).toHaveCount(1);
+  await expect(page.getByTestId('missed-row')).toContainText('прочитала');
   await expect(page.getByTestId('practised-raised')).toHaveCount(0);
   await expect(page.getByTestId('practised-progressed')).toHaveCount(1);
   await expect(page.getByTestId('practised-row').filter({ hasText: 'קשת' }).getByTestId('practised-progressed')).toHaveText(

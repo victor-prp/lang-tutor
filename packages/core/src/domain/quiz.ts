@@ -294,14 +294,22 @@ export function score(questions: readonly Question[], answers: readonly AnswerRe
   };
 }
 
+/** The wrong answers, one row per word. Phase 54: a ladder asks one word up to three
+ *  ways in a session, and the list names it once, by its first wrong card. A card's
+ *  `vocab_term_id` is its lexeme, and a session asks one gloss of a family at most
+ *  (phase 39 D5), one lexeme's glosses being one family, so within a session it
+ *  names the gloss. */
 export function missed(
   questions: readonly Question[],
   answers: readonly AnswerRecord[],
 ): MissedQuestion[] {
+  const listed = new Set<string>();
   return answers
     .filter((record) => !record.is_correct && !isUngraded(record))
     .flatMap((record) => {
       const question = questions.find((item) => item.id === record.question_id);
-      return question ? [{ question, correct_answer: rightAnswer(question) }] : [];
+      if (!question || listed.has(question.vocab_term_id)) return [];
+      listed.add(question.vocab_term_id);
+      return [{ question, correct_answer: rightAnswer(question) }];
     });
 }
