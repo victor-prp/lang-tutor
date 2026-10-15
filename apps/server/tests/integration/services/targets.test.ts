@@ -159,4 +159,38 @@ describe('the stock a change leaves (ruling R-D12b)', () => {
     expect(await jobPayloads(t.db, STOCK_SESSION)).toContainEqual({ enrollment_id: E, reason: 'target' });
     expect(logger.events).toContainEqual({ event: 'session_retired', enrollment_id: E, session_id: stock, reason: 'target_changed' });
   });
+
+  it('retires it too when an unsave takes a word out of a target (spec D12, final review M2)', async () => {
+    const seed = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);
+    await deps.sessions.skipSession('u_1', seed.sessionId);
+    const words: VocabularyEntryInput[] = [];
+    for (const [lemma, hebrew] of [['apple', 'תפוח'], ['bread', 'לחם'], ['cheese', 'גבינה']]) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [hebrew] });
+      words.push({ gloss_id: saved.glossIds[0], variant_id: saved.variantId });
+    }
+    await deps.targets.create('u_1', E, { kind: 'exam', due_on: DUE, photo_import_ids: [], entries: words.slice(0, 2) });
+    // Chosen with the target as it was.
+    const { sessionId: stock, status } = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);
+    expect(status).toBe('preparing');
+
+    await deps.vocabulary.unsave('u_1', E, words[0].gloss_id);
+
+    expect(await readStockRow(t.db, stock)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY });
+    expect(logger.events).toContainEqual({ event: 'session_retired', enrollment_id: E, session_id: stock, reason: 'target_changed' });
+  });
+
+  it('keeps it when the word unsaved is in no target', async () => {
+    const seed = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);
+    await deps.sessions.skipSession('u_1', seed.sessionId);
+    const glossIds: string[] = [];
+    for (const [lemma, hebrew] of [['apple', 'תפוח'], ['bread', 'לחם']]) {
+      glossIds.push((await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [hebrew] })).glossIds[0]);
+    }
+    const { sessionId: stock } = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);
+
+    await deps.vocabulary.unsave('u_1', E, glossIds[0]);
+
+    expect(await readStockRow(t.db, stock)).toEqual({ status: 'preparing', practiceDay: null, chosenOn: DAY });
+    expect(logger.events.filter((line) => line.event === 'session_retired')).toEqual([]);
+  });
 });

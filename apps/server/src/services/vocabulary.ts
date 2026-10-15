@@ -20,7 +20,7 @@ import {
 import { EnrollmentNotFound, GlossLanguageMismatch, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
 import type { Logger } from '../logger';
 import { authorize, authorizeEnrollment } from './access';
-import { requestStockAfterSave } from './stock';
+import { logTargetRetired, requestStockAfterSave, restockAfterTargetChange } from './stock';
 import type { Repos, Transaction } from './transaction';
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -146,9 +146,13 @@ export function createVocabularyService({
     },
 
     unsave: async (actorUserId: string, enrollmentId: string, glossId: string): Promise<void> => {
-      await transaction(async (repos) => {
+      const retired = await transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
         await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.remove' });
+        // Phase 53 (ruling R-D12b, final review M2). An unsave may change a target, so it takes
+        // the next-session lock first, as every change to a target does: a stock being written
+        // holds it and reads the targets' words.
+        await repos.session.lockNextSession(enrollmentId);
         // Phase 31 (spec D14). A card on screen since before a merge names the
         // forwarded id: share-lock, resolve, and delete the survivor's entry.
         const resolved = await repos.gloss.resolveGlosses([glossId]);
@@ -156,7 +160,8 @@ export function createVocabularyService({
         await repos.vocabulary.deleteEntry({ enrollmentId, glossId: survivor });
         // Phase 53 (spec D1). A target's words are saved ones: an unsaved word
         // leaves every target that held it, each with a line in its log.
-        for (const targetId of await repos.target.removeGlossFromTargets(enrollmentId, survivor)) {
+        const changed = await repos.target.removeGlossFromTargets(enrollmentId, survivor);
+        for (const targetId of changed) {
           await repos.target.insertEvent({
             targetId,
             kind: 'words_removed',
@@ -166,8 +171,11 @@ export function createVocabularyService({
             sessionId: null,
           });
         }
+        // Spec D12: a word removed is a change to its targets, so the stock chosen with it goes.
+        return changed.length > 0 ? restockAfterTargetChange(repos, enrollmentId) : null;
       });
       logger.info({ event: 'vocabulary_unsaved', enrollment_id: enrollmentId });
+      logTargetRetired(logger, enrollmentId, retired);
     },
 
     /**

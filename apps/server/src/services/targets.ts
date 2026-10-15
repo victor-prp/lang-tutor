@@ -17,7 +17,7 @@ import type { TargetRow } from '../repo/targets';
 import { authorizeEnrollment } from './access';
 import { learnerDay } from './learnerDay';
 import { logImportSaved, saveImportsInTx, type ImportSaved } from './photoImports';
-import { requestStock } from './stock';
+import { logTargetRetired, restockAfterTargetChange } from './stock';
 import type { Repos, Transaction } from './transaction';
 import { saveEntriesInTx } from './vocabulary';
 
@@ -87,26 +87,6 @@ export function createTargetService({
     if (!target) throw new TargetNotFound(targetId);
     const today = await learnerDay(repos, enrolled.user_id, now());
     return { enrolled, target, today, active: isActive(target, today) };
-  }
-
-  /**
-   * Ruling R-D12b. The stock a change leaves: the unstarted list stock, which was chosen
-   * without the change, retired (a seed, or a session already started, never is), and the
-   * next asked of the stock job. The caller holds lockNextSession. Answers the id of the
-   * stock retired, or null.
-   */
-  async function restock(repos: Repos, enrollmentId: string): Promise<string | null> {
-    const { stock } = await repos.session.findOpen(enrollmentId);
-    const retired = stock?.source === 'list' && (await repos.session.retireStock(stock.id)) ? stock.id : null;
-    await requestStock(repos, { enrollment_id: enrollmentId, reason: 'target' });
-    return retired;
-  }
-
-  /** Once the change committed: the stock it retired, as phase 53's retirements are logged. */
-  function logRetired(enrollmentId: string, sessionId: string | null): void {
-    if (sessionId !== null) {
-      logger.info({ event: 'session_retired', enrollment_id: enrollmentId, session_id: sessionId, reason: 'target_changed' });
-    }
   }
 
   /**
@@ -230,7 +210,7 @@ export function createTargetService({
           actorUserId,
           sessionId: null,
         });
-        const retired = await restock(repos, enrolled.id);
+        const retired = await restockAfterTargetChange(repos, enrolled.id);
         return { target: await viewOne(repos, enrolled, today, row), wordCount: glossIds.length, retired, saved };
       });
       logImportsSaved(created.saved, created.target.id);
@@ -242,7 +222,7 @@ export function createTargetService({
         word_count: created.wordCount,
         unread_photo_count: created.saved.unreadPhotos,
       });
-      logRetired(enrollmentId, created.retired);
+      logTargetRetired(logger, enrollmentId, created.retired);
       return created.target;
     },
 
@@ -266,7 +246,7 @@ export function createTargetService({
             actorUserId,
             sessionId: null,
           });
-          retired = await restock(repos, enrolled.id);
+          retired = await restockAfterTargetChange(repos, enrolled.id);
         }
         return { target: await viewOne(repos, enrolled, today, target), enrollmentId: enrolled.id, added, retired, saved };
       });
@@ -280,7 +260,7 @@ export function createTargetService({
           unread_photo_count: changed.saved.unreadPhotos,
         });
       }
-      logRetired(changed.enrollmentId, changed.retired);
+      logTargetRetired(logger, changed.enrollmentId, changed.retired);
       return changed.target;
     },
 
@@ -299,11 +279,11 @@ export function createTargetService({
           actorUserId,
           sessionId: null,
         });
-        return { enrollmentId: enrolled.id, retired: await restock(repos, enrolled.id) };
+        return { enrollmentId: enrolled.id, retired: await restockAfterTargetChange(repos, enrolled.id) };
       });
       if (changed === null) return;
       logger.info({ event: 'target_changed', target_id: targetId, change: 'words_removed', count: 1 });
-      logRetired(changed.enrollmentId, changed.retired);
+      logTargetRetired(logger, changed.enrollmentId, changed.retired);
     },
 
     /** Spec D1. To any day after today; the date it has already changes nothing. */
@@ -322,13 +302,13 @@ export function createTargetService({
           actorUserId,
           sessionId: null,
         });
-        const retired = await restock(repos, enrolled.id);
+        const retired = await restockAfterTargetChange(repos, enrolled.id);
         const moved = { ...target, dueOn: request.due_on };
         return { target: await viewOne(repos, enrolled, today, moved), change: { enrollmentId: enrolled.id, retired } };
       });
       if (changed.change !== null) {
         logger.info({ event: 'target_changed', target_id: targetId, change: 'date_changed' });
-        logRetired(changed.change.enrollmentId, changed.change.retired);
+        logTargetRetired(logger, changed.change.enrollmentId, changed.change.retired);
       }
       return changed.target;
     },
@@ -349,11 +329,11 @@ export function createTargetService({
           actorUserId,
           sessionId: null,
         });
-        return { enrollmentId: enrolled.id, retired: await restock(repos, enrolled.id) };
+        return { enrollmentId: enrolled.id, retired: await restockAfterTargetChange(repos, enrolled.id) };
       });
       if (ended === null) return;
       logger.info({ event: 'target_ended', target_id: targetId, how: 'early' });
-      logRetired(ended.enrollmentId, ended.retired);
+      logTargetRetired(logger, ended.enrollmentId, ended.retired);
     },
   };
 }

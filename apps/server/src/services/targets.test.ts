@@ -823,14 +823,42 @@ describe('vocabulary.unsave (spec D1, Review Focus 2)', () => {
 
     await vocabularyService.unsave(OWNER, 'e1', 'g_old_casa');
 
-    expect(calls).toEqual(['deleteEntry g_casa', 'removeGlossFromTargets g_casa', 'insertEvent words_removed']);
+    expect(calls).toEqual(['lockNextSession', 'deleteEntry g_casa', 'removeGlossFromTargets g_casa', 'insertEvent words_removed']);
     expect(events.map((event) => event.before)).toEqual([{ gloss_ids: ['g_casa'] }]);
   });
 
-  it('writes no event for a word in no target', async () => {
-    const { vocabularyService, events } = world({ saved: ['g_gatto'], targets: [target()] });
+  it('writes no event for a word in no target, and keeps the stock: no target changed', async () => {
+    const { vocabularyService, events, retired, jobs, logger } = world({ saved: ['g_gatto'], targets: [target()], open: { stock: listStock() } });
     await vocabularyService.unsave(OWNER, 'e1', 'g_gatto');
     expect(events).toEqual([]);
+    expect(retired).toEqual([]);
+    expect(jobs.enqueued).toEqual([]);
+    expect(logged(logger, 'session_retired')).toEqual([]);
+  });
+
+  it('retires the unstarted list stock and asks for the next when the word left a target, as any change to one does (spec D12, final review M2)', async () => {
+    const { vocabularyService, calls, retired, jobs, logger } = world({
+      saved: ['g_casa', 'g_gatto'],
+      targets: [target({ words: ['g_casa', 'g_gatto'] }), target({ id: 't2', words: ['g_casa'] })],
+      open: { stock: listStock() },
+    });
+
+    await vocabularyService.unsave(OWNER, 'e1', 'g_casa');
+
+    expect(retired).toEqual(['s_stock']);
+    expect(jobs.enqueued).toEqual([TARGET_STOCK]);
+    expect(logged(logger, 'session_retired')).toEqual([
+      { event: 'session_retired', enrollment_id: 'e1', session_id: 's_stock', reason: 'target_changed' },
+    ]);
+    // The next-session lock before the entry is deleted, as every change to a target takes it.
+    expect(calls).toEqual([
+      'lockNextSession',
+      'deleteEntry g_casa',
+      'removeGlossFromTargets g_casa',
+      'insertEvent words_removed',
+      'insertEvent words_removed',
+      'retireStock',
+    ]);
   });
 });
 

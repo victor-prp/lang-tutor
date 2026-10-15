@@ -1,4 +1,5 @@
 import { STOCK_SESSION, type StockSessionPayload } from '../domain/jobs';
+import type { Logger } from '../logger';
 import type { Repos } from './transaction';
 
 /**
@@ -26,4 +27,26 @@ export async function requestStockAfterSave(repos: Pick<Repos, 'jobs'>, enrollme
     { enrollment_id: enrollmentId, reason: 'save' },
     { singletonKey: `${enrollmentId}:save`, startAfterSeconds: delaySeconds },
   );
+}
+
+/**
+ * Phase 53 (spec D12, ruling R-D12b). The stock a change to the learner's targets leaves: the
+ * unstarted list stock, chosen without the change, retired (a seed, or a session already
+ * started, never is), and the next asked of the stock job. The caller took lockNextSession
+ * before it locked or wrote anything: a stock being written holds that lock and references
+ * the active targets' rows. Answers the id of the stock retired, or null. Shared by the
+ * targets service and an unsave that takes a word out of a target (final review M2).
+ */
+export async function restockAfterTargetChange(repos: Pick<Repos, 'session' | 'jobs'>, enrollmentId: string): Promise<string | null> {
+  const { stock } = await repos.session.findOpen(enrollmentId);
+  const retired = stock?.source === 'list' && (await repos.session.retireStock(stock.id)) ? stock.id : null;
+  await requestStock(repos, { enrollment_id: enrollmentId, reason: 'target' });
+  return retired;
+}
+
+/** Phase 53 (ruling R-D12b). Once the change committed: the stock it retired, if any. */
+export function logTargetRetired(logger: Logger, enrollmentId: string, sessionId: string | null): void {
+  if (sessionId !== null) {
+    logger.info({ event: 'session_retired', enrollment_id: enrollmentId, session_id: sessionId, reason: 'target_changed' });
+  }
 }
