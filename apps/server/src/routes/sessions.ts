@@ -369,6 +369,7 @@ export function createSessionsRouter(sessions: SessionService) {
               questionId: body.question_id,
               text: body.text,
               hintOpened: body.hint_opened,
+              helped: body.helped,
               checkFit: body.check_fit,
               retry: body.retry ?? false,
             })

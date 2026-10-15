@@ -809,7 +809,13 @@ export function createSessionService({
         } else {
           const recorded = outcome.record.answers[loaded.answers.length];
           // Phase 38 (spec D4): only the card that has a hint records whether it was opened.
-          const hinted = loaded.questions[loaded.answers.length].type === 'cloze_typed' ? { hintOpened: hintOpened ?? null } : {};
+          const askedType = loaded.questions[loaded.answers.length].type;
+          const hinted = askedType === 'cloze_typed' ? { hintOpened: hintOpened ?? null } : {};
+          // Phase 55 (spec D6): only a tiles or typed card records whether it was helped.
+          const helps =
+            askedType === 'letter_tiles' || askedType === 'typed_translation'
+              ? { helped: 'helped' in answer ? answer.helped ?? null : null }
+              : {};
           await repos.session.insertAnswer(
             sessionId,
             loaded.answers.length,
@@ -821,6 +827,7 @@ export function createSessionService({
                   verdict: recorded.verdict!,
                   ...(recorded.retry_state === 'pending' ? { pending: true as const } : {}),
                   ...hinted,
+                  ...helps,
                 },
           );
         }
@@ -989,7 +996,7 @@ export function createSessionService({
     answerText: async (
       actorUserId: string,
       sessionId: string,
-      input: { questionId: string; text: string; hintOpened?: boolean; checkFit?: boolean; retry?: boolean },
+      input: { questionId: string; text: string; hintOpened?: boolean; helped?: boolean; checkFit?: boolean; retry?: boolean },
     ): Promise<SessionResult> => {
       const retry = input.retry ?? false;
       const card =
@@ -1026,7 +1033,10 @@ export function createSessionService({
           });
         }
       }
-      return service.submitAnswer(actorUserId, sessionId, input.questionId, { text: input.text }, { retry, hintOpened: input.hintOpened, fits });
+      // Phase 55 (spec D6). `helped` travels with the text, so `step` grades a helped
+      // tiles or typed answer wrong, first try or second.
+      const answer = input.helped === undefined ? { text: input.text } : { text: input.text, helped: input.helped };
+      return service.submitAnswer(actorUserId, sessionId, input.questionId, answer, { retry, hintOpened: input.hintOpened, fits });
     },
 
     /**

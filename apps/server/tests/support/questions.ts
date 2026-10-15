@@ -165,6 +165,17 @@ export async function readHintOpened(db: Db, sessionId: string): Promise<(boolea
   return rows.map((row) => row.hintOpened);
 }
 
+/** Phase 55 (spec D6). Each stored answer's helped, by position. As hint_opened is
+ *  not in the domain's answer record, only a read over the table sees it. */
+export async function readHelped(db: Db, sessionId: string): Promise<(boolean | null)[]> {
+  const rows = await db
+    .select({ helped: answers.helped })
+    .from(answers)
+    .where(eq(answers.sessionId, sessionId))
+    .orderBy(asc(answers.position));
+  return rows.map((row) => row.helped);
+}
+
 /** Phase 54 (spec D1). The glosses `day` introduced, as the picker reads them: a
  *  service test may not reach past composition for a repository. */
 export async function readIntroducedOn(db: Db, enrollmentId: string, day: string): Promise<string[]> {

@@ -431,13 +431,16 @@ export function createSessionRepo(tx: Tx) {
      * (phase 23) is stored as its text and the verdict the learner was shown. A spoken
      * answer (phase 25) is stored the same way: the transcript, or '' for a
      * pass, and its verdict. Phase 34 (spec D9): `pending` holds it for its
-     * second try. Phase 38 (spec D4): `hintOpened`, a typed cloze's hint.
+     * second try. Phase 38 (spec D4): `hintOpened`, a typed cloze's hint. Phase 55
+     * (spec D6): `helped`, help used on a tiles or typed card.
      */
     insertAnswer: async (
       sessionId: string,
       position: number,
       questionId: string,
-      answer: { displayIndex: number } | { text: string; verdict: AnswerVerdict; pending?: true; hintOpened?: boolean | null },
+      answer:
+        | { displayIndex: number }
+        | { text: string; verdict: AnswerVerdict; pending?: true; hintOpened?: boolean | null; helped?: boolean | null },
     ): Promise<void> => {
       if ('text' in answer) {
         await tx.insert(answers).values({
@@ -448,6 +451,7 @@ export function createSessionRepo(tx: Tx) {
           verdict: answer.verdict,
           retryState: answer.pending ? 'pending' : null,
           hintOpened: answer.hintOpened ?? null,
+          helped: answer.helped ?? null,
         });
         return;
       }

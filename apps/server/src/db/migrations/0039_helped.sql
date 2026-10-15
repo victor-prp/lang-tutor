@@ -1,0 +1,2 @@
+ALTER TABLE "answers" ADD COLUMN "helped" boolean;--> statement-breakpoint
+ALTER TABLE "answers" ADD CONSTRAINT "answers_helped_text" CHECK ("answers"."helped" is null or "answers"."typed_text" is not null);
