@@ -1,8 +1,11 @@
 import type {
+  AddTargetWordsRequest,
+  ChangeTargetDateRequest,
   CreateEnrollmentRequest,
   CreateGrantRequest,
   CreateSessionRequest,
   CreateSessionResponse,
+  CreateTargetRequest,
   CreateUserRequest,
   CurrentSessionResponse,
   Enrollment,
@@ -31,6 +34,8 @@ import type {
   StartSessionResponse,
   SpeechAnswerRequest,
   SpeechAnswerResponse,
+  Target,
+  TargetList,
   TimeZoneRequest,
   TranslationRequest,
   TranslationResponse,
@@ -164,6 +169,8 @@ export function createApiClient({
 
   const vocabularyPath = (enrollmentId: string) =>
     `/api/enrollments/${encodeURIComponent(enrollmentId)}/vocabulary`;
+  const targetsPath = (enrollmentId: string) => `/api/enrollments/${encodeURIComponent(enrollmentId)}/targets`;
+  const targetPath = (targetId: string) => `/api/targets/${encodeURIComponent(targetId)}`;
 
   return {
     /** Phase 49 (spec D1). The server's own release, for the About screen. */
@@ -290,6 +297,20 @@ export function createApiClient({
     unregisterPushDevice: (token: string) =>
       postNoContent('/api/me/push-devices/unregister', { token } satisfies PushDeviceUnregisterRequest),
     tapReminder: (id: string) => postNoContent(`/api/me/reminders/${encodeURIComponent(id)}/tap`, {}),
+
+    // Phase 53 (spec D13). Preparing for homework or a test: the enrollment's active
+    // targets and a new one, then one target, its words, its date, and its end.
+    listTargets: (enrollmentId: string) => getJson<TargetList>(targetsPath(enrollmentId)),
+    getTarget: (targetId: string) => getJson<Target>(targetPath(targetId)),
+    createTarget: (enrollmentId: string, request: CreateTargetRequest) =>
+      postJson<Target>(targetsPath(enrollmentId), request),
+    addTargetWords: (targetId: string, request: AddTargetWordsRequest) =>
+      postJson<Target>(`${targetPath(targetId)}/words`, request),
+    removeTargetWord: (targetId: string, glossId: string) =>
+      deleteResource(`${targetPath(targetId)}/words/${encodeURIComponent(glossId)}`),
+    changeTargetDate: (targetId: string, request: ChangeTargetDateRequest) =>
+      patchJson<Target>(targetPath(targetId), request),
+    endTarget: (targetId: string) => postNoContent(`${targetPath(targetId)}/end`, {}),
   };
 }
 

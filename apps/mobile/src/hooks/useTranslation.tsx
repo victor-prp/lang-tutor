@@ -12,6 +12,7 @@ import {
 import { ApiError, type ApiClient } from '@/api/client';
 import { flipped, lookupDirection, type LookupDirection } from '@/enrollments';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { pickedEntryOf, pickedStateOf, unpickedEntries, type PickedEntry } from '@/targetWizard';
 import {
   addableStateOf,
   lookupEnrollmentId,
@@ -35,7 +36,8 @@ export type TranslationValue = {
   text: string;
   setText: (value: string) => void;
   result: TranslationResponse | undefined;
-  /** gloss_id → saved, for the senses that can be saved here (see savedStateOf). */
+  /** gloss_id → saved, for the senses that can be saved here (see savedStateOf).
+   *  In collect mode (see LookupCollect): picked. */
   saved: SavedState;
   /** Senses with a save or unsave in flight; their toggle is disabled, so a double
    *  tap cannot race a save against an unsave. */
@@ -82,13 +84,26 @@ export type LookupList = {
   mode: 'learner' | 'tutor';
 };
 
+/** Phase 53 (spec D10). The target wizard's lookup: a card's button adds its word to a
+ *  list the wizard holds instead of saving it, so nothing reaches the API before the
+ *  wizard's Done. `isPicked` says whether the wizard holds a card's word (the card reads
+ *  "saved" from it, whatever the learner's list says), and `toggle` puts the word on the
+ *  list or takes it off. `isPicked` is read on every render, so the cards follow the
+ *  wizard whenever the wizard re-renders. */
+export type LookupCollect = {
+  isPicked(glossId: string): boolean;
+  toggle(entry: PickedEntry): void;
+};
+
 export function TranslationProvider({
   api,
   list,
+  collect,
   children,
 }: {
   api: ApiClient;
   list?: LookupList;
+  collect?: LookupCollect;
   children: ReactNode;
 }) {
   const [status, setStatus] = useState<TranslationStatus>('idle');
@@ -189,20 +204,29 @@ export function TranslationProvider({
     [api, effective, user],
   );
 
+  // In collect mode the cards that can be added (the keys of `saved`, which the server
+  // marked) read their state from the wizard, not from the learner's list.
+  const shown = collect ? pickedStateOf(saved, collect.isPicked) : saved;
+
   const value = useMemo<TranslationValue>(
     () => ({
       status,
       text,
       setText,
       result,
-      saved,
+      saved: shown,
       pending,
       saveFailed,
       mode: effective?.mode ?? 'learner',
-      canSaveAll: result ? canSaveAllOf(result.senses, saved) : false,
+      canSaveAll: result ? canSaveAllOf(result.senses, shown) : false,
       toggleSave: (glossId: string) => {
         const sense = result?.senses.find((s) => s.gloss_id === glossId);
         if (!sense?.variant_id || saved[glossId] === undefined || pending[glossId]) return;
+        if (collect && result) {
+          const entry = pickedEntryOf(result, sense);
+          if (entry) collect.toggle(entry);
+          return;
+        }
         // A tutor adds and never removes (spec D10): an added card does nothing.
         const intent = toggleIntent(effective?.mode ?? 'learner', saved[glossId]);
         if (intent === 'none') return;
@@ -210,6 +234,10 @@ export function TranslationProvider({
       },
       saveAll: () => {
         if (!result) return;
+        if (collect) {
+          for (const entry of unpickedEntries(result, shown)) collect.toggle(entry);
+          return;
+        }
         void send(
           unsavedEntries(result.senses, saved).filter((entry) => !pending[entry.gloss_id]),
           true,
@@ -248,7 +276,7 @@ export function TranslationProvider({
         setSaveFailed(false);
       },
     }),
-    [status, text, result, saved, pending, saveFailed, send, direction, run, effective],
+    [status, text, result, saved, shown, collect, pending, saveFailed, send, direction, run, effective],
   );
 
   return <TranslationContext.Provider value={value}>{children}</TranslationContext.Provider>;

@@ -1,4 +1,4 @@
-import type { PartOfSpeech } from '@lang-tutor/core/api';
+import type { PartOfSpeech, TargetKind, TargetReadiness } from '@lang-tutor/core/api';
 import type { Dimension } from '@lang-tutor/core/domain';
 
 // U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
@@ -52,6 +52,33 @@ const PART_OF_SPEECH_LOOKUP: Record<string, string> = { ...PART_OF_SPEECH_NAMES,
 // Phase 52 (spec D8). The letter of the day, by ISO weekday 1 (Monday) to 7 (Sunday):
 // Sunday is the first day (א׳) in Hebrew.
 const REMINDER_DAY_NAMES = ['ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳', 'א׳'];
+
+// Phase 53 (spec D4, D11). Records over the closed wire sets, so the compiler refuses
+// a third kind or a fifth level that has no Hebrew name.
+const TARGET_KIND_NAMES: Record<TargetKind, string> = { homework: 'שיעורי בית', exam: 'בוחן' };
+const TARGET_READINESS_NAMES: Record<TargetReadiness, string> = {
+  not_started: 'עוד לא התחלנו',
+  on_the_way: 'בדרך',
+  almost: 'כמעט מוכנה',
+  ready: 'מוכנה',
+};
+// The weekday as JavaScript numbers it, 0 (Sunday) to 6 (Saturday), and each month
+// with its ב, which is how a date reads: "16 באוקטובר".
+const TARGET_WEEKDAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+const TARGET_MONTH_NAMES = [
+  'בינואר',
+  'בפברואר',
+  'במרץ',
+  'באפריל',
+  'במאי',
+  'ביוני',
+  'ביולי',
+  'באוגוסט',
+  'בספטמבר',
+  'באוקטובר',
+  'בנובמבר',
+  'בדצמבר',
+];
 
 export const strings = {
   appTitle: 'lang tutor',
@@ -369,4 +396,16 @@ export const strings = {
   homePhotoReady: (count: number) => `רשימה מתמונה: ${isolateLtr(String(count))} מילים לסקירה`,
   homePhotoFailed: 'לא הצלחנו לקרוא את התמונה ששלחת',
   homePhotoSeveral: (count: number) => `${isolateLtr(String(count))} רשימות מתמונות מחכות לסקירה`,
+  // Phase 53 (spec D10, D11). Preparing for homework or a test.
+  targetKindName: (kind: TargetKind): string => TARGET_KIND_NAMES[kind],
+  targetReadinessName: (readiness: TargetReadiness): string => TARGET_READINESS_NAMES[readiness],
+  targetTomorrow: 'מחר',
+  targetInDays: (days: number) => `בעוד ${isolateLtr(String(days))} ימים`,
+  // A target read after its date has come is no longer counted down to.
+  targetDateCame: 'התאריך הגיע',
+  targetReadyCount: (ready: number, total: number) =>
+    `${isolateLtr(String(ready))} מתוך ${isolateLtr(String(total))} מוכנות`,
+  /** `weekday` is JavaScript's (0 = Sunday), `month` is 1 = January. */
+  targetDueDay: (weekday: number, day: number, month: number) =>
+    `יום ${TARGET_WEEKDAY_NAMES[weekday]}, ${isolateLtr(String(day))} ${TARGET_MONTH_NAMES[month - 1]}`,
 } as const;

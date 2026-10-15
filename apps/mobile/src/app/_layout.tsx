@@ -36,6 +36,7 @@ import { RecordingProvider } from '@/hooks/useRecording';
 import { RemindersProvider } from '@/hooks/useReminders';
 import { SessionProvider } from '@/hooks/useSession';
 import { SpeechProvider } from '@/hooks/useSpeech';
+import { TargetsProvider } from '@/hooks/useTargets';
 import { TranslationProvider } from '@/hooks/useTranslation';
 import { VocabularyProvider } from '@/hooks/useVocabulary';
 import { createPhotoPicker, type PhotoAsset } from '@/photos';
@@ -43,6 +44,7 @@ import { createRecorder, type RecordPermission } from '@/recording';
 import type { AppRelease } from '@/release';
 import { createReminders, type NotificationsEngine, type Permission } from '@/reminders';
 import { createSpeaker } from '@/speech';
+import { MAX_PHOTOS } from '@/targetWizard';
 import { colors } from '@/theme';
 
 // Read directly off process.env.EXPO_PUBLIC_API_URL (not via an indirection)
@@ -109,6 +111,13 @@ const firstAsset = (result: ImagePicker.ImagePickerResult): PhotoAsset | null =>
     ? null
     : { uri: result.assets[0].uri, width: result.assets[0].width, height: result.assets[0].height };
 
+// Phase 53. Every asset of a multiple pick, not the first. The web's file chooser ignores
+// `selectionLimit`, so the most a request carries is kept here, before any is shrunk.
+const everyAsset = (result: ImagePicker.ImagePickerResult): PhotoAsset[] =>
+  result.canceled
+    ? []
+    : result.assets.slice(0, MAX_PHOTOS).map(({ uri, width, height }) => ({ uri, width, height }));
+
 // Phase 26. The only file that names the image packages (ADR 0002 R1).
 const photoPicker = createPhotoPicker({
   platform: Platform.OS,
@@ -118,6 +127,15 @@ const photoPicker = createPhotoPicker({
     launchCamera: async () => firstAsset(await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 })),
     launchLibrary: async () =>
       firstAsset(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 })),
+    chooseMany: async () =>
+      everyAsset(
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          quality: 1,
+          allowsMultipleSelection: true,
+          selectionLimit: MAX_PHOTOS,
+        }),
+      ),
     // The context and the rendered image hold native memory (a decoded camera
     // photo is tens of megabytes) until released, so both are released as soon
     // as the JPEG is saved, or the shrink fails. A no-op on web.
@@ -318,11 +336,13 @@ export default function RootLayout() {
                     <TranslationProvider api={api}>
                       <VocabularyProvider api={api}>
                         <PhotoImportsProvider api={api} picker={photoPicker}>
-                          <View style={styles.root} {...rtlProps}>
-                            <AppUpdatesProvider updates={appUpdates} events={updateRequiredEvents} release={appRelease} copy={copyToClipboard}>
-                              <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-                            </AppUpdatesProvider>
-                          </View>
+                          <TargetsProvider api={api}>
+                            <View style={styles.root} {...rtlProps}>
+                              <AppUpdatesProvider updates={appUpdates} events={updateRequiredEvents} release={appRelease} copy={copyToClipboard}>
+                                <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+                              </AppUpdatesProvider>
+                            </View>
+                          </TargetsProvider>
                         </PhotoImportsProvider>
                       </VocabularyProvider>
                     </TranslationProvider>

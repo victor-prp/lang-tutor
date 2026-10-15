@@ -685,3 +685,95 @@ describe('reminders', () => {
     await expect(buildClient(mockFetch).tapReminder('not-a-uuid')).rejects.toEqual(new ApiError(404, 'not found'));
   });
 });
+
+// Phase 53 (spec D13). The target endpoints the app calls.
+describe('targets', () => {
+  const word = { gloss_id: 'g1', form: 'dita', meaning: 'אצבע', readiness: 'not_started' };
+  const target = {
+    id: 't 1',
+    kind: 'exam',
+    due_on: '2026-10-20',
+    days_left: 5,
+    word_count: 1,
+    ready_count: 0,
+    words: [word],
+  };
+  const list = { today: '2026-10-15', targets: [] };
+  const create = {
+    kind: 'exam' as const,
+    due_on: '2026-10-20',
+    photo_import_ids: ['i1'],
+    entries: [{ gloss_id: 'g1', variant_id: 'v1' }],
+  };
+  const add = { photo_import_ids: [], entries: [{ gloss_id: 'g2', variant_id: 'v2' }] };
+
+  // Answers as the server does: 201 for a create, 204 for a removal and an end,
+  // 200 for the rest.
+  function recording() {
+    const calls: { method: string; path: string; body?: unknown; contentType?: string }[] = [];
+    const mockFetch = jest.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      const path = url.replace('http://test.local', '');
+      calls.push({
+        method,
+        path,
+        ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
+        ...(init?.headers ? { contentType: (init.headers as Record<string, string>)['Content-Type'] } : {}),
+      });
+      if (method === 'DELETE' || path.endsWith('/end')) return new Response(null, { status: 204 });
+      if (method === 'GET' && path.endsWith('/targets')) return new Response(JSON.stringify(list), { status: 200 });
+      const created = method === 'POST' && path.endsWith('/targets');
+      return new Response(JSON.stringify(target), { status: created ? 201 : 200 });
+    });
+    return { calls, client: buildClient(mockFetch as unknown as jest.Mock) };
+  }
+
+  it('lists and creates under the enrollment, and does the rest under the target', async () => {
+    const { calls, client } = recording();
+    await client.listTargets('e 1');
+    await client.getTarget('t 1');
+    await client.createTarget('e 1', create);
+    await client.addTargetWords('t 1', add);
+    await client.changeTargetDate('t 1', { due_on: '2026-10-22' });
+    await client.removeTargetWord('t 1', 'g/1');
+    await client.endTarget('t 1');
+    expect(calls).toEqual([
+      { method: 'GET', path: '/api/enrollments/e%201/targets', contentType: undefined },
+      { method: 'GET', path: '/api/targets/t%201', contentType: undefined },
+      { method: 'POST', path: '/api/enrollments/e%201/targets', body: create, contentType: 'application/json' },
+      { method: 'POST', path: '/api/targets/t%201/words', body: add, contentType: 'application/json' },
+      { method: 'PATCH', path: '/api/targets/t%201', body: { due_on: '2026-10-22' }, contentType: 'application/json' },
+      { method: 'DELETE', path: '/api/targets/t%201/words/g%2F1', contentType: undefined },
+      { method: 'POST', path: '/api/targets/t%201/end', body: {}, contentType: 'application/json' },
+    ]);
+  });
+
+  it('answers the list or the target the server sent, and nothing for a removal or an end', async () => {
+    const { client } = recording();
+    await expect(client.listTargets('e1')).resolves.toEqual(list);
+    await expect(client.getTarget('t1')).resolves.toEqual(target);
+    await expect(client.createTarget('e1', create)).resolves.toEqual(target);
+    await expect(client.addTargetWords('t1', add)).resolves.toEqual(target);
+    await expect(client.changeTargetDate('t1', { due_on: '2026-10-22' })).resolves.toEqual(target);
+    await expect(client.removeTargetWord('t1', 'g1')).resolves.toBeUndefined();
+    await expect(client.endTarget('t1')).resolves.toBeUndefined();
+  });
+
+  it("throws a refusal with the body's error, so the screen can tell the refusals apart", async () => {
+    const refuse = (status: number, error: string) =>
+      buildClient(jest.fn(async () => ({ ok: false, status, json: async () => ({ error }) })));
+    await expect(refuse(400, 'invalid target').createTarget('e1', create)).rejects.toEqual(
+      new ApiError(400, 'invalid target'),
+    );
+    await expect(refuse(409, 'target closed').changeTargetDate('t1', { due_on: '2026-10-22' })).rejects.toEqual(
+      new ApiError(409, 'target closed'),
+    );
+    await expect(refuse(409, 'photo import not ready').addTargetWords('t1', add)).rejects.toEqual(
+      new ApiError(409, 'photo import not ready'),
+    );
+    await expect(refuse(404, 'target not found').getTarget('nope')).rejects.toEqual(
+      new ApiError(404, 'target not found'),
+    );
+    await expect(refuse(409, 'target closed').endTarget('t1')).rejects.toEqual(new ApiError(409, 'target closed'));
+  });
+});
