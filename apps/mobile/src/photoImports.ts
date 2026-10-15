@@ -80,6 +80,12 @@ export function withChange(imp: PhotoImport, position: number, change: PhotoImpo
   };
 }
 
+/** The import with one row put in place of the row at its position: the server's
+ *  answer to a change, or the row as it was when a change is put back. */
+export function withRow(imp: PhotoImport, row: PhotoImportItem): PhotoImport {
+  return { ...imp, items: imp.items.map((item) => (item.position === row.position ? row : item)) };
+}
+
 /** A poll's answer, minus the rows whose change has not landed yet, so a
  *  stale poll never undoes a tap. */
 export function mergePolled(polled: PhotoImport, local: PhotoImport, inFlight: ReadonlySet<number>): PhotoImport {

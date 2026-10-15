@@ -113,7 +113,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all thirty-three paths and nothing else', async () => {
+  it('contains all thirty-eight paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/auth/email-otp/send-verification-otp',
@@ -123,6 +123,7 @@ describe('the document as a whole', () => {
       '/api/enrollments',
       '/api/enrollments/{id}/photo-imports',
       '/api/enrollments/{id}/sessions/current',
+      '/api/enrollments/{id}/targets',
       '/api/enrollments/{id}/vocabulary',
       '/api/enrollments/{id}/vocabulary/glosses/{gloss_id}',
       '/api/enrollments/{id}/vocabulary/word',
@@ -146,6 +147,10 @@ describe('the document as a whole', () => {
       '/api/sessions/{id}/skip',
       '/api/sessions/{id}/speech',
       '/api/sessions/{id}/start',
+      '/api/targets/{id}',
+      '/api/targets/{id}/end',
+      '/api/targets/{id}/words',
+      '/api/targets/{id}/words/{gloss_id}',
       '/api/translations',
       '/api/users',
       '/health',
@@ -494,6 +499,144 @@ describe('the vocabulary endpoints in the published document', () => {
   });
 });
 
+// Phase 53 (spec D2, D13). Seven operations on five paths, each the list owner's alone: so each
+// needs a session (401) and a profile (403), and the three that change words or the date, or end a
+// target, can find it closed (409).
+describe('the target endpoints in the published document (phase 53)', () => {
+  const TARGETS = '/api/enrollments/{id}/targets';
+  const TARGET = '/api/targets/{id}';
+  const END = '/api/targets/{id}/end';
+  const WORDS = '/api/targets/{id}/words';
+  const WORD = '/api/targets/{id}/words/{gloss_id}';
+
+  it.each([
+    [TARGETS, 'get', ['200', '401', '403', '404']],
+    [TARGETS, 'post', ['201', '400', '401', '403', '404', '409']],
+    [TARGET, 'get', ['200', '401', '403', '404']],
+    [TARGET, 'patch', ['200', '400', '401', '403', '404', '409']],
+    [END, 'post', ['204', '401', '403', '404', '409']],
+    [WORDS, 'post', ['200', '400', '401', '403', '404', '409']],
+    [WORD, 'delete', ['204', '401', '403', '404', '409']],
+  ])('%s %s declares exactly its statuses', async (path, method, statuses) => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths[path][method].responses).sort()).toEqual(statuses);
+  });
+
+  // ADR 0003 R7: the published 400 describes the body the server returns, and an invalid target
+  // says why.
+  it('publishes the reason of an invalid target on the three 400s that can carry it', async () => {
+    const doc = await openApiDocument();
+    for (const [path, method] of [
+      [TARGETS, 'post'],
+      [TARGET, 'patch'],
+      [WORDS, 'post'],
+    ]) {
+      const schema = doc.paths[path][method].responses['400'].content['application/json'].schema;
+      expect([path, method, schema.required]).toEqual([path, method, ['error']]);
+      expect(schema.properties.error.type).toBe('string');
+      expect(schema.properties.reason.enum).toEqual(['due_date', 'no_words', 'unknown_import']);
+    }
+  });
+
+  it('describes every other failure with the error body the server returns', async () => {
+    const doc = await openApiDocument();
+    const cases: [string, string, string][] = [
+      [TARGETS, 'get', '404'],
+      [TARGETS, 'post', '404'],
+      [TARGETS, 'post', '409'],
+      [TARGET, 'get', '404'],
+      [TARGET, 'patch', '404'],
+      [TARGET, 'patch', '409'],
+      [END, 'post', '404'],
+      [END, 'post', '409'],
+      [WORDS, 'post', '404'],
+      [WORDS, 'post', '409'],
+      [WORD, 'delete', '404'],
+      [WORD, 'delete', '409'],
+    ];
+    for (const [path, method, status] of cases) {
+      const schema = doc.paths[path][method].responses[status].content['application/json'].schema;
+      expect([path, method, status, schema.required]).toEqual([path, method, status, ['error']]);
+      expect(schema.properties.error.type).toBe('string');
+    }
+  });
+
+  it('answers the end of a target and the removal of a word with no body', async () => {
+    const doc = await openApiDocument();
+    expect(doc.paths[END].post.responses['204'].content).toBeUndefined();
+    expect(doc.paths[WORD].delete.responses['204'].content).toBeUndefined();
+    expect(doc.paths[END].post.requestBody).toBeUndefined();
+    expect(doc.paths[WORD].delete.requestBody).toBeUndefined();
+  });
+
+  it('publishes the requests: a create names its kind, date and word lists, the others less', async () => {
+    const doc = await openApiDocument();
+    const create = doc.paths[TARGETS].post.requestBody;
+    expect(create.required).toBe(true);
+    expect(create.content['application/json'].schema.required.sort()).toEqual(['due_on', 'entries', 'kind', 'photo_import_ids']);
+    expect(create.content['application/json'].schema.properties.kind.enum).toEqual(['homework', 'exam']);
+    const date = doc.paths[TARGET].patch.requestBody;
+    expect(date.required).toBe(true);
+    expect(date.content['application/json'].schema.required).toEqual(['due_on']);
+    const add = doc.paths[WORDS].post.requestBody;
+    expect(add.required).toBe(true);
+    expect(add.content['application/json'].schema.required.sort()).toEqual(['entries', 'photo_import_ids']);
+  });
+
+  it('publishes a due date as a string in the form of a learner day, and the word lists with their bounds', async () => {
+    const doc = await openApiDocument();
+    const create = doc.paths[TARGETS].post.requestBody.content['application/json'].schema;
+    expect(create.properties.due_on.type).toBe('string');
+    expect(create.properties.due_on.pattern).toBe('^\\d{4}-\\d{2}-\\d{2}$');
+    expect(create.properties.photo_import_ids.maxItems).toBe(10);
+    expect(create.properties.entries.maxItems).toBe(50);
+  });
+
+  it('publishes the list with the learner day, and a target with its words and their readiness', async () => {
+    const doc = await openApiDocument();
+    const list = doc.paths[TARGETS].get.responses['200'].content['application/json'].schema;
+    expect(list.required.sort()).toEqual(['targets', 'today']);
+    expect(list.properties.targets.items.required.sort()).toEqual(['days_left', 'due_on', 'id', 'kind', 'ready_count', 'word_count']);
+    for (const [path, method, status] of [
+      [TARGETS, 'post', '201'],
+      [TARGET, 'get', '200'],
+      [TARGET, 'patch', '200'],
+      [WORDS, 'post', '200'],
+    ]) {
+      const target = doc.paths[path][method].responses[status].content['application/json'].schema;
+      expect(target.required.sort()).toEqual(['days_left', 'due_on', 'id', 'kind', 'ready_count', 'word_count', 'words']);
+      expect(target.properties.words.items.required.sort()).toEqual(['form', 'gloss_id', 'meaning', 'readiness']);
+      expect(target.properties.words.items.properties.readiness.enum).toEqual(['not_started', 'on_the_way', 'almost', 'ready']);
+    }
+  });
+
+  it('names the path parameters', async () => {
+    const doc = await openApiDocument();
+    expect(doc.paths[WORD].delete.parameters).toEqual([
+      { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+      { name: 'gloss_id', in: 'path', required: true, schema: { type: 'string' } },
+    ]);
+    expect(doc.paths[TARGET].get.parameters).toEqual([{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }]);
+  });
+
+  it('is open to no one without a session: each operation carries the session scheme and a 401', async () => {
+    const doc = await openApiDocument();
+    for (const [path, method] of [
+      [TARGETS, 'get'],
+      [TARGETS, 'post'],
+      [TARGET, 'get'],
+      [TARGET, 'patch'],
+      [END, 'post'],
+      [WORDS, 'post'],
+      [WORD, 'delete'],
+    ]) {
+      expect(doc.paths[path][method].security).toBeUndefined();
+      expect(doc.paths[path][method].responses['401']).toBeDefined();
+    }
+    expect(doc.security).toEqual([{ sessionCookie: [] }]);
+  });
+});
+
 describe('phase 19 paths in the published document', () => {
   it('publishes read, skip and current', async () => {
     const doc = await openApiDocument();
@@ -526,6 +669,8 @@ describe('POST /api/sessions/{id}/judged-answer in the published document', () =
 // in its 403, and still says the gate's own 403 (a session without a profile).
 describe('the 403 of an owner-only or granted route in the published document', () => {
   const VOCABULARY = '/api/enrollments/{id}/vocabulary';
+  // Phase 53 (spec D2): a target is its list owner's alone, a tutor of the list included.
+  const OWNER_ONLY = /owner, who alone may read or change a target, a tutor of the list included/;
   it.each([
     [VOCABULARY, 'post', /accepted grant that allows adding words/],
     [VOCABULARY, 'get', /owner, who alone may read it/],
@@ -544,6 +689,13 @@ describe('the 403 of an owner-only or granted route in the published document', 
     ['/api/photo-imports/{id}/items/{position}', 'patch', /another learner's/],
     ['/api/photo-imports/{id}/save', 'post', /another learner's/],
     ['/api/photo-imports/{id}/discard', 'post', /another learner's/],
+    ['/api/enrollments/{id}/targets', 'get', OWNER_ONLY],
+    ['/api/enrollments/{id}/targets', 'post', OWNER_ONLY],
+    ['/api/targets/{id}', 'get', OWNER_ONLY],
+    ['/api/targets/{id}', 'patch', OWNER_ONLY],
+    ['/api/targets/{id}/end', 'post', OWNER_ONLY],
+    ['/api/targets/{id}/words', 'post', OWNER_ONLY],
+    ['/api/targets/{id}/words/{gloss_id}', 'delete', OWNER_ONLY],
     ['/api/translations', 'post', /another learner's enrollment/],
     ['/api/grants/{id}/accept', 'post', /owner, who alone may accept or decline an invite/],
     ['/api/grants/{id}', 'delete', /neither party to this grant/],

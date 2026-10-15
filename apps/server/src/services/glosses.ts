@@ -22,6 +22,7 @@ function glossMerged(input: { lexemeId: string; userLanguageCode: string; surviv
     snapshots: input.counts.snapshots,
     questions: input.counts.questions,
     memberships: input.counts.memberships,
+    target_words: input.counts.targetWords,
   };
 }
 

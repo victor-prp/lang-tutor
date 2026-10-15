@@ -284,8 +284,9 @@ export function coversPair(
 }
 
 /** The first entry of each gloss, in order. Saving is first-form-wins in the
- *  database too, so this only spares a batch from validating a duplicate. */
-export function firstPerGloss(entries: VocabularyEntryInput[]): VocabularyEntryInput[] {
+ *  database too, so this only spares a batch from validating a duplicate.
+ *  Phase 53: an entry may carry more (the import a row came from), kept. */
+export function firstPerGloss<T extends VocabularyEntryInput>(entries: readonly T[]): T[] {
   const seen = new Set<string>();
   return entries.filter((entry) => {
     if (seen.has(entry.gloss_id)) return false;

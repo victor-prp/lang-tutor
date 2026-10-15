@@ -18,6 +18,9 @@ type PhotoImportsValue = {
   loadFailed: boolean;
   reload: () => void;
   pick: (source: 'camera' | 'gallery') => Promise<PickResult>;
+  /** Phase 53 (spec D10). Several photos from the library at once, for the target
+   *  wizard; none when the learner cancels. */
+  pickMany: () => Promise<Photo[]>;
   upload: (photo: Photo) => Promise<PhotoImportSummary>;
   fetchImport: (id: string) => Promise<PhotoImport>;
   updateItem: (id: string, position: number, update: PhotoImportItemUpdate) => Promise<PhotoImportItem>;
@@ -66,6 +69,7 @@ export function PhotoImportsProvider({ api, picker, children }: { api: ApiClient
     (source: 'camera' | 'gallery') => (source === 'camera' ? picker.take() : picker.choose()),
     [picker],
   );
+  const pickMany = useCallback(() => picker.chooseMany(), [picker]);
   const upload = useCallback(
     async (photo: Photo) => {
       if (!active) throw new Error('no active enrollment');
@@ -82,8 +86,8 @@ export function PhotoImportsProvider({ api, picker, children }: { api: ApiClient
   const discard = useCallback((id: string) => api.discardPhotoImport(id), [api]);
 
   const value = useMemo<PhotoImportsValue>(
-    () => ({ imports, loadFailed, reload, pick, upload, fetchImport, updateItem, save, discard }),
-    [imports, loadFailed, reload, pick, upload, fetchImport, updateItem, save, discard],
+    () => ({ imports, loadFailed, reload, pick, pickMany, upload, fetchImport, updateItem, save, discard }),
+    [imports, loadFailed, reload, pick, pickMany, upload, fetchImport, updateItem, save, discard],
   );
 
   return <PhotoImportsContext.Provider value={value}>{children}</PhotoImportsContext.Provider>;

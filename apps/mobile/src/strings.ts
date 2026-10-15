@@ -1,4 +1,4 @@
-import type { PartOfSpeech } from '@lang-tutor/core/api';
+import type { PartOfSpeech, TargetKind, TargetReadiness } from '@lang-tutor/core/api';
 import type { Dimension } from '@lang-tutor/core/domain';
 
 // U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
@@ -52,6 +52,33 @@ const PART_OF_SPEECH_LOOKUP: Record<string, string> = { ...PART_OF_SPEECH_NAMES,
 // Phase 52 (spec D8). The letter of the day, by ISO weekday 1 (Monday) to 7 (Sunday):
 // Sunday is the first day (א׳) in Hebrew.
 const REMINDER_DAY_NAMES = ['ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳', 'א׳'];
+
+// Phase 53 (spec D4, D11). Records over the closed wire sets, so the compiler refuses
+// a third kind or a fifth level that has no Hebrew name.
+const TARGET_KIND_NAMES: Record<TargetKind, string> = { homework: 'שיעורי בית', exam: 'בוחן' };
+const TARGET_READINESS_NAMES: Record<TargetReadiness, string> = {
+  not_started: 'עוד לא התחלנו',
+  on_the_way: 'בדרך',
+  almost: 'כמעט מוכנה',
+  ready: 'מוכנה',
+};
+// The weekday as JavaScript numbers it, 0 (Sunday) to 6 (Saturday), and each month
+// with its ב, which is how a date reads: "16 באוקטובר".
+const TARGET_WEEKDAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+const TARGET_MONTH_NAMES = [
+  'בינואר',
+  'בפברואר',
+  'במרץ',
+  'באפריל',
+  'במאי',
+  'ביוני',
+  'ביולי',
+  'באוגוסט',
+  'בספטמבר',
+  'באוקטובר',
+  'בנובמבר',
+  'בדצמבר',
+];
 
 export const strings = {
   appTitle: 'lang tutor',
@@ -369,4 +396,75 @@ export const strings = {
   homePhotoReady: (count: number) => `רשימה מתמונה: ${isolateLtr(String(count))} מילים לסקירה`,
   homePhotoFailed: 'לא הצלחנו לקרוא את התמונה ששלחת',
   homePhotoSeveral: (count: number) => `${isolateLtr(String(count))} רשימות מתמונות מחכות לסקירה`,
+  // Phase 53 (spec D10, D11). Preparing for homework or a test.
+  targetKindName: (kind: TargetKind): string => TARGET_KIND_NAMES[kind],
+  targetReadinessName: (readiness: TargetReadiness): string => TARGET_READINESS_NAMES[readiness],
+  targetTomorrow: 'מחר',
+  targetInDays: (days: number) => `בעוד ${isolateLtr(String(days))} ימים`,
+  // A target read after its date has come is no longer counted down to.
+  targetDateCame: 'התאריך הגיע',
+  targetReadyCount: (ready: number, total: number) =>
+    `${isolateLtr(String(ready))} מתוך ${isolateLtr(String(total))} מוכנות`,
+  /** `weekday` is JavaScript's (0 = Sunday), `month` is 1 = January. */
+  targetDueDay: (weekday: number, day: number, month: number) =>
+    `יום ${TARGET_WEEKDAY_NAMES[weekday]}, ${isolateLtr(String(day))} ${TARGET_MONTH_NAMES[month - 1]}`,
+  // Home's button, which says what a target is for.
+  targetNew: 'הכנה לשיעורי בית או לבוחן',
+  // The wizard: its title for each action, and each step's (spec D10).
+  targetWizardCreate: 'הכנה חדשה',
+  targetWizardAddPhotos: 'מילים מתמונות',
+  targetWizardAddWords: 'הוספת מילים',
+  targetWizardChangeDate: 'שינוי התאריך',
+  targetStepKind: 'למה מתכוננים?',
+  targetStepPhotos: 'תמונות של רשימת המילים',
+  targetStepReview: 'המילים מהתמונות',
+  targetStepWords: 'עוד מילים',
+  targetStepDate: 'באיזה תאריך?',
+  targetPhotosHint: 'אפשר לצלם או לבחור כמה תמונות, או לדלג על השלב.',
+  // A target screen's add photos, whose Next needs a photo: no skipping there.
+  targetPhotosHintAdd: 'אפשר לצלם או לבחור כמה תמונות.',
+  targetReviewHint: 'אפשר להוריד סימון ממילה או לבחור לה משמעות אחרת.',
+  targetWordsHint: 'חפשו מילה והוסיפו אותה לרשימה.',
+  targetWizardNext: 'הבא',
+  targetWizardDone: 'סיום',
+  // Leaving the wizard with photos or words picked: nothing was saved yet.
+  targetLeaveTitle: 'לצאת בלי לשמור?',
+  targetLeaveMessage: 'התמונות והמילים שנבחרו לא יישמרו.',
+  targetLeaveConfirm: 'יציאה',
+  targetPhotoRemove: 'הסרת התמונה',
+  targetPhotosFull: (max: number) => `אפשר עד ${isolateLtr(String(max))} תמונות`,
+  // While the chosen photos are shrunk, one at a time, before they are shown.
+  targetPhotosPreparing: 'מכינים את התמונות…',
+  // `current` is the photo on its way, counted from 1.
+  targetUploading: (current: number, total: number) =>
+    `שולחים תמונה ${isolateLtr(String(current))} מתוך ${isolateLtr(String(total))}…`,
+  targetPhotoAddFailed: 'לא הצלחנו להוסיף את התמונה. נסו שוב.',
+  targetPhotoRemoveFailed: 'הסרת התמונה נכשלה. נסו שוב.',
+  targetReviewReading: 'קוראים את התמונות…',
+  targetReviewLoadFailed: 'טעינת המילים נכשלה. מנסים שוב…',
+  targetReviewEmpty: 'לא נמצאו מילים בתמונות.',
+  // Ruling R-D9: each photo is its own import, and a failed one is a photo not read.
+  targetPhotosUnread: (unread: number, total: number) =>
+    `לא הצלחנו לקרוא ${isolateLtr(String(unread))} מתוך ${isolateLtr(String(total))} תמונות`,
+  targetPickedCount: (count: number) => `מילים שנבחרו: ${isolateLtr(String(count))}`,
+  targetEntriesFull: (max: number) => `אפשר עד ${isolateLtr(String(max))} מילים`,
+  targetEntryRemove: 'הסרה',
+  targetDatesLoadFailed: 'טעינת התאריכים נכשלה.',
+  // Done refused: what to fix (the 400's reason), or that it did not go through.
+  targetNoWords: 'צריך לפחות מילה אחת. אפשר לחזור ולהוסיף מילים.',
+  targetDueDatePast: 'צריך לבחור תאריך אחרי היום.',
+  targetSaveFailed: 'השמירה נכשלה. נסו שוב.',
+  targetClosed: 'ההכנה הזו כבר הסתיימה.',
+  // The target screen (spec D11).
+  targetAddPhotos: 'הוספת מילים מתמונות',
+  targetAddWord: 'הוספת מילה',
+  targetChangeDate: 'שינוי התאריך',
+  targetEnd: 'סיום ההכנה',
+  targetEndTitle: 'לסיים את ההכנה?',
+  targetEndMessage: 'המילים יישארו שמורות ברשימה שלך.',
+  targetEndConfirm: 'סיום ההכנה',
+  targetWordRemove: 'הסרה',
+  targetEmpty: 'אין מילים בהכנה הזו.',
+  targetLoadFailed: 'טעינת ההכנה נכשלה. אפשר לנסות שוב.',
+  targetActionFailed: 'הפעולה נכשלה. נסו שוב.',
 } as const;

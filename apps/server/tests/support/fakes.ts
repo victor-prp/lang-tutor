@@ -13,6 +13,7 @@ import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
 import type { JobRepo } from '../../src/repo/jobs';
 import type { PronunciationRepo } from '../../src/repo/pronunciationScores';
+import type { TargetRepo } from '../../src/repo/targets';
 import type { CorrectionRow, PersistEntriesInput, DictRepo, GlossCounts, MergePair } from '../../src/repo/dictionary';
 import type { EnrollmentService } from '../../src/services/enrollments';
 import type { PhotoImportService } from '../../src/services/photoImports';
@@ -20,6 +21,7 @@ import type { ReminderService } from '../../src/services/reminders';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { LlmAudioRequest, SpeechTranscriber } from '../../src/services/speech';
 import type { SessionService } from '../../src/services/sessions';
+import type { TargetService } from '../../src/services/targets';
 import type { Repos, Transaction } from '../../src/services/transaction';
 import type { TranslationService } from '../../src/services/translations';
 import type { GrantService } from '../../src/services/grants';
@@ -113,6 +115,15 @@ export function createFakeAppDeps(): AppDeps {
     lookUpItem: unreachable,
     failItem: unreachable,
   };
+  const targets: TargetService = {
+    list: unreachable,
+    getTarget: unreachable,
+    create: unreachable,
+    addWords: unreachable,
+    removeWord: unreachable,
+    changeDate: unreachable,
+    end: unreachable,
+  };
   return {
     sessions,
     users,
@@ -122,6 +133,7 @@ export function createFakeAppDeps(): AppDeps {
     grants,
     reminders,
     photoImports,
+    targets,
     glosses: { mergeLexeme: unreachable, planMerges: unreachable, applyMerges: unreachable },
     health: { ping: unreachable },
     identity: { lane: 'test', database: 'test_db', port: 0, version: 'test', commit: 'test' },
@@ -237,6 +249,61 @@ export function createFakeJobRepo(): FakeJobRepo {
   };
 }
 
+export type FakeTargetRepo = TargetRepo & {
+  /** Every write the repo was handed, in order, with its arguments. */
+  written: { method: string; args: unknown[] }[];
+};
+
+/**
+ * Phase 53. A target repository for a learner with no target: the reads a session
+ * makes find nothing (no active target, no recorded split, no target ended on its
+ * date), and the writes are recorded no-ops that report nothing happened. Every other
+ * method throws with its name, so a test that reaches a target it never set up fails
+ * there. insertTarget is one of those: its caller needs the row it makes, which a
+ * no-op cannot invent, so a test that creates a target says what comes back.
+ * `overrides` replaces any method; the rest keep their defaults.
+ */
+export function createFakeTargetRepo(overrides: Partial<TargetRepo> = {}): FakeTargetRepo {
+  const written: FakeTargetRepo['written'] = [];
+  const missing = unreachableRepo<TargetRepo>('target repo');
+  return {
+    written,
+    insertTarget: missing.insertTarget,
+    findTarget: missing.findTarget,
+    findTargetForUpdate: missing.findTargetForUpdate,
+    listActive: async () => [],
+    listWordIds: missing.listWordIds,
+    addWords: async (...args) => {
+      written.push({ method: 'addWords', args });
+      return [];
+    },
+    removeWord: async (...args) => {
+      written.push({ method: 'removeWord', args });
+      return false;
+    },
+    removeGlossFromTargets: async (...args) => {
+      written.push({ method: 'removeGlossFromTargets', args });
+      return [];
+    },
+    setDueOn: async (...args) => {
+      written.push({ method: 'setDueOn', args });
+    },
+    end: async (...args) => {
+      written.push({ method: 'end', args });
+      return false;
+    },
+    listEndedUnrecorded: async () => [],
+    insertEvent: async (...args) => {
+      written.push({ method: 'insertEvent', args });
+    },
+    insertSessionSplit: async (...args) => {
+      written.push({ method: 'insertSessionSplit', args });
+    },
+    findSessionSplit: async () => [],
+    ...overrides,
+  };
+}
+
 // A repository a unit test can hold in its head: the same contract, backed by
 // an array. It reproduces the two behaviours a caller depends on — a second
 // profile for one id raises ProfileExists, a duplicate username raises
@@ -306,9 +373,10 @@ export function stub<T extends object>(methods: Partial<T>): T {
 }
 
 /** Runs `run` immediately with whichever repositories the test named; every
- *  other one throws with the method that was reached for. No rollback, by
- *  design: a fake that pretended to roll back would be asserting a database
- *  behaviour it cannot actually provide. */
+ *  other one throws with the method that was reached for, bar `target` (phase
+ *  53), which stands for a learner with no target: see createFakeTargetRepo.
+ *  No rollback, by design: a fake that pretended to roll back would be
+ *  asserting a database behaviour it cannot actually provide. */
 export function createFakeTransaction(repos: Partial<Repos>): Transaction {
   const bound: Repos = {
     user: repos.user ?? unreachableRepo('user repo'),
@@ -327,6 +395,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     modelCall: repos.modelCall ?? unreachableRepo('model call repo'),
     pronunciation: repos.pronunciation ?? unreachableRepo('pronunciation repo'),
     reminders: repos.reminders ?? unreachableRepo('reminders repo'),
+    target: repos.target ?? createFakeTargetRepo(),
   };
   return (run) => run(bound);
 }

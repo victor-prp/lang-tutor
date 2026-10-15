@@ -859,6 +859,70 @@ export const VocabularyWordQuerySchema = z.object({
   lemma: z.string().min(1).regex(/^[^\u0000]*$/),
 });
 
+// Phase 53 (spec D1, D4, D13). A target: a kind, a due date and words saved in the
+// enrollment, which sessions serve until the date. A learner day is ADR 0013's,
+// 'YYYY-MM-DD'. `days_left` counts from the learner's today, and a target is active
+// while it is at least 1. A word's readiness is its chance of being remembered on
+// the due date, in its weakest live skill, read against the kind's bars.
+export const TargetKindSchema = z.enum(['homework', 'exam']);
+export const TargetReadinessSchema = z.enum(['not_started', 'on_the_way', 'almost', 'ready']);
+// A calendar day, not only the shape of one: 2026-02-30 and 2026-13-01 match the pattern, reached
+// Postgres, which raises 22008, and answered 500. The parts must survive a round trip through UTC,
+// so no locale and no time zone is read; setUTCFullYear rather than Date.UTC, which would remap
+// the years 0-99 to 1900-1999. This checks a day it is given and computes none (ADR 0013 R1).
+const isCalendarDay = (day: string): boolean => {
+  const [year, month, date] = day.split('-').map(Number);
+  const utc = new Date(0);
+  utc.setUTCFullYear(year, month - 1, date);
+  return utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === date;
+};
+export const LearnerDaySchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine(isCalendarDay, { message: 'not a calendar day' });
+export const TargetSummarySchema = z.object({
+  id: z.string(),
+  kind: TargetKindSchema,
+  due_on: LearnerDaySchema,
+  days_left: z.number().int(),
+  word_count: z.number().int(),
+  ready_count: z.number().int(),
+});
+// The active targets, nearest due date first, and the day they were read on: the
+// app's date step offers the days after it.
+export const TargetListSchema = z.object({ today: LearnerDaySchema, targets: z.array(TargetSummarySchema) });
+// Ruling R-D11. `form` is the form the word was saved from, `meaning` the gloss's key.
+export const TargetWordSchema = z.object({
+  gloss_id: z.string(),
+  form: z.string(),
+  meaning: z.string(),
+  readiness: TargetReadinessSchema,
+});
+// Its words in the order they were added.
+export const TargetSchema = TargetSummarySchema.extend({ words: z.array(TargetWordSchema) });
+// Ruling R-D9. The words a create or an add brings, saved in the same transaction:
+// photo imports (one per photo; a failed one is skipped) and typed words.
+export const TargetWordsInputSchema = z.object({
+  photo_import_ids: z.array(z.string().min(1)).max(10),
+  entries: z.array(VocabularyEntryInputSchema).max(50),
+});
+// Ruling R-D10. Creating needs at least one word, which only the save can tell: a
+// photo may hold none, or fail.
+export const CreateTargetRequestSchema = TargetWordsInputSchema.extend({ kind: TargetKindSchema, due_on: LearnerDaySchema });
+export const AddTargetWordsRequestSchema = TargetWordsInputSchema.refine(
+  (body) => body.photo_import_ids.length + body.entries.length > 0,
+  { message: 'nothing to add' },
+);
+// Any day after the learner's today; the kind never changes.
+export const ChangeTargetDateRequestSchema = z.object({ due_on: LearnerDaySchema });
+// The 400 of a target request. `invalid request` (the body did not validate) and `invalid
+// vocabulary entry` carry the error alone; `invalid target` says why: the due date is not after
+// the learner's today, no word came out of the photos and typed words, or a photo import is
+// unknown or another list's.
+export const TargetRefusalSchema = ErrorSchema.extend({
+  reason: z.enum(['due_date', 'no_words', 'unknown_import']).optional(),
+});
+
 // A closed set, because part_of_speech is half of dict_lexemes' unique key from
 // phase 12 on: free text would make (book,"verb phrase") and (book,"verb_phrase")
 // two lexemes, and the pre-phase-12 data already held 80 spellings of ten ideas.

@@ -118,7 +118,59 @@ type Candidate = {
 
 const byNeed = (a: Candidate, b: Candidate) => (a.need ?? 1) - (b.need ?? 1);
 
+/** Phase 39 (spec D5). The groups among the candidates joined by either mark, a key or a
+ *  family (union-find). */
+function groupCount(candidates: readonly Candidate[]): number {
+  const parent = candidates.map((_, index) => index);
+  const root = (index: number): number => (parent[index] === index ? index : (parent[index] = root(parent[index])));
+  const firstWith = new Map<string, number>();
+  candidates.forEach((candidate, index) => {
+    for (const mark of [`k${candidate.key}`, ...(candidate.family === undefined ? [] : [`f${candidate.family}`])]) {
+      const seen = firstWith.get(mark);
+      if (seen === undefined) firstWith.set(mark, index);
+      else parent[root(index)] = root(seen);
+    }
+  });
+  return new Set(candidates.map((_, index) => root(index))).size;
+}
+
+/**
+ * Phase 53 (spec D6, ruling R-D6). A part of a session: a target's words, or the main
+ * path. The pools of a session are picked in order, in one call.
+ */
+export type Pool = {
+  /** The glosses this pool may pick; null: every saved gloss no other pool lists (the main path). */
+  glossIds: ReadonlySet<string> | null;
+  /** Picks this pool aims for in the first pass. What it leaves unpicked passes to the next
+   *  pool; what is still unpicked after the last goes back to the pools, in order. A pool
+   *  that lists its glosses (a target's) fills its slots with its own words answered today
+   *  before passing any on; the main path's words answered today come last of all. */
+  slots: number;
+  /** Ruling R-D7: new words this pool may introduce whatever the daily cap says (a target's pace),
+   *  reserved ahead of its returns and due words (owed words first); 0 for the main path. */
+  owedNew: number;
+};
+
+/** A session with no target: one pool, the main path, of SESSION_LENGTH. */
 export function chooseWords(input: ChoiceInput): ChosenPick[] {
+  return choosePools(input, [{ glossIds: null, slots: SESSION_LENGTH, owedNew: 0 }])[0];
+}
+
+/**
+ * Phase 53 (spec D5, D6, rulings R-D6, R-D7). One call per session. Returns each pool's
+ * picks, in pool order. In the first pass each pool takes steps 1–8 over its own words,
+ * aiming for its slots and what the pools before it left unpicked: unused slots go forward.
+ * A target's pool (one that lists its glosses) then fills those slots with its own words
+ * answered today (step 9) before passing any on, so a target not ready keeps the whole
+ * session (D5). In the second pass the slots still unpicked go back to the pools in the same
+ * order, each offered as many as remain, by the same rule. Only the third gives what is left
+ * to the main path's words answered today, so those wait for every pool's other words
+ * (phase 37 D3). A session still empty goes past the daily cap (ruling 15), the pools in
+ * order. The pools share what one session shares: the glosses, keys and families picked,
+ * the families the returns claimed, the per-dimension and hard counts, the new words and
+ * the speaking pick.
+ */
+export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenPick[][] {
   const live = liveDimensions(input.listening, input.speaking);
 
   const memory = new Map<string, Map<Dimension, number>>();
@@ -140,9 +192,16 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
   const steps = new Map(input.steps.filter((step) => live.includes(step.dimension)).map((step) => [step.glossId, step]));
   const waiting = new Set(input.steps.filter((step) => !live.includes(step.dimension)).map((step) => step.glossId));
 
-  // Phase 39 (spec D5). A waiting gloss is no candidate: no class, no pass.
+  // The glosses a pool lists are no words of the main path's.
+  const listed = new Set(pools.flatMap((pool) => (pool.glossIds === null ? [] : [...pool.glossIds])));
+
+  // Phase 39 (spec D5). A waiting gloss is no candidate: no class, no pass. Phase 53 (final
+  // review I1): unless a pool lists it. A target's word is asked while its family waits on
+  // another meaning, so it is met before the target's date (spec D7); a family still gives a
+  // session one gloss, by the families picked and the claims, as every family does. With no
+  // pool that lists glosses, `listed` is empty and the rule is phase 39's.
   const candidates = input.saved
-    .filter((gloss) => !input.families.waiting.has(gloss.glossId))
+    .filter((gloss) => !input.families.waiting.has(gloss.glossId) || listed.has(gloss.glossId))
     .map((gloss): Candidate => {
       const rows = memory.get(gloss.glossId);
       const owed = steps.get(gloss.glossId);
@@ -177,122 +236,206 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
       };
     });
 
+  // Phase 53 (ruling R-D6): sorted once for the session; each pool asks its own part
+  // of each list, in this order.
   const of = (cls: ChoiceClass) => candidates.filter((candidate) => candidate.pick.cls === cls);
-  const returns = of('STEP').sort((a, b) => a.opened - b.opened);
-  const due = of('DUE').sort(byNeed);
+  const allReturns = of('STEP').sort((a, b) => a.opened - b.opened);
+  const allDue = of('DUE').sort(byNeed);
   // Newest saved first; the shuffle first makes equal save times fall at random.
-  const fresh = shuffle(of('NEW'), input.rng).sort((a, b) => (a.savedAt < b.savedAt ? 1 : a.savedAt > b.savedAt ? -1 : 0));
-  const expand = of('EXPAND').sort(byNeed);
-  const notDue = of('NOT_DUE').sort(byNeed);
+  const allFresh = shuffle(of('NEW'), input.rng).sort((a, b) => (a.savedAt < b.savedAt ? 1 : a.savedAt > b.savedAt ? -1 : 0));
+  const allExpand = of('EXPAND').sort(byNeed);
+  const allNotDue = of('NOT_DUE').sort(byNeed);
   // D3: in the order today gives them, the least practised first; a waiting return last.
   const doneOrder = new Map([...input.done].map((glossId, index) => [glossId, index]));
-  const done = of('DONE').sort((a, b) => (doneOrder.get(a.pick.glossId) ?? Infinity) - (doneOrder.get(b.pick.glossId) ?? Infinity));
+  const allDone = of('DONE').sort((a, b) => (doneOrder.get(a.pick.glossId) ?? Infinity) - (doneOrder.get(b.pick.glossId) ?? Infinity));
 
-  // D3. The new-word reserve comes first and gives way to a backlog, down to NEW_FLOOR.
-  // Phase 39 (spec D5): n counts groups joined by either mark, a key or a family
-  // (union-find), so a list of a few large families promises no more picks than it can give.
-  const parent = candidates.map((_, index) => index);
-  const root = (index: number): number => (parent[index] === index ? index : (parent[index] = root(parent[index])));
-  const firstWith = new Map<string, number>();
-  candidates.forEach((candidate, index) => {
-    for (const mark of [`k${candidate.key}`, ...(candidate.family === undefined ? [] : [`f${candidate.family}`])]) {
-      const seen = firstWith.get(mark);
-      if (seen === undefined) firstWith.set(mark, index);
-      else parent[root(index)] = root(seen);
-    }
-  });
-  const n = Math.min(SESSION_LENGTH, new Set(candidates.map((_, index) => root(index))).size);
-  const newLeft = Math.max(0, DAY_NEW_CAP - input.newToday);
-  const speak = input.speaking && n >= 2 ? SPEAKING_PER_SESSION : 0;
-  const room = n - speak - returns.length - due.length;
-  const reserve = Math.min(fresh.length, newLeft, Math.min(NEW_PER_SESSION, Math.max(NEW_FLOOR, room)));
-
-  const picks: ChosenPick[] = [];
+  // Ruling R-D6: the state the pools share, created once for the session.
   const keys = new Set<string>();
   // Phase 39 (spec D5). The families of the picks so far, and the families a return
-  // claimed: a claimed family is free to its claiming return alone.
+  // claimed: a claimed family is free to its claiming return alone, whichever pool
+  // holds that return.
   const pickedFamilies = new Set<number | string>();
   const claims = new Map<number | string, string>();
-  for (const candidate of returns) {
+  for (const candidate of allReturns) {
     if (candidate.family !== undefined && !claims.has(candidate.family)) claims.set(candidate.family, candidate.pick.glossId);
   }
   const taken = new Set<string>();
   const perDimension = new Map<Dimension, number>();
   let hard = 0;
   let newCount = 0;
-  // Held back by a cap: asked after everything but DONE (ruling 14).
-  const deferred: Candidate[] = [];
+  let spoken = 0;
 
-  const free = (candidate: Candidate) =>
+  // Open: no pick so far is the gloss or shares its key or family. Free: open, and its
+  // family claimed by no other gloss's return.
+  const open = (candidate: Candidate) =>
     !taken.has(candidate.pick.glossId) &&
     !keys.has(candidate.key) &&
-    (candidate.family === undefined ||
-      (!pickedFamilies.has(candidate.family) && (claims.get(candidate.family) ?? candidate.pick.glossId) === candidate.pick.glossId));
-  const add = (candidate: Candidate) => {
-    if (candidate.family !== undefined) pickedFamilies.add(candidate.family);
-    picks.push(candidate.pick);
-    keys.add(candidate.key);
-    taken.add(candidate.pick.glossId);
-    perDimension.set(candidate.pick.dimension, (perDimension.get(candidate.pick.dimension) ?? 0) + 1);
-    if (isHard(candidate.pick)) hard++;
-    if (candidate.pick.cls === 'NEW') newCount++;
-  };
-  // The dimension cap holds expansions only: a newly live dimension cannot flood
-  // a session, and nothing better known is asked ahead of a due word for it.
-  const offer = (candidate: Candidate, dimensionCap: boolean) => {
-    if (picks.length >= n || !free(candidate)) return;
-    const capped =
-      (dimensionCap && (perDimension.get(candidate.pick.dimension) ?? 0) >= PER_DIMENSION_CAP) ||
-      (isHard(candidate.pick) && hard >= HARD_CAP);
-    if (capped) deferred.push(candidate);
-    else add(candidate);
-  };
-  let nextFresh = 0;
-  const offerFresh = (limit: number) => {
-    while (nextFresh < fresh.length && newCount < limit && picks.length < n) {
-      const candidate = fresh[nextFresh++];
-      if (free(candidate)) add(candidate);
+    (candidate.family === undefined || !pickedFamilies.has(candidate.family));
+  const free = (candidate: Candidate) =>
+    open(candidate) && (candidate.family === undefined || (claims.get(candidate.family) ?? candidate.pick.glossId) === candidate.pick.glossId);
+
+  // Per pool: its picks over every pass, the new words it introduced, and the groups it
+  // held when it first ran.
+  const chosen: ChosenPick[][] = pools.map(() => []);
+  const introducedBy = pools.map(() => 0);
+  const groupsAtFirst: number[] = [];
+
+  /** One run of a pool over its words still open, for up to `slots` more picks: steps 1–8,
+   *  and step 9 for a target's pool; step 9 alone (`done`, the main path's); or step 10 alone
+   *  (`pastTheCap`). Returns how many it picked. */
+  const run = (index: number, slots: number, part: 'steps' | 'done' | 'pastTheCap'): number => {
+    const pool = pools[index];
+    // This pool's words, less those a pick so far shut out.
+    const mine = (candidate: Candidate) =>
+      (pool.glossIds === null ? !listed.has(candidate.pick.glossId) : pool.glossIds.has(candidate.pick.glossId)) && open(candidate);
+    const returns = allReturns.filter(mine);
+    const due = allDue.filter(mine);
+    const fresh = allFresh.filter(mine);
+    const expand = allExpand.filter(mine);
+    const notDue = allNotDue.filter(mine);
+    const done = allDone.filter(mine);
+
+    // D3. The new-word reserve comes first and gives way to a backlog, down to NEW_FLOOR.
+    // Phase 39 (spec D5): n counts groups joined by either mark, a key or a family
+    // (union-find), so a list of a few large families promises no more picks than it can give.
+    // Phase 53 (ruling R-D6): the groups a pool held when it first ran bound its picks over
+    // every pass, so a lone pool's later passes add nothing today's steps did not. Ruling
+    // R-D7: a pool may introduce what its pace still owes past the daily cap, and every
+    // pool's new words count toward that cap.
+    const groups = groupCount(candidates.filter(mine));
+    groupsAtFirst[index] ??= groups;
+    const n = Math.min(slots, groups, groupsAtFirst[index] - chosen[index].length);
+    const owedLeft = Math.max(0, pool.owedNew - introducedBy[index]);
+    const newLeft = Math.max(owedLeft, DAY_NEW_CAP - (input.newToday + newCount));
+    // Ruling R-D6: the session's speaking pick, while no run before has made it.
+    const speak = input.speaking && n >= 2 ? Math.max(0, SPEAKING_PER_SESSION - spoken) : 0;
+    const room = n - speak - returns.length - due.length;
+    // Phase 53 (owed words first): the new words a pool's pace still owes are reserved ahead of
+    // its returns and due words, up to the whole run, so a target meets its words before its last
+    // day however much it has to review. The main path owes none: its reserve is today's.
+    const reserve = Math.min(fresh.length, newLeft, Math.max(Math.min(NEW_PER_SESSION, Math.max(NEW_FLOOR, room)), Math.min(owedLeft, n)));
+
+    const picks: ChosenPick[] = [];
+    // New words this run introduced.
+    let introduced = 0;
+    // Held back by a cap: asked after everything but DONE (ruling 14).
+    const deferred: Candidate[] = [];
+
+    const add = (candidate: Candidate) => {
+      if (candidate.family !== undefined) pickedFamilies.add(candidate.family);
+      picks.push(candidate.pick);
+      keys.add(candidate.key);
+      taken.add(candidate.pick.glossId);
+      perDimension.set(candidate.pick.dimension, (perDimension.get(candidate.pick.dimension) ?? 0) + 1);
+      if (isHard(candidate.pick)) hard++;
+      if (candidate.pick.cls === 'NEW') {
+        newCount++;
+        introduced++;
+      }
+    };
+    // The dimension cap holds expansions only: a newly live dimension cannot flood
+    // a session, and nothing better known is asked ahead of a due word for it.
+    const offer = (candidate: Candidate, dimensionCap: boolean) => {
+      if (picks.length >= n || !free(candidate)) return;
+      const capped =
+        (dimensionCap && (perDimension.get(candidate.pick.dimension) ?? 0) >= PER_DIMENSION_CAP) ||
+        (isHard(candidate.pick) && hard >= HARD_CAP);
+      if (capped) deferred.push(candidate);
+      else add(candidate);
+    };
+    let nextFresh = 0;
+    const offerFresh = (limit: number) => {
+      while (nextFresh < fresh.length && introduced < limit && picks.length < n) {
+        const candidate = fresh[nextFresh++];
+        if (free(candidate)) add(candidate);
+      }
+    };
+    const fill = (from: readonly Candidate[]) => {
+      for (const candidate of from) {
+        if (picks.length >= n) break;
+        if (free(candidate)) add(candidate);
+      }
+    };
+
+    if (part === 'steps') {
+      // 1. New words, up to the reserve.
+      offerFresh(reserve);
+      // 2. D4, the speaking pick: a return in SK, then a word due in SK, then a word not
+      //    due with no SK memory, least known first, then a word done today with none,
+      //    whose speaking is practice it has not had, then a due word with none, best
+      //    known first so the most urgent reviews keep their place. A pool with none of
+      //    these (a target's words never met) passes the pick on.
+      const silent = (candidate: Candidate) => !candidate.rows?.has(SPEAKING);
+      const tiers: [Candidate[], boolean][] = [
+        [returns.filter((candidate) => candidate.pick.dimension === SPEAKING), false],
+        [due.filter((candidate) => candidate.pick.dimension === SPEAKING), false],
+        [[...expand, ...notDue].sort(byNeed).filter(silent), true],
+        [done.filter((candidate) => candidate.rows !== undefined && silent(candidate)), true],
+        [due.filter(silent).sort((a, b) => byNeed(b, a)), true],
+      ];
+      for (let tries = 0; tries < speak && picks.length < n; tries++) {
+        for (const [tier, moved] of tiers) {
+          const candidate = tier.find(free);
+          if (!candidate) continue;
+          add(moved ? { ...candidate, pick: pickOf(candidate.pick.glossId, SPEAKING, 'SPEAK', candidate.rows) } : candidate);
+          spoken++;
+          break;
+        }
+      }
+      // 3–7. Returns, due words, expansions, new words to the daily cap, words not due.
+      for (const candidate of returns) offer(candidate, false);
+      for (const candidate of due) offer(candidate, false);
+      for (const candidate of expand) offer(candidate, true);
+      offerFresh(newLeft);
+      for (const candidate of notDue) offer(candidate, false);
+      // 8. What a cap held back: before any word answered today.
+      fill(deferred);
+      // 9. Words answered today: only when nothing else is left. A target's pool fills its
+      //    own slots with its own before passing any on (spec D5, target only until ready).
+      if (pool.glossIds !== null) fill(done);
+    } else if (part === 'done') {
+      // 9. The main path's words answered today: only when no pool has another word (phase 37 D3).
+      fill(done);
+    } else {
+      // 10. Ruling 15, now for an empty session only: new words past the daily cap.
+      offerFresh(Infinity);
     }
-  };
-  const fill = (from: readonly Candidate[]) => {
-    for (const candidate of from) {
-      if (picks.length >= n) break;
-      if (free(candidate)) add(candidate);
-    }
+
+    chosen[index].push(...picks);
+    introducedBy[index] += introduced;
+    return picks.length;
   };
 
-  // 1. New words, up to the reserve.
-  offerFresh(reserve);
-  // 2. D4, the speaking pick: a return in SK, then a word due in SK, then a word not
-  //    due with no SK memory, least known first, then a word done today with none,
-  //    whose speaking is practice it has not had, then a due word with none, best
-  //    known first so the most urgent reviews keep their place.
-  const silent = (candidate: Candidate) => !candidate.rows?.has(SPEAKING);
-  const tiers: [Candidate[], boolean][] = [
-    [returns.filter((candidate) => candidate.pick.dimension === SPEAKING), false],
-    [due.filter((candidate) => candidate.pick.dimension === SPEAKING), false],
-    [[...expand, ...notDue].sort(byNeed).filter(silent), true],
-    [done.filter((candidate) => candidate.rows !== undefined && silent(candidate)), true],
-    [due.filter(silent).sort((a, b) => byNeed(b, a)), true],
-  ];
-  for (let spoken = 0; spoken < speak && picks.length < n; spoken++) {
-    for (const [tier, moved] of tiers) {
-      const candidate = tier.find(free);
-      if (!candidate) continue;
-      add(moved ? { ...candidate, pick: pickOf(candidate.pick.glossId, SPEAKING, 'SPEAK', candidate.rows) } : candidate);
-      break;
-    }
-  }
-  // 3–7. Returns, due words, expansions, new words to the daily cap, words not due.
-  for (const candidate of returns) offer(candidate, false);
-  for (const candidate of due) offer(candidate, false);
-  for (const candidate of expand) offer(candidate, true);
-  offerFresh(newLeft);
-  for (const candidate of notDue) offer(candidate, false);
-  // 8. What a cap held back. 9. Words answered today: only when nothing else is left.
-  fill(deferred);
-  fill(done);
-  // 10. Ruling 15, now for an empty session only: new words past the daily cap.
-  if (picks.length === 0) offerFresh(Infinity);
-  return picks;
+  // Phase 53 (rulings R-D6, R-D7). The passes, each over the pools in order.
+  //
+  // One pool, chooseWords' main path, chooses exactly as before. Its first pass is the old
+  // steps 1–8; its second adds nothing; its third is the old step 9 and ruling 15 the old
+  // step 10, at the old capacity n − picks. The second adds nothing because:
+  //  - picks only make a run stricter: a gloss, key or family taken stays taken and claims
+  //    never change, so a word not free when steps 2–8 offered it is not free later;
+  //  - a pool the daily cap stopped has introduced its newLeft, so its next newLeft is 0;
+  //  - a pick shuts out only words of its own group (they share its key or family), so the
+  //    groups still open never fall below groupsAtFirst − picks: that bound is what binds.
+  // A pool's lists filter by `open`, not `free` (ruling 1): a word whose family another
+  // gloss's return claimed still counts in n, room and the reserve, as it always has; the
+  // claim applies only when a word is picked.
+  //
+  // The first pass: each pool aims for its slots and what the pools before it left unpicked.
+  let unpicked = 0;
+  pools.forEach((pool, index) => {
+    unpicked += pool.slots - run(index, pool.slots + unpicked, 'steps');
+  });
+  // Each later pass offers the slots still unpicked to the pools, each as many as remain.
+  const pass = (part: 'steps' | 'done' | 'pastTheCap', only: (pool: Pool) => boolean = () => true) =>
+    pools.forEach((pool, index) => {
+      if (unpicked > 0 && only(pool)) unpicked -= run(index, unpicked, part);
+    });
+  // The second: steps 1–8 again (and a target's words answered today), so a learner whose
+  // saved words are all one ready target still gets a full session.
+  pass('steps');
+  // The third: the main path's words answered today, once no pool has another word.
+  pass('done', (pool) => pool.glossIds === null);
+  // Ruling 15: a session still empty goes past the daily cap, the pools in order.
+  if (taken.size === 0) pass('pastTheCap');
+  return chosen;
 }

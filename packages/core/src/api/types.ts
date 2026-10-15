@@ -119,6 +119,16 @@ import type {
   VocabularyWordDetailSchema,
   VocabularyWordQuerySchema,
   VocabularyWordSchema,
+  TargetKindSchema,
+  TargetReadinessSchema,
+  TargetSummarySchema,
+  TargetListSchema,
+  TargetWordSchema,
+  TargetSchema,
+  CreateTargetRequestSchema,
+  AddTargetWordsRequestSchema,
+  ChangeTargetDateRequestSchema,
+  TargetRefusalSchema,
 } from './schemas';
 
 // Every type here is inferred. The alternative — schemas on the server and
@@ -189,6 +199,16 @@ export type VocabularyPage = z.infer<typeof VocabularyPageSchema>;
 export type VocabularySense = z.infer<typeof VocabularySenseSchema>;
 export type VocabularyWordDetail = z.infer<typeof VocabularyWordDetailSchema>;
 export type VocabularyWordQuery = z.infer<typeof VocabularyWordQuerySchema>;
+export type TargetKind = z.infer<typeof TargetKindSchema>;
+export type TargetReadiness = z.infer<typeof TargetReadinessSchema>;
+export type TargetSummary = z.infer<typeof TargetSummarySchema>;
+export type TargetList = z.infer<typeof TargetListSchema>;
+export type TargetWord = z.infer<typeof TargetWordSchema>;
+export type Target = z.infer<typeof TargetSchema>;
+export type CreateTargetRequest = z.infer<typeof CreateTargetRequestSchema>;
+export type AddTargetWordsRequest = z.infer<typeof AddTargetWordsRequestSchema>;
+export type ChangeTargetDateRequest = z.infer<typeof ChangeTargetDateRequestSchema>;
+export type TargetRefusal = z.infer<typeof TargetRefusalSchema>;
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type SessionSource = z.infer<typeof SessionSourceSchema>;
 export type LlmDistractors = z.infer<typeof LlmDistractorsSchema>;

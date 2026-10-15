@@ -350,6 +350,22 @@ export function createVocabularyRepo(tx: Tx) {
       }));
     },
 
+    /** Phase 53 (ruling R-D11, final review M3). The saved glosses among `glossIds`, each with
+     *  its key and the form it was saved from as the dictionary writes it ("Monday", "I"): what
+     *  a target's screen shows. listSavedGlosses lowercases its form, which the picker needs. */
+    findSavedWords: async (input: { enrollmentId: string; glossIds: string[] }): Promise<{ glossId: string; key: string; form: string }[]> => {
+      if (input.glossIds.length === 0) return [];
+      const rows = await tx.execute<{ gloss_id: string; key: string; form: string }>(sql`
+        SELECT ve.gloss_id, g.key, v.form
+        FROM vocabulary_entries ve
+        JOIN dict_glosses g ON g.id = ve.gloss_id
+        JOIN dict_variants v ON v.id = ve.variant_id
+        WHERE ve.enrollment_id = ${input.enrollmentId}
+          AND ve.gloss_id IN (${inList(input.glossIds)})
+        ORDER BY ve.gloss_id`);
+      return rows.rows.map((row) => ({ glossId: row.gloss_id, key: row.key, form: row.form }));
+    },
+
     /** Phase 46 (spec D3). Stamps `at` as these glosses' known_at where none is set:
      *  known once, known for good. */
     markKnown: async (input: { enrollmentId: string; glossIds: string[]; at: string }): Promise<void> => {

@@ -1,6 +1,15 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  AddTargetWordsRequestSchema,
+  ChangeTargetDateRequestSchema,
+  CreateTargetRequestSchema,
+  LearnerDaySchema,
+  TargetKindSchema,
+  TargetListSchema,
+  TargetReadinessSchema,
+  TargetRefusalSchema,
+  TargetSchema,
   CreateEnrollmentRequestSchema,
   CreateSessionRequestSchema,
   CreateUserRequestSchema,
@@ -1229,5 +1238,167 @@ describe('phase 27 Part B shapes', () => {
   it('the translation judge answers one of four verdicts', () => {
     expect(LlmTranslationJudgeSchema.safeParse({ verdict: 'misspelled' }).success).toBe(true);
     expect(LlmTranslationJudgeSchema.safeParse({ verdict: 'other_sense' }).success).toBe(false);
+  });
+});
+
+// Phase 53 (spec D1, D10, D13; rulings R-D9, R-D10). The target wire. A learner day is a real
+// calendar day and not only the shape of one: 2026-02-30 used to pass, reach Postgres, which
+// raises 22008, and answer 500. A kind is homework or exam, and every request is bounded on
+// every side.
+describe('LearnerDaySchema', () => {
+  it.each([
+    '2030-01-08',
+    '2026-12-31',
+    '2026-02-28',
+    // A leap year, and a century year that is one (divisible by 400).
+    '2024-02-29',
+    '2000-02-29',
+    // Years 0-99 are read as written; Date.UTC would remap them to 1900-1999.
+    '0099-12-31',
+    '9999-12-31',
+  ])('accepts %s', (day) => {
+    expect(LearnerDaySchema.safeParse(day).success).toBe(true);
+  });
+
+  it.each([
+    // Days the month does not have.
+    '2026-02-30',
+    '2026-04-31',
+    '2026-01-32',
+    '2026-01-00',
+    // Months the year does not have.
+    '2026-13-01',
+    '2026-00-10',
+    // The 29th of February of a year that is not a leap year, a century one included.
+    '2025-02-29',
+    '1900-02-29',
+  ])('rejects %s, which has the shape of a day and is not one', (day) => {
+    expect(LearnerDaySchema.safeParse(day).success).toBe(false);
+  });
+
+  it.each([
+    ['one-digit parts', '2026-2-3'],
+    ['no dashes', '20260203'],
+    ['slashes', '2026/02/03'],
+    ['a time of day', '2026-02-03T00:00:00Z'],
+    ['a trailing newline', '2026-02-03\n'],
+    ['a leading space', ' 2026-02-03'],
+    ['a five-digit year', '12026-02-03'],
+    ['an empty string', ''],
+    ['a number', 20260203],
+    ['null', null],
+  ])('rejects %s', (_label, value) => {
+    expect(LearnerDaySchema.safeParse(value).success).toBe(false);
+  });
+});
+
+describe('the target requests', () => {
+  const entry = { gloss_id: 'g1', variant_id: 'v1' };
+  const create = { kind: 'exam', due_on: '2030-01-13', photo_import_ids: ['i1'], entries: [entry] };
+  const ids = (count: number) => Array.from({ length: count }, (_, index) => 'i' + index);
+  const entries = (count: number) => Array(count).fill(entry);
+
+  it('accepts a create of either kind, with photos and typed words', () => {
+    expect(CreateTargetRequestSchema.parse(create)).toEqual(create);
+    expect(CreateTargetRequestSchema.safeParse({ ...create, kind: 'homework' }).success).toBe(true);
+  });
+
+  // Ruling R-D10: only the save can tell that a photo holds no word, so the schema lets a create
+  // with no word named through, and the service answers it with invalid target.
+  it('accepts a create that names no photo and no word', () => {
+    expect(CreateTargetRequestSchema.safeParse({ ...create, photo_import_ids: [], entries: [] }).success).toBe(true);
+  });
+
+  it.each([
+    ['an unknown kind', { kind: 'quiz' }],
+    ['no kind', { kind: undefined }],
+    ['no date', { due_on: undefined }],
+    ['a date in another format', { due_on: '13/01/2030' }],
+    ['a day that is not on the calendar', { due_on: '2026-02-30' }],
+    ['no photo list', { photo_import_ids: undefined }],
+    ['no word list', { entries: undefined }],
+    ['an empty photo import id', { photo_import_ids: [''] }],
+    ['an entry with no variant', { entries: [{ gloss_id: 'g1' }] }],
+    ['an entry with no gloss', { entries: [{ variant_id: 'v1' }] }],
+  ])('rejects a create with %s', (_label, override) => {
+    expect(CreateTargetRequestSchema.safeParse({ ...create, ...override }).success).toBe(false);
+  });
+
+  it('takes ten photos and fifty typed words, and not one more of either', () => {
+    expect(CreateTargetRequestSchema.safeParse({ ...create, photo_import_ids: ids(10), entries: entries(50) }).success).toBe(true);
+    expect(CreateTargetRequestSchema.safeParse({ ...create, photo_import_ids: ids(11) }).success).toBe(false);
+    expect(CreateTargetRequestSchema.safeParse({ ...create, entries: entries(51) }).success).toBe(false);
+  });
+
+  it('accepts an add of photos, of typed words, and of both', () => {
+    expect(AddTargetWordsRequestSchema.safeParse({ photo_import_ids: ['i1'], entries: [] }).success).toBe(true);
+    expect(AddTargetWordsRequestSchema.safeParse({ photo_import_ids: [], entries: [entry] }).success).toBe(true);
+    expect(AddTargetWordsRequestSchema.safeParse({ photo_import_ids: ['i1'], entries: [entry] }).success).toBe(true);
+  });
+
+  it('refuses an add that brings nothing', () => {
+    expect(AddTargetWordsRequestSchema.safeParse({ photo_import_ids: [], entries: [] }).success).toBe(false);
+  });
+
+  it.each([
+    ['no photo list', { entries: [entry] }],
+    ['no word list', { photo_import_ids: ['i1'] }],
+    ['an empty photo import id', { photo_import_ids: [''], entries: [] }],
+    ['an entry with no variant', { photo_import_ids: [], entries: [{ gloss_id: 'g1' }] }],
+  ])('rejects an add with %s', (_label, body) => {
+    expect(AddTargetWordsRequestSchema.safeParse(body).success).toBe(false);
+  });
+
+  it('has the same bounds on an add as on a create', () => {
+    expect(AddTargetWordsRequestSchema.safeParse({ photo_import_ids: ids(10), entries: entries(50) }).success).toBe(true);
+    expect(AddTargetWordsRequestSchema.safeParse({ photo_import_ids: ids(11), entries: [] }).success).toBe(false);
+    expect(AddTargetWordsRequestSchema.safeParse({ photo_import_ids: [], entries: entries(51) }).success).toBe(false);
+  });
+
+  it('moves a date to a real day, and only that', () => {
+    expect(ChangeTargetDateRequestSchema.parse({ due_on: '2030-02-01' })).toEqual({ due_on: '2030-02-01' });
+    for (const body of [{}, { due_on: '2030-2-1' }, { due_on: '2026-02-30' }, { due_on: '2026-13-01' }, { due_on: 20300201 }]) {
+      expect(ChangeTargetDateRequestSchema.safeParse(body).success).toBe(false);
+    }
+  });
+});
+
+describe('the target read models', () => {
+  const summary = { id: 't1', kind: 'homework', due_on: '2030-01-13', days_left: 5, word_count: 2, ready_count: 1 };
+  const word = { gloss_id: 'g1', form: 'apple', meaning: 'תפוח', readiness: 'ready' };
+
+  it('names two kinds and four readiness levels, in the order the app shows them', () => {
+    expect(TargetKindSchema.options).toEqual(['homework', 'exam']);
+    expect(TargetReadinessSchema.options).toEqual(['not_started', 'on_the_way', 'almost', 'ready']);
+  });
+
+  it('parses the list of active targets with the learner day it was read on', () => {
+    const list = { today: '2030-01-08', targets: [summary] };
+    expect(TargetListSchema.parse(list)).toEqual(list);
+    expect(TargetListSchema.parse({ today: '2030-01-08', targets: [] }).targets).toEqual([]);
+  });
+
+  it('parses a target with its words, in the order given', () => {
+    const second = { ...word, gloss_id: 'g2', form: 'bread', meaning: 'לחם', readiness: 'not_started' };
+    const target = { ...summary, words: [word, second] };
+    expect(TargetSchema.parse(target).words.map((each) => each.gloss_id)).toEqual(['g1', 'g2']);
+    expect(TargetSchema.safeParse({ ...summary, words: [{ ...word, readiness: 'nearly' }] }).success).toBe(false);
+    expect(TargetSchema.safeParse({ ...summary, days_left: 1.5, words: [] }).success).toBe(false);
+  });
+});
+
+// The 400 of a target request says why only when it is an invalid target.
+describe('TargetRefusalSchema', () => {
+  it('parses the three bodies a target request can be refused with', () => {
+    expect(TargetRefusalSchema.parse({ error: 'invalid request' })).toEqual({ error: 'invalid request' });
+    expect(TargetRefusalSchema.parse({ error: 'invalid vocabulary entry' })).toEqual({ error: 'invalid vocabulary entry' });
+    for (const reason of ['due_date', 'no_words', 'unknown_import']) {
+      expect(TargetRefusalSchema.parse({ error: 'invalid target', reason })).toEqual({ error: 'invalid target', reason });
+    }
+  });
+
+  it('rejects a reason it does not name, and a body with no error', () => {
+    expect(TargetRefusalSchema.safeParse({ error: 'invalid target', reason: 'because' }).success).toBe(false);
+    expect(TargetRefusalSchema.safeParse({ reason: 'due_date' }).success).toBe(false);
   });
 });

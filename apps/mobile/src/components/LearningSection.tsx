@@ -4,11 +4,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ApiError } from '@/api/client';
+import { TargetsSection } from '@/components/TargetsSection';
 import { availableTargets } from '@/enrollments';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { usePhotoImports } from '@/hooks/usePhotoImports';
 import { useSession } from '@/hooks/useSession';
+import { useTargets } from '@/hooks/useTargets';
 import {
   POLL_INTERVAL_MS,
   createLook,
@@ -41,6 +43,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
   const next = useNextSession();
   const { enrollments, switchTo } = useCurrentUser();
   const { imports, reload: reloadPhotos } = usePhotoImports();
+  const { reload: reloadTargets } = useTargets();
   // Set by the review after a save (spec D13): "28 words saved".
   const { photoSaved, start } = useLocalSearchParams<{ photoSaved?: string; start?: string }>();
   // Phase 52 (spec D8). Home's own route, so the param is cleared here even if
@@ -67,9 +70,10 @@ export function LearningSection({ active }: { active: Enrollment }) {
   const reminderHeld = useRef<{ read: CurrentSessionResponse | null } | null>(null);
 
   // Fresh on every focus: back from a session, from translate, after a switch.
-  // Both reloads change with the active enrollment, so a switch runs this
+  // The reloads change with the active enrollment, so a switch runs this
   // again, and the providers keep each read under the enrollment it was for,
-  // so that read is the one shown.
+  // so that read is the one shown. Phase 53: the targets too, back from a target
+  // or the wizard. Their reload never rejects, and the effect returns nothing.
   const { reload } = next;
   useFocusEffect(
     useCallback(() => {
@@ -77,7 +81,8 @@ export function LearningSection({ active }: { active: Enrollment }) {
       setMakeFailedFor(null);
       reload();
       reloadPhotos();
-    }, [reload, reloadPhotos]),
+      void reloadTargets();
+    }, [reload, reloadPhotos, reloadTargets]),
   );
 
   // While preparing, and only while this screen is focused.
@@ -286,6 +291,8 @@ export function LearningSection({ active }: { active: Enrollment }) {
           <Text style={styles.cardLabel}>{photoCardLabel(photoCard)}</Text>
         </Pressable>
       ) : null}
+
+      <TargetsSection />
 
       <Pressable
         accessibilityRole="button"

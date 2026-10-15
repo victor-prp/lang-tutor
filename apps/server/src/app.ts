@@ -17,6 +17,7 @@ import { createMeRouter } from './routes/me';
 import { createPhotoImportsRouter } from './routes/photoImports';
 import { createRemindersRouter } from './routes/reminders';
 import { createSessionsRouter } from './routes/sessions';
+import { createTargetsRouter } from './routes/targets';
 import { createTranslationsRouter } from './routes/translations';
 import { createUsersRouter } from './routes/users';
 import { createVocabularyRouter } from './routes/vocabulary';
@@ -118,6 +119,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api', createGrantsRouter(deps.grants));
   app.route('/api', createVocabularyRouter(deps.vocabulary));
   app.route('/api', createPhotoImportsRouter(deps.photoImports));
+  app.route('/api', createTargetsRouter(deps.targets));
   app.route('/api', createTranslationsRouter(deps.translations, deps.logger));
   app.route('/api', createSessionsRouter(deps.sessions));
 

@@ -132,3 +132,102 @@ describe('the Reminders screen (phase 52 D8)', () => {
     expect(strings.remindersTime('06:00')).toBe('\u206606:00\u2069');
   });
 });
+
+describe('targets (phase 53 D10, D11)', () => {
+  // U+2066 ... U+2069 around every number, as vocabularyMark's: a run with no
+  // strong direction is reordered by the RTL layout on Android.
+  const ltr = (text: string) => '\u2066' + text + '\u2069';
+
+  it('names the two kinds and the four levels of readiness', () => {
+    expect(strings.targetKindName('homework')).toBe('שיעורי בית');
+    expect(strings.targetKindName('exam')).toBe('בוחן');
+    expect(strings.targetReadinessName('not_started')).toBe('עוד לא התחלנו');
+    expect(strings.targetReadinessName('on_the_way')).toBe('בדרך');
+    expect(strings.targetReadinessName('almost')).toBe('כמעט מוכנה');
+    expect(strings.targetReadinessName('ready')).toBe('מוכנה');
+  });
+
+  it('says how soon a target is, isolating the number', () => {
+    expect(strings.targetTomorrow).toBe('מחר');
+    expect(strings.targetInDays(5)).toBe('בעוד ' + ltr('5') + ' ימים');
+    expect(strings.targetInDays(30)).toBe('בעוד ' + ltr('30') + ' ימים');
+    expect(strings.targetDateCame).toBe('התאריך הגיע');
+  });
+
+  it('counts the ready words, isolating both numbers', () => {
+    expect(strings.targetReadyCount(3, 8)).toBe(ltr('3') + ' מתוך ' + ltr('8') + ' מוכנות');
+  });
+
+  it('words a due date by its weekday, day and month, the day isolated', () => {
+    // The weekday is JavaScript's, 0 for Sunday; the month is 1 for January.
+    expect(strings.targetDueDay(5, 16, 10)).toBe('יום שישי, ' + ltr('16') + ' באוקטובר');
+    expect([0, 1, 2, 3, 4, 5, 6].map((weekday) => strings.targetDueDay(weekday, 1, 1).split(',')[0])).toEqual([
+      'יום ראשון',
+      'יום שני',
+      'יום שלישי',
+      'יום רביעי',
+      'יום חמישי',
+      'יום שישי',
+      'יום שבת',
+    ]);
+    const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    expect(months.map((month) => strings.targetDueDay(0, 1, month).split(' ').pop())).toEqual([
+      'בינואר',
+      'בפברואר',
+      'במרץ',
+      'באפריל',
+      'במאי',
+      'ביוני',
+      'ביולי',
+      'באוגוסט',
+      'בספטמבר',
+      'באוקטובר',
+      'בנובמבר',
+      'בדצמבר',
+    ]);
+  });
+});
+
+describe('the target wizard and the target screen (phase 53 D10, D11)', () => {
+  const ltr = (text: string) => '⁦' + text + '⁩';
+
+  it('isolates every number it counts', () => {
+    expect(strings.targetPhotosFull(10)).toBe('אפשר עד ' + ltr('10') + ' תמונות');
+    expect(strings.targetUploading(2, 5)).toBe('שולחים תמונה ' + ltr('2') + ' מתוך ' + ltr('5') + '…');
+    expect(strings.targetPhotosUnread(1, 3)).toBe('לא הצלחנו לקרוא ' + ltr('1') + ' מתוך ' + ltr('3') + ' תמונות');
+    expect(strings.targetPickedCount(4)).toBe('מילים שנבחרו: ' + ltr('4'));
+    expect(strings.targetEntriesFull(50)).toBe('אפשר עד ' + ltr('50') + ' מילים');
+  });
+
+  it('names the wizard of each action and each of its steps', () => {
+    expect(strings.targetNew).toBe('הכנה לשיעורי בית או לבוחן');
+    expect(strings.targetWizardCreate).toBe('הכנה חדשה');
+    expect(strings.targetWizardAddPhotos).toBe('מילים מתמונות');
+    expect(strings.targetWizardAddWords).toBe('הוספת מילים');
+    expect(strings.targetWizardChangeDate).toBe('שינוי התאריך');
+    expect(strings.targetStepKind).toBe('למה מתכוננים?');
+    expect(strings.targetStepPhotos).toBe('תמונות של רשימת המילים');
+    expect(strings.targetStepReview).toBe('המילים מהתמונות');
+    expect(strings.targetStepWords).toBe('עוד מילים');
+    expect(strings.targetStepDate).toBe('באיזה תאריך?');
+    expect(strings.targetWizardNext).toBe('הבא');
+    expect(strings.targetWizardDone).toBe('סיום');
+  });
+
+  it("says what Done's refusal asks the learner to fix", () => {
+    expect(strings.targetNoWords).toBe('צריך לפחות מילה אחת. אפשר לחזור ולהוסיף מילים.');
+    expect(strings.targetDueDatePast).toBe('צריך לבחור תאריך אחרי היום.');
+    expect(strings.targetSaveFailed).toBe('השמירה נכשלה. נסו שוב.');
+    expect(strings.targetClosed).toBe('ההכנה הזו כבר הסתיימה.');
+  });
+
+  it("words the target screen's actions and the end's question", () => {
+    expect(strings.targetAddPhotos).toBe('הוספת מילים מתמונות');
+    expect(strings.targetAddWord).toBe('הוספת מילה');
+    expect(strings.targetChangeDate).toBe('שינוי התאריך');
+    expect(strings.targetEnd).toBe('סיום ההכנה');
+    expect(strings.targetEndTitle).toBe('לסיים את ההכנה?');
+    expect(strings.targetEndMessage).toBe('המילים יישארו שמורות ברשימה שלך.');
+    expect(strings.targetEndConfirm).toBe('סיום ההכנה');
+  });
+});

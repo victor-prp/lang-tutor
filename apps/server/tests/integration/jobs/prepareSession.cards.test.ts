@@ -7,7 +7,7 @@ import type { PgBoss } from 'pg-boss';
 import type { AppDeps } from '../../../src/composition';
 import type { PrepareSessionPayload } from '../../../src/domain/jobs';
 import { createFakeLogger } from '../../support/fakes';
-import { NO_DEVICES } from '../../support/questions';
+import { CHOSEN_ON, NO_DEVICES } from '../../support/questions';
 import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import {
   assertMockServerReachable,
@@ -93,7 +93,7 @@ async function prepared(picks: ReturnType<typeof pick>[], alternatives?: string[
   await clearNamespace(ns);
   await expectDistractors(ns, { tasks: ['meaning', 'word', 'typed'], ...(alternatives ? { alternatives } : {}) });
   await expectCheck(ns);
-  const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', IT, NO_DEVICES));
+  const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', IT, NO_DEVICES, CHOSEN_ON));
   await deps.sessions.prepareSession({ session_id: sessionId, picks: steered(picks, THREE), listening: false, speaking: false });
   const record = await deps.sessions.getSession('u_1', sessionId);
   expect(record.status).toBe('ready');

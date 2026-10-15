@@ -137,6 +137,7 @@ function depsWithPing(ok: boolean): AppDeps {
     translations: unreachableTranslations,
     vocabulary: unreachableVocabulary,
     photoImports: unreachablePhotoImports,
+    targets: createFakeAppDeps().targets,
     glosses: createFakeAppDeps().glosses,
     health: { ping: async () => ok },
     identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001, version: 'v-test', commit: 'a3f9c21' },

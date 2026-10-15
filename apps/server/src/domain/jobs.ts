@@ -178,8 +178,9 @@ export const STOCK_SESSION_EXPIRY_SECONDS = 60;
  *  saves becomes one session rather than a session of the first word. */
 export const STOCK_SAVE_DELAY_SECONDS = 30;
 
-/** What asked for the stock: logged with it, so a stock can be traced to its cause. */
-export const STOCK_REASONS = ['start', 'answer', 'complete', 'skip', 'save'] as const;
+/** What asked for the stock: logged with it, so a stock can be traced to its cause.
+ *  Phase 53 (ruling R-D12b): `target`, a change to a target, which retired the stock. */
+export const STOCK_REASONS = ['start', 'answer', 'complete', 'skip', 'save', 'target'] as const;
 
 export const StockSessionPayloadSchema = z.object({
   enrollment_id: z.string().min(1),

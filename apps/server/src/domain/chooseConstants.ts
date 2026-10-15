@@ -49,3 +49,27 @@ export const SPEAKING_PER_SESSION = 1;
  *  known once remembered right on a later day. One right answer the next day lifts
  *  the first day's 2.3 to 7.3. */
 export const KNOWN_STABILITY = 7;
+
+/** Phase 53 (spec D4). A target word is ready for its date once its chance of being
+ *  remembered on the due date, in its weakest skill, is at least this: a homework's from
+ *  0.8, an exam's from 0.9. A starting value, named here to tune. */
+export const TARGET_READY = { homework: 0.8, exam: 0.9 } as const;
+
+/** Phase 53 (spec D4). Below TARGET_READY, a chance from this up reads "almost ready";
+ *  below it, "on the way". A starting value, named here to tune. */
+export const TARGET_ALMOST = { homework: 0.6, exam: 0.7 } as const;
+
+/** Phase 53 (spec D5, as amended: the graded wish). Slots out of SESSION_LENGTH a target asks
+ *  for once all its words are ready ("steady"); the main path takes the rest. Before then the
+ *  wish falls from SESSION_LENGTH toward this as the share of ready words rises. A starting
+ *  value, named here to tune. */
+export const TARGET_STEADY_SLOTS = { homework: 3, exam: 5 } as const;
+
+/** Phase 53 (spec D5, as amended). Slots a homework asks for at least on its last day, ready
+ *  or not; its graded wish when that is higher. A starting value, named here to tune. */
+export const HOMEWORK_LAST_DAY_SLOTS = 7;
+
+/** Phase 53 (spec D5). An exam's run-up: with this many days left or fewer it asks for
+ *  every slot, ready or not; with one day left it also takes every slot from the other
+ *  targets and the main path (exclusive). A starting value, named here to tune. */
+export const EXAM_RUN_UP_DAYS = 2;
