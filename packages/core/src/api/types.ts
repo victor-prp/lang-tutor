@@ -128,6 +128,7 @@ import type {
   CreateTargetRequestSchema,
   AddTargetWordsRequestSchema,
   ChangeTargetDateRequestSchema,
+  TargetRefusalSchema,
 } from './schemas';
 
 // Every type here is inferred. The alternative — schemas on the server and
@@ -207,6 +208,7 @@ export type Target = z.infer<typeof TargetSchema>;
 export type CreateTargetRequest = z.infer<typeof CreateTargetRequestSchema>;
 export type AddTargetWordsRequest = z.infer<typeof AddTargetWordsRequestSchema>;
 export type ChangeTargetDateRequest = z.infer<typeof ChangeTargetDateRequestSchema>;
+export type TargetRefusal = z.infer<typeof TargetRefusalSchema>;
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type SessionSource = z.infer<typeof SessionSourceSchema>;
 export type LlmDistractors = z.infer<typeof LlmDistractorsSchema>;

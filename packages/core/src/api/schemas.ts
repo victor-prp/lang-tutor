@@ -866,7 +866,20 @@ export const VocabularyWordQuerySchema = z.object({
 // the due date, in its weakest live skill, read against the kind's bars.
 export const TargetKindSchema = z.enum(['homework', 'exam']);
 export const TargetReadinessSchema = z.enum(['not_started', 'on_the_way', 'almost', 'ready']);
-export const LearnerDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+// A calendar day, not only the shape of one: 2026-02-30 and 2026-13-01 match the pattern, reached
+// Postgres, which raises 22008, and answered 500. The parts must survive a round trip through UTC,
+// so no locale and no time zone is read; setUTCFullYear rather than Date.UTC, which would remap
+// the years 0-99 to 1900-1999. This checks a day it is given and computes none (ADR 0013 R1).
+const isCalendarDay = (day: string): boolean => {
+  const [year, month, date] = day.split('-').map(Number);
+  const utc = new Date(0);
+  utc.setUTCFullYear(year, month - 1, date);
+  return utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === date;
+};
+export const LearnerDaySchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine(isCalendarDay, { message: 'not a calendar day' });
 export const TargetSummarySchema = z.object({
   id: z.string(),
   kind: TargetKindSchema,
@@ -902,6 +915,13 @@ export const AddTargetWordsRequestSchema = TargetWordsInputSchema.refine(
 );
 // Any day after the learner's today; the kind never changes.
 export const ChangeTargetDateRequestSchema = z.object({ due_on: LearnerDaySchema });
+// The 400 of a target request. `invalid request` (the body did not validate) and `invalid
+// vocabulary entry` carry the error alone; `invalid target` says why: the due date is not after
+// the learner's today, no word came out of the photos and typed words, or a photo import is
+// unknown or another list's.
+export const TargetRefusalSchema = ErrorSchema.extend({
+  reason: z.enum(['due_date', 'no_words', 'unknown_import']).optional(),
+});
 
 // A closed set, because part_of_speech is half of dict_lexemes' unique key from
 // phase 12 on: free text would make (book,"verb phrase") and (book,"verb_phrase")

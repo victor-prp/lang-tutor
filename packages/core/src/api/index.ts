@@ -103,6 +103,7 @@ export type {
   TargetKind,
   TargetList,
   TargetReadiness,
+  TargetRefusal,
   TargetSummary,
   TargetWord,
   TimeZoneRequest,
