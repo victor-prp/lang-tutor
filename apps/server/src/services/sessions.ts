@@ -100,7 +100,7 @@ import { MAX_AVOID } from '../domain/sentences';
 import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
-import { chooseWithTargets, splitChanged, targetSplit, type TargetSessionInput } from '../domain/targetSession';
+import { chooseWithTargets, splitChanged, targetSplit, type TargetSessionInput, type TargetSplit } from '../domain/targetSession';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
   AnswerKindMismatch,
@@ -174,6 +174,10 @@ type Stocked = { sessionId: string; endedOnDate: string[] };
 
 /** Phase 53 (ruling R-D12). A stale stock retired, and the stock built in its place. */
 type Replaced = Stocked & { retired: string };
+
+/** Phase 53 (ruling R-D12). What the cheap half of the stale check read of one stock: the
+ *  learner's today, the devices the stock was built for, and the split it recorded. */
+type MaybeStale = { stockId: string; today: string; devices: Devices; recorded: TargetSplit[] };
 
 /**
  * Phase 20. Runs the progress rule over an ended session's answers, inside the
@@ -522,36 +526,46 @@ export function createSessionService({
 
   /**
    * Phase 53 (ruling R-D12). The cheap half of the stale check: a list stock whose words were
-   * chosen on an earlier learner day than today. A seed, a stock from before phase 53 (no
-   * chosen_on) and today's never are. Answers today and the devices the stock was built
-   * for, or null. `stock` is unstarted: findOpen's.
+   * chosen on an earlier learner day than today, and which recorded a split or has a target
+   * active today beside it. A seed, a stock from before phase 53 (no chosen_on) and today's
+   * never are, and with no target on either side phase 43 R5 holds without the list being
+   * read (final review item 16: the home read takes no lock for it). Answers what it read, or
+   * null. `stock` is unstarted: findOpen's.
    */
-  async function choseEarlier(repos: Repos, enrolled: Enrollment, stock: SessionSummary) {
+  async function mayBeStale(repos: Repos, enrolled: Enrollment, stock: SessionSummary): Promise<MaybeStale | null> {
     if (stock.source !== 'list') return null;
     const choice = await repos.session.findStockChoice(stock.id);
     if (!choice || choice.chosenOn === null) return null;
     const today = await learnerDay(repos, enrolled.user_id, now());
-    return choice.chosenOn < today ? { today, devices: { listening: choice.listening, speaking: choice.speaking } } : null;
+    if (choice.chosenOn >= today) return null;
+    const recorded = await repos.target.findSessionSplit(stock.id);
+    if (recorded.length === 0 && (await repos.target.listActive(enrolled.id, today)).length === 0) return null;
+    return { stockId: stock.id, today, devices: { listening: choice.listening, speaking: choice.speaking }, recorded };
   }
 
   /**
    * Phase 53 (spec D12, ruling R-D12). A stock chosen on an earlier learner day is played as
    * it is (phase 43 R5) unless today's split differs from the one it recorded: then it is
-   * retired and the next is built in its place, for the devices it was built for. With no
-   * target active and none recorded, R5 holds without the list being read. A list with
-   * nothing to ask leaves the stock as it is, and so does a start that took it first. The
-   * caller holds lockNextSession and read `stock` under it. Answers the stock built, or null.
+   * retired and the next is built in its place, for the devices it was built for. A list
+   * with nothing to ask, or chosen words with no rendering, leave the stock as it is, and so
+   * does a start that took it first. The caller holds lockNextSession and read `stock` under
+   * it. `checked` is mayBeStale's answer from before the lock: a stock's day and split are
+   * written with it and never change, so for the same stock they are not read again. Answers
+   * the stock built, or null.
    */
-  async function replaceIfStale(repos: Repos, enrolled: Enrollment, stock: SessionSummary): Promise<Replaced | null> {
-    const earlier = await choseEarlier(repos, enrolled, stock);
-    if (!earlier) return null;
-    const recorded = await repos.target.findSessionSplit(stock.id);
-    if (recorded.length === 0 && (await repos.target.listActive(enrolled.id, earlier.today)).length === 0) return null;
-    const read = await readChoice(repos, enrolled, earlier.devices);
-    if (!read || !splitChanged(recorded, targetSplit(read.input))) return null;
+  async function replaceIfStale(
+    repos: Repos,
+    enrolled: Enrollment,
+    stock: SessionSummary,
+    checked: MaybeStale | null = null,
+  ): Promise<Replaced | null> {
+    const stale = checked?.stockId === stock.id ? checked : await mayBeStale(repos, enrolled, stock);
+    if (!stale) return null;
+    const read = await readChoice(repos, enrolled, stale.devices);
+    if (!read || !splitChanged(stale.recorded, targetSplit(read.input))) return null;
     const chosen = await choosePicks(repos, enrolled, read);
     if (!chosen || !(await repos.session.retireStock(stock.id))) return null;
-    return { retired: stock.id, ...(await writeStock(repos, enrolled, earlier.devices, read, chosen)) };
+    return { retired: stock.id, ...(await writeStock(repos, enrolled, stale.devices, read, chosen)) };
   }
 
   /** Phase 43 (spec D3). A stock made, once its transaction committed. Phase 53 (spec D8):
@@ -657,8 +671,9 @@ export function createSessionService({
      *  logged with its status, which counts how often a learner found it ready.
      *  Phase 53 (ruling R-D12): home learns of the stock here, so a stock chosen
      *  on an earlier day is checked here, and offered replaced when its split is
-     *  stale. Create's lock is taken only when the cheap half holds, and the
-     *  stock is read again under it. */
+     *  stale. Create's lock is taken only when the cheap half holds (a stock
+     *  chosen on an earlier day, with a split recorded or a target active), and
+     *  the stock is read again under it. */
     currentSession: async (
       actorUserId: string,
       enrollmentId: string,
@@ -667,11 +682,13 @@ export function createSessionService({
         const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
         let open = await repos.session.findOpen(enrollmentId);
         let replaced: Replaced | null = null;
-        // Phase 53 (ruling R-D12). The lock only on a day the stock was chosen before.
-        if (!open.started && open.stock && (await choseEarlier(repos, enrolled, open.stock))) {
+        // Phase 53 (ruling R-D12). The lock only for a stock chosen on an earlier day that a
+        // target can have made stale; what that read is not read again for the same stock.
+        const checked = !open.started && open.stock ? await mayBeStale(repos, enrolled, open.stock) : null;
+        if (checked) {
           await repos.session.lockNextSession(enrollmentId);
           open = await repos.session.findOpen(enrollmentId);
-          replaced = !open.started && open.stock ? await replaceIfStale(repos, enrolled, open.stock) : null;
+          replaced = !open.started && open.stock ? await replaceIfStale(repos, enrolled, open.stock, checked) : null;
           if (replaced) open = { stock: { id: replaced.sessionId, status: 'preparing', source: 'list', answered: 0, total: 0 } };
         }
         const latest = await repos.session.findLatest(enrollmentId);

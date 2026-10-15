@@ -443,13 +443,58 @@ describe('a stock chosen on an earlier day (spec D12, ruling R-D12)', () => {
     expect(eventsOf(logger, 'session_retired')).toEqual([]);
   });
 
-  it('is played as it is with no target active and none recorded, choosing nothing', async () => {
-    // The list is not even read: listSavedGlosses is not stubbed here.
-    const { service, retired } = world(stockChosenOn(YESTERDAY), {
+  it('is played as it is with no target active and none recorded, choosing nothing and taking no lock', async () => {
+    // The list is not even read: listSavedGlosses is not stubbed here. Nor is create's lock
+    // taken (final review item 16): the home read of a learner with no target stays a read.
+    const { service, retired, locked } = world(stockChosenOn(YESTERDAY), {
       vocabulary: stub<VocabularyRepo>({ countEntries: async () => SAVED.length }),
     });
     expect((await service.currentSession('u1', E)).current?.id).toBe('s_stock');
     expect(retired).toEqual([]);
+    expect(locked).toEqual([]);
+  });
+
+  // Final review item 16: either half is enough for the home read to take the lock and check.
+  it.each([
+    ['it recorded a split and no target is active today: its target ended', withTargets([], YESTERDAYS_SPLIT)],
+    ['a target is active today and it recorded no split', withTargets([HOMEWORK], [])],
+  ])('is replaced on the home read when %s', async (_, target) => {
+    const { service, retired, locked } = world(stockChosenOn(YESTERDAY), { target });
+    expect((await service.currentSession('u1', E)).current?.id).toBe('s_new');
+    expect(locked).toEqual([E]);
+    expect(retired).toEqual(['s_stock']);
+  });
+
+  it("reads the stock's day and split once on the home read: under the lock, the same stock's are not read again", async () => {
+    const asked: string[] = [];
+    const target = withTargets();
+    const findSessionSplit = target.findSessionSplit;
+    target.findSessionSplit = async (sessionId) => {
+      asked.push(`findSessionSplit ${sessionId}`);
+      return findSessionSplit(sessionId);
+    };
+    const { service } = world(
+      {
+        ...stockChosenOn(YESTERDAY),
+        findStockChoice: async (sessionId) => {
+          asked.push(`findStockChoice ${sessionId}`);
+          return { chosenOn: YESTERDAY, listening: true, speaking: false };
+        },
+      },
+      { target },
+    );
+    expect((await service.currentSession('u1', E)).current?.id).toBe('s_new');
+    expect(asked).toEqual(['findStockChoice s_stock', 'findSessionSplit s_stock']);
+  });
+
+  it('is played as it is when its replacement cannot be built: no word chosen today has a rendering (final review item 17)', async () => {
+    const dict = stub<DictRepo>({ findLexemeForms: async () => [], findGlossRenderings: async () => [] });
+    const { service, logger, inserted, retired, locked } = world(stockChosenOn(YESTERDAY), { target: withTargets(), dict });
+    expect((await service.currentSession('u1', E)).current?.id).toBe('s_stock');
+    expect(locked).toEqual([E]);
+    expect(retired).toEqual([]);
+    expect(inserted).toEqual([]);
+    expect(eventsOf(logger, 'session_retired')).toEqual([]);
   });
 
   // Every stock here says it was chosen yesterday, and today's split differs from the one it
