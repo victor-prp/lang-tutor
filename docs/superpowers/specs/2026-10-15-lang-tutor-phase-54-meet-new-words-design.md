@@ -187,8 +187,8 @@ ladder and nothing else is its four cards in a row.
 
 ### D6. Wire and app
 
-- `MeetQuestionSchema` joins the `Question` union: `type: 'meet'`, `id`, `question` (the form),
-  `prompt` (the Hebrew meaning), as `read_aloud` carries them.
+- `MeetQuestionSchema` joins the `Question` union, shaped as `ReadAloudQuestionSchema`: `type: 'meet'`, `id`, `vocab_term_id`, `question` (the form),
+  `meaning` (the Hebrew meaning).
 - `NextStepRequest` takes a fourth shape, `{ question_id, seen: true }`, and `AnswerInput` the
   same `{ seen: true }`, accepted only on a meet card (`answerFits`); `evaluate` records it with
   verdict `seen` and an empty answer string. A meet card takes no other answer, and no retry.
