@@ -233,8 +233,11 @@ export function evaluateSession(
     }
   }
   // A skipped card (spec D7) is in neither list: choice answers never skip.
+  // Phase 54 (spec D1). Nor is a seen meet card, which writes no progress.
   const practised = new Set(
-    answers.filter((answer) => !('verdict' in answer && answer.verdict === 'skipped')).map((answer) => answer.glossId),
+    answers
+      .filter((answer) => !('verdict' in answer && (answer.verdict === 'skipped' || answer.verdict === 'seen')))
+      .map((answer) => answer.glossId),
   );
 
   const changed: ProgressRow[] = [];

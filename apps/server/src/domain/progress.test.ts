@@ -202,6 +202,11 @@ describe('evaluateSession', () => {
     expect(outcome.snapshot.some((s) => s.glossId === 's1')).toBe(false);
     expect(outcome.snapshot.filter((s) => s.glossId === 's2')).toHaveLength(5);
   });
+
+  // Phase 54 (spec D1). A meet card writes no progress: a seen answer is no practice.
+  it('does not count a seen meet card as practised (phase 54, spec D1)', () => {
+    expect(evaluateSession(fiveRows('s1'), [{ glossId: 's1', type: 'meet', verdict: 'seen' }], D)).toEqual({ changed: [], snapshot: [] });
+  });
 });
 
 describe('evaluateSession, reverse choice only', () => {
