@@ -251,9 +251,10 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
 
   // Spec D6, D10: in a session of at least BOARD_MIN_PICKS, four
   // multiple-choice picks whose forms and meanings all differ become one
-  // matching board; otherwise there is none. A return is never on it: it is
-  // asked last (phase 37 D6). A ladder's multiple choice is never on it
-  // (phase 54, spec D3).
+  // matching board; otherwise there is none. A return is never on it: it
+  // follows every card that is not a return (phase 37 D6), though since phase 54
+  // (spec D5, as ruled) a ladder's cards can go between the returns. A ladder's
+  // multiple choice is never on it (phase 54, spec D3).
   const multipleChoice = cards.flatMap((card, index) => (card?.type === 'multiple_choice' && !picks[index].step ? [index] : []));
   const board = picks.length >= BOARD_MIN_PICKS ? boardPicks(picks, multipleChoice) : null;
   const onBoard = new Set(board ?? []);

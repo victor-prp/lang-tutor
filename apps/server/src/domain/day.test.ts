@@ -51,7 +51,9 @@ import { dayState, type DayAnswer } from './today';
  * rhythm. Every run adds four outcomes:
  *   8. every unlearned word is asked as a ladder, its four cards in that order, in its session;
  *   9. no session holds more than three ladders, or more than ten graded cards;
- *  10. no two cards of one word sit side by side while another card can go between them;
+ *  10. no two cards of one word sit side by side while another card can go between them: a lone
+ *      ladder with `others` other cards has at most max(0, 3 − others) of its cards after one of
+ *      its own, and two ladders or more none;
  *  11. a word whose ladder was all wrong is laddered again later that day, while its returns last.
  * Two runs join them: the new learner's thirty words over days, all met, three a session at
  * most; and a learner who forgets one word, whose ladders outcome 11 follows.
