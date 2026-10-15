@@ -320,7 +320,7 @@ export class TargetClosed extends Error { constructor(readonly targetId: string)
 
 // services/targets.ts — createTargetService({ transaction, logger, now, stockSaveDelaySeconds })
 list(actorUserId: string, enrollmentId: string): Promise<TargetList>
-get(actorUserId: string, targetId: string): Promise<Target>
+getTarget(actorUserId: string, targetId: string): Promise<Target>
 create(actorUserId: string, enrollmentId: string, request: CreateTargetRequest): Promise<Target>
 addWords(actorUserId: string, targetId: string, request: AddTargetWordsRequest): Promise<Target>
 removeWord(actorUserId: string, targetId: string, glossId: string): Promise<void>   // idempotent
@@ -364,7 +364,7 @@ Types in `types.ts` (`z.infer`) and the `export type` barrel in `index.ts`: `Tar
 - `end`: `end(id, new Date(now()))`, event `ended_early`, log `target_ended { target_id, how: 'early' }`.
 - **The stock rule (R-D12b)**, in every change's transaction: `lockNextSession(enrollmentId)`; `const { stock } = await repos.session.findOpen(enrollmentId)`; if `stock?.source === 'list'` and `retireStock(stock.id)`, log `session_retired { session_id, reason: 'target_changed' }`; then `requestStock(repos, { enrollment_id, reason: 'target' })`.
 - `vocabulary.unsave`: after deleting the entry, `removeGlossFromTargets(enrollmentId, glossId)` and a `words_removed { before: { gloss_ids: [id] }, after: { reason: 'unsaved' } }` event per target it left.
-- Read model (`list`/`get`): active targets only for `list` (`listActive`), any of the enrollment's targets for `get`. Per word: `form` and `meaning` from `vocabulary.listSavedGlosses` (R-D11); `readiness = readinessOf(kind, recallOnDue(memory rows, live, speakable(form), due_on))` with `live = liveDimensions` of `session.findNewestDevices(enrollmentId)` (both false when none); `ready_count` counts `ready`; `days_left = daysBetween(today, due_on)`; words ordered as added. `list` answers `{ today, targets }`, targets by `due_on`, then id.
+- Read model (`list`/`getTarget`): active targets only for `list` (`listActive`), any of the enrollment's targets for `getTarget`. Per word: `form` and `meaning` from `vocabulary.listSavedGlosses` (R-D11); `readiness = readinessOf(kind, recallOnDue(memory rows, live, speakable(form), due_on))` with `live = liveDimensions` of `session.findNewestDevices(enrollmentId)` (both false when none); `ready_count` counts `ready`; `days_left = daysBetween(today, due_on)`; words ordered as added. `list` answers `{ today, targets }`, targets by `due_on`, then id.
 
 - [ ] **Step 1:** `importRows.test.ts` (null gloss kept; second row of a gloss dropped; order kept). `services/targets.test.ts` with fakes: each behaviour bullet above, incl. Review Focus 2–5. Existing `vocabulary` and `photoImports` service tests pass untouched.
 - [ ] **Step 2:** Implement (extract first, run the existing tests, then the new service).
@@ -379,7 +379,7 @@ Types in `types.ts` (`z.infer`) and the `export type` barrel in `index.ts`: `Tar
 - Modify: `packages/core/src/api/schemas.ts`, `types.ts`, `index.ts`, `schemas.test.ts` (schemas may already exist from Task 6: add tests); `apps/server/src/app.ts` (mount); `apps/server/src/openapi.test.ts` (paths and statuses)
 - Create: `apps/server/src/routes/targets.ts`, `apps/server/tests/integration/routes/targets.test.ts`
 
-**Interfaces — Consumes:** the core schemas and types Task 6 added to `packages/core/src/api/schemas.ts`: `TargetListSchema`, `TargetSchema`, `CreateTargetRequestSchema`, `AddTargetWordsRequestSchema`, `ChangeTargetDateRequestSchema` (and their `z.infer` types); `TargetService` from `apps/server/src/services/targets.ts` (methods `list`, `get`, `create`, `addWords`, `removeWord`, `changeDate`, `end`); errors `TargetNotFound`, `InvalidTarget` (`reason: 'due_date' | 'no_words'`), `TargetClosed`.
+**Interfaces — Consumes:** the core schemas and types Task 6 added to `packages/core/src/api/schemas.ts`: `TargetListSchema`, `TargetSchema`, `CreateTargetRequestSchema`, `AddTargetWordsRequestSchema`, `ChangeTargetDateRequestSchema` (and their `z.infer` types); `TargetService` from `apps/server/src/services/targets.ts` (methods `list`, `getTarget`, `create`, `addWords`, `removeWord`, `changeDate`, `end`); errors `TargetNotFound`, `InvalidTarget` (`reason: 'due_date' | 'no_words'`), `TargetClosed`.
 
 **Routes** (`createRoute` + `router.openapi`, `defaultHook` → 400 `{ error: 'invalid request' }`, `...learnerResponses`, `403: forbidden('…the list owner only…')`):
 
@@ -391,7 +391,7 @@ Types in `types.ts` (`z.infer`) and the `export type` barrel in `index.ts`: `Tar
 | PATCH `/targets/{id}` (`ChangeTargetDateRequest`) | 200 `Target` | 400, 403, 404, 409 `target closed` |
 | POST `/targets/{id}/end` | 204 | 403, 404 |
 | POST `/targets/{id}/words` (`AddTargetWordsRequest`) | 200 `Target` | 400, 403, 404, 409 (`target closed`, `photo import not ready`) |
-| DELETE `/targets/{id}/words/{glossId}` | 204 | 403, 404, 409 `target closed` |
+| DELETE `/targets/{id}/words/{gloss_id}` | 204 | 403, 404, 409 `target closed` |
 
 `InvalidTarget` → 400 `{ error: 'invalid target', reason }`; `PhotoImportNotFound` (an import id unknown or another enrollment's) → 400 `{ error: 'invalid target', reason: 'unknown_import' }`; `PhotoImportConflict` → 409 `{ error: 'photo import not ready' }`; `InvalidVocabularyEntry` (and `GlossLanguageMismatch`) → 400 `{ error: 'invalid vocabulary entry' }`; `TargetNotFound` → 404 `{ error: 'target not found' }`; `TargetClosed` → 409 `{ error: 'target closed' }`; `AccessDenied` → 403; `EnrollmentNotFound` → 404.
 
