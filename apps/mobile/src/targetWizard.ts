@@ -194,6 +194,38 @@ export function discardLeftNothing(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 404 || error.status === 409);
 }
 
+/** The imports the wizard made and has not discarded or saved, held by the screen in a ref. */
+export type MadeImports = { current: string[] };
+
+/**
+ * Final review I2. Discards every import the wizard made, the list emptied at once, so a second
+ * call discards none twice. Cancel and Back wait for it before they leave. Leaving any other way
+ * (a reminder's tap, the browser's back, an iOS swipe) unmounts the wizard, which cannot wait, so
+ * it never rejects: a discard that fails leaves its import in the photo-import list, where it is
+ * saved or discarded as any other, as a closed app's is (spec D10).
+ */
+export async function discardImports(made: MadeImports, discard: (importId: string) => Promise<unknown>): Promise<void> {
+  const leaving = made.current;
+  made.current = [];
+  await Promise.allSettled(leaving.map(async (importId) => discard(importId)));
+}
+
+/**
+ * Final review I2. Done, which saves the wizard's imports: they are held out of its list while
+ * the request is on its way, so leaving meanwhile discards none of what Done is saving. Saved,
+ * they are the wizard's no more; a failure gives them back, and Cancel discards them.
+ */
+export async function saveHolding<T>(made: MadeImports, save: () => Promise<T>): Promise<T> {
+  const held = made.current;
+  made.current = [];
+  try {
+    return await save();
+  } catch (failure) {
+    made.current = [...held, ...made.current];
+    throw failure;
+  }
+}
+
 /**
  * Whether the step on screen may go on (on the last step: whether Done may be pressed).
  * `reviewSettled` is the review's own answer, that every import it shows has been read

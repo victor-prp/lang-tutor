@@ -1,6 +1,6 @@
 import type { Enrollment, TargetKind } from '@lang-tutor/core/api';
 import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
@@ -30,6 +30,7 @@ import {
   canAdvance,
   createRequest,
   dateRequest,
+  discardImports,
   discardLeftNothing,
   entriesFull,
   holdsEntry,
@@ -39,6 +40,7 @@ import {
   isLastStep,
   photosFull,
   photosToUpload,
+  saveHolding,
   wizardReducer,
   wizardRouteOf,
   type WizardRoute,
@@ -94,6 +96,23 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
   // the handlers rather than read from a render, so an upload that lands just as Cancel
   // is pressed is not missed.
   const made = useRef<string[]>([]);
+
+  // Final review I2. Leaving without Cancel or Back (a reminder's tap, which dismisses to
+  // home, the browser's back, an iOS swipe) unmounts the wizard: its imports are discarded all
+  // the same, in the background, and an upload on its way discards its own when it lands (goOn
+  // reads `leaving`). Reset on every mount, as StrictMode mounts twice. `discard` is read
+  // through a ref, so a new one never runs the cleanup while the wizard is open.
+  const discardOnLeaving = useRef(discard);
+  useEffect(() => {
+    discardOnLeaving.current = discard;
+  }, [discard]);
+  useEffect(() => {
+    leaving.current = false;
+    return () => {
+      leaving.current = true;
+      void discardImports(made, discardOnLeaving.current);
+    };
+  }, []);
   const [readingDates, setReadingDates] = useState(true);
 
   // The date step offers the days after the learner's today, which the targets list
@@ -155,8 +174,7 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
     }
     leaving.current = true;
     setWork({ kind: 'leaving' });
-    const imports = made.current.splice(0);
-    await Promise.allSettled(imports.map((importId) => discard(importId)));
+    await discardImports(made, discard);
     leaveScreen();
   }
 
@@ -262,21 +280,28 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
     dispatch({ type: 'next' });
   };
 
+  // Done saves the wizard's imports with the target: saveHolding keeps them out of `made` while
+  // it is on its way, so leaving meanwhile discards none of them (final review I2). Left by the
+  // time it answers (a reminder's tap), the wizard goes nowhere, and a failure discards what
+  // Done did not save.
   const done = () =>
     act({ kind: 'saving' }, async () => {
       try {
         if (route.mode === 'create') {
-          const target = await api.createTarget(enrollment.id, createRequest(state));
-          made.current = [];
-          router.replace(`/targets/${target.id}`);
+          const target = await saveHolding(made, () => api.createTarget(enrollment.id, createRequest(state)));
+          if (!leaving.current) router.replace(`/targets/${target.id}`);
           return;
         }
-        if (route.mode === 'change-date') await api.changeTargetDate(route.targetId, dateRequest(state));
-        else await api.addTargetWords(route.targetId, addRequest(state));
-        made.current = [];
-        leaveScreen();
+        const { targetId } = route;
+        await saveHolding(made, () =>
+          route.mode === 'change-date'
+            ? api.changeTargetDate(targetId, dateRequest(state))
+            : api.addTargetWords(targetId, addRequest(state)),
+        );
+        if (!leaving.current) leaveScreen();
       } catch (failure) {
-        setError(doneFailureMessage(failure));
+        if (leaving.current) void discardImports(made, discard);
+        else setError(doneFailureMessage(failure));
       }
     });
 

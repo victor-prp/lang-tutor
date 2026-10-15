@@ -20,7 +20,7 @@ import { openApp, signUpLearner } from './support/users';
 // Phase 53 (spec D10, D11). The target wizard end to end on the web build. The first test is the
 // walk: New, an exam, one photo of a word list, its review, a typed word and a date, then Done;
 // home shows the target, and its screen removes a word, moves the date and ends it. The second
-// leaves the wizard half way, with a photo uploaded.
+// leaves the wizard half way, with a photo uploaded; the third leaves it by the browser's back.
 //
 // Everything is stubbed at the model, as photo-import.spec.ts does it: the read of the photo,
 // the lookup of each row, and the one typed lookup.
@@ -341,6 +341,37 @@ test('cancelling the wizard asks first, then discards the photo it sent and save
   await tapAndWaitForResponse(page, page.getByTestId('wizard-cancel'), IMPORT_DISCARD);
   await expect(page.getByTestId('target-new'), report()).toBeVisible();
   expect(dialogs).toEqual([LEAVE_CONFIRM]);
+  expect(await openImports(page.request, enrollmentId)).toEqual([]);
+  expect((await activeTargets(page.request, enrollmentId)).targets).toEqual([]);
+  expect(await savedLemmas(page.request, enrollmentId)).toEqual([]);
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+test('leaving the wizard by the browser’s back, not its Cancel, discards the photo it sent all the same', async ({
+  page,
+  request,
+}) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const dialogs = acceptDialogs(page);
+
+  await signUpLearner(page, 'e2e_targets_back', 'it');
+  const enrollmentId = await enrollmentIdOf(page.request);
+  await openApp(page);
+  await stubPhoto(request);
+
+  await reachReview(page, report);
+  expect(await openImports(page.request, enrollmentId)).toHaveLength(1);
+
+  // Final review I2. The browser's back unmounts the wizard without its Cancel, as a reminder's
+  // tap does on a phone: nothing asks, and the import is discarded on the way out.
+  const discarded = page.waitForResponse(
+    (res) => IMPORT_DISCARD.url.test(res.url()) && res.request().method() === IMPORT_DISCARD.method,
+  );
+  await page.goBack();
+  expect((await discarded).status(), report()).toBe(IMPORT_DISCARD.status);
+  await expect(page.getByTestId('target-new'), report()).toBeVisible();
+  expect(dialogs).toEqual([]);
   expect(await openImports(page.request, enrollmentId)).toEqual([]);
   expect((await activeTargets(page.request, enrollmentId)).targets).toEqual([]);
   expect(await savedLemmas(page.request, enrollmentId)).toEqual([]);

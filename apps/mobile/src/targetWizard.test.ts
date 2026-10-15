@@ -10,6 +10,7 @@ import {
   canAdvance,
   createRequest,
   dateRequest,
+  discardImports,
   discardLeftNothing,
   entriesFull,
   holdsEntry,
@@ -21,6 +22,7 @@ import {
   photosToUpload,
   pickedEntryOf,
   pickedStateOf,
+  saveHolding,
   stepsFor,
   unpickedEntries,
   wizardReducer,
@@ -534,6 +536,67 @@ describe('discardLeftNothing', () => {
     expect(discardLeftNothing(new ApiError(500))).toBe(false);
     expect(discardLeftNothing(new ApiError(401, 'not signed in'))).toBe(false);
     expect(discardLeftNothing(new TypeError('Network request failed'))).toBe(false);
+  });
+});
+
+// Final review I2. The imports the wizard made, which every way out of it discards: Cancel and
+// Back waiting for it, an unmount (a reminder's tap, the browser's back, a swipe) not.
+describe('discardImports', () => {
+  it('discards every import the wizard made, and empties its list: a second call discards none', async () => {
+    const made = { current: ['i_a', 'i_b'] };
+    const asked: string[] = [];
+    const discard = async (importId: string) => {
+      asked.push(importId);
+    };
+    await discardImports(made, discard);
+    expect(asked).toEqual(['i_a', 'i_b']);
+    expect(made.current).toEqual([]);
+    await discardImports(made, discard);
+    expect(asked).toEqual(['i_a', 'i_b']);
+  });
+
+  it('empties the list before any discard answers, so none is sent twice', () => {
+    const made = { current: ['i_a'] };
+    void discardImports(made, () => new Promise(() => undefined));
+    expect(made.current).toEqual([]);
+  });
+
+  it('never rejects: a discard that fails or throws leaves its import in the photo-import list, and the rest still go', async () => {
+    const asked: string[] = [];
+    const discard = (importId: string): Promise<void> => {
+      asked.push(importId);
+      if (importId === 'i_a') return Promise.reject(new ApiError(500));
+      if (importId === 'i_b') throw new TypeError('Network request failed');
+      return Promise.resolve();
+    };
+    await expect(discardImports({ current: ['i_a', 'i_b', 'i_c'] }, discard)).resolves.toBeUndefined();
+    expect(asked).toEqual(['i_a', 'i_b', 'i_c']);
+  });
+});
+
+describe('saveHolding', () => {
+  it("holds the imports out of the wizard's list while Done is on its way, so leaving meanwhile discards none of them", async () => {
+    const made = { current: ['i_a', 'i_b'] };
+    let during: string[] | null = null;
+    const answer = await saveHolding(made, async () => {
+      during = [...made.current];
+      return 'saved';
+    });
+    expect(answer).toBe('saved');
+    expect(during).toEqual([]);
+    // Saved with the target: none is the wizard's to discard any more.
+    expect(made.current).toEqual([]);
+  });
+
+  it('gives them back when Done fails, so Cancel still discards them', async () => {
+    const made = { current: ['i_a', 'i_b'] };
+    const failure = new ApiError(409, 'photo import conflict');
+    await expect(
+      saveHolding(made, async () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+    expect(made.current).toEqual(['i_a', 'i_b']);
   });
 });
 
