@@ -255,6 +255,7 @@ describe('repos', () => {
     findLemmaRenderings: forbidden,
     findSavedInLemma: forbidden,
     listSavedGlosses: forbidden,
+    findSavedWords: forbidden,
     countEntries: forbidden,
   };
 

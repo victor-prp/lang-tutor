@@ -642,3 +642,23 @@ describe('the saved list for sessions (phase 19)', () => {
     expect(await repo((r) => r.countEntries(enrollmentOf('u_2')))).toBe(0);
   });
 });
+
+describe("a target's saved words (phase 53, final review M3)", () => {
+  it('reads the saved glosses among those asked, each with its key and its form as saved, capitals kept', async () => {
+    const picked = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'pick up', form: 'Picked Up', translations: ['לאסוף'] });
+    await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'onion', translations: ['בצל'] });
+    // kite is not saved, and onion, saved, is not asked.
+    expect(await repo((r) => r.findSavedWords({ enrollmentId: E, glossIds: [picked.glossIds[0], kite.glossIds[0]] }))).toEqual([
+      { glossId: picked.glossIds[0], key: 'לאסוף', form: 'Picked Up' },
+    ]);
+    // The saved list keeps its lowercased form, which the picker reads.
+    expect(await repo((r) => r.listSavedGlosses(E))).toContainEqual(expect.objectContaining({ glossId: picked.glossIds[0], form: 'picked up' }));
+  });
+
+  it("reads nothing for no gloss, or for another enrollment's", async () => {
+    const onion = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'onion', translations: ['בצל'] });
+    await seedUser(t.db, 'u_2');
+    expect(await repo((r) => r.findSavedWords({ enrollmentId: E, glossIds: [] }))).toEqual([]);
+    expect(await repo((r) => r.findSavedWords({ enrollmentId: enrollmentOf('u_2'), glossIds: onion.glossIds }))).toEqual([]);
+  });
+});

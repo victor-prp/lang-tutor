@@ -113,6 +113,13 @@ describe('create (spec D10, ruling R-D9)', () => {
     expect(logger.events.filter((line) => line.event === 'photo_import_saved')).toEqual([saved(first, 2), saved(second, 1)]);
   });
 
+  it('shows a word in the form it was saved from, capitals kept (final review M3)', async () => {
+    const monday = await word('Monday', 'יום שני');
+    const made = await deps.targets.create('u_1', E, { kind: 'homework', due_on: DUE, photo_import_ids: [], entries: [typed(monday)] });
+    expect(made.words).toEqual([{ gloss_id: monday.gloss_id, form: 'Monday', meaning: 'יום שני', readiness: 'not_started' }]);
+    expect((await deps.targets.getTarget('u_1', made.id)).words.map((shown) => shown.form)).toEqual(['Monday']);
+  });
+
   it('decides the date by the bot’s day, not the clock: its today is refused, and the day after is one day left (ADR 0013)', async () => {
     const apple = await word('apple', 'תפוח');
     const request = { kind: 'homework' as const, photo_import_ids: [], entries: [typed(apple)] };

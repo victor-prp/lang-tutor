@@ -115,21 +115,20 @@ export function createTargetService({
 
   /**
    * Spec D4, D11, rulings R-D4, R-D11. Targets as the learner reads them on `today`: each
-   * word with the form it was saved from, its key, and its readiness for the target's date —
-   * its recall then in its weakest skill live in the enrollment's newest session (both
-   * spoken ones off when there is none), speaking skipped for a word that cannot be said,
-   * read against the kind's bars. A target's words are saved ones (unsaving takes a word out
-   * of every target), so a word the list does not hold is not shown.
+   * word with the form it was saved from, as written (final review M3), its key, and its
+   * readiness for the target's date — its recall then in its weakest skill live in the
+   * enrollment's newest session (both spoken ones off when there is none), speaking skipped
+   * for a word that cannot be said, read against the kind's bars. A target's words are saved
+   * ones (unsaving takes a word out of every target), so a word the list does not hold is not
+   * shown.
    */
   async function view(repos: Repos, enrolled: Enrollment, today: string, targets: readonly TargetWithWords[]): Promise<Target[]> {
     if (targets.length === 0) return [];
-    const saved = new Map((await repos.vocabulary.listSavedGlosses(enrolled.id)).map((gloss) => [gloss.glossId, gloss]));
+    const glossIds = [...new Set(targets.flatMap((target) => target.glossIds))];
+    const saved = new Map((await repos.vocabulary.findSavedWords({ enrollmentId: enrolled.id, glossIds })).map((word) => [word.glossId, word]));
     const devices = (await repos.session.findNewestDevices(enrolled.id)) ?? { listening: false, speaking: false };
     const live = liveDimensions(devices.listening, devices.speaking);
-    const memory = await repos.memory.findRows({
-      enrollmentId: enrolled.id,
-      glossIds: [...new Set(targets.flatMap((target) => target.glossIds))],
-    });
+    const memory = await repos.memory.findRows({ enrollmentId: enrolled.id, glossIds });
     const rowsOf = new Map<string, { dimension: Dimension; state: MemoryState }[]>();
     for (const row of memory) rowsOf.set(row.glossId, [...(rowsOf.get(row.glossId) ?? []), row]);
 

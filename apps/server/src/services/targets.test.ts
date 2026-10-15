@@ -14,7 +14,7 @@ import {
 import { STOCK_SESSION } from '../domain/jobs';
 import type { MemoryRow } from '../domain/memoryUpdate';
 import { IMPORT_TTL_MS } from '../domain/photoImports';
-import type { Devices, SavedGloss, SessionSummary } from '../domain/session';
+import type { Devices, SessionSummary } from '../domain/session';
 import {
   AccessDenied,
   EnrollmentNotFound,
@@ -59,19 +59,10 @@ const WORDS: Record<string, { variantId: string; lexemeId: string; lemma: string
   g_sole: { variantId: 'v_sole', lexemeId: 'l_sole', lemma: 'sole', form: 'sole', key: 'שמש' },
   // Five words, past MAX_SPOKEN_WORDS: never asked aloud (ruling R-D4).
   g_lupo: { variantId: 'v_lupo', lexemeId: 'l_lupo', lemma: 'in bocca al lupo', form: 'in bocca al lupo sempre', key: 'בהצלחה' },
+  // Written with a capital: the saved list's own read lowercases it (final review M3).
+  g_roma: { variantId: 'v_roma', lexemeId: 'l_roma', lemma: 'Roma', form: 'Roma', key: 'רומא' },
 };
 const entry = (glossId: string): VocabularyEntryInput => ({ gloss_id: glossId, variant_id: WORDS[glossId].variantId });
-const savedGloss = (glossId: string): SavedGloss => ({
-  glossId,
-  key: WORDS[glossId].key,
-  variantId: WORDS[glossId].variantId,
-  savedAt: '2026-10-01T09:00:00.000000Z',
-  lexemeId: WORDS[glossId].lexemeId,
-  lemma: WORDS[glossId].lemma,
-  form: WORDS[glossId].form,
-  order: [0, 0],
-  knownAt: null,
-});
 
 const importRow = (id: string, over: Partial<PhotoImportRow> = {}): PhotoImportRow => ({
   id,
@@ -168,7 +159,11 @@ function world(
       calls.push(`deleteEntry ${glossId}`);
       if (saved.includes(glossId)) saved.splice(saved.indexOf(glossId), 1);
     },
-    listSavedGlosses: async () => saved.map(savedGloss),
+    // A target's words, as the repository reads them, keep the form as saved (final review M3).
+    // The saved list (listSavedGlosses), which lowercases it, is not stubbed: a target is read
+    // from its own words alone.
+    findSavedWords: async ({ glossIds }) =>
+      saved.filter((glossId) => glossIds.includes(glossId)).map((glossId) => ({ glossId, key: WORDS[glossId].key, form: WORDS[glossId].form })),
   });
 
   const imports = new Map((setup.imports ?? []).map(({ row, items }) => [row.id, { row: { ...row }, items }]));
@@ -770,6 +765,11 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
         { id: 't_far', kind: 'homework', due_on: '2026-11-01', days_left: 17, word_count: 2, ready_count: 1 },
       ],
     });
+  });
+
+  it('shows each word in the form it was saved from, as the dictionary writes it, not lowercased (final review M3)', async () => {
+    const { service } = world({ saved: ['g_roma', 'g_casa'], targets: [target({ words: ['g_roma', 'g_casa'] })] });
+    expect((await service.getTarget(OWNER, 't1')).words.map((shown) => shown.form)).toEqual(['Roma', 'casa']);
   });
 
   it('lists none for a learner with no target', async () => {
