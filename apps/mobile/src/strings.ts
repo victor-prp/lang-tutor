@@ -234,6 +234,7 @@ export const strings = {
   updateRequiredTitle: 'יש גרסה חדשה',
   updateRequiredBody: 'הגרסה הזו של האפליקציה כבר לא עובדת מול השרת. צריך לעדכן אותה כדי להמשיך.',
   updateRequiredButton: 'לעדכון ב‑Google Play',
+  updateRequiredButtonIos: 'לעדכון ב‑TestFlight',
   updateCheckAgain: 'לבדוק שוב',
   // Phase 49 (spec D4, R4). The About screen; its three labels stay English.
   aboutTitle: 'אודות',

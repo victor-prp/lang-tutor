@@ -127,7 +127,7 @@ enforced.
 | [0009](docs/adr/adr-0009-sign-in.md) | Sign-in with Better Auth, behind one seam — one import site per app, the session becomes an actor in `routes/actor.ts` only, exact version pins |
 | [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `terraform/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
 | [0011](docs/adr/adr-0011-learner-unit-is-the-gloss.md) | The learner's unit is the gloss — the learner's tables hold gloss ids rather than sense ids, senses stay the dictionary's, and no table outside the `dict_` prefix references `dict_senses` or `dict_var_translations` |
-| [0012](docs/adr/adr-0012-native-client-releases.md) | The Android app ships with every release, after the server, by fingerprint — an update lands only on a matching build, builds go to Play's internal track, and `X-Api-Level` is named only in `packages/core` |
+| [0012](docs/adr/adr-0012-native-client-releases.md) | The Android and iOS apps ship with every release, after the server, by fingerprint — an update lands only on a matching build, builds go to Play's internal track and TestFlight, and `X-Api-Level` is named only in `packages/core` |
 | [0013](docs/adr/adr-0013-learner-day.md) | A learner's day comes from one place — only `services/learnerDay.ts` computes a progress day, `bot_day` is read and written only in `repo/users.ts`, and `routes/bots.ts` is the only route file naming the bot kind or its secret |
 
 All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 + 4 + 3 = 71 checks, grep only, no deps,
@@ -750,8 +750,9 @@ the newest tag is no longer live, so name the tag for the next. Everything else,
 first apply to reading the container's log, is in the
 [hosting runbook](docs/runbooks/hosting.md).
 
-Since phase 32 a release also ships the Android app, in a last job, `android`, after `apply`.
-See *The Android app* below.
+Since phase 32 a release also ships the Android app, in a job `android` after `apply`, and
+since phase 36 the iPhone and iPad app, in a job `ios` beside it. See *The Android app* and
+*The iPhone and iPad app* below.
 
 ### The Android app
 
@@ -767,6 +768,18 @@ is `on`; otherwise the release run shows it as skipped.
 A change that breaks older clients raises `API_LEVEL` in `packages/core/src/apiLevel.ts` by one,
 in the same PR: an installed app can be a day or two behind the server, and the server answers it
 426 so it shows "update required".
+
+### The iPhone and iPad app
+
+Friends on iPhone or iPad install **WordsPal** from TestFlight, invited to an external testing
+group. It updates itself the same way: JavaScript over the air, native changes as a new
+TestFlight build. On an iPad, and in a wide browser window, every screen sits in a centred
+column at most 640 points wide
+([phase 36 design](docs/superpowers/specs/2026-10-11-lang-tutor-phase-36-ios-app-design.md)).
+The repository variable `IOS_RELEASE` switches the `ios` job, as `ANDROID_RELEASE` does
+`android`: off, the release run shows it as skipped. A TestFlight build expires after 90 days,
+so the job rebuilds at 80, and a release is due at least that often. Running it in the iOS simulator, the one-time Apple setup and what
+each release prints are in the [iOS runbook](docs/runbooks/ios.md).
 
 ### Practice reminders
 
