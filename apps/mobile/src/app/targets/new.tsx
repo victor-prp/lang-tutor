@@ -45,7 +45,7 @@ import {
   wizardRouteOf,
   type WizardRoute,
 } from '@/targetWizard';
-import { doneFailureMessage, dueDateChoices, stepTitle, targetTitle, wizardTitle } from '@/targets';
+import { doneFailureMessage, dueDateChoices, photosHint, stepTitle, targetTitle, wizardTitle } from '@/targets';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 const KINDS: readonly TargetKind[] = ['homework', 'exam'];
@@ -361,7 +361,7 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
 
         {state.step === 'photos' ? (
           <>
-            <Text style={styles.hint}>{strings.targetPhotosHint}</Text>
+            <Text style={styles.hint}>{photosHint(state.mode)}</Text>
             <View style={styles.photoButtons}>
               <Pressable
                 accessibilityRole="button"

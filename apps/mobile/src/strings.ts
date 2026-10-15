@@ -421,6 +421,8 @@ export const strings = {
   targetStepWords: 'עוד מילים',
   targetStepDate: 'באיזה תאריך?',
   targetPhotosHint: 'אפשר לצלם או לבחור כמה תמונות, או לדלג על השלב.',
+  // A target screen's add photos, whose Next needs a photo: no skipping there.
+  targetPhotosHintAdd: 'אפשר לצלם או לבחור כמה תמונות.',
   targetReviewHint: 'אפשר להוריד סימון ממילה או לבחור לה משמעות אחרת.',
   targetWordsHint: 'חפשו מילה והוסיפו אותה לרשימה.',
   targetWizardNext: 'הבא',

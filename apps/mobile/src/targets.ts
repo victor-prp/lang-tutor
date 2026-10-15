@@ -96,6 +96,12 @@ export function stepTitle(step: WizardStep): string {
   return STEP_TITLES[step];
 }
 
+/** The photos step's hint. A new target may skip its photos; a target screen's add photos is
+ *  there for them, and its Next needs one (canAdvance), so it says nothing of skipping. */
+export function photosHint(mode: WizardMode): string {
+  return mode === 'add-photos' ? strings.targetPhotosHintAdd : strings.targetPhotosHint;
+}
+
 /** Whether a target's date has come, which closes it: the server refuses every change
  *  to it then. A target ended early cannot be told from the wire (it has no end date
  *  there); a change to one is refused with `target closed`, which the screens say. */

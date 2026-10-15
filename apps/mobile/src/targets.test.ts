@@ -9,6 +9,7 @@ import {
   dueDayLabel,
   daysLeftLabel,
   doneFailureMessage,
+  photosHint,
   readinessName,
   readyLabel,
   stepTitle,
@@ -187,6 +188,17 @@ describe('wizardTitle and stepTitle', () => {
     expect(stepTitle('review')).toBe('המילים מהתמונות');
     expect(stepTitle('words')).toBe('עוד מילים');
     expect(stepTitle('date')).toBe('באיזה תאריך?');
+  });
+});
+
+describe('photosHint (final review item 32)', () => {
+  it('lets a new target skip its photos, and says so', () => {
+    expect(photosHint('create')).toBe('אפשר לצלם או לבחור כמה תמונות, או לדלג על השלב.');
+  });
+
+  it("says nothing of skipping where Next needs a photo: a target screen's add photos", () => {
+    expect(photosHint('add-photos')).toBe('אפשר לצלם או לבחור כמה תמונות.');
+    expect(photosHint('add-photos')).not.toContain('לדלג');
   });
 });
 
