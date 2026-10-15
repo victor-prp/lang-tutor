@@ -68,7 +68,8 @@ export function readinessOf(kind: TargetKind, recall: number | null): Readiness 
  * the slots above the steady share in proportion to the words not yet ready, rounded up, so
  * one word not ready still asks for one slot more. On a homework's last day the wish is at
  * least HOMEWORK_LAST_DAY_SLOTS. A target with no words asks for its steady share; its pool
- * has nothing to pick, so the slots pass on. daysLeft is at least 1 while the target is active.
+ * has nothing to pick, so the slots pass on, to the main path too (phase 55, spec D5: unlike a
+ * target's leftovers). daysLeft is at least 1 while the target is active.
  */
 export function targetWish(
   kind: TargetKind,

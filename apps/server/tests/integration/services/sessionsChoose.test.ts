@@ -91,24 +91,23 @@ describe('createNextSession chooses the words (spec D5)', () => {
 
     const picks = await nextPicks();
     const ids = (from: Word[]) => from.map((word) => word.glossId).sort();
-    // Phase 54 (spec D4): the two new words are ladders, three slots each, so one word answered
-    // today fills the tenth slot, not three.
-    expect(picks).toHaveLength(6);
-    // The new words (the reserve), newest first...
-    expect(picks.slice(0, 2).map((pick) => pick.gloss_id)).toEqual([words[7].glossId, words[6].glossId]);
-    for (const pick of picks.slice(0, 2)) expect(pick).toMatchObject({ dimension: 'written_receptive', rung: 1, r: null, step: false });
+    // Phase 55 (spec D4): the new words are ladders, four slots each. The return and the two due
+    // words leave room for one; the second does not fit the three slots left, and the three words
+    // answered today fill them.
+    expect(picks).toHaveLength(7);
+    // The new word (the reserve), the newest...
+    expect(picks[0]).toMatchObject({ gloss_id: words[7].glossId, dimension: 'written_receptive', rung: 1, r: null, step: false });
     // ...the missed word, owed a return: recall, though met a month ago...
-    expect(picks[2]).toMatchObject({ gloss_id: words[2].glossId, dimension: 'written_receptive', rung: 2, r: 1, step: true });
+    expect(picks[1]).toMatchObject({ gloss_id: words[2].glossId, dimension: 'written_receptive', rung: 2, r: 1, step: true });
     // ...the words due and not asked today...
-    expect(picks.slice(3, 5).map((pick) => pick.gloss_id).sort()).toEqual(ids(words.slice(4, 6)));
-    for (const pick of picks.slice(3, 5)) {
+    expect(picks.slice(2, 4).map((pick) => pick.gloss_id).sort()).toEqual(ids(words.slice(4, 6)));
+    for (const pick of picks.slice(2, 4)) {
       expect(pick).toMatchObject({ dimension: 'written_receptive', rung: 1, step: false });
       expect(pick.r).toBeLessThan(0.75);
     }
-    // ...and last a word answered right today, in the dimension it would expand into.
-    expect(picks.slice(5)).toHaveLength(1);
-    expect(ids([words[0], words[1], words[3]])).toContain(picks[5].gloss_id);
-    for (const pick of picks.slice(5)) expect(pick).toMatchObject({ dimension: 'written_productive', rung: 1, r: null, step: false });
+    // ...and last the words answered right today, each in the dimension it would expand into.
+    expect(picks.slice(4).map((pick) => pick.gloss_id).sort()).toEqual(ids([words[0], words[1], words[3]]));
+    for (const pick of picks.slice(4)) expect(pick).toMatchObject({ dimension: 'written_productive', rung: 1, r: null, step: false });
   });
 
   it('on the next day, expands the words introduced yesterday into their next dimension', async () => {
@@ -117,7 +116,7 @@ describe('createNextSession chooses the words (spec D5)', () => {
     clock += DAY_MS;
 
     const picks = await nextPicks();
-    // Phase 54 (spec D4): the two words never met are ladders, three slots each.
+    // Phase 55 (spec D4): the two words never met are ladders, four slots each.
     expect(picks).toHaveLength(10 - 2 * LADDER_SLOTS + 2);
     const yesterday = new Set(words.slice(0, 10).map((word) => word.glossId));
     const expanded = picks.filter((pick) => yesterday.has(pick.gloss_id));

@@ -314,19 +314,20 @@ describe('sentence cards through the queue', () => {
 describe('prepare-session through the queue', () => {
   it('turns a list session ready, with its saved words as the prompts', async () => {
     await expectCheck(ns);
-    // Phase 55 (spec D2, D3): each of the three ladders' intro stage, the meet card and the
-    // tiles (the session cannot speak), q1-q6, asks nothing, then the stages of the practice cards.
-    await expectDistractors(ns, { tasks: [null, null, null, null, null, null, 'meaning', 'meaning', 'meaning', 'word', 'word', 'word', 'typed', 'typed', 'typed'] });
+    // Phase 55 (spec D2, D3, D4): each of the two ladders' intro stage, the meet card and the
+    // tiles (the session cannot speak), q1-q4, asks nothing, then the stages of the practice cards.
+    await expectDistractors(ns, { tasks: [null, null, null, null, 'meaning', 'meaning', 'word', 'word', 'typed', 'typed'] });
     const sessionId = await requestListSession();
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
     const record = await deps.sessions.getSession('u_1', sessionId);
     // Phase 35 (spec D6): three new words, too few for a board. Phase 54 (spec D3,
-    // D5, D7): each a ladder, its pick stored as one. Phase 55 (spec D2, D3): each word's
-    // intro stage is a meet card and the tiles, in a row, then the practice cards stage by stage.
-    const stage = (type: string) => [type, type, type];
+    // D5, D7): each a ladder, its pick stored as one; phase 55 (spec D4), two of them, the
+    // session's ceiling. Phase 55 (spec D2, D3): each word's intro stage is a meet card and the
+    // tiles, in a row, then the practice cards stage by stage.
+    const stage = (type: string) => [type, type];
     expect(record.questions.map((q) => q.type)).toEqual([
-      'meet', 'letter_tiles', 'meet', 'letter_tiles', 'meet', 'letter_tiles',
+      'meet', 'letter_tiles', 'meet', 'letter_tiles',
       ...stage('multiple_choice'), ...stage('reverse_choice'), ...stage('typed_translation'),
     ]);
     for (const choice of record.questions.filter((q) => q.type === 'multiple_choice')) {
@@ -339,8 +340,10 @@ describe('prepare-session through the queue', () => {
       expect(meet.meaning).toBe(WORDS[meet.question]);
     }
     // The tiles card follows its word's meet card.
-    for (const at of [0, 2, 4]) expect(record.questions[at + 1].vocab_term_id).toBe(record.questions[at].vocab_term_id);
-    expect(new Set([0, 2, 4].map((at) => (record.questions[at] as { question: string }).question))).toEqual(new Set(Object.keys(WORDS)));
+    for (const at of [0, 2]) expect(record.questions[at + 1].vocab_term_id).toBe(record.questions[at].vocab_term_id);
+    const met = new Set([0, 2].map((at) => (record.questions[at] as { question: string }).question));
+    expect(met.size).toBe(2);
+    expect(Object.keys(WORDS)).toEqual(expect.arrayContaining([...met]));
   });
 
   it('writes each card the content its type needs', async () => {

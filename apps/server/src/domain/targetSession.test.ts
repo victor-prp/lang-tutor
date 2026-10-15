@@ -96,6 +96,8 @@ const range = (n: number, make: (i: number) => Word) => Array.from({ length: n }
  *  asks: ready for any date these tests set, and not due today. */
 const READY: MemoryState = { stability: 1000, difficulty: 5, lastDay: TODAY, reps: 5, lapses: 0, params: FSRS6_DEFAULT.id };
 const ready = (id: string): Word => ({ id, state: { [WR]: READY, [WP]: READY, [SR]: READY, [SP]: READY } });
+/** READY in every skill, speaking included: ready with speaking live, and no speaking pick. */
+const readyAloud = (id: string): Word => ({ id, state: { [WR]: READY, [WP]: READY, [SR]: READY, [SP]: READY, [SK]: READY } });
 /** Met in every skill but speaking, none of them due. */
 const heard = (id: string): Word => ({ id, memory: { [WR]: 0.95, [WP]: 0.95, [SR]: 0.95, [SP]: 0.95 } });
 
@@ -148,15 +150,71 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     }
   });
 
-  it('gives an exam whose words are all unmet every slot: three ladders, and the slot no ladder fits to the main path', () => {
-    const exam = unmet(20);
-    const { picks, split } = chooseWithTargets(session([...exam, ...mains(30)], [target('exam', 'exam', 10, exam)]));
-    // Phase 54 (spec D4): three ladders take nine slots and are the session's ceiling.
-    expect(picks).toHaveLength(NEW_PER_SESSION + 1);
-    expect(of(picks, exam)).toHaveLength(NEW_PER_SESSION);
-    expect(split).toEqual([
-      { targetId: 'exam', wish: 10, slots: 10, picked: NEW_PER_SESSION, reason: 'not_ready', daysLeft: 10, readyCount: 0, wordCount: 20 },
+  it('gives a fresh homework of thirty words every slot: two ladders, and no main-path pick though the main path has words (phase 55, spec D5)', () => {
+    const homework = unmet(30);
+    const { picks, split } = chooseWithTargets(session([...homework, ...mains(30)], [target('hw', 'homework', 5, homework)]));
+    // Two ladders take eight slots and are the session's ceiling; the two left stay off the main path.
+    expect(picks.map((pick) => [pick.glossId, pick.cls, pick.ladder])).toEqual([
+      ['t29', 'NEW', true],
+      ['t28', 'NEW', true],
     ]);
+    expect(split).toEqual([
+      { targetId: 'hw', wish: 10, slots: 10, picked: 2, reason: 'not_ready', daysLeft: 5, readyCount: 0, wordCount: 30 },
+    ]);
+  });
+
+  it("passes a target's unused slots to the later targets, never to the main path (phase 55, spec D5)", () => {
+    const first = unmet(1);
+    const second = range(10, (i) => ready(`r${i}`));
+    const { picks, split } = chooseWithTargets(
+      session([...first, ...second, ...mains(30)], [target('first', 'homework', 3, first), target('second', 'homework', 5, second)]),
+    );
+    // The first's eight slots hold its one ladder, four; the second, steady, asks for three and is
+    // given two, and takes the first's four with them: six words. The main path's share is none.
+    expect(split.map(({ targetId, wish, slots, picked }) => ({ targetId, wish, slots, picked }))).toEqual([
+      { targetId: 'first', wish: 10, slots: 8, picked: 1 },
+      { targetId: 'second', wish: 3, slots: 2, picked: 6 },
+    ]);
+    expect(picks).toHaveLength(7);
+    expect(of(picks, mains(30))).toHaveLength(0);
+  });
+
+  it("passes an empty target's slots on to the main path, before or after a target that leaves some (phase 55, spec D5)", () => {
+    const words = unmet(1);
+    for (const [emptyDays, wordsDays] of [
+      [3, 5],
+      [5, 3],
+    ]) {
+      const { picks, split } = chooseWithTargets(
+        session([...words, ...mains(30)], [target('empty', 'homework', emptyDays, []), target('words', 'homework', wordsDays, words)]),
+      );
+      // The empty target's steady three are given two; the other's eight hold one ladder. The main
+      // path takes the empty target's two, and none of the four the other leaves.
+      const byId = Object.fromEntries(split.map(({ targetId, slots, picked }) => [targetId, { slots, picked }]));
+      expect({ emptyDays, byId, main: of(picks, mains(30)).length }).toEqual({
+        emptyDays,
+        byId: { empty: { slots: 2, picked: 0 }, words: { slots: 8, picked: 1 } },
+        main: 2,
+      });
+    }
+  });
+
+  it("gives the main path's own unused slots back to a target: a main path of two words in a share of seven", () => {
+    const homework = range(10, (i) => ready(`t${i}`));
+    const main = mains(2);
+    const { picks, split } = chooseWithTargets(session([...homework, ...main], [target('hw', 'homework', 5, homework)]));
+    expect(picks).toHaveLength(SESSION_LENGTH);
+    expect(of(picks, main)).toHaveLength(2);
+    expect(split[0]).toMatchObject({ reason: 'steady', slots: 3, picked: 8 });
+  });
+
+  it("shows no main-path pick on a small exam's eve: what the exam leaves stays off the main path (phase 55, spec D5)", () => {
+    // Two words never met, two ladders and two slots left; three words met, three picks and seven left.
+    for (const exam of [unmet(2), range(3, (i) => known(`t${i}`))]) {
+      const { picks, split } = chooseWithTargets(session([...exam, ...mains(30)], [target('exam', 'exam', 1, exam)]));
+      expect({ words: exam.length, picks: picks.length, main: of(picks, mains(30)).length }).toEqual({ words: exam.length, picks: exam.length, main: 0 });
+      expect(split[0]).toMatchObject({ reason: 'exclusive', slots: SESSION_LENGTH, picked: exam.length });
+    }
   });
 
   it('gives an exam whose every word is ready its steady five, and the main path the other five', () => {
@@ -170,10 +228,10 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
   it('gives an exam with some of its words ready a graded share: 12 of 20 ready ask for 7, the main path takes 3', () => {
     const exam = [...range(12, (i) => ready(`t${i}`)), ...range(8, (i) => fresh(`u${i}`))];
     const { picks, split } = chooseWithTargets(session([...exam, ...mains(30)], [target('exam', 'exam', 10, exam)]));
-    // Phase 54 (spec D4): the exam's seven slots are two ladders and one ready word.
-    expect(picks).toHaveLength(6);
-    expect(of(picks, exam).map((pick) => pick.cls)).toEqual(['NEW', 'NEW', 'NOT_DUE']);
-    expect(split).toEqual([{ targetId: 'exam', wish: 7, slots: 7, picked: 3, reason: 'not_ready', daysLeft: 10, readyCount: 12, wordCount: 20 }]);
+    // Phase 55 (spec D4): the exam's seven slots are one ladder and three ready words.
+    expect(picks).toHaveLength(7);
+    expect(of(picks, exam).map((pick) => pick.cls)).toEqual(['NEW', 'NOT_DUE', 'NOT_DUE', 'NOT_DUE']);
+    expect(split).toEqual([{ targetId: 'exam', wish: 7, slots: 7, picked: 4, reason: 'not_ready', daysLeft: 10, readyCount: 12, wordCount: 20 }]);
   });
 
   it.each<[TargetKind, number, number]>([
@@ -220,41 +278,42 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     const { picks, split } = chooseWithTargets(
       session([...exam, ...news], [target('exam', 'exam', 10, exam)], { done: new Set(idsOf(answered)) }),
     );
-    // Phase 54 (spec D4): three ladders, the session's ceiling, take nine slots; one word
-    // answered today takes the tenth.
-    expect(picks).toHaveLength(NEW_PER_SESSION + 1);
+    // Phase 55 (spec D4): two ladders, the session's ceiling, take eight slots; two words
+    // answered today take the rest.
+    const rest = SESSION_LENGTH - NEW_PER_SESSION * LADDER_SLOTS;
+    expect(picks).toHaveLength(NEW_PER_SESSION + rest);
     expect(of(picks, unmetFour)).toHaveLength(NEW_PER_SESSION);
-    expect(of(picks, answered)).toHaveLength(SESSION_LENGTH - NEW_PER_SESSION * LADDER_SLOTS);
+    expect(of(picks, answered)).toHaveLength(rest);
     expect(of(picks, news)).toHaveLength(0);
-    expect(split[0]).toMatchObject({ reason: 'not_ready', slots: 10, picked: NEW_PER_SESSION + 1 });
+    expect(split[0]).toMatchObject({ reason: 'not_ready', slots: 10, picked: NEW_PER_SESSION + rest });
   });
 
-  it("lets a steady target take its share from its own words answered today; the main path's new words fill the rest", () => {
+  it("lets a steady target take its share from its own words answered today; the main path's new words take theirs, and what they leave comes back", () => {
     const homework = range(10, (i) => ready(`t${i}`));
     const news = range(10, (i) => fresh(`n${i}`));
     const { picks, split } = chooseWithTargets(
       session([...homework, ...news], [target('hw', 'homework', 5, homework)], { done: new Set(idsOf(homework)) }),
     );
-    // Phase 54 (spec D4): the main path's seven slots hold two ladders; the slot left, too few
-    // for a third, comes back to the homework in the second pass.
-    expect(of(picks, homework).map((pick) => pick.cls)).toEqual(['DONE', 'DONE', 'DONE', 'DONE']);
-    expect(of(picks, news).map((pick) => pick.cls)).toEqual(['NEW', 'NEW']);
-    expect(split[0]).toMatchObject({ reason: 'steady', slots: 3, picked: 4 });
+    // Phase 55 (spec D4): the main path's seven slots hold one ladder; the three left, too few
+    // for a second, come back to the homework in the second pass.
+    expect(of(picks, homework).map((pick) => pick.cls)).toEqual(Array(6).fill('DONE'));
+    expect(of(picks, news).map((pick) => pick.cls)).toEqual(['NEW']);
+    expect(split[0]).toMatchObject({ reason: 'steady', slots: 3, picked: 6 });
   });
 
-  it('leaves the main path its share while it has words not done today: the steady homework keeps its three', () => {
+  it('leaves the main path its share while it has words not done today: the steady homework keeps its three, and what the main path leaves', () => {
     const homework = range(10, (i) => ready(`t${i}`));
     const news = range(10, (i) => fresh(`n${i}`));
     const answered = mains(10);
     const { picks, split } = chooseWithTargets(
       session([...homework, ...news, ...answered], [target('hw', 'homework', 5, homework)], { done: new Set(idsOf(answered)) }),
     );
-    // Phase 54 (spec D4): the main path's seven slots hold two ladders; the slot left, too few
-    // for a third, goes back to the homework before the main path's words answered today.
-    expect(of(picks, homework)).toHaveLength(4);
-    expect(of(picks, news)).toHaveLength(2);
+    // Phase 55 (spec D4): the main path's seven slots hold one ladder; the three left, too few
+    // for a second, go back to the homework before the main path's words answered today.
+    expect(of(picks, homework)).toHaveLength(6);
+    expect(of(picks, news)).toHaveLength(1);
     expect(of(picks, answered)).toHaveLength(0);
-    expect(split[0]).toMatchObject({ slots: 3, picked: 4 });
+    expect(split[0]).toMatchObject({ slots: 3, picked: 6 });
   });
 
   it('gives an exam the day before its date every slot, and a homework none', () => {
@@ -262,7 +321,9 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     const homework = range(5, (i) => fresh(`h${i}`));
     const both = session([...exam, ...homework, ...mains(30)], [target('hw', 'homework', 5, homework), target('exam', 'exam', 1, exam)]);
     const { picks, split } = chooseWithTargets(both);
-    // Phase 54 (spec D4): three ladders, the session's ceiling, nine of its slots.
+    // Phase 55 (spec D4, D5): two ladders, the session's ceiling, eight of its slots; the two left
+    // pass to the homework, which no ladder fits, and never to the main path.
+    expect(picks).toHaveLength(NEW_PER_SESSION);
     expect(of(picks, exam)).toHaveLength(NEW_PER_SESSION);
     expect(of(picks, homework)).toHaveLength(0);
     // In the order the pools run: the nearer date first.
@@ -274,13 +335,11 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     expect(targetSplit(both)).toEqual(split.map((row) => ({ ...row, picked: 0 })));
   });
 
-  it('hands the slots a target cannot fill to the main path: three words wishing ten', () => {
-    const homework = unmet(3);
+  it('keeps the slots a target cannot fill off the main path: one word wishing ten is its ladder alone (phase 55, spec D5)', () => {
+    const homework = unmet(1);
     const { picks, split } = chooseWithTargets(session([...homework, ...mains(30)], [target('hw', 'homework', 5, homework)]));
-    // Phase 54 (spec D4): three ladders take nine slots; the main path gets the tenth.
-    expect(picks).toHaveLength(4);
-    expect(of(picks, homework)).toHaveLength(3);
-    expect(split[0]).toMatchObject({ wish: 10, slots: 10, picked: 3 });
+    expect(ids(picks)).toEqual(['t0']);
+    expect(split[0]).toMatchObject({ wish: 10, slots: 10, picked: 1 });
   });
 
   it('asks a gloss in two targets once, for the one due first, and counts it in both', () => {
@@ -294,13 +353,13 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
         target('sooner', 'exam', 4, sooner),
       ]),
     );
-    // Phase 54 (spec D4): the sooner target's five slots hold one ladder; the later target's,
-    // with the two passed on, two; the main path gets the slot left.
-    expect(picks).toHaveLength(4);
+    // Phase 55 (spec D4, D5): the sooner target's five slots hold one ladder; the later target's,
+    // with the one passed on, one more; the two it leaves stay off the main path.
+    expect(picks).toHaveLength(2);
     expect(count(picks, (pick) => pick.glossId === 'shared')).toBe(1);
     expect(split.map(({ targetId, slots, picked, wordCount }) => ({ targetId, slots, picked, wordCount }))).toEqual([
       { targetId: 'sooner', slots: 5, picked: 1, wordCount: 3 },
-      { targetId: 'later', slots: 5, picked: 2, wordCount: 3 },
+      { targetId: 'later', slots: 5, picked: 1, wordCount: 3 },
     ]);
   });
 
@@ -315,33 +374,40 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     ]);
   });
 
-  it('passes the speaking pick on: a target of words never met cannot make it, so the main path does', () => {
-    // Phase 54 (spec D4): two words, two ladders, so the main path has a run of four slots.
-    const homework = unmet(2);
+  it('passes the speaking pick on: a target of words never met or known aloud cannot make it, so the main path does', () => {
+    // Phase 55 (spec D5): a target of words never met asks for every slot and the main path gets
+    // none it leaves, so five words ready aloud bring the homework's wish to five, the main path's
+    // share to five. The homework's five hold one ladder and one ready word, neither a speaking pick.
+    const homework = [...unmet(2), ...range(5, (i) => readyAloud(`r${i}`))];
     const main = range(10, (i) => heard(`m${i}`));
-    const { picks } = chooseWithTargets(session([...homework, ...main], [target('hw', 'homework', 5, homework)], { speaking: true }));
-    expect(of(picks, homework).map((pick) => pick.cls)).toEqual(['NEW', 'NEW']);
+    const { picks, split } = chooseWithTargets(session([...homework, ...main], [target('hw', 'homework', 5, homework)], { speaking: true }));
+    expect(split[0]).toMatchObject({ slots: 5, readyCount: 5 });
+    expect(of(picks, homework).map((pick) => pick.cls)).toEqual(['NEW', 'NOT_DUE']);
     const spoken = picks.filter((pick) => pick.cls === 'SPEAK');
     expect(spoken).toHaveLength(1);
     expect(idsOf(main)).toContain(spoken[0].glossId);
   });
 
   it('makes one speaking pick a session: the first pool that can, and no pool after it', () => {
-    const homework = range(4, (i) => ({ id: `t${i}`, memory: { [WR]: 0.95 } }));
+    // Phase 55 (spec D5): three words ready aloud bring the homework's wish to seven, so the main
+    // path has three slots of its own, and words it could make the pick from.
+    const homework = [...range(4, (i) => ({ id: `t${i}`, memory: { [WR]: 0.95 } })), ...range(3, (i) => readyAloud(`r${i}`))];
     const main = range(10, (i) => heard(`m${i}`));
     const { picks } = chooseWithTargets(session([...homework, ...main], [target('hw', 'homework', 5, homework)], { speaking: true }));
+    expect(of(picks, main)).toHaveLength(3);
     const spoken = picks.filter((pick) => pick.cls === 'SPEAK');
     expect(spoken).toHaveLength(1);
     expect(idsOf(homework)).toContain(spoken[0].glossId);
   });
 
   it('never asks a target word and a main word of one family, or of one key, in one session', () => {
-    const homework = unmet(3);
+    // Phase 55 (spec D5): a ready word brings the homework's wish to eight, its two ladders, so the
+    // main path has two slots of its own.
+    const homework = [...unmet(2), ready('r0')];
     // The main path's two neediest words: one of t0's family, one of t1's key.
     const main = [known('kin', { [WR]: 0.3 }), { ...known('twin', { [WR]: 0.35 }), key: 'KEY-t1 ' }, ...mains(12)];
     const families = { familyOf: new Map([['t0', 1], ['kin', 1]]), waiting: new Set<string>(), introductions: new Set<string>() };
     const { picks } = chooseWithTargets(session([...homework, ...main], [target('hw', 'homework', 5, homework)], { families }));
-    // Phase 54 (spec D4): three ladders take nine slots; the main path gets the tenth.
     expect(picks).toHaveLength(4);
     expect(ids(picks)).toEqual(expect.arrayContaining(['t0', 't1']));
     expect(ids(picks)).not.toContain('kin');
@@ -349,7 +415,9 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
   });
 
   it('keeps a family for the return that claimed it, whichever pool holds the return', () => {
-    const homework = unmet(3);
+    // Phase 55 (spec D5): a ready word brings the homework's wish to eight, so the main path has
+    // two slots of its own.
+    const homework = [...unmet(2), ready('r0')];
     const main = [{ id: 'ret', memory: { [WR]: 1 } }, ...mains(12)];
     const families = { familyOf: new Map([['t0', 1], ['ret', 1]]), waiting: new Set<string>(), introductions: new Set<string>() };
     const { picks } = chooseWithTargets(
@@ -363,18 +431,23 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     // `kin`, saved and practised, is its family's current meaning, and due; `t`, the list's
     // word, never met, waits behind it (phase 39).
     const t = fresh('t');
-    const words = [t, known('kin', { [WR]: 0.3 }), ...mains(12)];
+    // Phase 55 (spec D5): three words ready beside t, so that four days out the exam asks for
+    // seven slots and the main path has three of its own to ask kin in.
+    const exam = [t, ...range(3, (i) => ready(`r${i}`))];
+    const words = [...exam, known('kin', { [WR]: 0.3 }), ...mains(12)];
     const families = { familyOf: new Map([['t', 1], ['kin', 1]]), waiting: new Set(['t']), introductions: new Set<string>() };
     for (const daysLeft of [4, 2, 1]) {
-      const { picks, split } = chooseWithTargets(session(words, [target('exam', 'exam', daysLeft, [t])], { families }));
-      // Phase 54 (spec D4): t is a ladder, three slots; seven main words fill the rest.
+      const { picks, split } = chooseWithTargets(session(words, [target('exam', 'exam', daysLeft, exam)], { families }));
+      // t is a ladder, four slots, and the ready words three. In the run-up the exam asks for every
+      // slot, and the three it leaves stay off the main path.
+      const main = daysLeft === 4 ? 3 : 0;
       expect({ daysLeft, picks: picks.length, t: ids(picks).includes('t'), kin: ids(picks).includes('kin') }).toEqual({
         daysLeft,
-        picks: SESSION_LENGTH - LADDER_SLOTS + 1,
+        picks: 1 + 3 + main,
         t: true,
         kin: false,
       });
-      expect(split[0]).toMatchObject({ slots: SESSION_LENGTH, picked: 1, reason: daysLeft === 1 ? 'exclusive' : expect.any(String) });
+      expect(split[0]).toMatchObject({ slots: SESSION_LENGTH - main, picked: 4, reason: daysLeft === 1 ? 'exclusive' : expect.any(String) });
     }
     // On no target, the word waits again: the main path asks the meaning it waits on.
     const { picks } = chooseWithTargets(session(words, [], { families }));
@@ -386,22 +459,29 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     const others = [...range(5, (i) => fresh(`n${i}`)), ...mains(30)];
     const exam = unmet(20);
     const { picks, split } = chooseWithTargets(session([...exam, ...others], [target('exam', 'exam', 2, exam)], { newToday: DAY_NEW_CAP }));
-    // Phase 54 (spec D4): its pace past the cap, but three ladders a session at most.
+    // Phase 54 (spec D4): its pace past the cap, but the session's ceiling of ladders at most.
     expect(of(picks, exam).filter((pick) => pick.cls === 'NEW')).toHaveLength(NEW_PER_SESSION);
     expect(split[0]).toMatchObject({ reason: 'run_up', slots: 10, picked: NEW_PER_SESSION });
-    // A smaller list leaves the main path slots: it fills them with no new word of its own.
+    // A list that leaves the main path a share: it fills it with no new word of its own. Phase 55
+    // (spec D5): what a target leaves no longer reaches the main path, so a word ready brings a
+    // homework's wish to eight, and two days out its two new words are both owed.
     const few = unmet(2);
-    const short = chooseWithTargets(session([...few, ...others], [target('exam', 'exam', 2, few)], { newToday: DAY_NEW_CAP }));
-    expect(short.picks).toHaveLength(SESSION_LENGTH - few.length * LADDER_SLOTS + few.length);
+    const homework = [...few, ready('r0')];
+    const short = chooseWithTargets(session([...homework, ...others], [target('hw', 'homework', 2, homework)], { newToday: DAY_NEW_CAP }));
+    expect(short.split[0]).toMatchObject({ slots: 8, picked: 2 });
+    expect(short.picks).toHaveLength(few.length + SESSION_LENGTH - few.length * LADDER_SLOTS);
     expect(ids(short.picks.filter((pick) => pick.cls === 'NEW')).sort()).toEqual(idsOf(few).sort());
   });
 
   it("counts a target's new words toward the daily cap: what the target spends, the main path does not get", () => {
-    const exam = unmet(10);
+    // Phase 55 (spec D5): ten words ready bring the exam's wish to eight, so the main path has
+    // two slots of its own.
+    const exam = [...unmet(10), ...range(10, (i) => ready(`r${i}`))];
     expect(owedNew(10, 0, 20)).toBe(1);
     const others = [...range(5, (i) => fresh(`n${i}`)), ...mains(30)];
-    const { picks } = chooseWithTargets(session([...exam, ...others], [target('exam', 'exam', 20, exam)], { newToday: DAY_NEW_CAP - 2 }));
-    // Phase 54 (spec D4): the two new words are ladders, six slots.
+    const { picks, split } = chooseWithTargets(session([...exam, ...others], [target('exam', 'exam', 20, exam)], { newToday: DAY_NEW_CAP - 2 }));
+    expect(split[0]).toMatchObject({ slots: 8 });
+    // Phase 55 (spec D4): the two new words are ladders, eight slots.
     expect(picks).toHaveLength(SESSION_LENGTH - 2 * LADDER_SLOTS + 2);
     const introduced = picks.filter((pick) => pick.cls === 'NEW');
     expect(introduced).toHaveLength(2);
@@ -411,17 +491,20 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
   it("keeps the main path's own new-word floor after a target's new words, below the session's ceiling", () => {
     const backlog = range(12, (i) => known(`d${i}`, { [[WR, WP, SP, SR][i % 4]]: 0.5 }));
     const news = range(5, (i) => fresh(`n${i}`));
-    // Phase 54 (spec D4): two ladders take six slots; the main path's floor, a third, three of
-    // its four, and one due word the last.
-    const homework = unmet(2);
+    // Phase 55 (spec D4, D5): a homework of one new word and three ready asks for five slots, its
+    // ladder's four and a ready word; the main path's floor, the session's second ladder, takes
+    // four of its five, and one due word the last.
+    const one = unmet(1);
+    const homework = [...one, ...range(3, (i) => ready(`r${i}`))];
     const { picks } = chooseWithTargets(session([...homework, ...backlog, ...news], [target('hw', 'homework', 5, homework)]));
-    expect(picks).toHaveLength(4);
-    expect(of(picks, homework)).toHaveLength(2);
+    expect(picks.map((pick) => pick.cls)).toEqual(['NEW', 'NOT_DUE', 'NEW', 'DUE']);
+    expect(of(picks, one)).toHaveLength(1);
     expect(of(picks, news)).toHaveLength(NEW_FLOOR);
-    // Three ladders spend the session's ceiling: the floor gives way, and a due word takes the slot left.
-    const three = unmet(3);
-    const ceiling = chooseWithTargets(session([...three, ...backlog, ...news], [target('hw', 'homework', 5, three)]));
-    expect(ceiling.picks.map((pick) => pick.cls)).toEqual(['NEW', 'NEW', 'NEW', 'DUE']);
+    // A homework of two new words asks for every slot, and its two ladders spend the session's
+    // ceiling: the main path has no slot for its floor, and the two left stay off it.
+    const two = unmet(2);
+    const ceiling = chooseWithTargets(session([...two, ...backlog, ...news], [target('hw', 'homework', 5, two)]));
+    expect(ceiling.picks.map((pick) => pick.cls)).toEqual(['NEW', 'NEW']);
     expect(of(ceiling.picks, news)).toHaveLength(0);
   });
 
@@ -434,9 +517,10 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     const { picks } = chooseWithTargets(
       session([...exam, ...mains(30)], [target('exam', 'exam', 3, exam)], { newToday: DAY_NEW_CAP, done: met }, { introducedToday: met }),
     );
-    // Phase 54 (spec D4): three ladders take nine slots; a word met today the tenth.
+    // Phase 55 (spec D4): two ladders, the session's ceiling below the pace of three, take eight
+    // slots; two words met today the rest.
     expect(picks).toHaveLength(4);
-    expect(count(picks, (pick) => pick.cls === 'NEW')).toBe(3);
+    expect(count(picks, (pick) => pick.cls === 'NEW')).toBe(NEW_PER_SESSION);
   });
 
   it("introduces the new words a target owes before its returns: an exam in 3 days, the daily cap already spent", () => {
@@ -455,17 +539,19 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     };
     const all = (cls: ChosenPick['cls'], n = SESSION_LENGTH) => Array<ChosenPick['cls']>(n).fill(cls);
 
-    // Two days to meet 40 words in: 20 today. Phase 54 (spec D4): a session meets three, its
-    // ceiling, in nine slots, ahead of the returns the sessions before it opened, which take the
-    // tenth; once the 20 are met, the returns, and no new word past the cap.
+    // Two days to meet 40 words in: 20 today. Phase 55 (spec D4, D5): a session meets two, its
+    // ceiling, in eight slots, ahead of the returns the sessions before it opened, which take the
+    // other two; with none opened, the two slots left stay off the main path. Once the 20 are met,
+    // the returns, and no new word past the cap.
     expect(owedNew(40, 0, 3)).toBe(20);
     const forty = unmet(40);
-    expect(classesAfter(forty, 0)).toEqual([...all('NEW', NEW_PER_SESSION), 'NOT_DUE']);
-    expect(classesAfter(forty, 10)).toEqual([...all('NEW', NEW_PER_SESSION), 'STEP']);
+    const rest = SESSION_LENGTH - NEW_PER_SESSION * LADDER_SLOTS;
+    expect(classesAfter(forty, 0)).toEqual(all('NEW', NEW_PER_SESSION));
+    expect(classesAfter(forty, 10)).toEqual([...all('NEW', NEW_PER_SESSION), ...all('STEP', rest)]);
     expect(classesAfter(forty, 20)).toEqual(all('STEP'));
-    // 30 words owe 15: with ten met, five still owed, three of them in this session.
+    // 30 words owe 15: with ten met, five still owed, two of them in this session.
     expect(owedNew(30, 0, 3)).toBe(15);
-    expect(classesAfter(unmet(30), 10)).toEqual([...all('NEW', NEW_PER_SESSION), 'STEP']);
+    expect(classesAfter(unmet(30), 10)).toEqual([...all('NEW', NEW_PER_SESSION), ...all('STEP', rest)]);
   });
 
   it("keeps a target's pace across both passes: past the daily cap, no more new words than it owes", () => {
@@ -511,22 +597,30 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
 
   it('counts the hard cap over the whole session', () => {
     // R 0.19 at rung 1: 0.25 + 0.75·√0.19 ≈ 0.58, below 0.6.
-    const homework = range(HARD_CAP, (i) => known(`t${i}`, { [WR]: 0.19 }));
+    const hard = range(HARD_CAP, (i) => known(`t${i}`, { [WR]: 0.19 }));
+    // Phase 55 (spec D5): as many words ready bring the homework's wish to seven, so the main
+    // path has three slots of its own.
+    const homework = [...hard, ...range(HARD_CAP, (i) => ready(`r${i}`))];
     const main = [...range(HARD_CAP, (i) => known(`h${i}`, { [WP]: 0.19 })), ...range(SESSION_LENGTH, (i) => known(`m${i}`, { [SP]: 0.92 }))];
-    const { picks } = chooseWithTargets(session([...homework, ...main], [target('hw', 'homework', 5, homework)]));
+    const { picks, split } = chooseWithTargets(session([...homework, ...main], [target('hw', 'homework', 5, homework)]));
+    expect(split[0]).toMatchObject({ slots: 7 });
     expect(picks).toHaveLength(SESSION_LENGTH);
-    expect(of(picks, homework)).toHaveLength(HARD_CAP);
+    expect(of(picks, hard)).toHaveLength(HARD_CAP);
     expect(count(picks, (pick) => expectedSuccess(pick.r, pick.rung === 1, pick.rung) < 0.6)).toBe(HARD_CAP);
   });
 
   it('counts the per-skill limit over the whole session', () => {
     // Met in writing only: each expands into listening.
     const writing = (id: string): Word => ({ id, memory: { [WR]: 0.95, [WP]: 0.95 } });
-    const homework = range(PER_DIMENSION_CAP, (i) => writing(`t${i}`));
+    const written = range(PER_DIMENSION_CAP, (i) => writing(`t${i}`));
+    // Phase 55 (spec D5): as many words ready bring the homework's wish to seven, so the main
+    // path has three slots of its own.
+    const homework = [...written, ...range(PER_DIMENSION_CAP, (i) => ready(`r${i}`))];
     const main = [...range(PER_DIMENSION_CAP, (i) => writing(`s${i}`)), ...range(SESSION_LENGTH, (i) => known(`m${i}`, { [SP]: 0.92 }))];
-    const { picks } = chooseWithTargets(session([...homework, ...main], [target('hw', 'homework', 5, homework)]));
+    const { picks, split } = chooseWithTargets(session([...homework, ...main], [target('hw', 'homework', 5, homework)]));
+    expect(split[0]).toMatchObject({ slots: 7 });
     expect(picks).toHaveLength(SESSION_LENGTH);
-    expect(of(picks, homework)).toHaveLength(PER_DIMENSION_CAP);
+    expect(of(picks, written)).toHaveLength(PER_DIMENSION_CAP);
     expect(count(picks, (pick) => pick.dimension === SR)).toBe(PER_DIMENSION_CAP);
   });
 });
@@ -544,8 +638,9 @@ describe('choosePools (ruling R-D6)', () => {
   });
 
   it('hands the slots a pool leaves forward in the first pass: the next pool runs with them', () => {
-    // Phase 54 (spec D4): a's one ladder leaves two of its five slots, too few for a second;
-    // with them, b's one-slot pool can hold the session's speaking pick, ahead of the main path.
+    // Phase 55 (spec D4, D5): a's one ladder leaves one of its five slots, too few for a second;
+    // with it, b's one-slot pool, a later listing pool's, can hold the session's speaking pick,
+    // ahead of the main path.
     const b = range(3, (i) => ({ id: `b${i}`, memory: { [WR]: 0.95 } }));
     const words = [fresh('a1'), fresh('a2'), ...b, ...range(6, (i) => heard(`m${i}`))];
     const [first, second, main] = choosePools(input(words, { speaking: true }), [
@@ -554,7 +649,7 @@ describe('choosePools (ruling R-D6)', () => {
       { glossIds: null, slots: 4, owedNew: 0 },
     ]);
     expect(ids(first)).toEqual(['a2']);
-    expect(second.map((pick) => pick.cls)).toEqual(['SPEAK', 'EXPAND', 'EXPAND']);
+    expect(second.map((pick) => pick.cls)).toEqual(['SPEAK', 'EXPAND']);
     expect(main.map((pick) => pick.cls)).not.toContain('SPEAK');
   });
 
@@ -592,16 +687,17 @@ describe('choosePools (ruling R-D6)', () => {
   });
 
   it("counts a word whose family a return claimed in its pool's lists, and never picks it (ruling 1: claims apply when picking)", () => {
-    // d is due, but r's return claims their family. Counted as due, d leaves room for two new
-    // words before r; left out of the lists, it would leave room for three.
-    const words = [{ id: 'r', memory: { [WR]: 1 } }, known('d', { [WP]: 0.4 }), ...range(3, (i) => fresh(`f${i}`))];
+    // d is due, but r's return claims their family. Phase 55 (spec D4): counted as due, d and e
+    // leave room for one new word before r; left out of the lists, d would leave room for two.
+    // The second comes after the due word, in the four slots left.
+    const words = [{ id: 'r', memory: { [WR]: 1 } }, known('d', { [WP]: 0.4 }), known('e', { [WP]: 0.4 }), ...range(3, (i) => fresh(`f${i}`))];
     const families = { familyOf: new Map([['r', 1], ['d', 1]]), waiting: new Set<string>(), introductions: new Set<string>() };
     const picks = chooseWords(input(words, { steps: [step('r', WR)], families }));
     expect(picks.map((pick) => [pick.glossId, pick.cls])).toEqual([
       ['f2', 'NEW'],
-      ['f1', 'NEW'],
       ['r', 'STEP'],
-      ['f0', 'NEW'],
+      ['e', 'DUE'],
+      ['f1', 'NEW'],
     ]);
   });
 
@@ -615,16 +711,16 @@ describe('choosePools (ruling R-D6)', () => {
 
   it("leaves a word an earlier pool took out of a later pool's lists: it holds back none of that pool's new words", () => {
     const later = [known('x', { [WR]: 0.3 }), ...range(3, (i) => fresh(`n${i}`)), ...range(5, (i) => ({ id: `e${i}`, memory: { [WR]: 0.95 } }))];
-    // The second pool fills its nine slots, so no second pass comes back to it.
+    // The second pool fills its eight slots, so no second pass comes back to it.
     const [first, second] = choosePools(input(later), [
       { glossIds: new Set(['x']), slots: 1, owedNew: 0 },
-      { glossIds: new Set(idsOf(later)), slots: SESSION_LENGTH - 1, owedNew: 0 },
+      { glossIds: new Set(idsOf(later)), slots: 8, owedNew: 0 },
       { glossIds: null, slots: 0, owedNew: 0 },
     ]);
     expect(ids(first)).toEqual(['x']);
-    // Phase 54 (spec D4): nine slots, three ladders. Still counted as a due word to ask, x would
-    // shrink the second pool's reserve to two ladders, and expansions would take the last three slots.
-    expect(second.map((pick) => pick.cls)).toEqual(['NEW', 'NEW', 'NEW']);
+    // Phase 55 (spec D4): eight slots, two ladders. Still counted as a due word to ask, x would
+    // shrink the second pool's reserve to one ladder, and expansions would take the last four slots.
+    expect(second.map((pick) => pick.cls)).toEqual(['NEW', 'NEW']);
   });
 
   it('goes past the daily cap only for a session still empty after the second pass, from the pools in order', () => {
@@ -638,8 +734,12 @@ describe('choosePools (ruling R-D6)', () => {
     expect(choosePools(input([known('a', { [WR]: 0.3 }), ...news], capSpent), pools('a')).map(ids)).toEqual([['a'], []]);
     // A pool with no slot of its own picks in the second pass: still no new word past the cap.
     expect(choosePools(input([known('a'), ...news], capSpent), pools('a', 0)).map(ids)).toEqual([['a'], []]);
-    // Nothing picked in either pass: new words past the cap, each pool's in turn.
-    expect(choosePools(input(news, capSpent), pools('n0')).map(ids)).toEqual([['n0'], ['n2', 'n1']]);
+    // Nothing picked in either pass: new words past the cap, each pool's in turn, to the
+    // session's ceiling of ladders.
+    expect(choosePools(input(news, capSpent), pools('n0')).map(ids)).toEqual([['n0'], ['n2']]);
+    // Phase 55 (spec D5): unchanged, every slot left offered to every pool, a listing pool's
+    // included: the main path, with no slot of its own, takes four of the six the first leaves.
+    expect(choosePools(input(news, capSpent), pools('n0', SESSION_LENGTH)).map(ids)).toEqual([['n0'], ['n2']]);
   });
 });
 
