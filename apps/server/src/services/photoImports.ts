@@ -1,4 +1,5 @@
 import type {
+  Enrollment,
   PhotoImport,
   PhotoImportCreateRequest,
   PhotoImportItem,
@@ -6,7 +7,9 @@ import type {
   SaveVocabularyResponse,
   TranslationRequest,
   TranslationResponse,
+  VocabularyEntryInput,
 } from '@lang-tutor/core/api';
+import { firstRowPerGloss } from '@lang-tutor/core/domain';
 
 import {
   LOOK_UP_IMPORT_ITEM,
@@ -71,6 +74,153 @@ function toImport(row: PhotoImportRow, items: PhotoImportItemRow[]): PhotoImport
     created_at: row.createdAt.toISOString(),
     items: items.map(toItem),
   };
+}
+
+/** Spec D11. An import a save may take: read, no row still being looked up, not expired. */
+function readyToSave(row: PhotoImportRow, items: readonly PhotoImportItemRow[], now: number): boolean {
+  return row.status === 'read' && isOpen(row.status, row.createdAt, now) && !items.some((item) => item.status === 'pending');
+}
+
+/** A ticked row's chosen sense, as a save takes it, with the import the row is in: a refused
+ *  entry's log names it. */
+type ImportEntry = VocabularyEntryInput & { importId: string };
+
+/**
+ * Spec D11. The writes of a save from photo imports, in a transaction the caller opened,
+ * authorized, and locked each import in after checking it with readyToSave: the entries
+ * checked as today's save checks them, inserted, their lemma renders claimed, every import
+ * marked saved, and the next session in stock asked for. These writes are dependent, so a
+ * refused gloss or a lost race rolls all of them back. Answers the saved gloss ids, resolved
+ * through merges, in order.
+ *
+ * Phase 53. Shared by a save of one import and by a target's save of several
+ * (saveImportsInTx), which differ only in the rows they take.
+ */
+async function writeImportSave(
+  repos: Repos,
+  logger: Logger,
+  input: {
+    enrolled: Enrollment;
+    actorUserId: string;
+    importIds: readonly string[];
+    entries: readonly ImportEntry[];
+    stockSaveDelaySeconds: number;
+  },
+): Promise<string[]> {
+  const { photoImport, vocabulary, gloss, dict, jobs } = repos;
+  const { enrolled, entries } = input;
+  // Phase 31 (spec D14). Share-lock and resolve before anything is checked or
+  // written. The rows' options are a snapshot, so a choice made before a
+  // merge names a forwarded gloss: it is saved as its survivor.
+  const resolved = await gloss.resolveGlosses(entries.map((entry) => entry.gloss_id));
+  const foreign = entries.find((entry) => {
+    const found = resolved.get(entry.gloss_id);
+    return found !== undefined && found.userLanguageCode !== enrolled.source_language;
+  });
+  if (foreign) {
+    logger.info({ event: 'photo_import_entry_refused', import_id: foreign.importId, gloss_id: foreign.gloss_id, reason: 'language' });
+    throw new GlossLanguageMismatch(foreign.gloss_id);
+  }
+  const toSave = firstPerGloss(entries.map((entry) => ({ ...entry, gloss_id: resolved.get(entry.gloss_id)?.id ?? entry.gloss_id })));
+  const saveable = await vocabulary.findSaveable({
+    entries: toSave.map((entry) => ({ glossId: entry.gloss_id, variantId: entry.variant_id })),
+    targetLanguage: enrolled.target_language,
+    sourceLanguage: enrolled.source_language,
+  });
+  const passed = new Set(saveable.map((entry) => `${entry.glossId} ${entry.variantId}`));
+  const refused = toSave.find((entry) => !passed.has(`${entry.gloss_id} ${entry.variant_id}`));
+  if (refused) {
+    // As today's save logs it: the 400 body is fixed, and an import that
+    // can never be saved is diagnosed only from here.
+    logger.info({
+      event: 'photo_import_entry_refused',
+      import_id: refused.importId,
+      gloss_id: refused.gloss_id,
+      variant_id: refused.variant_id,
+    });
+    throw new InvalidVocabularyEntry(refused.gloss_id);
+  }
+  // Phase 28. Only the list's owner photographs into it: no grant reaches a
+  // photo import or a target (photo_import.manage and targets.manage are in no
+  // role), so the actor here is the owner, who added these words. Phase 29 made
+  // that true by construction: every caller's check lets only the owner here.
+  await vocabulary.insertEntries({
+    enrollmentId: enrolled.id,
+    addedByUserId: input.actorUserId,
+    entries: saveable,
+  });
+  // Phase 31 (spec D12). A word whose lemma form this language has not
+  // rendered gets it rendered in the background, once (plan item 3).
+  const claimed = await dict.claimLemmaRenders(
+    saveable.map((entry) => ({ lexemeId: entry.lexemeId, userLanguageCode: enrolled.source_language })),
+  );
+  for (const pair of claimed) {
+    await jobs.enqueue(RENDER_LEMMA, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
+  }
+  for (const importId of input.importIds) {
+    // Conditional: a discard that landed first wins, and the throw rolls
+    // the inserts back.
+    if (!(await photoImport.transition(importId, ['read'], 'saved'))) {
+      throw new PhotoImportConflict(importId, 'not ready to save');
+    }
+  }
+  // Phase 43 (spec D3, ruling R3). The next session in stock, if the list has none.
+  await requestStockAfterSave(repos, enrolled.id, input.stockSaveDelaySeconds);
+  return toSave.map((entry) => entry.gloss_id);
+}
+
+/**
+ * Phase 53 (spec D10, D11, ruling R-D9). Several photo imports, one per photo, saved together
+ * in a transaction the caller opened and authorized for `enrolled`: what a target's create or
+ * add brings from photos. Each import is locked, and must be one of `enrolled`'s: else
+ * PhotoImportNotFound. A failed one (its photo could not be read) is skipped and counted as a
+ * photo not read. Any other must be ready, as a save of it alone must be: one reading, saved,
+ * discarded or expired is PhotoImportConflict. The rows of all of them, in the order given and
+ * then by position, are one review, as the app shows it: the first row of each chosen gloss
+ * (firstRowPerGloss), and of those the ticked ones are saved as a save of one import saves
+ * them, every import then marked saved. Answers the saved gloss ids, resolved through merges,
+ * in order, and the photos not read. No import, or only failed ones: nothing is written.
+ */
+export async function saveImportsInTx(
+  repos: Repos,
+  logger: Logger,
+  input: {
+    enrolled: Enrollment;
+    actorUserId: string;
+    importIds: readonly string[];
+    now: number;
+    stockSaveDelaySeconds: number;
+  },
+): Promise<{ glossIds: string[]; failedPhotos: number }> {
+  const { photoImport } = repos;
+  const joined: { importId: string; items: PhotoImportItemRow[] }[] = [];
+  let failedPhotos = 0;
+  // An id named twice is one import, saved once.
+  for (const importId of new Set(input.importIds)) {
+    const row = await photoImport.findImportForUpdate(importId);
+    if (!row || row.enrollmentId !== input.enrolled.id) throw new PhotoImportNotFound(importId);
+    if (row.status === 'failed') {
+      failedPhotos += 1;
+      continue;
+    }
+    const items = await photoImport.listItems(importId);
+    if (!readyToSave(row, items, input.now)) throw new PhotoImportConflict(importId, 'not ready to save');
+    joined.push({ importId, items });
+  }
+  if (joined.length === 0) return { glossIds: [], failedPhotos };
+  const shown = firstRowPerGloss(
+    joined.flatMap(({ importId, items }) => items.map((item) => ({ importId, item }))),
+    ({ item }) => item.chosenGlossId,
+  );
+  const entries = firstPerGloss(shown.flatMap(({ importId, item }) => entriesToSave([item]).map((entry) => ({ ...entry, importId }))));
+  const glossIds = await writeImportSave(repos, logger, {
+    enrolled: input.enrolled,
+    actorUserId: input.actorUserId,
+    importIds: joined.map(({ importId }) => importId),
+    entries,
+    stockSaveDelaySeconds: input.stockSaveDelaySeconds,
+  });
+  return { glossIds, failedPhotos };
 }
 
 /**
@@ -192,78 +342,29 @@ export function createPhotoImportService({
      * so a refused gloss or a lost race rolls all of them back. A repeated save
      * answers the same ids and writes nothing, which covers a save whose
      * response was lost.
+     *
+     * Phase 53. Its writes are writeImportSave's, shared with a target's save of
+     * several imports. The rows differ: this import's review shows every row, so
+     * every ticked row is saved, where a target's review shows only the first
+     * row of each gloss (saveImportsInTx).
      */
     save: async (actorUserId: string, importId: string): Promise<SaveVocabularyResponse> => {
       const outcome = await transaction(async (repos) => {
-        const { photoImport, vocabulary, gloss, dict, jobs } = repos;
+        const { photoImport } = repos;
         const row = await photoImport.findImportForUpdate(importId);
         if (!row) throw new PhotoImportNotFound(importId);
         const enrolled = await authorizeImport(repos, actorUserId, row);
         const items = await photoImport.listItems(importId);
         const entries = firstPerGloss(entriesToSave(items));
         if (row.status === 'saved') return { entries, items, repeated: true };
-        const ready =
-          row.status === 'read' &&
-          isOpen(row.status, row.createdAt, now()) &&
-          !items.some((item) => item.status === 'pending');
-        if (!ready) throw new PhotoImportConflict(importId, 'not ready to save');
-
-        // Phase 31 (spec D14). Share-lock and resolve before anything is checked or
-        // written. The rows' options are a snapshot, so a choice made before a
-        // merge names a forwarded gloss: it is saved as its survivor.
-        const resolved = await gloss.resolveGlosses(entries.map((entry) => entry.gloss_id));
-        const foreign = entries.find((entry) => {
-          const found = resolved.get(entry.gloss_id);
-          return found !== undefined && found.userLanguageCode !== enrolled.source_language;
+        if (!readyToSave(row, items, now())) throw new PhotoImportConflict(importId, 'not ready to save');
+        await writeImportSave(repos, logger, {
+          enrolled,
+          actorUserId,
+          importIds: [importId],
+          entries: entries.map((entry) => ({ ...entry, importId })),
+          stockSaveDelaySeconds,
         });
-        if (foreign) {
-          logger.info({ event: 'photo_import_entry_refused', import_id: importId, gloss_id: foreign.gloss_id, reason: 'language' });
-          throw new GlossLanguageMismatch(foreign.gloss_id);
-        }
-        const toSave = firstPerGloss(
-          entries.map((entry) => ({ gloss_id: resolved.get(entry.gloss_id)?.id ?? entry.gloss_id, variant_id: entry.variant_id })),
-        );
-        const saveable = await vocabulary.findSaveable({
-          entries: toSave.map((entry) => ({ glossId: entry.gloss_id, variantId: entry.variant_id })),
-          targetLanguage: enrolled.target_language,
-          sourceLanguage: enrolled.source_language,
-        });
-        const passed = new Set(saveable.map((entry) => `${entry.glossId} ${entry.variantId}`));
-        const refused = toSave.find((entry) => !passed.has(`${entry.gloss_id} ${entry.variant_id}`));
-        if (refused) {
-          // As today's save logs it: the 400 body is fixed, and an import that
-          // can never be saved is diagnosed only from here.
-          logger.info({
-            event: 'photo_import_entry_refused',
-            import_id: importId,
-            gloss_id: refused.gloss_id,
-            variant_id: refused.variant_id,
-          });
-          throw new InvalidVocabularyEntry(refused.gloss_id);
-        }
-        // Phase 28. Only the list's owner photographs into it; no grant reaches
-        // a photo import, so the owner is who added these words. Phase 29 made
-        // that true by construction: the check above lets only the owner here.
-        await vocabulary.insertEntries({
-          enrollmentId: row.enrollmentId,
-          addedByUserId: enrolled.user_id,
-          entries: saveable,
-        });
-        // Phase 31 (spec D12). A word whose lemma form this language has not
-        // rendered gets it rendered in the background, once (plan item 3).
-        const claimed = await dict.claimLemmaRenders(
-          saveable.map((entry) => ({ lexemeId: entry.lexemeId, userLanguageCode: enrolled.source_language })),
-        );
-        for (const pair of claimed) {
-          await jobs.enqueue(RENDER_LEMMA, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
-        }
-        // Conditional: a discard that landed first wins, and the throw rolls
-        // the inserts back.
-        if (!(await photoImport.transition(importId, ['read'], 'saved'))) {
-          throw new PhotoImportConflict(importId, 'not ready to save');
-        }
-        // Phase 43 (spec D3, ruling R3). The next session in stock, if the list has none.
-        await requestStockAfterSave(repos, row.enrollmentId, stockSaveDelaySeconds);
         return { entries, items, repeated: false };
       });
       if (!outcome.repeated) {

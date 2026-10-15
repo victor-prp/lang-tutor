@@ -32,6 +32,79 @@ async function enrollmentOrThrow(repos: Repos, enrollmentId: string): Promise<En
 }
 
 /**
+ * A typed save's checks and writes, inside a transaction the caller opened and
+ * authorized: all-or-nothing, so every entry is checked before anything is
+ * written and a throw rolls the caller's transaction back. A gloss already
+ * saved is not an error (the insert's DO NOTHING keeps its first form).
+ * Answers the saved gloss ids, resolved through merges, in the order asked,
+ * each once; nothing is read or written for no entries.
+ *
+ * Phase 53 (spec D10, D11). Extracted from save, so a target's typed words are
+ * saved exactly as the list saves them, in the target's own transaction.
+ */
+export async function saveEntriesInTx(
+  repos: Repos,
+  logger: Logger,
+  input: {
+    enrolled: Enrollment;
+    actorUserId: string;
+    entries: readonly VocabularyEntryInput[];
+    stockSaveDelaySeconds: number;
+  },
+): Promise<string[]> {
+  const { enrolled, actorUserId } = input;
+  const asked = firstPerGloss(input.entries);
+  if (asked.length === 0) return [];
+  // Phase 31 (spec D14). Share-lock and resolve before anything is checked or
+  // written: a merge of these glosses runs wholly before this or wholly after.
+  const resolved = await repos.gloss.resolveGlosses(asked.map((entry) => entry.gloss_id));
+  const foreign = asked.find((entry) => {
+    const gloss = resolved.get(entry.gloss_id);
+    return gloss !== undefined && gloss.userLanguageCode !== enrolled.source_language;
+  });
+  if (foreign) {
+    logger.info({ event: 'vocabulary_entry_refused', enrollment_id: enrolled.id, gloss_id: foreign.gloss_id, reason: 'language' });
+    throw new GlossLanguageMismatch(foreign.gloss_id);
+  }
+  const toSave = firstPerGloss(
+    asked.map((entry) => ({ gloss_id: resolved.get(entry.gloss_id)?.id ?? entry.gloss_id, variant_id: entry.variant_id })),
+  );
+  const saveable = await repos.vocabulary.findSaveable({
+    entries: toSave.map((entry) => ({ glossId: entry.gloss_id, variantId: entry.variant_id })),
+    targetLanguage: enrolled.target_language,
+    sourceLanguage: enrolled.source_language,
+  });
+  const passed = new Set(saveable.map((row) => `${row.glossId} ${row.variantId}`));
+  const refused = toSave.find((entry) => !passed.has(`${entry.gloss_id} ${entry.variant_id}`));
+  if (refused) {
+    // The 400 body is fixed; the gloss that caused it is only in the log.
+    // Logged before the throw, inside the transaction, so it is recorded
+    // even though the rollback follows. Logger has no warn level, so this
+    // is an info event like every other.
+    logger.info({
+      event: 'vocabulary_entry_refused',
+      enrollment_id: enrolled.id,
+      gloss_id: refused.gloss_id,
+      variant_id: refused.variant_id,
+    });
+    throw new InvalidVocabularyEntry(refused.gloss_id);
+  }
+  await repos.vocabulary.insertEntries({ enrollmentId: enrolled.id, addedByUserId: actorUserId, entries: saveable });
+  // Phase 31 (spec D12). A word whose lemma form this language has not
+  // rendered gets it rendered in the background, once (plan item 3).
+  const claimed = await repos.dict.claimLemmaRenders(
+    saveable.map((row) => ({ lexemeId: row.lexemeId, userLanguageCode: enrolled.source_language })),
+  );
+  for (const pair of claimed) {
+    await repos.jobs.enqueue(RENDER_LEMMA, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
+  }
+  // Phase 43 (spec D3). A list with no session in stock gets one, once the
+  // burst of saves this may be the first of has landed (ruling R3).
+  await requestStockAfterSave(repos, enrolled.id, input.stockSaveDelaySeconds);
+  return toSave.map((entry) => entry.gloss_id);
+}
+
+/**
  * An enrollment's word list. One transaction per use case (ADR 0001 R8); the
  * enrollment check shares it, because an entry for an enrollment that does not
  * exist is wrong, and so is a page read against one.
@@ -66,52 +139,7 @@ export function createVocabularyService({
       await transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
         by = await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.add' });
-        // Phase 31 (spec D14). Share-lock and resolve before anything is checked or
-        // written: a merge of these glosses runs wholly before this or wholly after.
-        const resolved = await repos.gloss.resolveGlosses(asked.map((entry) => entry.gloss_id));
-        const foreign = asked.find((entry) => {
-          const gloss = resolved.get(entry.gloss_id);
-          return gloss !== undefined && gloss.userLanguageCode !== enrolled.source_language;
-        });
-        if (foreign) {
-          logger.info({ event: 'vocabulary_entry_refused', enrollment_id: enrollmentId, gloss_id: foreign.gloss_id, reason: 'language' });
-          throw new GlossLanguageMismatch(foreign.gloss_id);
-        }
-        const toSave = firstPerGloss(
-          asked.map((entry) => ({ gloss_id: resolved.get(entry.gloss_id)?.id ?? entry.gloss_id, variant_id: entry.variant_id })),
-        );
-        const saveable = await repos.vocabulary.findSaveable({
-          entries: toSave.map((entry) => ({ glossId: entry.gloss_id, variantId: entry.variant_id })),
-          targetLanguage: enrolled.target_language,
-          sourceLanguage: enrolled.source_language,
-        });
-        const passed = new Set(saveable.map((row) => `${row.glossId} ${row.variantId}`));
-        const refused = toSave.find((entry) => !passed.has(`${entry.gloss_id} ${entry.variant_id}`));
-        if (refused) {
-          // The 400 body is fixed; the gloss that caused it is only in the log.
-          // Logged before the throw, inside the transaction, so it is recorded
-          // even though the rollback follows. Logger has no warn level, so this
-          // is an info event like every other.
-          logger.info({
-            event: 'vocabulary_entry_refused',
-            enrollment_id: enrollmentId,
-            gloss_id: refused.gloss_id,
-            variant_id: refused.variant_id,
-          });
-          throw new InvalidVocabularyEntry(refused.gloss_id);
-        }
-        await repos.vocabulary.insertEntries({ enrollmentId, addedByUserId: actorUserId, entries: saveable });
-        // Phase 31 (spec D12). A word whose lemma form this language has not
-        // rendered gets it rendered in the background, once (plan item 3).
-        const claimed = await repos.dict.claimLemmaRenders(
-          saveable.map((row) => ({ lexemeId: row.lexemeId, userLanguageCode: enrolled.source_language })),
-        );
-        for (const pair of claimed) {
-          await repos.jobs.enqueue(RENDER_LEMMA, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
-        }
-        // Phase 43 (spec D3). A list with no session in stock gets one, once the
-        // burst of saves this may be the first of has landed (ruling R3).
-        await requestStockAfterSave(repos, enrollmentId, stockSaveDelaySeconds);
+        await saveEntriesInTx(repos, logger, { enrolled, actorUserId, entries, stockSaveDelaySeconds });
       });
       logger.info({ event: 'vocabulary_saved', enrollment_id: enrollmentId, entry_count: asked.length, by });
       return { saved_gloss_ids: asked.map((entry) => entry.gloss_id) };

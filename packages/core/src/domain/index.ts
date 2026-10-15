@@ -29,6 +29,7 @@ export type { Dimension } from './progress';
 export { SCRIPTS, answerLanguage, gatesScript, isTypedAnswerType, wrongScript } from './script';
 export type { TypedAnswerType } from './script';
 export { normaliseGloss } from './gloss';
+export { firstRowPerGloss } from './importRows';
 export { FSRS6_DEFAULT, retrievability, review } from './memory';
 export type { Grade, MemoryState } from './memory';
 export { dimensionsTested, gradesFor } from './memoryGrades';
