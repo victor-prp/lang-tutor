@@ -192,9 +192,16 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
   const steps = new Map(input.steps.filter((step) => live.includes(step.dimension)).map((step) => [step.glossId, step]));
   const waiting = new Set(input.steps.filter((step) => !live.includes(step.dimension)).map((step) => step.glossId));
 
-  // Phase 39 (spec D5). A waiting gloss is no candidate: no class, no pass.
+  // The glosses a pool lists are no words of the main path's.
+  const listed = new Set(pools.flatMap((pool) => (pool.glossIds === null ? [] : [...pool.glossIds])));
+
+  // Phase 39 (spec D5). A waiting gloss is no candidate: no class, no pass. Phase 53 (final
+  // review I1): unless a pool lists it. A target's word is asked while its family waits on
+  // another meaning, so it is met before the target's date (spec D7); a family still gives a
+  // session one gloss, by the families picked and the claims, as every family does. With no
+  // pool that lists glosses, `listed` is empty and the rule is phase 39's.
   const candidates = input.saved
-    .filter((gloss) => !input.families.waiting.has(gloss.glossId))
+    .filter((gloss) => !input.families.waiting.has(gloss.glossId) || listed.has(gloss.glossId))
     .map((gloss): Candidate => {
       const rows = memory.get(gloss.glossId);
       const owed = steps.get(gloss.glossId);
@@ -267,8 +274,6 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
   const free = (candidate: Candidate) =>
     open(candidate) && (candidate.family === undefined || (claims.get(candidate.family) ?? candidate.pick.glossId) === candidate.pick.glossId);
 
-  // The glosses a pool lists are no words of the main path's.
-  const listed = new Set(pools.flatMap((pool) => (pool.glossIds === null ? [] : [...pool.glossIds])));
   // Per pool: its picks over every pass, the new words it introduced, and the groups it
   // held when it first ran.
   const chosen: ChosenPick[][] = pools.map(() => []);

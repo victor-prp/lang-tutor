@@ -340,6 +340,28 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     expect(ids(picks)).not.toContain('t0');
   });
 
+  it("asks a target word that waits on its family's practised meaning, on an exam's eve too, never beside it (final review I1)", () => {
+    // `kin`, saved and practised, is its family's current meaning, and due; `t`, the list's
+    // word, never met, waits behind it (phase 39).
+    const t = fresh('t');
+    const words = [t, known('kin', { [WR]: 0.3 }), ...mains(12)];
+    const families = { familyOf: new Map([['t', 1], ['kin', 1]]), waiting: new Set(['t']) };
+    for (const daysLeft of [4, 2, 1]) {
+      const { picks, split } = chooseWithTargets(session(words, [target('exam', 'exam', daysLeft, [t])], { families }));
+      expect({ daysLeft, picks: picks.length, t: ids(picks).includes('t'), kin: ids(picks).includes('kin') }).toEqual({
+        daysLeft,
+        picks: SESSION_LENGTH,
+        t: true,
+        kin: false,
+      });
+      expect(split[0]).toMatchObject({ slots: SESSION_LENGTH, picked: 1, reason: daysLeft === 1 ? 'exclusive' : expect.any(String) });
+    }
+    // On no target, the word waits again: the main path asks the meaning it waits on.
+    const { picks } = chooseWithTargets(session(words, [], { families }));
+    expect(ids(picks)).toContain('kin');
+    expect(ids(picks)).not.toContain('t');
+  });
+
   it('lets a target keep its pace past the daily cap, while the main path meets no new word', () => {
     const others = [...range(5, (i) => fresh(`n${i}`)), ...mains(30)];
     const exam = unmet(20);
@@ -424,10 +446,12 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     expect(split[0]).toMatchObject({ slots: 10, picked: 2 });
   });
 
-  it('leaves no session empty while a word can be asked: new words past the cap come from a target too', () => {
-    // A random input the first version left empty. g1, the one word that can be asked, is
-    // new and only the exam's; the cap is spent; the exam owes no new word today, since
-    // g0 was met today; and g0 waits (phase 39).
+  it('leaves no session empty while a word can be asked: a random input the first version left empty', () => {
+    // g1 is new and only the exam's; the cap is spent; the exam owes no new word today, since
+    // g0 was met today; and g0 waits (phase 39). The first version asked nothing. Then g1 came
+    // past the cap. Since final review I1 a target's word is asked though it waits, so x0, the
+    // first pool to list g0, asks it. New words past the cap from a listing pool are shown by
+    // choosePools' "goes past the daily cap only for a session still empty".
     const words = [{ id: 'g0', memory: { [WR]: 0.95, [SP]: 0.5, [SR]: 0.1, [SK]: 0.1 } }, fresh('g1', { key: 'run' })];
     const families = { familyOf: new Map<string, number | string>([['g0', 'f2'], ['g1', 0]]), waiting: new Set(['g0']) };
     const targets = [target('x0', 'homework', 13, [words[0]]), target('x1', 'homework', 9, []), target('x2', 'exam', 14, words)];
@@ -435,11 +459,11 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     const { picks, split } = chooseWithTargets(
       session(words, targets, { newToday: DAY_NEW_CAP + 3, listening: false, speaking: true, families }, { introducedToday: new Set(['g0']) }),
     );
-    expect(picks).toEqual([{ glossId: 'g1', dimension: WR, rung: 1, level: 1, r: null, cls: 'NEW' }]);
+    expect(picks).toEqual([{ glossId: 'g0', dimension: SK, rung: 1, level: 1, r: 0.1, cls: 'DUE' }]);
     expect(split.map(({ targetId, picked }) => ({ targetId, picked }))).toEqual([
       { targetId: 'x1', picked: 0 },
-      { targetId: 'x0', picked: 0 },
-      { targetId: 'x2', picked: 1 },
+      { targetId: 'x0', picked: 1 },
+      { targetId: 'x2', picked: 0 },
     ]);
   });
 

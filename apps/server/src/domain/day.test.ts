@@ -734,6 +734,55 @@ describe("a target, phase 37's learner: an exam due in 4 days (phase 53, spec §
   itKeepsTheSessionRules(run, exam.dueOn);
 });
 
+/** Final review I1. A meaning saved and practised before the lists' first day, never known: its
+ *  family's current meaning, which the list's first word, another meaning of the same word, waits
+ *  on (phase 39). The list word keeps waiting throughout: once both are practised, the more common
+ *  meaning, the one practised, stays current. */
+const SIBLING: Omit<FamilyGloss, 'knownAt'> = {
+  glossId: 'sib',
+  key: 'sibling',
+  savedAt: '2026-10-01T09:00:00.000000Z',
+  lexemeId: 'x-shared',
+  lemma: 'x-shared',
+  forms: ['f-shared'],
+  order: [0, 0],
+  speakable: true,
+};
+const SIBLING_MEMORY = (['written_receptive', 'written_productive'] as const).map((dimension) => ({
+  glossId: SIBLING.glossId,
+  dimension,
+  state: { stability: 3, difficulty: 5, lastDay: '2026-10-09', reps: 2, lapses: 0, params: 'fsrs6-default' },
+}));
+
+/** withList's lists, the first list word another meaning of SIBLING's word, SIBLING saved and practised. */
+function withPractisedSibling(words: number): DayList {
+  const list = withList(words);
+  const shared = { lexemeId: SIBLING.lexemeId, lemma: SIBLING.lemma, forms: SIBLING.forms, order: [0, 1] as const };
+  return {
+    ...list,
+    saved: [...list.saved.map((gloss) => (gloss.glossId === listId(1) ? { ...gloss, ...shared } : gloss)), SIBLING],
+    memory: [...list.memory, ...SIBLING_MEMORY],
+  };
+}
+
+describe("a target word whose family waits, phase 37's learner: an exam due in 4 days, its first word another meaning of a word practised (phase 53, final review I1)", () => {
+  const exam: ActiveTarget = { id: 'exam', kind: 'exam', dueOn: dueIn(4), glossIds: listIds(1, 20) };
+  const run = runTargets(withPractisedSibling(20), 6, () => [exam]);
+
+  it('splits every session by the rules: the graded wish, the split and the picks', () => {
+    expectSplitsByTheRules(run);
+  });
+
+  it('asks the word though it waits on the meaning practised, and meets every word before the last day', () => {
+    const first = run.sessions.findIndex((session) => session.picks.some((pick) => pick.glossId === listId(1)));
+    expect(first).not.toBe(-1);
+    expect(run.sessions[first].families.state.get(listId(1))).toBe('waiting');
+    expectMetBeforeTheLastDay(run, 'exam');
+  });
+
+  itKeepsTheSessionRules(run, exam.dueOn);
+});
+
 describe("two targets, phase 37's learner: a 4-word exam due in 6 days beside a 16-word homework due in 10 (phase 53, spec §2 row 4)", () => {
   const homework: ActiveTarget = { id: 'homework', kind: 'homework', dueOn: dueIn(10), glossIds: listIds(1, 16) };
   const exam: ActiveTarget = { id: 'exam', kind: 'exam', dueOn: dueIn(6), glossIds: listIds(17, 20) };
