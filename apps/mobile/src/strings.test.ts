@@ -11,6 +11,14 @@ describe('sentence-card strings (phase 27 D5, D6)', () => {
   });
 });
 
+describe('the meet card (phase 54 D1)', () => {
+  it('words its title, its prompt and its button exactly', () => {
+    expect(strings.meetTitle).toBe('מילה חדשה');
+    expect(strings.meetSayAloud).toBe('אמרו את המילה בקול');
+    expect(strings.continueLabel).toBe('המשך');
+  });
+});
+
 describe('language names', () => {
   it('names Italian in every string composed from a language code', () => {
     expect(strings.languageName('it')).toBe('איטלקית');

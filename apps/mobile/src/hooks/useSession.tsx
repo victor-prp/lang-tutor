@@ -17,7 +17,7 @@ import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { checksFit, type CardAnswer } from '@/feedback';
 import type { Clip } from '@/recording';
-import { answerRoute, applyQueued, landed, nextStepRequest, queuedFrom, resumed, retried, settle, type QuizState, type Settled } from '@/quiz';
+import { answerRoute, applyQueued, landed, nextStepRequest, queuedFrom, resumed, retried, seenState, settle, type QuizState, type Settled } from '@/quiz';
 import { canJudge, judgedAnswer, type JudgeAttempt } from '@/judging';
 import { IDLE_ATTEMPT, passesUnseen, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 import { strings } from '@/strings';
@@ -56,6 +56,9 @@ export type SessionValue = {
   submitSpeech: (clip: Clip) => void;
   /** Answers a speaking card without audio: skip, or show the answer. */
   pass: (kind: 'skip' | 'show_answer') => void;
+  /** Phase 54 (spec D1, D6). The meet card tapped through: answered with `seen`,
+   *  and the next card at once, with no banner. */
+  seen: () => void;
   /** The recorder could not start: the card shows the "couldn't check" notice. */
   markSpeechFailed: () => void;
   /** Back to a fresh attempt after one that recorded nothing. */
@@ -339,6 +342,19 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     [state, api, queueResponse],
   );
 
+  // Phase 54 (spec D1, D6). A meet card asked nothing, so it has no banner:
+  // like a skip, Continue is requested at once and the next card appears as
+  // soon as the server answers. It is never held for a second try, so no settle.
+  const seen = useCallback(() => {
+    if (!state || state.answer !== null || state.question?.type !== 'meet') return;
+    const { sessionId, question } = state;
+    setState((current) => (current ? seenState(current) : current));
+    queueResponse(
+      sessionId,
+      api.nextStep(sessionId, nextStepRequest(question.id, { seen: true }, null)).then((next) => ({ answer: { seen: true }, next, met: null })),
+    );
+  }, [state, api, queueResponse]);
+
   const markSpeechFailed = useCallback(() => {
     setState((current) =>
       current && current.answer === null && current.speech.phase !== 'checking'
@@ -392,6 +408,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         speakingOff: null,
         submitSpeech,
         pass,
+        seen,
         retrySpeech,
         markSpeechFailed,
         stopSpeaking,
@@ -422,6 +439,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       speakingOff: state.speakingOff,
       submitSpeech,
       pass,
+      seen,
       retrySpeech,
       markSpeechFailed,
       stopSpeaking,
@@ -430,7 +448,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       retry: state.retry,
       next,
     };
-  }, [state, enter, select, submitText, submitBoard, submitSpeech, pass, retrySpeech, markSpeechFailed, stopSpeaking, submitJudged, next]);
+  }, [state, enter, select, submitText, submitBoard, submitSpeech, pass, seen, retrySpeech, markSpeechFailed, stopSpeaking, submitJudged, next]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

@@ -50,6 +50,8 @@ export function missedPair({ question, correct_answer }: MissedQuestion): { word
       return { word: question.question, meaning: correct_answer };
     case 'dictation':
     case 'read_aloud':
+    // Phase 54: a meet card is never missed, but it reads word → meaning too.
+    case 'meet':
     case 'typed_meaning':
       return { word: question.question, meaning: question.meaning };
     // Phase 27: the practised word, not the sentence round it.

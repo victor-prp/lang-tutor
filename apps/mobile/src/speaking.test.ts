@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { Question } from '@lang-tutor/core/api';
 
-import { IDLE_ATTEMPT, attemptNotice, isSkip, passesUnseen } from './speaking';
+import { IDLE_ATTEMPT, attemptNotice, hasBanner, isSkip, passesUnseen } from './speaking';
 import { strings } from './strings';
 
 const READ: Question = { id: 'r', type: 'read_aloud', vocab_term_id: 'l', question: 'gatto', meaning: 'חתול' };
@@ -47,5 +47,16 @@ describe('isSkip', () => {
     expect(isSkip({ pass: 'skip' })).toBe(true);
     expect(isSkip({ pass: 'show_answer' })).toBe(false);
     expect(isSkip({ heard: 'gatto', verdict: 'understood' })).toBe(false);
+  });
+});
+
+describe('hasBanner (phase 54 D1)', () => {
+  it('a skip and a meet card tapped through show none; every other answer shows one', () => {
+    expect(hasBanner({ pass: 'skip' })).toBe(false);
+    expect(hasBanner({ seen: true })).toBe(false);
+    expect(hasBanner({ pass: 'show_answer' })).toBe(true);
+    expect(hasBanner({ option_index: 1 })).toBe(true);
+    expect(hasBanner({ text: 'gatto' })).toBe(true);
+    expect(hasBanner({ heard: 'gatto', verdict: 'understood' })).toBe(true);
   });
 });

@@ -131,6 +131,9 @@ export const strings = {
   // One word on a translation card is asked again, not sent.
   wordOnlyNotice: 'כתבו את כל המשפט, לא רק את המילה',
   translationReference: 'תרגום לדוגמה:',
+  // Phase 54 (spec D1). The meet card: a new word, shown before it is asked.
+  meetTitle: 'מילה חדשה',
+  meetSayAloud: 'אמרו את המילה בקול',
   // Phase 25 (spec D7).
   questionInstructionReadAloud: 'קראו בקול',
   questionInstructionSay: (language: string) => `אמרו ב${languageName(language)}`,

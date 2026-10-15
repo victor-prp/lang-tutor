@@ -14,6 +14,7 @@ const CARDS: Record<Question['type'], Question> = {
   listen_choice: q({ id: '4', type: 'listen_choice', question: 'casa', options: ['בית'], correct_option: 0 }),
   dictation: q({ id: '5', type: 'dictation', question: 'parlo', meaning: 'מדבר' }),
   read_aloud: q({ id: '6', type: 'read_aloud', question: 'gatto', meaning: 'חתול' }),
+  meet: q({ id: '6m', type: 'meet', question: 'finestra', meaning: 'חלון' }),
   reverse_choice: q({ id: '7', type: 'reverse_choice', question: 'בית', options: ['porta', 'casa'], correct_option: 1 }),
   typed_translation: q({ id: '8', type: 'typed_translation', question: 'חלון', answer: 'finestra' }),
   letter_tiles: q({ id: '9', type: 'letter_tiles', question: 'בית', answer: 'casa', tiles: [] }),
@@ -34,6 +35,7 @@ describe('cardVoice (spec D1)', () => {
     ['listen_choice', { arrival: 'casa', after: null }],
     ['dictation', { arrival: 'parlo', after: null }],
     ['read_aloud', { arrival: 'gatto', after: null }],
+    ['meet', { arrival: 'finestra', after: null }],
     ['reverse_choice', { arrival: null, after: 'casa' }],
     ['typed_translation', { arrival: null, after: 'finestra' }],
     ['letter_tiles', { arrival: null, after: 'casa' }],
@@ -53,7 +55,7 @@ describe('cardVoice (spec D1)', () => {
     }
   });
 
-  it('Done 2: a card whose answer is target-language text is silent on arrival, but for dictation and read aloud', () => {
+  it('Done 2: a card whose answer is target-language text is silent on arrival, but for dictation, read aloud and meet', () => {
     const producesTarget: Question['type'][] = [
       'reverse_choice', 'typed_translation', 'letter_tiles', 'say_translation',
       'cloze_choice', 'cloze_typed', 'sentence_translation',
@@ -70,6 +72,11 @@ describe('cardVoice (spec D1)', () => {
 
   it('a read-aloud card passed unseen, with speaking off, says nothing', () => {
     expect(cardVoice(CARDS.read_aloud, { speaking: false })).toEqual({ arrival: null, after: null });
+  });
+
+  it('a meet card says its word on arrival whether or not speaking is off (phase 54 D1)', () => {
+    expect(cardVoice(CARDS.meet, { speaking: true })).toEqual({ arrival: 'finestra', after: null });
+    expect(cardVoice(CARDS.meet, { speaking: false })).toEqual({ arrival: 'finestra', after: null });
   });
 
   it('a say-the-translation card typed, with speaking off, keeps its cue', () => {

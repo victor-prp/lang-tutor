@@ -255,7 +255,8 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
 }
 
 const MIC = 96;
-const styles = StyleSheet.create({
+// Phase 54 (spec D1). The meet card is drawn in this card's layout, so it borrows its styles.
+export const speakingStyles = StyleSheet.create({
   container: { gap: spacing.lg },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   // A target-language word: left to right inside the mirrored screen.
@@ -290,3 +291,4 @@ const styles = StyleSheet.create({
   secondary: { paddingVertical: spacing.sm, paddingHorizontal: spacing.lg, borderRadius: radii.md, borderWidth: 1, borderColor: colors.primary },
   secondaryLabel: { color: colors.primary, fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '700' },
 });
+const styles = speakingStyles;

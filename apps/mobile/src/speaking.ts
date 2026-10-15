@@ -31,3 +31,10 @@ export function passesUnseen(question: Question | undefined, speakingOff: Speaki
 export function isSkip(answer: CardAnswer): boolean {
   return 'pass' in answer && answer.pass === 'skip';
 }
+
+/** Phase 54 (spec D1). Whether an answer shows the feedback banner. A skip does
+ *  not, and nor does a meet card tapped through: it asked nothing, so it has
+ *  nothing to say, and the next card follows at once. */
+export function hasBanner(answer: CardAnswer): boolean {
+  return !isSkip(answer) && !('seen' in answer);
+}

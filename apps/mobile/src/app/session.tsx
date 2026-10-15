@@ -8,6 +8,7 @@ import { MarkedText } from '@/components/ContextLine';
 import { FeedbackBanner } from '@/components/FeedbackBanner';
 import { LetterTilesView } from '@/components/LetterTilesView';
 import { MatchingBoardView } from '@/components/MatchingBoardView';
+import { MeetCardView } from '@/components/MeetCardView';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
 import { NewMeaningPrompt } from '@/components/NewMeaningPrompt';
 import { ProgressBar } from '@/components/ProgressBar';
@@ -22,7 +23,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession, type SessionValue } from '@/hooks/useSession';
 import { showsSentenceTranslation, splitAtGap } from '@/sentence';
-import { isSkip } from '@/speaking';
+import { hasBanner } from '@/speaking';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 import { scriptGate } from '@/typedSubmit';
@@ -277,6 +278,10 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           retry={null}
         />
       );
+    case 'meet':
+      // Phase 54 (spec D1): a new word, met before it is asked. Ungraded, and
+      // independent of speaking: it asks the learner to say it, and records nothing.
+      return <MeetCardView key={question.id} question={question} language={language} answered={session.answered} onSeen={session.seen} />;
     case 'say_translation':
       // Spec D8: with speaking off, the same card is typed.
       if (session.speakingOff !== null) {
@@ -333,7 +338,7 @@ export default function SessionScreen() {
   // Phase 44 (spec D2): the card reads itself aloud.
   useCardVoice(session.question ?? null, {
     language,
-    banner: session.answer !== null && !isSkip(session.answer),
+    banner: session.answer !== null && hasBanner(session.answer),
     speaking: session.speakingOff === null,
   });
   // Phase 27: what a meaning card last sent, so "try again" sends the same text.
@@ -416,7 +421,7 @@ export default function SessionScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {session.answer && !isSkip(session.answer) ? (
+      {session.answer && hasBanner(session.answer) ? (
         <FeedbackBanner feedback={feedbackFor(question, session.answer, session.retry)} onContinue={session.next} />
       ) : null}
     </SafeAreaView>
