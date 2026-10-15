@@ -146,7 +146,7 @@ jobs:
   # Phase 32 (spec D4–D7). The Android app, after the server answers /health
   # with the tag, so new app code never calls a server that is not live yet.
   # The tag's checkout (the default ref), like build-push: what ships is the
-  # tag's app. scripts/android-release.sh decides between an over-the-air
+  # tag's app. scripts/native-release.sh decides between an over-the-air
   # update and a new Play build by fingerprint.
   #
   # The job is skipped (shown greyed out in the run) unless the repository
@@ -179,4 +179,38 @@ jobs:
           packager: npm
           token: ${{ secrets.EXPO_TOKEN }}
       # A dispatch is a rollback (npm run rollback): it may update, never build.
-      - run: ./scripts/android-release.sh ${{ github.event_name == 'workflow_dispatch' && '--rollback' || '' }}
+      - run: ./scripts/native-release.sh android ${{ github.event_name == 'workflow_dispatch' && '--rollback' || '' }}
+
+  # Phase 36 (spec D3–D5). The iPhone and iPad app: the android job with the
+  # iOS switch. EAS builds on Expo's Macs, so this runner stays Linux. It runs
+  # beside android, not after it: each fails and reruns on its own. It is
+  # skipped (greyed out) unless the repository variable IOS_RELEASE is exactly
+  # "on"; the script checks it again, and skips, green, until the one-time
+  # setup is done (no EXPO_TOKEN, no EAS project id, or no App Store Connect
+  # app id in eas.json). Builds go to TestFlight, and a
+  # matching build older than 80 days is rebuilt: TestFlight expires it at 90.
+  ios:
+    needs: apply
+    if: vars.IOS_RELEASE == 'on'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      IOS_RELEASE: ${{ vars.IOS_RELEASE }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: expo/expo-github-action@v9
+        if: env.IOS_RELEASE == 'on' && env.EXPO_TOKEN != ''
+        with:
+          eas-version: 24.8.0
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+      # A dispatch is a rollback (npm run rollback): it may update, never build.
+      - run: ./scripts/native-release.sh ios ${{ github.event_name == 'workflow_dispatch' && '--rollback' || '' }}

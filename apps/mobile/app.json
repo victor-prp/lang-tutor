@@ -8,7 +8,13 @@
     "scheme": "langtutor",
     "userInterfaceStyle": "light",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "ai.wordspal.app",
+      "supportsTablet": true,
+      "requireFullScreen": true,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "ai.wordspal.app",

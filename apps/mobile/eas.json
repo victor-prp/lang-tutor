@@ -19,6 +19,13 @@
       "android": {
         "buildType": "app-bundle"
       }
+    },
+    "simulator": {
+      "channel": "production",
+      "environment": "production",
+      "ios": {
+        "simulator": true
+      }
     }
   },
   "submit": {

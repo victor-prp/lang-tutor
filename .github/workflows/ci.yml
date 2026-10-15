@@ -63,8 +63,8 @@ jobs:
       - run: ./scripts/test-release-workflow.sh
       # npm run release / rollback: tag naming and refusals, against a bare origin.
       - run: ./scripts/test-release.sh
-      # Phase 32. The Android release's build-or-update decision, against stub eas and npx.
-      - run: ./scripts/test-android-release.sh
+      # Phases 32 and 36. The native releases' build-or-update decision, against stub eas and npx.
+      - run: ./scripts/test-native-release.sh
       # Phase 49. The commit the server and the app name, against a throwaway repository.
       - run: ./scripts/test-with-commit.sh
       # Request logs. A lane's output saved to its files, against a throwaway LANE_LOGS.
