@@ -200,6 +200,27 @@ test('(d) the share of cards whose rung is not the one memory implies (phase 37 
   assert.equal(weekNumbers(stateWith(log), 1, noMemory, WRITTEN).d, 0.25);
 });
 
+test("(d) reads a ladder's cards at their own rungs, and a card outside a ladder as before (phase 54)", () => {
+  // Phase 54 (spec D3). A word with a meet card in a session is a ladder there: its multiple
+  // choice, reverse choice and typed translation are the design's rungs, not the rule's. The
+  // replay writes memory at the session's end, so without this the typed card (written
+  // productive, rung 2) read as off-rung against no memory: three ladders gave (d) = 3/9.
+  const ladder = (word: string) => [
+    card(1, 'meet', word, false, {}, { verdict: 'seen' }),
+    card(1, 'multiple_choice', word, true),
+    card(1, 'reverse_choice', word, true),
+    card(1, 'typed_translation', word, false, {}, { verdict: 'wrong' }),
+  ];
+  const [x, y, z] = [ladder('x'), ladder('y'), ladder('z')];
+  const log = [x[0], y[0], x[1], z[0], y[1], x[2], z[1], y[2], x[3], z[2], y[3], z[3]];
+  assert.equal(weekNumbers(stateWith(log), 1, noMemory, WRITTEN).d, 0);
+  assert.deepEqual(serverView(log)[8], { dimension: WP, rung: 2, level: 1, r: null, implied: 2 });
+
+  // A typed translation of a word never met, with no meet card beside it, is still off-rung.
+  const off = card(2, 'typed_translation', 'w', true, {}, { verdict: 'exact' });
+  assert.equal(weekNumbers(stateWith([...log, off]), 1, noMemory, WRITTEN).d, 1 / 10);
+});
+
 test('(e) the mean true recall over every saved word and live dimension', () => {
   const recall: Record<string, number> = { 'x|written_receptive': 0.9, 'x|written_productive': 0.3, 'y|written_receptive': 0.6 };
   const memory: BotMemory = { setTime() {}, recall: (w, d) => recall[`${w}|${d}`] ?? 0, learn() {} };
@@ -222,4 +243,27 @@ test('a new-meaning card is placed as a written recognition choice and counts as
   assert.deepEqual(view[0], { dimension: WR, rung: 1, level: 1, r: null, implied: 1 });
   assert.equal(view[1]?.dimension, WR);
   assert.notEqual(view[1]?.r, null);
+});
+
+test('a meet card is placed on no dimension and leaves the weeks\' numbers as they were', () => {
+  // Phase 54 (spec D8). The server writes nothing for a meet card, so the replay grades nothing for
+  // it, and the picker chose no dimension for it: it is in none of (a) to (d). The second meet card
+  // sits in a session of its own: beside the day-2 card it would make that card a ladder card, read
+  // at its own rung, which the (d) test above covers.
+  const asked = [
+    card(1, 'multiple_choice', 'x', true, { [WR]: 0.2 }),
+    card(2, 'multiple_choice', 'x', true, { [WR]: 0.5 }),
+    card(3, 'multiple_choice', 'x', true, { [WR]: 0.6 }),
+  ];
+  const meet = (day: number, session = `s${day}`) => card(day, 'meet', 'x', false, { [WR]: 0.1 }, { session, verdict: 'seen' });
+  const withMeet = [meet(1), asked[0], asked[1], meet(2, 's2-meet'), asked[2]];
+
+  const view = serverView(withMeet);
+  assert.deepEqual([view[0], view[3]], [null, null]);
+  assert.deepEqual(
+    [view[1], view[2], view[4]],
+    serverView(asked),
+  );
+  const days = [day(1, 10, 5), day(2, 10, 5), day(3, 10, 5)];
+  assert.deepEqual(weekNumbers(stateWith(withMeet, days), 1, noMemory, WRITTEN), weekNumbers(stateWith(asked, days), 1, noMemory, WRITTEN));
 });

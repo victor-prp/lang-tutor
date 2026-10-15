@@ -164,3 +164,60 @@ test('the week\'s summary and the prompt carry what D20 names', () => {
     assert.ok(prompt.includes(fact), `the prompt names ${fact}:\n${prompt}`);
   }
 });
+
+test('a meet card is no card asked, and a ladder is not the same word again', () => {
+  // Phase 54 (spec D8, D3). A new word's ladder is a meet card and three asked ones, in one session.
+  const state: BotState = {
+    ...newState({ name: 'steady-en', memory: 'actr' }),
+    saved: [{ form: 'kettle', meaning: 'm', glossId: 'g', day: 1 }],
+    days: [{ ...newLine(1), played: true, completed: true, sessions: 1, cards: 3, right: 2, newWords: 1 }],
+    log: [
+      card(1, 's1', 'kettle', false, 'meet'),
+      card(1, 's1', 'kettle', true),
+      card(1, 's1', 'kettle', true, 'reverse_choice'),
+      card(1, 's1', 'kettle', false, 'typed_translation'),
+    ],
+  };
+  const summary = weekSummary(state, 1, { setTime() {}, recall: () => 1, learn() {} });
+  assert.equal(summary.cards, 3);
+  assert.equal(summary.right, 2);
+  assert.deepEqual(summary.byType, {
+    multiple_choice: { cards: 1, right: 1 },
+    reverse_choice: { cards: 1, right: 1 },
+    typed_translation: { cards: 1, right: 0 },
+  });
+  // A word with a meet card in the session is a ladder there: the design, not a repeat.
+  assert.deepEqual(summary.repeated, []);
+});
+
+test('a laddered word asked again in another session of the day is a repeat there, as usual', () => {
+  const memory: BotMemory = { setTime() {}, recall: () => 1, learn() {} };
+  const state: BotState = {
+    ...newState({ name: 'steady-en', memory: 'actr' }),
+    saved: ['kettle', 'ladle'].map((form, i) => ({ form, meaning: `m${i}`, glossId: `g${i}`, day: 1 })),
+    days: [{ ...newLine(1), played: true, completed: true, sessions: 2, cards: 8, right: 6, newWords: 2 }],
+    log: [
+      // s1: kettle is laddered (its three asked cards are not a repeat); ladle is asked four times with no meet card.
+      card(1, 's1', 'kettle', false, 'meet'),
+      card(1, 's1', 'kettle', true),
+      card(1, 's1', 'kettle', true, 'reverse_choice'),
+      card(1, 's1', 'kettle', true, 'typed_translation'),
+      card(1, 's1', 'ladle', true),
+      card(1, 's1', 'ladle', true),
+      card(1, 's1', 'ladle', true),
+      card(1, 's1', 'ladle', true),
+      // s2: kettle again, three times, with no meet card in this session: counted as usual.
+      card(1, 's2', 'kettle', true),
+      card(1, 's2', 'kettle', true, 'reverse_choice'),
+      card(1, 's2', 'kettle', true, 'typed_translation'),
+    ],
+  };
+  const summary = weekSummary(state, 1, memory);
+  assert.deepEqual(summary.repeated, [
+    { word: 'ladle', times: 4 },
+    { word: 'kettle', times: 3 },
+  ]);
+  // Only s2's cards count for kettle: three, not the six of both sessions.
+  const kettleOnly: BotState = { ...state, log: state.log.filter((c) => c.word === 'kettle') };
+  assert.deepEqual(weekSummary(kettleOnly, 1, memory).repeated, [{ word: 'kettle', times: 3 }]);
+});

@@ -5,6 +5,7 @@ import type {
   LetterTilesQuestion,
   ListenChoiceQuestion,
   MatchingQuestion,
+  MeetQuestion,
   MultipleChoiceQuestion,
   Question,
   ReadAloudQuestion,
@@ -546,5 +547,99 @@ describe('the second try (phase 34, spec D9)', () => {
       expect(evidenceVerdict('alternative', retry)).toBe('alternative');
     }
     expect(evidenceVerdict('exact', null)).toBe('exact');
+  });
+});
+
+// Phase 54 (spec D1, D6). A new word shown before it is asked: ungraded, answered with `seen`.
+const MEET: MeetQuestion = { id: 'e1', type: 'meet', vocab_term_id: 'l1', question: 'gatto', meaning: 'חתול' };
+
+describe('the meet card and the seen answer (phase 54, spec D6)', () => {
+  it('takes `seen` and nothing else, and no other card takes it', () => {
+    expect(answerFits(MEET, { seen: true })).toBe(true);
+    expect(answerFits(MEET, { option_index: 0 })).toBe(false);
+    expect(answerFits(MEET, { text: 'x' })).toBe(false);
+    expect(answerFits(MEET, { pass: 'skip' })).toBe(false);
+    expect(answerFits(MEET, { heard: 'gatto' })).toBe(false);
+    for (const card of [READ, SAY, MEANING, typed, makeQuestion(1)]) {
+      expect(answerFits(card, { seen: true })).toBe(false);
+    }
+  });
+
+  it('records `seen` as a wrong-looking, empty answer with no retry', () => {
+    expect(evaluate(MEET, { seen: true })).toEqual({
+      question_id: 'e1',
+      is_correct: false,
+      answer_string: '',
+      verdict: 'seen',
+      ...NO_RETRY,
+    });
+  });
+
+  it('is not a choice, and its right answer is its form', () => {
+    expect(isChoice(MEET)).toBe(false);
+    expect(rightAnswer(MEET)).toBe('gatto');
+  });
+
+  it('a seen verdict is not right', () => {
+    expect(verdictCorrect('seen')).toBe(false);
+  });
+
+  it('leaves a meet card out of the score total and of the missed list, as a skip', () => {
+    const mc = makeQuestion(1);
+    const answers = [evaluate(MEET, { seen: true }), evaluate(mc, { option_index: 0 })];
+    expect(score([MEET, mc], answers)).toEqual({ correct: 1, total: 1 });
+    expect(missed([MEET, mc], answers)).toEqual([]);
+    const wrong = [evaluate(MEET, { seen: true }), evaluate(mc, { option_index: 1 })];
+    expect(score([MEET, mc], wrong)).toEqual({ correct: 0, total: 1 });
+    expect(missed([MEET, mc], wrong).map((item) => item.question.id)).toEqual([mc.id]);
+  });
+
+  it('is shuffled as a text card is: not at all', () => {
+    expect(shuffleOptions(MEET, seededRng(1))).toBe(MEET);
+  });
+});
+
+// Phase 54 (final review). A ladder asks one word three ways in a session; the missed
+// list names a word once, by its first wrong card. `vocab_term_id` is the card's lexeme,
+// and a session asks one gloss of a family at most (phase 39 D5), one lexeme's glosses
+// being one family, so within a session it names the gloss.
+describe('missed, a ladder (phase 54)', () => {
+  const choice: MultipleChoiceQuestion = { ...makeQuestion(1), id: 'c1', vocab_term_id: 'l1', question: 'gatto' };
+  const reverse: Question = {
+    id: 'r1', type: 'reverse_choice', vocab_term_id: 'l1', question: 'חתול', part_of_speech: 'noun',
+    options: ['gatto', 'cane', 'casa', 'porta'], correct_option: 0, context: null,
+  };
+  const ladder: Question[] = [MEET, choice, reverse, typed];
+
+  it('lists a ladder whose three practice cards were all wrong once, by its first wrong card', () => {
+    const answers = [
+      evaluate(MEET, { seen: true }),
+      evaluate(choice, { option_index: 1 }),
+      evaluate(reverse, { option_index: 2 }),
+      evaluate(typed, { text: 'porta' }),
+    ];
+    expect(missed(ladder, answers)).toEqual([{ question: choice, correct_answer: 'a1' }]);
+  });
+
+  it('lists the first wrong card when the earlier ones were right', () => {
+    const answers = [
+      evaluate(MEET, { seen: true }),
+      evaluate(choice, { option_index: 0 }),
+      evaluate(reverse, { option_index: 2 }),
+      evaluate(typed, { text: 'porta' }),
+    ];
+    expect(missed(ladder, answers).map((item) => item.question.id)).toEqual(['r1']);
+  });
+
+  it('still lists two different words wrong as two rows', () => {
+    const other = makeQuestion(2);
+    const answers = [
+      evaluate(MEET, { seen: true }),
+      evaluate(choice, { option_index: 1 }),
+      evaluate(other, { option_index: 1 }),
+      evaluate(reverse, { option_index: 2 }),
+      evaluate(typed, { text: 'porta' }),
+    ];
+    expect(missed([...ladder, other], answers).map((item) => item.question.id)).toEqual(['c1', 'q2']);
   });
 });

@@ -18,10 +18,13 @@ export type Step = { glossId: string; dimension: Dimension; opened: number };
 
 /**
  * Reads each gloss's answers in order. A word met today owes a written
- * receptive return from its first answer. An answer in a later session than the
- * one that opened the owed return is one return, and settles it when it grades
- * that dimension Good or Hard. An Again in any dimension opens a return there,
- * replacing an open one; within one answer the settling is read first.
+ * receptive return from its first answer. A later session than the one that
+ * opened the owed return, answering the word, is one return: its first answer
+ * of the word counts, and the rest of that session's answers of it add none
+ * (phase 54: a ladder asks one word up to four times a session). An answer in a
+ * later session settles the return when it grades that dimension Good or Hard.
+ * An Again in any dimension opens a return there, replacing an open one; within
+ * one answer the settling is read first.
  *
  * A gloss still owing a return, with fewer than RETURNS_PER_DAY made, is a step
  * for the next session. Every other gloss answered today is done for the day,
@@ -31,14 +34,14 @@ export type Step = { glossId: string; dimension: Dimension; opened: number };
  */
 export function dayState(answers: readonly DayAnswer[], introduced: ReadonlySet<string>): { steps: Step[]; done: Set<string> } {
   type Owed = { dimension: Dimension; sessionId: string; opened: number };
-  const tracks = new Map<string, { owed: Owed | null; returns: number; answers: number; last: number }>();
+  const tracks = new Map<string, { owed: Owed | null; returns: number; returnedIn: Set<string>; answers: number; last: number }>();
   answers.forEach((answer, index) => {
     let track = tracks.get(answer.glossId);
     if (!track) {
       const met: Owed | null = introduced.has(answer.glossId)
         ? { dimension: 'written_receptive', sessionId: answer.sessionId, opened: index }
         : null;
-      track = { owed: met, returns: 0, answers: 0, last: index };
+      track = { owed: met, returns: 0, returnedIn: new Set(), answers: 0, last: index };
       tracks.set(answer.glossId, track);
     }
     track.answers += 1;
@@ -46,7 +49,10 @@ export function dayState(answers: readonly DayAnswer[], introduced: ReadonlySet<
     const grades = gradesFor(answer);
     const owed = track.owed;
     if (owed && owed.sessionId !== answer.sessionId) {
-      track.returns += 1;
+      if (!track.returnedIn.has(answer.sessionId)) {
+        track.returns += 1;
+        track.returnedIn.add(answer.sessionId);
+      }
       if (grades.some((piece) => piece.dimension === owed.dimension && piece.grade >= 2)) track.owed = null;
     }
     for (const piece of grades) {

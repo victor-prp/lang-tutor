@@ -74,6 +74,7 @@ export type {
   PushDeviceUnregisterRequest,
   Question,
   ReadAloudQuestion,
+  MeetQuestion,
   ReminderSettings,
   ReminderSettingsResponse,
   ReminderTickResponse,

@@ -74,6 +74,7 @@ export function taskFor(type: QuestionType): Task | null {
     case 'matching':
     case 'read_aloud':
     case 'typed_meaning':
+    case 'meet':
       return null;
   }
 }
@@ -680,6 +681,8 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
     case 'dictation':
     case 'read_aloud':
     case 'typed_meaning':
+    case 'meet':
+      // Phase 54 (spec D7). A meet card asks nothing: its prompt is the meaning it shows.
       return { ...none, prompt: row.translation };
     case 'cloze_choice': {
       // Spec D7: the saved example, the form's own text blanked, correct option first.

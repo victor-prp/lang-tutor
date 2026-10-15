@@ -91,6 +91,51 @@ describe('dayState (phase 37 D1)', () => {
   });
 });
 
+// Phase 54 (final review). A ladder answers one word three or four times in a session;
+// the day counts one return per later session the word is answered in, as it did when a
+// word had one card a session.
+describe('dayState, a ladder (phase 54)', () => {
+  const meet = (glossId: string, sessionId: string): DayAnswer => ({ glossId, sessionId, type: 'meet', verdict: 'seen' });
+  const reverse = (glossId: string, sessionId: string, right: boolean): DayAnswer => ({
+    glossId,
+    sessionId,
+    type: 'reverse_choice',
+    correct: right,
+  });
+  const ladder = (sessionId: string): DayAnswer[] => [
+    meet('a', sessionId),
+    mc('a', sessionId, false),
+    reverse('a', sessionId, false),
+    typed('a', sessionId, 'wrong'),
+  ];
+
+  it('counts a re-ladder session with mixed answers as one return, and reads its settling and misses in order', () => {
+    // s1 owes written productive (the typed card's Again). In s2 the meet card is the
+    // return; the reverse card's Hard settles it, and the typed card's Again opens another.
+    const answers = [
+      ...ladder('s1'),
+      meet('a', 's2'),
+      mc('a', 's2', true),
+      reverse('a', 's2', true),
+      typed('a', 's2', 'wrong'),
+    ];
+    expect(dayState(answers, new Set(['a']))).toEqual({
+      steps: [{ glossId: 'a', dimension: 'written_productive', opened: 7 }],
+      done: new Set(),
+    });
+  });
+
+  it(`spends the ${RETURNS_PER_DAY} returns over three later sessions, not within one`, () => {
+    const answers = [...ladder('s1'), ...ladder('s2'), ...ladder('s3'), ...ladder('s4')];
+    // Two comebacks: still owed, it comes back.
+    expect(dayState(answers.slice(0, 12), new Set(['a'])).steps).toEqual([
+      { glossId: 'a', dimension: 'written_productive', opened: 11 },
+    ]);
+    // Three: the returns are spent and the word is done.
+    expect(dayState(answers, new Set(['a']))).toEqual({ steps: [], done: new Set(['a']) });
+  });
+});
+
 describe('withSessionInFlight (phase 43 D4)', () => {
   const step = (glossId: string, opened: number) => ({ glossId, dimension: 'written_receptive' as const, opened });
 

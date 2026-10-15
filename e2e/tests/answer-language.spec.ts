@@ -1,12 +1,13 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerChoice, answerMeaning, answerTyped, expectGeneration, readCard } from './support/cards';
+import { answerChoice, answerMeaning, answerTyped, expectGeneration, playOut, readCard, rightOption } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { BOARD_WORDS, LUK, PROCHITALA } from './support/lexemes';
 import { seedMemory } from './support/memory';
 import { clearGemini, expectGeminiMatching, userText } from './support/mockServer';
+import { continueMeet } from './support/sessions';
 import { openApp, signUpLearner } from './support/users';
 import { spokenAfter, spoken, withVoices } from './support/voices';
 
@@ -19,7 +20,11 @@ test.setTimeout(240_000);
 const WRONG_ALPHABET_FOR_RUSSIAN = 'מציצה';
 const MEANINGS_OF: Record<string, string[]> = { прочитала: ['קראה', 'הקריאה'], лук: ['בצל', 'קשת'] };
 
-const MEANING_CARDS = 2;
+// Phase 54. прочитала is a new word, so it is a ladder (met, then asked three ways), and
+// лук's due meaning is one card: five.
+const MEANING_CARDS = 5;
+// Three new words are three ladders and the lizard's dictation one more card: thirteen.
+const DICTATION_CARDS = 13;
 
 async function expectBoldLanguage(page: Page) {
   await expect(page.getByTestId('instruction-language')).toHaveCSS('font-weight', '700');
@@ -65,7 +70,8 @@ test('a dictation: Hebrew in a Russian answer is asked again, then the right wor
   await withVoices(page, ['ru-RU']);
   await signUpLearner(page, 'e2e_script_dictation_ru', 'ru');
   // The last four of the ten words: the lizard (ящерица) is due on spoken
-  // recognition, so it is asked as a dictation; the other three are new.
+  // recognition, so it is asked as a dictation; the other three are new, so each
+  // is met first and asked three ways (phase 54).
   await saveWords(page.request, 4);
   await seedMemory('e2e_script_dictation_ru', [{ gloss: 'לטאה', dimension: 'spoken_receptive', stability: 10, daysAgo: 19, level: 3 }]);
 
@@ -77,8 +83,8 @@ test('a dictation: Hebrew in a Russian answer is asked again, then the right wor
   let before = (await spoken(page)).length;
   await tapUntil(page, 'start-button', 'progress-label');
 
-  for (let position = 1; position <= 4; position++) {
-    const card = await readCard(page, position, 4);
+  for (let position = 1; position <= DICTATION_CARDS; position++) {
+    const card = await readCard(page, position, DICTATION_CARDS);
     if (card.kind === 'dictation') {
       const dictated = await spokenAfter(page, before);
       await expectBoldLanguage(page);
@@ -91,12 +97,30 @@ test('a dictation: Hebrew in a Russian answer is asked again, then the right wor
       expect(diagnostics.pageErrors, report()).toEqual([]);
       return;
     }
-    expect(card.kind, `position ${position}`).toBe('choice');
-    // Phase 44 (spec D2): a choice of meanings reads its word on arrival. Only
-    // once it has is the count settled for the next card's spokenAfter.
-    await expect.poll(async () => (await spoken(page)).slice(before)).toEqual([{ text: card.prompt, lang: 'ru-RU' }]);
-    await answerChoice(page, card, true);
-    before = (await spoken(page)).length;
+    // Phase 44 (spec D2). Each of a new word's cards says one word: a meet card and
+    // a choice of meanings on arrival, a choice of words and a typed translation once
+    // answered. Only once it has is the count settled for the next card's spokenAfter.
+    const hears = async (text?: string) => {
+      await expect.poll(async () => (await spoken(page)).length).toBe(before + 1);
+      if (text !== undefined) expect((await spoken(page))[before]).toEqual({ text, lang: 'ru-RU' });
+      before += 1;
+    };
+    expect(['meet', 'choice', 'reverse', 'typed'], `position ${position}`).toContain(card.kind);
+    if (card.kind === 'meet') {
+      await hears(card.prompt);
+      await continueMeet(page);
+      continue;
+    }
+    if (card.kind === 'choice') {
+      await hears(card.prompt);
+      await answerChoice(page, card, true);
+    } else if (card.kind === 'reverse') {
+      await answerChoice(page, card, true);
+      await hears(rightOption(card));
+    } else {
+      await page.getByTestId('typed-show-answer').click();
+      await hears();
+    }
     await page.getByTestId('continue-button').click();
   }
   throw new Error(`the session asked no dictation\n${report()}`);
@@ -130,7 +154,8 @@ test('a meaning card: Latin in a Hebrew answer is asked again, then the meaning 
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 
-  // Each word's two senses are a gloss family, asked once a session: two cards.
+  // Each word's two senses are a gloss family, asked once a session: прочитала's
+  // ladder, and лук's due meaning, which is the one card of its family.
   for (let position = 1; position <= MEANING_CARDS; position++) {
     const card = await readCard(page, position, MEANING_CARDS);
     if (card.kind === 'meaning') {
@@ -143,9 +168,7 @@ test('a meaning card: Latin in a Hebrew answer is asked again, then the meaning 
       expect(diagnostics.pageErrors, report()).toEqual([]);
       return;
     }
-    expect(card.kind, `position ${position}`).toBe('choice');
-    await answerChoice(page, card, true);
-    await page.getByTestId('continue-button').click();
+    await playOut(page, card);
   }
   throw new Error(`the session asked no meaning card\n${report()}`);
 });

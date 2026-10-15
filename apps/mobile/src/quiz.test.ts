@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { NextStepResponse, PendingRetry, Question, SessionView } from '@lang-tutor/core/api';
 
 import type { CardAnswer } from './feedback';
-import { answerRoute, applyQueued, holds, landed, metHold, nextStepRequest, passFor, queuedFrom, resumed, retried, settle, type QuizState, type Sent } from './quiz';
+import { answerRoute, applyQueued, holds, landed, metHold, nextStepRequest, passFor, queuedFrom, resumed, retried, seenState, settle, type QuizState, type Sent } from './quiz';
 import { IDLE_ATTEMPT } from './speaking';
 
 const BASE: QuizState = {
@@ -277,5 +277,39 @@ describe('the second try (phase 34 D9)', () => {
       expect(nextStepRequest(TYPED.id, { pass: 'skip' }, held.retry)).toEqual({ question_id: 't1', pass: 'show_answer', retry: true });
       expect(nextStepRequest(TYPED.id, { option_index: 2 }, null)).toEqual({ question_id: 't1', option_index: 2 });
     });
+  });
+});
+
+describe('the meet card (phase 54 D1, D6)', () => {
+  const MEET: Question = { id: 'm1', type: 'meet', vocab_term_id: 'l', question: 'finestra', meaning: 'חלון' };
+  const CHOICE: Question = {
+    id: 'c1',
+    type: 'multiple_choice',
+    vocab_term_id: 'l',
+    question: 'finestra',
+    options: ['חלון', 'דלת'],
+    correct_option: 0,
+    context: null,
+  };
+  const ON_MEET: QuizState = { ...BASE, question: MEET, position: 1, total: 12, answer: null, advanceRequested: false, speakingOff: null, judging: 'idle' };
+
+  it('is sent as seen, with no retry and nothing else', () => {
+    expect(nextStepRequest('m1', { seen: true }, null)).toEqual({ question_id: 'm1', seen: true });
+  });
+
+  it('tapping through answers the card with seen and asks for the next one at once, so no banner waits', () => {
+    expect(seenState(ON_MEET)).toMatchObject({ question: MEET, answer: { seen: true }, advanceRequested: true });
+  });
+
+  it('the next card arrives when the server answers, with no answer left on it', () => {
+    const next: NextStepResponse = {
+      session_id: 's',
+      question: CHOICE,
+      position: { position: 2, total: 12 },
+      complete: false,
+      pending_retry: null,
+    };
+    const moved = applyQueued(seenState(ON_MEET), queuedFrom(next));
+    expect(moved).toMatchObject({ question: CHOICE, position: 2, answer: null, advanceRequested: false, retry: null });
   });
 });

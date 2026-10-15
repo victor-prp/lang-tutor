@@ -4,6 +4,7 @@ import type {
   ClozeChoiceQuestion,
   ListenChoiceQuestion,
   MatchingQuestion,
+  MeetQuestion,
   MissedQuestion,
   MultipleChoiceQuestion,
   NewMeaningQuestion,
@@ -40,7 +41,9 @@ export type AnswerInput =
   | { pass: 'skip' | 'show_answer' }
   // Phase 27 (spec D3). A text the server judged, by rule or by a model call.
   // Only the server builds it: the next-step schema has no `judged` field.
-  | { text: string; judged: TypedVerdict };
+  | { text: string; judged: TypedVerdict }
+  // Phase 54 (spec D6). A meet card, tapped through. It takes no other answer.
+  | { seen: true };
 
 export type ChoiceQuestion = MultipleChoiceQuestion | NewMeaningQuestion | ReverseChoiceQuestion | ListenChoiceQuestion | MatchingQuestion | ClozeChoiceQuestion;
 /** Phase 25. The cards answered by voice. */
@@ -48,7 +51,7 @@ export type SpeakingQuestion = ReadAloudQuestion | SayTranslationQuestion;
 /** Phase 24. A question answered by text: typed, heard, or built from tiles. */
 /** Phase 27 (spec D3). The cards whose text answer the server judges. */
 export type JudgedQuestion = TypedMeaningQuestion | SentenceTranslationQuestion;
-type TextQuestion = Exclude<Question, ChoiceQuestion | SpeakingQuestion | JudgedQuestion>;
+type TextQuestion = Exclude<Question, ChoiceQuestion | SpeakingQuestion | JudgedQuestion | MeetQuestion>;
 
 export function isChoice(question: Question): question is ChoiceQuestion {
   switch (question.type) {
@@ -63,6 +66,7 @@ export function isChoice(question: Question): question is ChoiceQuestion {
     case 'dictation':
     case 'letter_tiles':
     case 'read_aloud':
+    case 'meet':
     case 'say_translation':
     case 'typed_meaning':
     case 'cloze_typed':
@@ -83,6 +87,9 @@ export function isJudged(question: Question): question is JudgedQuestion {
 /** Whether `answer` is the kind `question` takes. A read-aloud card has no
  *  "show the answer": its word is on the screen. */
 export function answerFits(question: Question, answer: AnswerInput): boolean {
+  // Phase 54 (spec D6). A meet card takes `seen` and nothing else; no other card takes it.
+  if (question.type === 'meet') return 'seen' in answer;
+  if ('seen' in answer) return false;
   if (isChoice(question)) return 'option_index' in answer;
   if (question.type === 'read_aloud') return 'heard' in answer || ('pass' in answer && answer.pass === 'skip');
   if (question.type === 'say_translation') return 'heard' in answer || 'pass' in answer || ('text' in answer && !('judged' in answer));
@@ -95,7 +102,7 @@ export function rightAnswer(question: Question): string {
   if (isChoice(question)) return question.options[question.correct_option];
   if (question.type === 'typed_meaning') return question.meaning;
   if (question.type === 'sentence_translation') return question.sentence;
-  return question.type === 'dictation' || question.type === 'read_aloud' ? question.question : question.answer;
+  return question.type === 'dictation' || question.type === 'read_aloud' || question.type === 'meet' ? question.question : question.answer;
 }
 
 /** Phase 25 (spec D6). What a speaking card's transcript is judged against:
@@ -112,9 +119,10 @@ export function spokenVerdict(question: SpeakingQuestion, heard: string): Speech
 }
 
 /** Phase 25 (spec D9). Whether a stored verdict counts as right. A skip is
- *  not right, and score leaves it out of the total. */
+ *  not right, and score leaves it out of the total. Phase 54 (spec D6): nor is
+ *  a meet card's `seen`. */
 export function verdictCorrect(verdict: AnswerVerdict): boolean {
-  return verdict !== 'wrong' && verdict !== 'gave_up' && verdict !== 'skipped';
+  return verdict !== 'wrong' && verdict !== 'gave_up' && verdict !== 'skipped' && verdict !== 'seen';
 }
 
 /** A choice's options in a new order. A text card has none and comes back as
@@ -228,6 +236,10 @@ export function evaluate(question: Question, answer: AnswerInput): AnswerRecord 
     const verdict = answer.pass === 'skip' ? 'skipped' : 'gave_up';
     return recorded(question, { question_id: question.id, is_correct: false, answer_string: '', verdict });
   }
+  if (question.type === 'meet' && 'seen' in answer) {
+    // Phase 54 (spec D6). Neither right nor wrong: score and missed leave it out.
+    return recorded(question, { question_id: question.id, is_correct: false, answer_string: '', verdict: 'seen' });
+  }
   if (isJudged(question) && 'judged' in answer) {
     return recorded(question, {
       question_id: question.id,
@@ -236,7 +248,7 @@ export function evaluate(question: Question, answer: AnswerInput): AnswerRecord 
       verdict: answer.judged,
     });
   }
-  if (!isChoice(question) && !isJudged(question) && question.type !== 'read_aloud' && 'text' in answer && !('judged' in answer)) {
+  if (!isChoice(question) && !isJudged(question) && question.type !== 'read_aloud' && question.type !== 'meet' && 'text' in answer && !('judged' in answer)) {
     const verdict = verdictFor(question, answer.text);
     return recorded(question, { question_id: question.id, is_correct: verdictCorrect(verdict), answer_string: answer.text, verdict });
   }
@@ -268,23 +280,36 @@ export function evidenceVerdict(verdict: AnswerVerdict, retryVerdict: AnswerVerd
   return retryVerdict === 'exact' || retryVerdict === 'near_miss' || retryVerdict === 'understood' ? retryVerdict : verdict;
 }
 
+/** The answers a score and a missed list leave out: a skip is not a failure
+ *  (phase 25, spec D9), and a meet card's `seen` asked nothing (phase 54, spec D6). */
+const isUngraded = (record: AnswerRecord) => record.verdict === 'skipped' || record.verdict === 'seen';
+
 /** Phase 25 (spec D9). A skipped card is not in the total: a skip is not a failure.
- *  Phase 34 (spec D9): the first answer counts, never its retry. */
+ *  Phase 34 (spec D9): the first answer counts, never its retry. Phase 54 (spec D6):
+ *  a meet card is left out as a skip is. */
 export function score(questions: readonly Question[], answers: readonly AnswerRecord[]): Score {
   return {
     correct: answers.filter((record) => record.is_correct).length,
-    total: questions.length - answers.filter((record) => record.verdict === 'skipped').length,
+    total: questions.length - answers.filter(isUngraded).length,
   };
 }
 
+/** The wrong answers, one row per word. Phase 54: a ladder asks one word up to three
+ *  ways in a session, and the list names it once, by its first wrong card. A card's
+ *  `vocab_term_id` is its lexeme, and a session asks one gloss of a family at most
+ *  (phase 39 D5), one lexeme's glosses being one family, so within a session it
+ *  names the gloss. */
 export function missed(
   questions: readonly Question[],
   answers: readonly AnswerRecord[],
 ): MissedQuestion[] {
+  const listed = new Set<string>();
   return answers
-    .filter((record) => !record.is_correct && record.verdict !== 'skipped')
+    .filter((record) => !record.is_correct && !isUngraded(record))
     .flatMap((record) => {
       const question = questions.find((item) => item.id === record.question_id);
-      return question ? [{ question, correct_answer: rightAnswer(question) }] : [];
+      if (!question || listed.has(question.vocab_term_id)) return [];
+      listed.add(question.vocab_term_id);
+      return [{ question, correct_answer: rightAnswer(question) }];
     });
 }

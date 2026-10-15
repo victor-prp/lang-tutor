@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { ACTR_AVERAGE, ActrMemory, addTrace, guess, recall, type Trace } from './actr.ts';
+import { ACTR_AVERAGE, ActrMemory, SEEN_ANSWER_WEIGHT, addTrace, guess, recall, type Trace } from './actr.ts';
 
 const near = (actual: number, expected: number, eps = 1e-6) =>
   assert.ok(Math.abs(actual - expected) < eps, `${actual} is not ${expected}`);
@@ -122,6 +122,27 @@ test('learning is the same wrong or right, and a read-aloud card teaches nothing
   assert.ok(m.state.traces['a|written_receptive'].length > 0);
   m.learn('b', { type: 'read_aloud', verdict: 'understood' });
   assert.deepEqual(Object.keys(m.state.traces).filter((k) => k.startsWith('b|')), []);
+});
+
+test('a meet card is a study: the feedback trace alone, in the receptive dimensions', () => {
+  // Phase 54 (spec D8). The word is shown with its meaning and said aloud, and nothing is
+  // answered: what a wrong answer's feedback adds (SEEN_ANSWER_WEIGHT), without the answer's own trace.
+  const m = new ActrMemory({ name: 'x', params: ACTR_AVERAGE });
+  m.setTime({ day: '2026-01-01', hour: 0 });
+  m.learn('cat', { type: 'meet', verdict: 'seen' });
+  assert.deepEqual(m.state.traces, {
+    'cat|written_receptive': [{ at: 0, weight: SEEN_ANSWER_WEIGHT }],
+    'cat|spoken_receptive': [{ at: 0, weight: SEEN_ANSWER_WEIGHT }],
+  });
+  // Met is not known: a minute later the word is a little remembered, far from after a right answer.
+  const answered = new ActrMemory({ name: 'x', params: ACTR_AVERAGE });
+  answered.setTime({ day: '2026-01-01', hour: 0 });
+  answered.learn('cat', { type: 'multiple_choice', correct: true });
+  for (const memory of [m, answered]) memory.setTime({ day: '2026-01-01', hour: 1 / 60 });
+  assert.ok(m.recall('cat', 'written_receptive') > 0);
+  assert.ok(m.recall('cat', 'written_receptive') < answered.recall('cat', 'written_receptive'));
+  // And it teaches nothing about producing the word.
+  assert.equal(m.recall('cat', 'written_productive'), 0);
 });
 
 test('each word has a stable hidden difficulty that survives a round trip', () => {

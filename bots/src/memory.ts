@@ -10,7 +10,7 @@ export type When = { day: string; hour: number };
 export type LearnEvent = {
   type: QuestionType;
   correct?: boolean;
-  verdict?: 'exact' | 'near_miss' | 'wrong' | 'gave_up' | 'understood' | 'skipped' | 'alternative';
+  verdict?: 'exact' | 'near_miss' | 'wrong' | 'gave_up' | 'understood' | 'skipped' | 'alternative' | 'seen';
 };
 
 /** What `decide` needs of a bot's memory, whichever way it forgets. */
@@ -18,6 +18,6 @@ export interface BotMemory {
   setTime(when: When): void;
   /** The chance the bot recalls this word in this dimension right now, before any guessing. */
   recall(word: string, dimension: Dimension): number;
-  /** Practice: the card the bot just answered, with its outcome. */
+  /** Practice: the card the bot just answered, with its outcome. A meet card (phase 54, spec D8) is a study of the word, not a practice. */
   learn(word: string, event: LearnEvent): void;
 }

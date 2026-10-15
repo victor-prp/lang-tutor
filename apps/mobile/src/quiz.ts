@@ -123,16 +123,24 @@ export function passFor(kind: 'skip' | 'show_answer', retry: PendingRetry | null
  *  has a hint; a retry never does, as the hint it opened is the app's doing. */
 export function nextStepRequest(
   questionId: string,
-  input: { option_index: number } | { text: string } | { pass: 'skip' | 'show_answer' },
+  input: { option_index: number } | { text: string } | { pass: 'skip' | 'show_answer' } | { seen: true },
   retry: PendingRetry | null,
   hintOpened?: boolean,
   checkFit = false,
 ): NextStepRequest {
+  // Phase 54 (spec D6). A meet card is tapped through once: it is never held for a second try.
+  if ('seen' in input) return { question_id: questionId, seen: true };
   const request = 'pass' in input ? { question_id: questionId, pass: passFor(input.pass, retry) } : { question_id: questionId, ...input };
   const hinted = 'text' in input && retry === null && hintOpened !== undefined ? { ...request, hint_opened: hintOpened } : request;
   // Phase 41 (spec D3): only a first answer is checked against the gap.
   const checked = 'text' in input && retry === null && checkFit ? { ...hinted, check_fit: true } : hinted;
   return retried(checked, retry);
+}
+
+/** Phase 54 (spec D1, D6). The meet card tapped through: answered with `seen`,
+ *  and the next card requested at once, as a skip is, so no banner shows. */
+export function seenState(current: QuizState): QuizState {
+  return { ...current, answer: { seen: true }, advanceRequested: true };
 }
 
 /** Phase 34 (spec D9). How an answer the phone judges goes out. `banner`: its

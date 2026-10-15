@@ -226,8 +226,8 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
 
   /** Past the seed (skipped), three saved words, `lantern` already stamped with
    *  an empty list, and a list session requested. Three new words are three
-   *  multiple choices (phase 35, spec D5, D6); `typedTome` makes tome due on
-   *  writing at R 0.85 and level 3, so it is asked as a typed translation. */
+   *  ladders (phase 54, spec D3); `typedTome` makes tome due on writing at R 0.85
+   *  and level 3, so it is asked as a typed translation. */
   async function requestListSession(opts: { typedTome?: boolean } = {}) {
     const seed = await deps().sessions.createNextSession('u_1', E, { listening: false, speaking: false });
     await deps().sessions.skipSession('u_1', seed.sessionId);
@@ -267,7 +267,8 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
 
     // The retry reads again, and the queue keeps one job per rendering.
     await clearNamespace(ns);
-    await expectDistractors(ns, { tasks: ['meaning', 'meaning', 'meaning'] });
+    // Phase 54 (spec D5): three ladders, stage by stage, their meet cards asking nothing.
+    await expectDistractors(ns, { tasks: [null, null, null, 'meaning', 'meaning', 'meaning', 'word', 'word', 'word', 'typed', 'typed', 'typed'] });
     await expectCheck(ns);
     await deps().sessions.prepareSession(payload);
     expect(await acceptJobs()).toEqual(expected);
@@ -276,8 +277,9 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
 
   it("never writes a session's own typed alternatives into the dictionary", async () => {
     await expectAccept(ns, { answers: ['codex'], answer_form: null });
-    // The two new words' multiple choices (p 1) round tome's typed translation (p 0.85).
-    await expectDistractors(ns, { tasks: ['meaning', 'typed', 'meaning'] });
+    // Phase 54 (spec D5): the two new words' ladders, stage by stage, merged with
+    // tome's typed translation (q5): their meet cards q1-q2 ask nothing.
+    await expectDistractors(ns, { tasks: [null, null, 'meaning', 'meaning', 'typed', 'word', 'word', 'typed', 'typed'] });
     await expectCheck(ns);
     await registerWorkers(boss, deps(), { pollingIntervalSeconds: 0.5 });
     const { sessionId, saved } = await requestListSession({ typedTome: true });
@@ -286,7 +288,7 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
     await waitFor(async () => events('accept_stored').length === 2);
 
     const { questions } = await deps().sessions.getSession('u_1', sessionId);
-    const typed = questions.find((q): q is TypedTranslationQuestion => q.type === 'typed_translation')!;
+    const typed = questions.find((q): q is TypedTranslationQuestion => q.type === 'typed_translation' && q.answer === 'tome')!;
     expect(typed.alternatives).toContain(STUB_ALTERNATIVE);
     expect(await countGeminiRequests(ns, DISTRACTOR_MARKER)).toBe(1);
     for (const lemma of ['tome', 'sprint']) {

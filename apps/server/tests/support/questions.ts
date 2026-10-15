@@ -164,3 +164,9 @@ export async function readHintOpened(db: Db, sessionId: string): Promise<(boolea
     .orderBy(asc(answers.position));
   return rows.map((row) => row.hintOpened);
 }
+
+/** Phase 54 (spec D1). The glosses `day` introduced, as the picker reads them: a
+ *  service test may not reach past composition for a repository. */
+export async function readIntroducedOn(db: Db, enrollmentId: string, day: string): Promise<string[]> {
+  return withTx(db, (tx) => createSessionRepo(tx).findIntroducedOn(enrollmentId, day));
+}

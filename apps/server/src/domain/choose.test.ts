@@ -1,8 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 import { FSRS6_DEFAULT, SESSION_LENGTH, retrievability, type Dimension, type MemoryState } from '@lang-tutor/core/domain';
 
-import { chooseWords, expectedSuccess, liveDimensions, rungFor, type ChoiceInput, type ChosenPick } from './choose';
-import { DAY_NEW_CAP, HARD_CAP, NEW_PER_SESSION, PER_DIMENSION_CAP, RUNG_R, R_TARGET } from './chooseConstants';
+import { choosePools, chooseWords, expectedSuccess, liveDimensions, rungFor, type ChoiceInput, type ChosenPick } from './choose';
+import { DAY_NEW_CAP, HARD_CAP, LADDER_SLOTS, NEW_FLOOR, NEW_PER_SESSION, PER_DIMENSION_CAP, RUNG_R, R_TARGET } from './chooseConstants';
 import { withSessionInFlight, type Step } from './today';
 
 // Not tests/support/testRng: ADR 0001 R3 greps domain/ for any parent-directory
@@ -48,7 +48,7 @@ type Word = {
   state?: Partial<Record<Dimension, MemoryState>>;
 };
 
-const NO_FAMILIES = { familyOf: new Map<string, number>(), waiting: new Set<string>() };
+const NO_FAMILIES = { familyOf: new Map<string, number>(), waiting: new Set<string>(), introductions: new Set<string>() };
 
 const savedAt = (i: number) => `2026-01-01T00:${String(i).padStart(2, '0')}:00.000000Z`;
 
@@ -155,16 +155,24 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
     ]);
   });
 
-  it('fills with more NEW after EXPAND and before NOT_DUE', () => {
-    const picks = chooseWords(
-      input([known('not-due', { [SP]: 0.93 }), { id: 'expand', memory: { [WR]: 0.95 } }, ...range(4, (i) => fresh(`n${i}`))]),
-    );
-    expect(picks.map((pick) => pick.cls)).toEqual(['NEW', 'NEW', 'NEW', 'EXPAND', 'NEW', 'NOT_DUE']);
+  it('fills with more NEW after EXPAND and before NOT_DUE: a family introduction, one slot; never a fourth ladder', () => {
+    const words = [known('not-due', { [SP]: 0.93 }), { id: 'expand', memory: { [WR]: 0.95 } }, ...range(4, (i) => fresh(`n${i}`))];
+    // Phase 54 (spec D4): three ladders take nine slots and are the session's ceiling.
+    expect(chooseWords(input(words)).map((pick) => pick.cls)).toEqual(['NEW', 'NEW', 'NEW', 'EXPAND']);
+    const introductions = new Set(range(4, (i) => fresh(`n${i}`)).map((word) => word.id));
+    expect(chooseWords(input(words, { families: { ...NO_FAMILIES, introductions } })).map((pick) => pick.cls)).toEqual([
+      'NEW',
+      'NEW',
+      'NEW',
+      'EXPAND',
+      'NEW',
+      'NOT_DUE',
+    ]);
   });
 
   it('expands into the next unintroduced live dimension in ORDER, at rung 1 with no R', () => {
     const [pick] = chooseWords(input([{ id: 'g', memory: { [WR]: 0.95, [WP]: 0.95 }, levels: { [SR]: 4 } }]));
-    expect(pick).toEqual({ glossId: 'g', dimension: SR, rung: 1, level: 4, r: null, cls: 'EXPAND' });
+    expect(pick).toEqual({ glossId: 'g', dimension: SR, rung: 1, level: 4, r: null, cls: 'EXPAND', ladder: false });
   });
 
   it('asks DUE glosses by need ascending, each in its weakest live dimension', () => {
@@ -190,7 +198,7 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
     const levels = Object.fromEntries(ALL.map((dimension) => [dimension, 5]));
     const picks = chooseWords(input([{ ...known('g', { [WR]: 0.85 }), levels }]));
     expect(picks).toHaveLength(1);
-    expect(picks[0]).toEqual({ glossId: 'g', dimension: WR, rung: 2, level: 5, r: expect.closeTo(0.85, 10), cls: 'DUE' });
+    expect(picks[0]).toEqual({ glossId: 'g', dimension: WR, rung: 2, level: 5, r: expect.closeTo(0.85, 10), cls: 'DUE', ladder: false });
   });
 
   it('chooses the rung by memory, not level: recall from RUNG_R up, recognition below it or untested', () => {
@@ -206,16 +214,17 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
 
   it('asks a return at rung 2 in its owed dimension, whatever its R', () => {
     const [pick] = chooseWords(input([{ id: 'g', memory: { [WR]: 0.5, [WP]: 0.95 } }], { steps: [step('g', WR)] }));
-    expect(pick).toEqual({ glossId: 'g', dimension: WR, rung: 2, level: 1, r: expect.closeTo(0.5, 10), cls: 'STEP' });
+    expect(pick).toEqual({ glossId: 'g', dimension: WR, rung: 2, level: 1, r: expect.closeTo(0.5, 10), cls: 'STEP', ladder: false });
   });
 
   describe('NEW', () => {
     it('gets NEW_FLOOR, one, under a backlog of due words', () => {
       const due = range(12, (i) => known(`d${i}`, { [[WR, WP, SP, SR][i % 4]]: 0.5 }));
       const picks = chooseWords(input([...due, ...range(5, (i) => fresh(`n${i}`))]));
-      expect(picks).toHaveLength(SESSION_LENGTH);
+      // Phase 54 (spec D4): the new word is a ladder, three slots; seven due words fill the rest.
+      expect(picks).toHaveLength(SESSION_LENGTH - LADDER_SLOTS + 1);
       expect(count(picks, (pick) => pick.cls === 'NEW')).toBe(1);
-      expect(count(picks, (pick) => pick.cls === 'DUE')).toBe(9);
+      expect(count(picks, (pick) => pick.cls === 'DUE')).toBe(SESSION_LENGTH - LADDER_SLOTS);
     });
 
     it('is never held back by the per-skill limit: with four due words in WR, a new word still comes first', () => {
@@ -224,11 +233,11 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
       const picks = chooseWords(
         input([...wr, ...wp, known('due-sp', { [SP]: 0.5 }), { id: 'expand', memory: { [WR]: 0.95, [WP]: 0.95 } }, known('not-due'), fresh('n0'), fresh('n1')]),
       );
+      // Phase 54 (spec D4): the ladder takes three slots, so seven due words fit.
       expect(picks.map((pick) => [pick.glossId, pick.cls])).toEqual([
         ['n1', 'NEW'],
         ...wr.map((word) => [word.id, 'DUE']),
-        ...wp.map((word) => [word.id, 'DUE']),
-        ['due-sp', 'DUE'],
+        ...wp.slice(0, 3).map((word) => [word.id, 'DUE']),
       ]);
     });
 
@@ -237,17 +246,19 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
       const next: Partial<Record<Dimension, number>>[] = [{ [WR]: 0.95 }, { [WR]: 0.95, [WP]: 0.95 }, { [WR]: 0.95, [WP]: 0.95, [SR]: 0.95 }];
       const expand = range(7, (i) => ({ id: `x${i}`, memory: next[i % 3] }));
       const picks = chooseWords(input([...expand, ...range(10, (i) => fresh(`n${i}`))]));
-      expect(picks).toHaveLength(SESSION_LENGTH);
+      // Phase 54 (spec D4): three ladders take nine slots; one expansion fills the tenth.
+      expect(picks).toHaveLength(NEW_PER_SESSION + 1);
       expect(picks.slice(0, NEW_PER_SESSION).map((pick) => pick.cls)).toEqual(Array(NEW_PER_SESSION).fill('NEW'));
       expect(count(picks, (pick) => pick.cls === 'NEW')).toBe(NEW_PER_SESSION);
-      expect(count(picks, (pick) => pick.cls === 'EXPAND')).toBe(7);
+      expect(count(picks, (pick) => pick.cls === 'EXPAND')).toBe(SESSION_LENGTH - NEW_PER_SESSION * LADDER_SLOTS);
     });
 
     it('stops at the daily cap of DAY_NEW_CAP while other words can fill the session', () => {
       const others = range(10, (i) => known(`k${i}`, { [ALL[i % 5]]: 0.93 }));
       const words = [...range(10, (i) => fresh(`n${i}`)), ...others];
       const atCapLessOne = chooseWords(input(words, { newToday: DAY_NEW_CAP - 1 }));
-      expect(atCapLessOne).toHaveLength(SESSION_LENGTH);
+      // Phase 54 (spec D4): the one new word is a ladder, three slots.
+      expect(atCapLessOne).toHaveLength(SESSION_LENGTH - LADDER_SLOTS + 1);
       expect(count(atCapLessOne, (pick) => pick.cls === 'NEW')).toBe(1);
       const atCap = chooseWords(input(words, { newToday: DAY_NEW_CAP }));
       expect(atCap).toHaveLength(SESSION_LENGTH);
@@ -260,16 +271,18 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
       // An all-NEW list: what the cap allows below it, and a full session at or past it.
       const all = range(12, (i) => fresh(`n${i}`));
       expect(ids(chooseWords(input(all, { newToday: DAY_NEW_CAP - 2 })))).toEqual(['n11', 'n10']);
+      // Phase 54 (spec D4): past the cap too, three ladders at most.
       for (const newToday of [DAY_NEW_CAP, DAY_NEW_CAP + 5]) {
-        expect(ids(chooseWords(input(all, { newToday })))).toEqual(Array.from({ length: 10 }, (_, i) => `n${11 - i}`));
+        expect(ids(chooseWords(input(all, { newToday })))).toEqual(['n11', 'n10', 'n9']);
       }
       expect(chooseWords(input(all.slice(0, 3), { newToday: DAY_NEW_CAP }))).toHaveLength(3);
     });
 
     it('fills an all-NEW list: the newest saved first, every one written receptive at rung 1', () => {
       const picks = chooseWords(input(range(12, (i) => fresh(`n${i}`))));
-      expect(ids(picks)).toEqual(Array.from({ length: 10 }, (_, i) => `n${11 - i}`));
-      for (const pick of picks) expect(pick).toMatchObject({ cls: 'NEW', dimension: WR, rung: 1, level: 1, r: null });
+      // Phase 54 (spec D4): three ladders, the session's ceiling.
+      expect(ids(picks)).toEqual(['n11', 'n10', 'n9']);
+      for (const pick of picks) expect(pick).toMatchObject({ cls: 'NEW', dimension: WR, rung: 1, level: 1, r: null, ladder: true });
     });
 
     it('breaks ties of equal save time with the injected rng, reproducibly', () => {
@@ -298,7 +311,9 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
       const listeningOff = { steps: [step('heard', SR)], listening: false };
       expect(ids(chooseWords(input([heard, ...range(10, (i) => known(`k${i}`))], listeningOff)))).not.toContain('heard');
       // A one-word list: a session is never empty while a word is saved.
-      expect(chooseWords(input([heard], listeningOff))).toEqual([{ glossId: 'heard', dimension: WP, rung: 1, level: 1, r: null, cls: 'DONE' }]);
+      expect(chooseWords(input([heard], listeningOff))).toEqual([
+        { glossId: 'heard', dimension: WP, rung: 1, level: 1, r: null, cls: 'DONE', ladder: false },
+      ]);
     });
 
     it('take their key: a sibling with the same key is not asked too', () => {
@@ -399,7 +414,7 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
       const picks = chooseWords(
         input([{ id: 'met-b', memory: { [WR]: 0.97 } }, { id: 'met-a', memory: { [WR]: 0.92 } }, known('other')], speaking),
       );
-      expect(picks[0]).toEqual({ glossId: 'met-a', dimension: SK, rung: 1, level: 1, r: null, cls: 'SPEAK' });
+      expect(picks[0]).toEqual({ glossId: 'met-a', dimension: SK, rung: 1, level: 1, r: null, cls: 'SPEAK', ladder: false });
       expect(count(picks, (pick) => pick.dimension === SK)).toBe(1);
     });
 
@@ -468,8 +483,10 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
     expect(ids(picks).sort()).toEqual(['d', 'k', 'n']);
   });
 
-  it('gives a list of fewer than ten new words one pick each', () => {
-    expect(chooseWords(input(range(4, (i) => fresh(`n${i}`))))).toHaveLength(4);
+  it('gives a list of fewer than ten new words one pick each, up to the ceiling', () => {
+    expect(chooseWords(input(range(NEW_PER_SESSION, (i) => fresh(`n${i}`))))).toHaveLength(NEW_PER_SESSION);
+    // Phase 54 (spec D4): a fourth new word is past the session's ceiling of three ladders.
+    expect(chooseWords(input(range(4, (i) => fresh(`n${i}`))))).toHaveLength(NEW_PER_SESSION);
   });
 
   it('picks one gloss per normalised key, the neediest', () => {
@@ -492,7 +509,7 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
 
 describe('families (phase 39 D5)', () => {
   const family = (members: Record<string, number>, waiting: string[] = []) => ({
-    families: { familyOf: new Map(Object.entries(members)), waiting: new Set(waiting) },
+    families: { familyOf: new Map(Object.entries(members)), waiting: new Set(waiting), introductions: new Set<string>() },
   });
 
   it('never picks a waiting gloss, in any pass', () => {
@@ -555,8 +572,12 @@ describe('families (phase 39 D5)', () => {
 
   it('counts groups, not glosses, for the length of a session', () => {
     const members = Object.fromEntries(range(12, (i) => ({ id: `m${i}` })).map((w, i) => [w.id, Math.floor(i / 4)]));
+    // Words met and not due: the five groups bind.
+    const met = [...range(12, (i) => known(`m${i}`)), known('s1'), known('s2')];
+    expect(chooseWords(input(met, family(members)))).toHaveLength(5);
+    // Phase 54 (spec D4): new words, the session's ceiling of three ladders binds first.
     const words = [...range(12, (i) => fresh(`m${i}`)), fresh('s1'), fresh('s2')];
-    expect(chooseWords(input(words, { newToday: 0, ...family(members) }))).toHaveLength(5);
+    expect(chooseWords(input(words, { newToday: 0, ...family(members) }))).toHaveLength(NEW_PER_SESSION);
   });
 
   it('asks no speaking pick of a session that can hold only one (n counts the family once)', () => {
@@ -572,5 +593,144 @@ describe('families (phase 39 D5)', () => {
     const words = range(6, (i) => fresh(`g${i}`));
     const members = Object.fromEntries(words.map((w) => [w.id, 7]));
     expect(chooseWords(input(words, family(members)))).toHaveLength(1);
+  });
+});
+
+describe('ladders (phase 54, spec D2, D4)', () => {
+  /** A skill's memory after `reps` answers, every one an Again, the last today. */
+  const again = (reps = 1): MemoryState => ({ stability: 0.2, difficulty: 6.4, lastDay: TODAY, reps, lapses: reps, params: FSRS6_DEFAULT.id });
+  /** The session slots the picks take: three for a ladder, one for any other pick. */
+  const slotsOf = (picks: ChosenPick[]) => picks.reduce((sum, pick) => sum + (pick.ladder ? LADDER_SLOTS : 1), 0);
+  const ladders = (picks: ChosenPick[]) => count(picks, (pick) => pick.ladder);
+  const backlog = (n: number) => range(n, (i) => known(`d${i}`, { [[WR, WP, SP, SR][i % 4]]: 0.5 }));
+
+  it('classes a gloss with no memory, or with only Agains in every skill, NEW and a ladder; a right answer in any skill ends it', () => {
+    const picks = chooseWords(
+      input([
+        fresh('none'),
+        { id: 'agains', state: { [WR]: again(2), [WP]: again(1) } },
+        { id: 'right', state: { [WR]: again(2), [WP]: { ...again(1), reps: 2 } } },
+      ]),
+    );
+    const byId = new Map(picks.map((pick) => [pick.glossId, pick]));
+    expect(byId.get('none')).toMatchObject({ cls: 'NEW', dimension: WR, ladder: true });
+    expect(byId.get('agains')).toMatchObject({ cls: 'NEW', dimension: WR, ladder: true });
+    expect(byId.get('right')).toMatchObject({ ladder: false });
+    expect(byId.get('right')?.cls).not.toBe('NEW');
+  });
+
+  it("does not ladder a family's new meaning that glossFamilies introduces: NEW, one slot", () => {
+    const words = [...range(SESSION_LENGTH - 1, (i) => known(`k${i}`)), fresh('meaning')];
+    const introduced = chooseWords(input(words, { families: { ...NO_FAMILIES, introductions: new Set(['meaning']) } }));
+    expect(introduced.find((pick) => pick.glossId === 'meaning')).toMatchObject({ cls: 'NEW', ladder: false });
+    expect(introduced).toHaveLength(SESSION_LENGTH);
+    // Laddered, the same word takes three slots: two fewer picks.
+    const laddered = chooseWords(input(words));
+    expect(laddered.find((pick) => pick.glossId === 'meaning')).toMatchObject({ cls: 'NEW', ladder: true });
+    expect(laddered).toHaveLength(SESSION_LENGTH - LADDER_SLOTS + 1);
+  });
+
+  it('asks an unlearned gloss owed a return as NEW, a ladder again; a learned one stays STEP; an unlearned one done today stays DONE', () => {
+    const picks = chooseWords(
+      input(
+        [
+          // Missed in its ladder this morning: one Again, its return owed.
+          { id: 'missed', state: { [WR]: again() } },
+          { id: 'learned', memory: { [WR]: 1 } },
+          // Its returns spent: answered today, owing none.
+          { id: 'spent', state: { [WR]: again(3) } },
+          // Met today and never answered: no memory, owing nothing.
+          fresh('met'),
+        ],
+        { steps: [step('missed', WR), step('learned', WR, 1)], done: new Set(['spent', 'met']) },
+      ),
+    );
+    expect(picks.map((pick) => [pick.glossId, pick.cls, pick.dimension, pick.ladder])).toEqual([
+      ['missed', 'NEW', WR, true],
+      ['learned', 'STEP', WR, false],
+      ['spent', 'DONE', WR, false],
+      ['met', 'DONE', WR, false],
+    ]);
+  });
+
+  it('holds three ladders at most: thirty words never met give three, nine of the ten slots', () => {
+    const picks = chooseWords(input(range(30, (i) => fresh(`n${i}`))));
+    expect(ladders(picks)).toBe(NEW_PER_SESSION);
+    expect(slotsOf(picks)).toBeLessThanOrEqual(SESSION_LENGTH);
+    expect(picks.length).toBeLessThanOrEqual(NEW_PER_SESSION + 1);
+  });
+
+  it('lets one ladder in under a backlog of due words, NEW_FLOOR: three slots, and seven due words', () => {
+    const picks = chooseWords(input([...backlog(10), ...range(5, (i) => fresh(`n${i}`))]));
+    expect(ladders(picks)).toBe(NEW_FLOOR);
+    expect(count(picks, (pick) => pick.cls === 'DUE')).toBe(SESSION_LENGTH - NEW_FLOOR * LADDER_SLOTS);
+    expect(slotsOf(picks)).toBe(SESSION_LENGTH);
+  });
+
+  it('holds the ceiling across pools, and keeps each pool to the slots it is offered', () => {
+    const target = range(10, (i) => fresh(`t${i}`));
+    const main = range(10, (i) => fresh(`m${i}`));
+    for (const owedNew of [0, 10]) {
+      const pools = choosePools(input([...target, ...main]), [
+        { glossIds: new Set(target.map((word) => word.id)), slots: 6, owedNew },
+        { glossIds: null, slots: SESSION_LENGTH - 6, owedNew: 0 },
+      ]);
+      expect({ owedNew, ladders: pools.map(ladders), slots: pools.map(slotsOf) }).toEqual({ owedNew, ladders: [2, 1], slots: [6, 3] });
+    }
+  });
+
+  it('adds no ladder to a run with fewer than three slots free: the session ends short', () => {
+    // One ladder and five due words take eight slots; only new words are left.
+    const picks = chooseWords(input([...backlog(5), ...range(5, (i) => fresh(`n${i}`))]));
+    expect(picks.map((pick) => pick.cls)).toEqual(['NEW', 'DUE', 'DUE', 'DUE', 'DUE', 'DUE']);
+    expect(slotsOf(picks)).toBe(SESSION_LENGTH - 2);
+  });
+
+  it('brings a word missed in its ladder back first, the earliest opened first, ahead of words saved after it', () => {
+    const picks = chooseWords(
+      input(
+        [
+          { id: 'first', state: { [WR]: again() } },
+          ...range(3, (i) => fresh(`later${i + 1}`)),
+          { id: 'second', state: { [WR]: again() } },
+          ...range(8, (i) => known(`k${i}`)),
+        ],
+        { steps: [step('second', WR, 5), step('first', WR, 1)] },
+      ),
+    );
+    expect(picks.map((pick) => [pick.glossId, pick.cls, pick.ladder])).toEqual([
+      ['first', 'NEW', true],
+      ['second', 'NEW', true],
+      ['later3', 'NEW', true],
+      ['k0', 'NOT_DUE', false],
+    ]);
+  });
+
+  it('lets a word owed its ladder again claim its family as a return does: a sibling in an earlier pool waits', () => {
+    const words = [{ id: 'missed', state: { [WR]: again() } }, known('kin', { [WR]: 0.4 }), ...range(6, (i) => known(`k${i}`))];
+    const families = { ...NO_FAMILIES, familyOf: new Map([['missed', 1], ['kin', 1]]) };
+    const [listed, main] = choosePools(input(words, { steps: [step('missed', WR)], families }), [
+      { glossIds: new Set(['kin']), slots: 2, owedNew: 0 },
+      { glossIds: null, slots: SESSION_LENGTH - 2, owedNew: 0 },
+    ]);
+    expect(ids(listed)).toEqual([]);
+    expect(main[0]).toMatchObject({ glossId: 'missed', cls: 'NEW', ladder: true });
+  });
+
+  it('holds the ceiling with more slots in play than three ladders take: pools of six and six, or one of fifteen', () => {
+    const words = range(30, (i) => fresh(`n${i}`));
+    const halves = choosePools(input(words), [
+      { glossIds: new Set(words.slice(0, 15).map((word) => word.id)), slots: 6, owedNew: 0 },
+      { glossIds: null, slots: 6, owedNew: 0 },
+    ]);
+    expect(halves.map(ladders)).toEqual([2, 1]);
+    const [one] = choosePools(input(words), [{ glossIds: null, slots: 15, owedNew: 0 }]);
+    expect(ladders(one)).toBe(NEW_PER_SESSION);
+  });
+
+  it('holds the ceiling past the daily cap too (ruling 15): an empty session gets three ladders', () => {
+    const picks = chooseWords(input(range(12, (i) => fresh(`n${i}`)), { newToday: DAY_NEW_CAP }));
+    expect(ids(picks)).toEqual(['n11', 'n10', 'n9']);
+    expect(ladders(picks)).toBe(NEW_PER_SESSION);
   });
 });

@@ -185,7 +185,10 @@ export function weekSummary(state: BotState, week: number, memory: BotMemory): W
   const last = week * DAYS_PER_WEEK;
   const inWeek = (day: number) => day >= first && day <= last;
   const days = state.days.filter((d) => inWeek(d.day));
-  const cards = state.log.filter((c) => inWeek(c.day));
+  // Phase 54 (spec D8). A meet card asks nothing, so it is no card asked: the week's counts, its
+  // types and the words asked again leave it out, as the server's score does. The log keeps it.
+  const asked = (c: { type: QuestionType }) => c.type !== 'meet';
+  const cards = state.log.filter((c) => inWeek(c.day) && asked(c));
 
   const byType: WeekSummary['byType'] = {};
   for (const c of cards) {
@@ -198,7 +201,7 @@ export function weekSummary(state: BotState, week: number, memory: BotMemory): W
   const lastAsked = new Map<string, number>();
   const cameBack: WeekSummary['cameBack'] = [];
   for (const c of state.log) {
-    if (c.word === null) continue;
+    if (c.word === null || !asked(c)) continue;
     const before = lastAsked.get(c.word);
     if (before !== undefined && c.day > before && inWeek(c.day)) cameBack.push({ word: c.word, afterDays: c.day - before });
     lastAsked.set(c.word, c.day);
@@ -207,8 +210,12 @@ export function weekSummary(state: BotState, week: number, memory: BotMemory): W
   // Each word once, at its longest absence.
   const longest = cameBack.filter((c, i) => cameBack.findIndex((o) => o.word === c.word) === i);
 
+  // Phase 54 (spec D3). A word with a meet card in a session is a ladder there: its cards are the
+  // design, not the picker asking the same word again, so they do not count toward `repeated`.
+  const key = (c: { session: string; word: string | null }) => `${c.session}\u0000${c.word}`;
+  const laddered = new Set(state.log.filter((c) => c.type === 'meet' && c.word !== null).map(key));
   const perSession = new Map<string, number>();
-  for (const c of cards) if (c.word !== null) perSession.set(`${c.session}\u0000${c.word}`, (perSession.get(`${c.session}\u0000${c.word}`) ?? 0) + 1);
+  for (const c of cards) if (c.word !== null && !laddered.has(key(c))) perSession.set(key(c), (perSession.get(key(c)) ?? 0) + 1);
   const repeated = [...perSession]
     .filter(([, times]) => times >= REPEAT_TIMES)
     .map(([k, times]) => ({ word: k.split('\u0000')[1], times }))

@@ -85,6 +85,7 @@ import type {
   LetterTilesQuestionSchema,
   TypedVerdictSchema,
   ReadAloudQuestionSchema,
+  MeetQuestionSchema,
   SayTranslationQuestionSchema,
   SpokenVerdictSchema,
   AnswerVerdictSchema,
@@ -225,6 +226,7 @@ export type SkipSessionResponse = z.infer<typeof SkipSessionResponseSchema>;
 export type StartSessionRequest = z.infer<typeof StartSessionRequestSchema>;
 export type StartSessionResponse = z.infer<typeof StartSessionResponseSchema>;
 export type ReadAloudQuestion = z.infer<typeof ReadAloudQuestionSchema>;
+export type MeetQuestion = z.infer<typeof MeetQuestionSchema>;
 export type SayTranslationQuestion = z.infer<typeof SayTranslationQuestionSchema>;
 export type SpokenVerdict = z.infer<typeof SpokenVerdictSchema>;
 export type AnswerVerdict = z.infer<typeof AnswerVerdictSchema>;

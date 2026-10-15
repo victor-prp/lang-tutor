@@ -17,6 +17,7 @@ import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { tapUntil } from './support/interactions';
 import { seedMemory, type MemorySeed } from './support/memory';
 import { clearGemini, expectContext, expectGeminiMatching, expectJudge, userText } from './support/mockServer';
+import { continueMeet } from './support/sessions';
 import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
@@ -49,6 +50,8 @@ const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.m
 const FORMS = WORDS.map((w) => w.form);
 /** Phase 34 (spec D8). STUB_GAP's word in STUB_SENTENCE_HEBREW, which a sentence card marks. */
 const MARKED = 'קראה';
+/** Five picks of one card each and a new word's ladder of four. */
+const CARDS = 9;
 
 /** Past a skipped seed, the six words looked up and saved through the API. */
 async function saveSixWords(request: APIRequestContext): Promise<string> {
@@ -90,8 +93,10 @@ async function saveSixWords(request: APIRequestContext): Promise<string> {
  *   the type used least takes each tie, so the three get one each. Five picks
  *   on one dimension pass the cap of four, so the last waits, and still fills
  *   the session: six saved words make six cards.
- * - כפפה: no memory, a choice of meanings.
- * Six picks, so no board. The cards come in the order of their p.
+ * - כפפה: no memory, a new word: a ladder (phase 54), its meet card and then
+ *   a choice of meanings, a choice of words and a typed translation.
+ * Six picks, so no board. The five other cards come in the order of their p, the
+ * ladder's four among them (spec D5): nine in all.
  */
 const MEMORY: MemorySeed[] = [
   { gloss: 'פרפר', dimension: 'written_productive', stability: 1, daysAgo: 90, level: 1 },
@@ -118,7 +123,7 @@ async function reachSentenceSession(page: Page, request: APIRequestContext, user
   // no sentence falls back on its saved example, as by default.
   await expectContext(
     request,
-    [1, 2, 3, 4, 5, 6].map((position) => ({ key: `q${position}`, sentence_word: MARKED })),
+    Array.from({ length: CARDS }, (_, i) => ({ key: `q${i + 1}`, sentence_word: MARKED })),
   );
   // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
   await openApp(page, 'enrollment-switcher');
@@ -130,9 +135,11 @@ async function reachSentenceSession(page: Page, request: APIRequestContext, user
 const nextStepSent = (page: Page) =>
   page.waitForRequest((sent) => sent.method() === 'POST' && sent.url().endsWith('/next-step'));
 
-/** Gets past a card this spec is not about: a choice answered right, a typed
- *  card by its saved form, and a sentence to translate by showing the answer. */
+/** Gets past a card this spec is not about: a meet card tapped through, a choice
+ *  answered right, a typed card by its saved form, and a sentence to translate
+ *  by showing the answer. */
 async function pass(page: Page, card: Card) {
+  if (card.kind === 'meet') return continueMeet(page);
   if (card.kind === 'choice' || card.kind === 'reverse' || card.kind === 'cloze-choice') await answerChoice(page, card, true);
   else if (card.kind === 'typed') await answerTyped(page, FORM_OF[card.prompt]);
   else await page.getByTestId('typed-show-answer').click();
@@ -145,8 +152,8 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
   await reachSentenceSession(page, request, 'e2e_sentences_ru');
 
   const kinds: string[] = [];
-  for (let position = 1; position <= 6; position++) {
-    const card = await readCard(page, position, 6);
+  for (let position = 1; position <= CARDS; position++) {
+    const card = await readCard(page, position, CARDS);
     kinds.push(card.kind);
     if (card.kind === 'cloze-choice') {
       // The saved example with its word blanked; no Hebrew until it is answered.
@@ -207,7 +214,7 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       await pass(page, card);
     }
   }
-  expect(kinds.sort()).toEqual(['choice', 'cloze-choice', 'cloze-typed', 'reverse', 'translate', 'typed']);
+  expect(kinds.sort()).toEqual(['choice', 'cloze-choice', 'cloze-typed', 'meet', 'reverse', 'reverse', 'translate', 'typed', 'typed']);
 
   await expect(page.getByTestId('results-score')).toBeVisible();
   expect(diagnostics.pageErrors, report()).toEqual([]);
@@ -220,8 +227,8 @@ test('a typed gap refuses the lemma of its inflected word', async ({ page, reque
 
   // Every card before the typed gap passed, whatever its type.
   for (let position = 1; ; position++) {
-    expect(position, 'the session asked no typed gap').toBeLessThanOrEqual(6);
-    const card = await readCard(page, position, 6);
+    expect(position, 'the session asked no typed gap').toBeLessThanOrEqual(CARDS);
+    const card = await readCard(page, position, CARDS);
     if (card.kind === 'cloze-typed') break;
     await pass(page, card);
   }
@@ -246,8 +253,8 @@ test('a typed gap takes a word that fits, opens its hint and asks again', async 
   await reachSentenceSession(page, request, 'e2e_sentences_fits_ru', [FITS]);
 
   for (let position = 1; ; position++) {
-    expect(position, 'the session asked no typed gap').toBeLessThanOrEqual(6);
-    const card = await readCard(page, position, 6);
+    expect(position, 'the session asked no typed gap').toBeLessThanOrEqual(CARDS);
+    const card = await readCard(page, position, CARDS);
     if (card.kind === 'cloze-typed') break;
     await pass(page, card);
   }
@@ -290,8 +297,8 @@ test('a typed gap checks an unlisted word with the server, and one that fits ask
   await reachSentenceSession(page, request, 'e2e_sentences_fit_check_ru');
 
   for (let position = 1; ; position++) {
-    expect(position, 'the session asked no typed gap').toBeLessThanOrEqual(6);
-    const card = await readCard(page, position, 6);
+    expect(position, 'the session asked no typed gap').toBeLessThanOrEqual(CARDS);
+    const card = await readCard(page, position, CARDS);
     if (card.kind === 'cloze-typed') break;
     await pass(page, card);
   }
@@ -319,8 +326,8 @@ test('a translation that uses another word on both tries is told it is still not
   await reachSentenceSession(page, request, 'e2e_sentences_still_other_ru');
 
   for (let position = 1; ; position++) {
-    expect(position, 'the session asked no translation').toBeLessThanOrEqual(6);
-    const card = await readCard(page, position, 6);
+    expect(position, 'the session asked no translation').toBeLessThanOrEqual(CARDS);
+    const card = await readCard(page, position, CARDS);
     if (card.kind === 'translate') break;
     await pass(page, card);
   }

@@ -27,7 +27,9 @@ const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.t
  * Phase 35 (spec D5, D6). The memory that gives the four words four card
  * types; no voices and speaking off, so the live dimensions are WR, WP and SP.
  * Each seeded word is due on the one dimension it has a row for:
- * - כד: no memory, a new word: a choice of meanings.
+ * - כד: WR at R 0.50 (S 1, 90 days), level 1: recognition, a choice of
+ *   meanings. Phase 54: seeded, because a word with no memory is a new word,
+ *   met first and asked as a ladder of four cards.
  * - שמיכה: WP at R 0.50 (S 1, 90 days), level 1: recognition. The reversed
  *   card's p is 0.25 + 0.75·√0.50 = 0.78, nearer 0.85 than tiles' √0.50 = 0.71,
  *   and with no saved example there is no gap to choose.
@@ -37,6 +39,7 @@ const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.t
  * - טחנה: WR at R 0.85 (S 10, 19 days), level 3: recall, a typed meaning.
  */
 const MEMORY: MemorySeed[] = [
+  { gloss: CHOICE.translation, dimension: 'written_receptive', stability: 1, daysAgo: 90, level: 1 },
   { gloss: REVERSE.translation, dimension: 'written_productive', stability: 1, daysAgo: 90, level: 1 },
   { gloss: TYPED.translation, dimension: 'written_productive', stability: 10, daysAgo: 19, level: 3 },
   { gloss: MEANING.translation, dimension: 'written_receptive', stability: 10, daysAgo: 19, level: 3 },

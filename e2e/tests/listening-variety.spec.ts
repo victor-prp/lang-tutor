@@ -61,9 +61,11 @@ async function buildFromTiles(page: Page, card: Card) {
  * board, tiles, a typed card, a meaning card and a dictation. A ru-RU voice and
  * speaking off, so the live dimensions are WR, WP, SR and SP. Each seeded word
  * is due on the one dimension it has a row for:
- * - ромашка, черепаха, подушка, зонтик: no memory, new words, a choice of
- *   meanings each; four of them in a session of seven picks or more make the
- *   board (ruling 18).
+ * - ромашка, черепаха, подушка, зонтик: WR at R 0.50 (S 1, 90 days), level 1:
+ *   recognition, a choice of meanings each; four of them in a session of seven
+ *   picks or more make the board (ruling 18). Phase 54: seeded, because a word
+ *   with no memory is a new word, met first and asked as a ladder, whose
+ *   choice is never on a board.
  * - ведро: SR at R 0.50 (S 1, 90 days), level 1: recognition, listen and choose.
  * - скрипка, лопата: WP at R 0.72 (S 10, 75 days), level 1: recognition. Tiles'
  *   p is √0.72 = 0.849, nearer 0.85 than a choice of words' 0.25 + 0.75·√0.72 =
@@ -75,6 +77,7 @@ async function buildFromTiles(page: Page, card: Card) {
  * The cards come in the order of their p, so each is answered by its type.
  */
 const MEMORY: MemorySeed[] = [
+  ...['מרגנית', 'צב', 'כרית', 'מטרייה'].map((gloss): MemorySeed => ({ gloss, dimension: 'written_receptive', stability: 1, daysAgo: 90, level: 1 })),
   { gloss: 'דלי', dimension: 'spoken_receptive', stability: 1, daysAgo: 90, level: 1 },
   { gloss: 'כינור', dimension: 'written_productive', stability: 10, daysAgo: 75, level: 1 },
   { gloss: 'את חפירה', dimension: 'written_productive', stability: 10, daysAgo: 75, level: 1 },

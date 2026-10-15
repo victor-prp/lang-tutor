@@ -69,6 +69,11 @@ export function readCard(id: string, form: string): Question {
   return { id, type: 'read_aloud', vocab_term_id: `g-${form}`, question: form, meaning: meaningOf(form) };
 }
 
+/** Phase 54 (spec D1, D6). A new word's meet card: the form and its Hebrew meaning, answered `seen`. */
+export function meetCard(id: string, form: string): Question {
+  return { id, type: 'meet', vocab_term_id: `g-${form}`, question: form, meaning: meaningOf(form) };
+}
+
 /** A typed translation of `form` that also accepts `alternatives`. */
 export function typedCard(id: string, form: string, alternatives: string[]): Question {
   return {
@@ -259,6 +264,12 @@ export class FakeServer {
       nextStep: async (id, body: NextStepRequest) => {
         this.record(bot, 'next-step', body);
         const s = session(id);
+        // The server takes `seen` on a meet card and nowhere else, and nothing else on a meet card
+        // (packages/core answerFits).
+        if (('seen' in body) !== (s.cards[s.at].type === 'meet')) {
+          throw new ApiError('POST', `/sessions/${id}`, 400, '{"error":"the answer is not the kind this question takes"}');
+        }
+        if ('seen' in body) return settle(s, '', undefined, false);
         const retry = body.retry ?? false;
         // A typed card is judged by the function the server runs (packages/core).
         const verdict = 'text' in body ? evaluate(s.cards[s.at], { text: body.text }).verdict : undefined;

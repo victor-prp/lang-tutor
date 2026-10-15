@@ -18,10 +18,14 @@ import { READ_ALOUD_MAX_LEVEL } from './progress';
  *  `clozeGap`: its saved example holds the form exactly once, so it can be
  *  blanked (phase 27 D7). `dimension`, `rung`, `level` and `r` come from the
  *  word choice (D5): `r` is null for a dimension with no memory yet. `step`: a
- *  same-day return (phase 37 D1), asked after every other card (D6).
+ *  same-day return (phase 37 D1), asked after every other card (D6) but a
+ *  ladder's, whose cards it can go between (phase 54, spec D5).
  *  `meanings`: phase 34 (spec D3), every meaning the dictionary knows for its
  *  word and the word's homographs; none when absent. `knownMeanings`: phase 39
- *  (spec D6), the meanings already learned of a word whose new gloss this is. */
+ *  (spec D6), the meanings already learned of a word whose new gloss this is.
+ *  `ladder`: phase 54 (spec D3), a new word's first session: the pick is asked
+ *  as the four cards of LADDER_TYPES, whatever its rung, R, level and flags
+ *  say; absent is false. */
 export type PlanPick = {
   form: string;
   translation: string;
@@ -35,6 +39,7 @@ export type PlanPick = {
   step: boolean;
   meanings?: readonly string[];
   knownMeanings?: readonly string[];
+  ladder?: boolean;
 };
 
 /** `listening`: the app said its device has a voice for the target (phase 24 D5).
@@ -59,10 +64,16 @@ export const RUNGS: Readonly<Record<Dimension, readonly [readonly QuestionType[]
   spoken_productive: [['read_aloud'], ['say_translation']],
 };
 
+/** Phase 54 (spec D3). A ladder's cards, always in this order: the meet card,
+ *  then the practice a new word is asked in its first session. All three
+ *  practice types are always eligible, so every ladder has all four. */
+export const LADDER_TYPES: readonly QuestionType[] = ['meet', 'multiple_choice', 'reverse_choice', 'typed_translation'];
+
 /** Spec D6: no type is chosen more than this many times in one session. A new
  *  word's multiple choice, and the last resort's, are not chosen and do not
  *  count: four new words would otherwise send every recognised word to recall,
- *  though those four are about to become a board. */
+ *  though those four are about to become a board. A ladder's cards (phase 54,
+ *  spec D3) are not chosen either, and do not count. */
 export const MAX_PER_TYPE = 4;
 
 export const BOARD_SIZE = 4;
@@ -104,6 +115,9 @@ function eligible(type: QuestionType, pick: PlanPick, listening: boolean, speaki
     case 'cloze_choice':
       return pick.clozeGap;
     case 'matching':
+      return false;
+    case 'meet':
+      // Phase 54 (spec D3, D5). A ladder's first card, which planCards places from a pick's ladder flag: never a rung's choice.
       return false;
   }
 }
@@ -225,8 +239,11 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
   // "can't speak now" could pass, leaving nothing to score.
   const speaking = input.speaking && picks.length > 1;
 
+  // Phase 54 (spec D3). A ladder pick has no card of its own: its four are
+  // fixed, and it touches no type's count.
   const used = new Map<QuestionType, number>();
-  const cards = picks.map((pick) => {
+  const cards = picks.map((pick): Card | null => {
+    if (pick.ladder) return null;
     const { chosen, ...card } = cardFor(pick, used, input.listening, speaking);
     if (chosen) used.set(card.type, (used.get(card.type) ?? 0) + 1);
     return card;
@@ -234,26 +251,54 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
 
   // Spec D6, D10: in a session of at least BOARD_MIN_PICKS, four
   // multiple-choice picks whose forms and meanings all differ become one
-  // matching board; otherwise there is none. A return is never on it: it is
-  // asked last (phase 37 D6).
-  const multipleChoice = cards.flatMap((card, index) => (card.type === 'multiple_choice' && !picks[index].step ? [index] : []));
+  // matching board; otherwise there is none. A return is never on it: it
+  // follows every card that is not a return (phase 37 D6), though since phase 54
+  // (spec D5, as ruled) a ladder's cards can go between the returns. A ladder's
+  // multiple choice is never on it (phase 54, spec D3).
+  const multipleChoice = cards.flatMap((card, index) => (card?.type === 'multiple_choice' && !picks[index].step ? [index] : []));
   const board = picks.length >= BOARD_MIN_PICKS ? boardPicks(picks, multipleChoice) : null;
   const onBoard = new Set(board ?? []);
 
   const units: Unit[] = cards.flatMap((card, index) =>
-    onBoard.has(index) ? [] : [{ indices: [index], ...card, step: picks[index].step }],
+    card === null || onBoard.has(index) ? [] : [{ indices: [index], ...card, step: picks[index].step }],
   );
-  if (board) units.push({ indices: board, type: 'matching', p: Math.max(...board.map((index) => cards[index].p)), step: false });
+  if (board) units.push({ indices: board, type: 'matching', p: Math.max(...board.map((index) => cards[index]!.p)), step: false });
+
+  // Phase 54 (spec D5). The ladder stream, stage by stage: every meet card, then
+  // every first practice card, and so on, each stage in pick order.
+  const ladders = picks.flatMap((pick, index) => (pick.ladder ? [index] : []));
+  const stream: Unit[] = LADDER_TYPES.flatMap((type) => ladders.map((index) => ({ indices: [index], type, p: 1, step: false })));
 
   // Phase 37 (spec D6): the returns after every other card, so each is at least
-  // the rest of the session away from the answer that owed it.
+  // the rest of the session away from the answer that owed it. Phase 54 (spec D5,
+  // as ruled): they are the last of the other cards, ordered as before, so they
+  // follow every other card but can go between a ladder's cards: a session of one
+  // ladder and its returns does not ask the ladder back to back. With no ladder,
+  // the returns come last, as before.
   const first = ordered(units.filter((unit) => !unit.step), null);
   const returns = ordered(units.filter((unit) => unit.step), first.last);
+  const others = [...first.out, ...returns.out];
+
+  // Merged evenly with the other cards: the stream places its next card when its
+  // share of the stream placed is no more than the other cards' share. A ladder
+  // card never follows its own word while another card is left to put between
+  // them.
+  const merged: Unit[] = [];
+  let a = 0;
+  let b = 0;
+  while (a < stream.length || b < others.length) {
+    const L = stream.length;
+    const O = others.length;
+    let fromStream = b >= O || (a < L && (a + 0.5) / L <= (b + 0.5) / O);
+    const last = merged[merged.length - 1];
+    if (fromStream && b < O && last && last.indices.includes(stream[a].indices[0])) fromStream = false;
+    merged.push(fromStream ? stream[a++] : others[b++]);
+  }
 
   const order: number[] = [];
   const types: QuestionType[] = [];
   let start: number | null = null;
-  for (const unit of [...first.out, ...returns.out]) {
+  for (const unit of merged) {
     if (unit.type === 'matching') start = order.length;
     for (const index of unit.indices) {
       order.push(index);

@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import { SESSION_LENGTH } from '@lang-tutor/core/domain';
+import { SESSION_LENGTH, isChoice, type QuestionType } from '@lang-tutor/core/domain';
+import type { Question } from '@lang-tutor/core/api';
 
 import type { PgBoss } from 'pg-boss';
 
+import { NEW_PER_SESSION } from '../../../src/domain/chooseConstants';
 import { PREPARE_SESSION, type PrepareSessionPayload } from '../../../src/domain/jobs';
 import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import { enrollmentOf, seedEnrollment, seedUser } from '../../support/seedUser';
@@ -10,7 +12,7 @@ import { seedGrant } from '../../support/grantRows';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
-import { asChoice } from '../../support/questions';
+import { asChoice, insertListSession, readIntroducedOn, readVerdicts, type AskedGloss } from '../../support/questions';
 import { testRng } from '../../support/testRng';
 import {
   AccessDenied,
@@ -25,11 +27,12 @@ import {
 } from '../../../src/errors';
 import { countRows } from '../../support/rowCounts';
 import { createTestServerDeps } from '../../support/serverDeps';
-import type { SessionRecord } from '../../../src/domain/session';
+import { sessionScore, type SessionRecord } from '../../../src/domain/session';
 import type { SessionService } from '../../../src/services/sessions';
 import type { VocabularyService } from '../../../src/services/vocabulary';
 import {
   failInsertsInto,
+  readMemory,
   readProgress,
   readSnapshot,
   saveSessionGlosses,
@@ -153,7 +156,8 @@ describe('createNextSession', () => {
     const jobs = await boss.findJobs<PrepareSessionPayload>(PREPARE_SESSION);
     expect(jobs).toHaveLength(1);
     expect(jobs[0].data.session_id).toBe(created.sessionId);
-    expect(jobs[0].data.picks).toHaveLength(SESSION_LENGTH);
+    // Phase 54 (spec D4): twelve new words, three ladders, the session's ceiling.
+    expect(jobs[0].data.picks).toHaveLength(NEW_PER_SESSION);
     // Phase 24: listening on. Phase 35 (spec D6): no rotation step.
     expect(jobs[0].data).toMatchObject({ listening: true });
     expect(jobs[0].data).not.toHaveProperty('ordinal');
@@ -532,5 +536,60 @@ describe('authorization (phase 29)', () => {
 
   it('still answers an unknown session as not found, before any check', async () => {
     await expect(service.getSession(OTHER, '00000000-0000-0000-0000-000000000000')).rejects.toBeInstanceOf(SessionNotFound);
+  });
+});
+
+// Phase 54 (spec D1, D6, D7). A meet card is answered `seen`: stored as an empty
+// text with that verdict, held for no second try, left out of the score and the
+// memory, and the word's first answer, which dates its introduction.
+describe('a meet card (phase 54, spec D1, D6, D7)', () => {
+  /** A ladder's four cards, with another word's card among them. */
+  const LADDER: QuestionType[] = ['meet', 'multiple_choice', 'reverse_choice', 'reverse_choice', 'typed_translation'];
+  /** An open session counts for whichever day is asked (findIntroducedOn). */
+  const OPEN_DAY = '2026-10-15';
+
+  async function savedWord(enrollmentId: string, lemma: string, translation: string): Promise<AskedGloss> {
+    const saved = await seedSavedSenses(t.db, { enrollmentId, lemma, translations: [translation] });
+    return { glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation };
+  }
+
+  /** Answers `question` right: a choice by its right option, a typed card by its answer. */
+  function right(userId: string, sessionId: string, question: Question) {
+    if (isChoice(question)) return service.submitAnswer(userId, sessionId, question.id, { option_index: question.correct_option });
+    if (question.type !== 'typed_translation') throw new Error(`no right answer for a ${question.type} card`);
+    return service.submitAnswer(userId, sessionId, question.id, { text: question.answer });
+  }
+
+  it('stores seen with no retry, counts it in no score, writes no memory for it, and dates the introduction by it', async () => {
+    const E = enrollmentOf('u_1');
+    const kite = await savedWord(E, 'kite', 'עפיפון');
+    const lamp = await savedWord(E, 'lamp', 'מנורה');
+    const { sessionId, questions } = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [kite, kite, lamp, kite, kite], types: LADDER });
+    const [meet, ...practice] = questions;
+    expect(meet).toEqual({ id: meet.id, vocab_term_id: kite.lexemeId, type: 'meet', question: 'kite', meaning: 'עפיפון' });
+
+    const seen = await service.submitAnswer('u_1', sessionId, meet.id, { seen: true });
+    expect(seen.answers).toEqual([{ question_id: meet.id, is_correct: false, answer_string: '', verdict: 'seen', ...NO_RETRY }]);
+    expect(seen.complete).toBe(false);
+    expect(await readVerdicts(t.db, sessionId)).toEqual([{ verdict: 'seen', retryState: null }]);
+    // The word's first answer: kite is introduced, lamp, not answered yet, is not.
+    expect(await readIntroducedOn(t.db, E, OPEN_DAY)).toEqual([kite.glossId]);
+
+    let done = seen;
+    for (const question of practice) done = await right('u_1', sessionId, question);
+    expect(done.complete).toBe(true);
+    expect(sessionScore(done)).toEqual({ correct: 4, total: 4 });
+    expect(await readIntroducedOn(t.db, E, (await sessionDay(t.db, sessionId))!)).toEqual([kite.glossId, lamp.glossId].sort());
+
+    // The same practice with no meet card, in another learner's list, writes the same memory.
+    const E2 = enrollmentOf('u_2');
+    const tome = await savedWord(E2, 'tome', 'ספר');
+    const lantern = await savedWord(E2, 'lantern', 'פנס');
+    const control = await insertListSession(t.db, { userId: 'u_2', enrollmentId: E2, asked: [tome, lantern, tome, tome], types: LADDER.slice(1) });
+    for (const question of control.questions) await right('u_2', control.sessionId, question);
+    const memoryOf = async (enrollmentId: string, glossId: string) =>
+      (await readMemory(t.db, enrollmentId)).filter((row) => row.glossId === glossId).map(({ enrollmentId: _e, glossId: _g, ...row }) => row);
+    expect(await memoryOf(E, kite.glossId)).toEqual(await memoryOf(E2, tome.glossId));
+    expect((await memoryOf(E, kite.glossId)).length).toBeGreaterThan(0);
   });
 });

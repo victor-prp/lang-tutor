@@ -19,6 +19,10 @@ export function cardVoice(question: Question, { speaking }: { speaking: boolean 
     case 'listen_choice':
     case 'dictation':
       return { arrival: question.question, after: null };
+    case 'meet':
+      // Phase 54 (spec D1). The word is on screen to be met, so hearing it gives
+      // nothing away, and it is said whether or not the learner can speak back.
+      return { arrival: question.question, after: null };
     case 'read_aloud':
       // R1: the word is on screen, so hearing it is a model, not the answer.
       // With speaking off the card is passed unseen.

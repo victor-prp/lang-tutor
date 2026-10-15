@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerChoice, answerMeaning, expectGeneration, readCard } from './support/cards';
+import { answerMeaning, expectGeneration, playOut, readCard } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
@@ -19,17 +19,18 @@ const MEANINGS_OF: Record<string, string[]> = { прочитала: ['קראה',
 const SYNONYM = 'מילה';
 
 /** Phase 39 (spec D5). Each word's two senses are a gloss family, and a session
- *  asks one gloss of a family: two cards. */
-const CARDS = 2;
+ *  asks one gloss of a family. Phase 54: прочитала is a new word, so its card is
+ *  a ladder (met, then asked three ways), and лук's due meaning is one card: five. */
+const CARDS = 5;
 
 /** Past the seed, four saved senses of two words, and the session on its
  *  meaning card, every card before it answered right. Phase 35 (spec D5, D6):
  *  בצל is due on written recognition, WR at R 0.85 (S 10, 19 days) and level 3,
  *  so it is asked by recall, a typed meaning. Phase 39 (spec D3): practised,
  *  it is лук's current meaning, and קשת waits; one of прочитала's two new
- *  meanings is asked, a choice of meanings, and the other waits. The order
- *  follows each card's chance of success, so the meaning card is found by its
- *  type. */
+ *  meanings is asked, as a ladder, and the other waits. The order is the plan's
+ *  (a ladder's cards are spread through the session, spec D5), so the meaning
+ *  card is found by its type. */
 async function reachMeaningCard(page: Page, request: APIRequestContext, username: string, report: () => string) {
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
@@ -59,18 +60,15 @@ async function reachMeaningCard(page: Page, request: APIRequestContext, username
   for (let position = 1; position <= CARDS; position++) {
     const card = await readCard(page, position, CARDS);
     if (card.kind === 'meaning') return { card, position };
-    expect(card.kind, `position ${position}`).toBe('choice');
-    await answerChoice(page, card, true);
-    await page.getByTestId('continue-button').click();
+    await playOut(page, card);
   }
   throw new Error('the session asked no meaning card');
 }
 
-/** The rest of the session after the meaning card: choices, answered right. */
+/** The rest of the session after the meaning card: the ladder's cards, played out. */
 async function finishSession(page: Page, after: number) {
   for (let position = after + 1; position <= CARDS; position++) {
-    await answerChoice(page, await readCard(page, position, CARDS, 'choice'), true);
-    await page.getByTestId('continue-button').click();
+    await playOut(page, await readCard(page, position, CARDS));
   }
 }
 

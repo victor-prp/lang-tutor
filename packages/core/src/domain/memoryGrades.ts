@@ -79,6 +79,9 @@ export function gradesFor(answer: GradableAnswer): GradedPiece[] {
     case 'read_aloud':
       // The word is shown: nothing is retrieved.
       return [];
+    case 'meet':
+      // Phase 54 (spec D6). Ungraded: the word is shown and nothing is asked.
+      return [];
     case 'say_translation':
       switch (answer.verdict) {
         case 'understood':
@@ -116,6 +119,7 @@ export function dimensionsTested(type: QuestionType): Dimension[] {
     case 'dictation':
       return ['spoken_receptive', 'spelling'];
     case 'read_aloud':
+    case 'meet':
       return [];
     case 'say_translation':
       return ['spoken_receptive', 'spoken_productive'];

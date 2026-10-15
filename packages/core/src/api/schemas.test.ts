@@ -44,6 +44,7 @@ import {
   NextStepResponseSchema,
   SpeechAnswerRequestSchema,
   SpeechAnswerResponseSchema,
+  AnswerRecordSchema,
   QuestionSchema,
   SaveVocabularyRequestSchema,
   TranslationCorrectionSchema,
@@ -153,6 +154,15 @@ describe('NextStepRequestSchema', () => {
     expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'edit', check_fit: 'yes' }).success).toBe(false);
   });
 
+  // Phase 54 (spec D6). A meet card is answered with `seen: true` and nothing else.
+  it('takes `seen: true` for a meet card, and nothing that is not true', () => {
+    expect(NextStepRequestSchema.parse({ question_id: 'q1', seen: true })).toEqual({ question_id: 'q1', seen: true });
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q1', seen: false }).success).toBe(false);
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q1', seen: 'yes' }).success).toBe(false);
+    expect(NextStepRequestSchema.safeParse({ seen: true }).success).toBe(false);
+    expect(NextStepRequestSchema.safeParse({ question_id: '', seen: true }).success).toBe(false);
+  });
+
   it('rejects a negative option_index', () => {
     expect(NextStepRequestSchema.safeParse({ ...valid, option_index: -1 }).success).toBe(false);
   });
@@ -191,6 +201,25 @@ describe('NewMeaningQuestionSchema', () => {
     expect(QuestionSchema.safeParse(bare).success).toBe(false);
     const { context: _context, ...noContext } = card;
     expect(QuestionSchema.safeParse(noContext).success).toBe(false);
+  });
+});
+
+// Phase 54 (spec D1, D6). The meet card carries the form and its meaning, and nothing to answer with.
+describe('MeetQuestionSchema', () => {
+  const card = { id: 'e1', type: 'meet', vocab_term_id: 'l1', question: 'gatto', meaning: 'חתול' };
+
+  it('joins the Question union by its type', () => {
+    expect(QuestionSchema.parse(card)).toEqual(card);
+  });
+
+  it('needs the form and the meaning', () => {
+    expect(QuestionSchema.safeParse({ ...card, meaning: undefined }).success).toBe(false);
+    expect(QuestionSchema.safeParse({ ...card, question: undefined }).success).toBe(false);
+  });
+
+  it('is stored with the seen verdict', () => {
+    const record = { question_id: 'e1', is_correct: false, answer_string: '', verdict: 'seen', retry_state: null, retry_answer_string: null, retry_verdict: null };
+    expect(AnswerRecordSchema.parse(record).verdict).toBe('seen');
   });
 });
 

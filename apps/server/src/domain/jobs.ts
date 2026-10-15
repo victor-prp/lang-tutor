@@ -74,12 +74,16 @@ export const PrepareSessionPayloadSchema = z.object({
         rung: z.union([z.literal(1), z.literal(2)]).default(1),
         level: z.number().int().min(MIN_LEVEL).max(MAX_LEVEL).default(MIN_LEVEL),
         r: z.number().min(0).max(1).nullable().default(null),
-        // Phase 37 (spec D6). A same-day return, asked after every other card.
+        // Phase 37 (spec D6). A same-day return, asked after every card that is not
+        // a return; a ladder's cards can go between returns (phase 54, spec D5).
         // Absent in a job enqueued before the deploy: no return.
         step: z.boolean().default(false),
         // Phase 39 (spec D6). The known meanings a new_meaning card lists; absent
         // before the deploy and on every other pick.
         known_meanings: z.array(z.string()).optional(),
+        // Phase 54 (spec D3, D7). A new word's first session, asked as four cards,
+        // the meet card first. Absent in a stock prepared before the deploy: no ladder.
+        ladder: z.boolean().optional(),
       }),
     )
     .min(1)
