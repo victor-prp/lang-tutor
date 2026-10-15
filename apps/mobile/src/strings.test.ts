@@ -187,3 +187,47 @@ describe('targets (phase 53 D10, D11)', () => {
     ]);
   });
 });
+
+describe('the target wizard and the target screen (phase 53 D10, D11)', () => {
+  const ltr = (text: string) => '⁦' + text + '⁩';
+
+  it('isolates every number it counts', () => {
+    expect(strings.targetPhotosFull(10)).toBe('אפשר עד ' + ltr('10') + ' תמונות');
+    expect(strings.targetUploading(2, 5)).toBe('שולחים תמונה ' + ltr('2') + ' מתוך ' + ltr('5') + '…');
+    expect(strings.targetPhotosUnread(1, 3)).toBe('לא הצלחנו לקרוא ' + ltr('1') + ' מתוך ' + ltr('3') + ' תמונות');
+    expect(strings.targetPickedCount(4)).toBe('מילים שנבחרו: ' + ltr('4'));
+    expect(strings.targetEntriesFull(50)).toBe('אפשר עד ' + ltr('50') + ' מילים');
+  });
+
+  it('names the wizard of each action and each of its steps', () => {
+    expect(strings.targetNew).toBe('הכנה לשיעורי בית או לבוחן');
+    expect(strings.targetWizardCreate).toBe('הכנה חדשה');
+    expect(strings.targetWizardAddPhotos).toBe('מילים מתמונות');
+    expect(strings.targetWizardAddWords).toBe('הוספת מילים');
+    expect(strings.targetWizardChangeDate).toBe('שינוי התאריך');
+    expect(strings.targetStepKind).toBe('למה מתכוננים?');
+    expect(strings.targetStepPhotos).toBe('תמונות של רשימת המילים');
+    expect(strings.targetStepReview).toBe('המילים מהתמונות');
+    expect(strings.targetStepWords).toBe('עוד מילים');
+    expect(strings.targetStepDate).toBe('באיזה תאריך?');
+    expect(strings.targetWizardNext).toBe('הבא');
+    expect(strings.targetWizardDone).toBe('סיום');
+  });
+
+  it("says what Done's refusal asks the learner to fix", () => {
+    expect(strings.targetNoWords).toBe('צריך לפחות מילה אחת. אפשר לחזור ולהוסיף מילים.');
+    expect(strings.targetDueDatePast).toBe('צריך לבחור תאריך אחרי היום.');
+    expect(strings.targetSaveFailed).toBe('השמירה נכשלה. נסו שוב.');
+    expect(strings.targetClosed).toBe('ההכנה הזו כבר הסתיימה.');
+  });
+
+  it("words the target screen's actions and the end's question", () => {
+    expect(strings.targetAddPhotos).toBe('הוספת מילים מתמונות');
+    expect(strings.targetAddWord).toBe('הוספת מילה');
+    expect(strings.targetChangeDate).toBe('שינוי התאריך');
+    expect(strings.targetEnd).toBe('סיום ההכנה');
+    expect(strings.targetEndTitle).toBe('לסיים את ההכנה?');
+    expect(strings.targetEndMessage).toBe('המילים יישארו שמורות ברשימה שלך.');
+    expect(strings.targetEndConfirm).toBe('סיום ההכנה');
+  });
+});

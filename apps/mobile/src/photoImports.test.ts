@@ -16,6 +16,7 @@ import {
   statusLabel,
   tickedCount,
   withChange,
+  withRow,
 } from './photoImports';
 import { strings } from './strings';
 
@@ -55,6 +56,17 @@ describe('withChange', () => {
     expect(next.items[1]).toMatchObject({ ticked: false, chosen_gloss_id: 's2' });
     expect(next.items[0]).toEqual(item(0));
     expect(chosenOption(next.items[1])).toEqual(option(2));
+  });
+});
+
+describe('withRow', () => {
+  // The server's answer to a change, or the row as it was before a refused one.
+  it('puts a row in place of the one at its position, and leaves the others', () => {
+    const before = imp([item(0), item(1), item(2)]);
+    const after = withRow(before, item(1, { ticked: false, chosen_gloss_id: 's2' }));
+    expect(after.items).toEqual([item(0), item(1, { ticked: false, chosen_gloss_id: 's2' }), item(2)]);
+    expect(before.items[1]).toEqual(item(1));
+    expect(withRow(before, item(7))).toEqual(before);
   });
 });
 

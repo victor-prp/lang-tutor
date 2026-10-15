@@ -211,6 +211,7 @@ describe('api/client', () => {
     const failure = await buildClient(mockFetch).currentSession('e1').catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(ApiError);
     expect((failure as ApiError).code).toBeUndefined();
+    expect((failure as ApiError).reason).toBeUndefined();
   });
 
   it('createProfile posts the profile to /api/users', async () => {
@@ -775,5 +776,26 @@ describe('targets', () => {
       new ApiError(404, 'target not found'),
     );
     await expect(refuse(409, 'target closed').endTarget('t1')).rejects.toEqual(new ApiError(409, 'target closed'));
+  });
+
+  // Phase 53 (spec D10). An invalid target says why (`no_words`, `due_date`, `unknown_import`),
+  // and the wizard's Done tells the learner what to fix from it.
+  it("keeps a refusal's reason beside its error, and only a reason that is a string", async () => {
+    const refuse = (body: unknown) =>
+      buildClient(jest.fn(async () => ({ ok: false, status: 400, json: async () => body })));
+    const failureOf = (body: unknown) => refuse(body).createTarget('e1', create).catch((error: unknown) => error);
+
+    const noWords = await failureOf({ error: 'invalid target', reason: 'no_words' });
+    expect(noWords).toBeInstanceOf(ApiError);
+    expect(noWords).toMatchObject({ status: 400, code: 'invalid target', reason: 'no_words' });
+    expect((noWords as ApiError).message).toBe('API request failed with status 400 (invalid target: no_words)');
+
+    const plain = await failureOf({ error: 'invalid request' });
+    expect((plain as ApiError).reason).toBeUndefined();
+    expect((plain as ApiError).message).toBe('API request failed with status 400 (invalid request)');
+    expect((await failureOf({ error: 'invalid target', reason: 7 })) as ApiError).toMatchObject({
+      code: 'invalid target',
+      reason: undefined,
+    });
   });
 });

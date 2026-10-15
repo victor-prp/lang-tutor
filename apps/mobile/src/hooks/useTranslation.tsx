@@ -49,6 +49,9 @@ export type TranslationValue = {
   canSaveAll: boolean;
   /** 'tutor' on a student's list: the cards add and never remove. */
   mode: 'learner' | 'tutor';
+  /** Phase 53. In collect mode (see LookupCollect): a card's button adds its word to the
+   *  target wizard's list and saves nothing, so the panel says add / added, not save / saved. */
+  collecting: boolean;
   /**
    * `override` exists for the correction banner's alternative chips. `submit()`
    * closes over the provider's `text` state, so `setText(alt)` followed by a bare
@@ -218,6 +221,7 @@ export function TranslationProvider({
       pending,
       saveFailed,
       mode: effective?.mode ?? 'learner',
+      collecting: collect !== undefined,
       canSaveAll: result ? canSaveAllOf(result.senses, shown) : false,
       toggleSave: (glossId: string) => {
         const sense = result?.senses.find((s) => s.gloss_id === glossId);

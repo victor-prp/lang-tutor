@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { TranslationSense } from '@lang-tutor/core/api';
 
+import { ApiError } from './api/client';
 import type { Photo } from './photos';
 import {
   MAX_ENTRIES,
@@ -8,13 +9,22 @@ import {
   addRequest,
   canAdvance,
   createRequest,
+  dateRequest,
+  discardLeftNothing,
+  entriesFull,
+  holdsEntry,
+  holdsPicks,
   initialWizard,
+  isFirstStep,
+  isLastStep,
+  photosFull,
   photosToUpload,
   pickedEntryOf,
   pickedStateOf,
   stepsFor,
   unpickedEntries,
   wizardReducer,
+  wizardRouteOf,
   type PickedEntry,
   type WizardAction,
   type WizardMode,
@@ -455,5 +465,94 @@ describe('what a lookup card adds', () => {
     it('lists nothing when every card is picked', () => {
       expect(unpickedEntries(result, { g1: true, g2: true, g3: true })).toEqual([]);
     });
+  });
+});
+
+describe('wizardRouteOf', () => {
+  it('is a new target with no mode, and for an unknown one', () => {
+    expect(wizardRouteOf({})).toEqual({ mode: 'create', targetId: null });
+    expect(wizardRouteOf({ mode: 'create' })).toEqual({ mode: 'create', targetId: null });
+    expect(wizardRouteOf({ mode: 'rename', targetId: 't1' })).toEqual({ mode: 'create', targetId: null });
+    expect(wizardRouteOf({ mode: ['add-words', 'change-date'], targetId: 't1' })).toEqual({ mode: 'create', targetId: null });
+  });
+
+  it("is a target's action with the target it acts on", () => {
+    expect(wizardRouteOf({ mode: 'add-photos', targetId: 't1' })).toEqual({ mode: 'add-photos', targetId: 't1' });
+    expect(wizardRouteOf({ mode: 'add-words', targetId: 't1' })).toEqual({ mode: 'add-words', targetId: 't1' });
+    expect(wizardRouteOf({ mode: 'change-date', targetId: 't1' })).toEqual({ mode: 'change-date', targetId: 't1' });
+  });
+
+  it('is nothing for an action with no target to act on', () => {
+    expect(wizardRouteOf({ mode: 'add-words' })).toBeNull();
+    expect(wizardRouteOf({ mode: 'add-photos', targetId: '' })).toBeNull();
+    expect(wizardRouteOf({ mode: 'change-date', targetId: ['t1', 't2'] })).toBeNull();
+  });
+});
+
+describe('isFirstStep and isLastStep', () => {
+  it('knows where each mode starts and where Done is', () => {
+    expect(isFirstStep(at('create'))).toBe(true);
+    expect(isLastStep(at('create'))).toBe(false);
+    expect(isFirstStep(at('create', { step: 'photos' }))).toBe(false);
+    expect(isLastStep(at('create', { step: 'date' }))).toBe(true);
+    expect(isFirstStep(at('add-photos'))).toBe(true);
+    expect(isLastStep(at('add-photos', { step: 'review' }))).toBe(true);
+  });
+
+  it('is both on the one step of an addition of words or a change of date', () => {
+    for (const mode of ['add-words', 'change-date'] as const) {
+      expect(isFirstStep(at(mode))).toBe(true);
+      expect(isLastStep(at(mode))).toBe(true);
+    }
+  });
+});
+
+describe('holdsPicks', () => {
+  it('is true once a photo or a word is held, which leaving would lose', () => {
+    expect(holdsPicks(at('create'))).toBe(false);
+    expect(holdsPicks(at('create', { kind: 'exam', dueOn: '2026-10-20' }))).toBe(false);
+    expect(holdsPicks(at('create', { photos: photos(1) }))).toBe(true);
+    expect(holdsPicks(at('add-words', { entries: [entry(1)] }))).toBe(true);
+  });
+});
+
+describe('dateRequest', () => {
+  it('is the date chosen, and throws without one', () => {
+    expect(dateRequest(at('change-date', { dueOn: '2026-10-22' }))).toEqual({ due_on: '2026-10-22' });
+    expect(() => dateRequest(at('change-date'))).toThrow();
+  });
+});
+
+describe('discardLeftNothing', () => {
+  // A removed photo's import is discarded before the photo goes, so none is left behind.
+  it('lets the photo go when the server says its import is gone or saved', () => {
+    expect(discardLeftNothing(new ApiError(404, 'photo import not found'))).toBe(true);
+    expect(discardLeftNothing(new ApiError(409, 'photo import not ready'))).toBe(true);
+  });
+
+  it('keeps the photo when the import may still be there', () => {
+    expect(discardLeftNothing(new ApiError(500))).toBe(false);
+    expect(discardLeftNothing(new ApiError(401, 'not signed in'))).toBe(false);
+    expect(discardLeftNothing(new TypeError('Network request failed'))).toBe(false);
+  });
+});
+
+describe('photosFull and entriesFull', () => {
+  it('says when the wizard holds as many photos or words as a request carries', () => {
+    expect(photosFull(at('create', { photos: photos(MAX_PHOTOS - 1) }))).toBe(false);
+    expect(photosFull(at('create', { photos: photos(MAX_PHOTOS) }))).toBe(true);
+    const words = (count: number) => Array.from({ length: count }, (_, n) => entry(n));
+    expect(entriesFull(at('add-words', { entries: words(MAX_ENTRIES - 1) }))).toBe(false);
+    expect(entriesFull(at('add-words', { entries: words(MAX_ENTRIES) }))).toBe(true);
+  });
+});
+
+describe('holdsEntry', () => {
+  // The lookup's collect mode reads a card's state from it.
+  it('knows a picked word by its gloss', () => {
+    const state = at('add-words', { entries: [entry(1), entry(2)] });
+    expect(holdsEntry(state, 'g2')).toBe(true);
+    expect(holdsEntry(state, 'g3')).toBe(false);
+    expect(holdsEntry(at('add-words'), 'g1')).toBe(false);
   });
 });

@@ -1,9 +1,10 @@
-import type { PhotoImport, PhotoImportItem, PhotoImportItemUpdate, PhotoImportOption } from '@lang-tutor/core/api';
+import type { PhotoImport, PhotoImportItemUpdate } from '@lang-tutor/core/api';
 import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { PhotoImportRow } from '@/components/PhotoImportRow';
 import { confirm } from '@/confirm';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { usePhotoImports } from '@/hooks/usePhotoImports';
@@ -12,42 +13,20 @@ import {
   afterFailedChange,
   afterReadBack,
   canSave,
-  chosenOption,
   mergePolled,
-  rowNotes,
   savedWordCount,
   shouldPollImport,
   statusLabel,
   tickedCount,
   withChange,
+  withRow,
 } from '@/photoImports';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
-import { alsoLine } from '@/vocabulary';
 
 // How one read of the import ended (ReadOutcome in @/photoImports), with what it
 // read when it was shown.
 type Read = { outcome: 'applied'; read: PhotoImport } | { outcome: 'superseded' | 'failed' };
-
-const withRow = (imp: PhotoImport, row: PhotoImportItem): PhotoImport => ({
-  ...imp,
-  items: imp.items.map((item) => (item.position === row.position ? row : item)),
-});
-
-function Meaning({ option }: { option: PhotoImportOption }) {
-  const partOfSpeech = option.part_of_speech ? strings.partOfSpeech(option.part_of_speech) : undefined;
-  const also = alsoLine(option.alternatives);
-  return (
-    <>
-      <Text style={styles.translation}>{option.translation}</Text>
-      {/* Phase 31. The lookup card's lines, in its order: the gloss's key when it says
-          something else, the rendering's other words, then the part of speech. */}
-      {option.key ? <Text style={styles.meta}>{option.key}</Text> : null}
-      {also ? <Text style={styles.meta}>{also}</Text> : null}
-      {partOfSpeech ? <Text style={styles.meta}>{partOfSpeech}</Text> : null}
-    </>
-  );
-}
 
 // Phase 26 (spec D13). The review of one import: every row with a sense starts
 // ticked, any can be unticked or switched to another of its senses, and the
@@ -243,91 +222,16 @@ export default function PhotoImportReviewScreen() {
               </View>
             ) : null
           }
-          renderItem={({ item }) => {
-            const choosable = item.status === 'ready' && item.options.length > 0;
-            const locked = busy || changing.has(item.position);
-            const tickDisabled = !choosable || locked;
-            const chosen = chosenOption(item);
-            const expanded = open === item.position;
-            return (
-              <View testID="photo-import-row" style={styles.row}>
-                <View style={styles.rowTop}>
-                  <Pressable
-                    accessibilityRole="checkbox"
-                    accessibilityLabel={item.corrected_form ?? item.text}
-                    accessibilityState={{ checked: item.ticked, disabled: tickDisabled }}
-                    // react-native-web 0.21 does not render accessibilityState, so on
-                    // web this is what puts the tick in the DOM (and in a test).
-                    aria-checked={item.ticked}
-                    disabled={tickDisabled}
-                    testID="photo-import-tick"
-                    hitSlop={8}
-                    onPress={() => void change(item.position, { ticked: !item.ticked })}
-                    style={[styles.tick, item.ticked && styles.tickOn, tickDisabled && styles.disabled]}
-                  >
-                    {item.ticked ? <Text style={styles.tickMark}>✓</Text> : null}
-                  </Pressable>
-                  <Text testID="photo-import-word" style={[styles.word, { writingDirection: wordDirection }]}>
-                    {item.corrected_form ?? item.text}
-                  </Text>
-                </View>
-
-                {item.status === 'pending' ? (
-                  <View style={styles.pending}>
-                    <ActivityIndicator />
-                    <Text style={styles.meta}>{strings.photoImportPending}</Text>
-                  </View>
-                ) : choosable ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityState={{ expanded, disabled: locked }}
-                    disabled={locked}
-                    testID="photo-import-meaning"
-                    onPress={() => setOpen(expanded ? null : item.position)}
-                    style={styles.meaning}
-                  >
-                    {chosen ? <Meaning option={chosen} /> : null}
-                  </Pressable>
-                ) : null}
-
-                {expanded && choosable
-                  ? item.options.map((option) => {
-                      const selected = option.gloss_id === item.chosen_gloss_id;
-                      return (
-                        <Pressable
-                          key={option.gloss_id}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected, disabled: locked }}
-                          aria-selected={selected}
-                          disabled={locked}
-                          testID="photo-import-option"
-                          onPress={() => {
-                            setOpen(null);
-                            if (!selected) void change(item.position, { gloss_id: option.gloss_id });
-                          }}
-                          style={[styles.option, selected && styles.optionSelected]}
-                        >
-                          <Meaning option={option} />
-                          {/* Two members may share a sentence, so the React key adds the place. */}
-                          {(option.examples ?? []).map((example, index) => (
-                            <View key={`${index}:${example.source}`}>
-                              <Text style={[styles.exampleSource, { writingDirection: wordDirection }]}>{example.source}</Text>
-                              <Text style={styles.meta}>{example.target}</Text>
-                            </View>
-                          ))}
-                        </Pressable>
-                      );
-                    })
-                  : null}
-
-                {rowNotes(item).map((note) => (
-                  <Text key={note} testID="photo-import-note" style={styles.note}>
-                    {note}
-                  </Text>
-                ))}
-              </View>
-            );
-          }}
+          renderItem={({ item }) => (
+            <PhotoImportRow
+              item={item}
+              wordDirection={wordDirection}
+              locked={busy || changing.has(item.position)}
+              expanded={open === item.position}
+              onExpand={(expanded) => setOpen(expanded ? item.position : null)}
+              onChange={(update) => void change(item.position, update)}
+            />
+          )}
         />
       )}
 
@@ -374,42 +278,6 @@ const styles = StyleSheet.create({
   status: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   statusLabel: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, writingDirection: 'rtl' },
   list: { gap: spacing.sm, paddingBottom: spacing.xl },
-  row: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-    gap: spacing.xs,
-  },
-  rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  tick: {
-    width: 28,
-    height: 28,
-    borderRadius: radii.sm,
-    borderWidth: 2,
-    borderColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tickOn: { backgroundColor: colors.primary },
-  tickMark: { color: colors.onPrimary, fontSize: fontSizes.md, fontWeight: '700' },
-  disabled: { opacity: 0.4 },
-  word: { flex: 1, fontSize: fontSizes.lg, fontWeight: '700', color: colors.text },
-  pending: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  meaning: { gap: spacing.xs },
-  translation: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.text, writingDirection: 'rtl' },
-  meta: { fontSize: fontSizes.sm, color: colors.muted, writingDirection: 'rtl' },
-  option: {
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.sm,
-    gap: spacing.xs,
-  },
-  optionSelected: { borderColor: colors.primary, backgroundColor: colors.background },
-  exampleSource: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.text },
-  note: { fontSize: fontSizes.sm, color: colors.muted, writingDirection: 'rtl' },
   empty: { gap: spacing.sm, alignItems: 'center', paddingTop: spacing.xl },
   notice: { fontSize: fontSizes.md, color: colors.muted, writingDirection: 'rtl', textAlign: 'center' },
   error: { color: colors.wrong, fontSize: fontSizes.md, lineHeight: lineHeights.md, writingDirection: 'rtl' },

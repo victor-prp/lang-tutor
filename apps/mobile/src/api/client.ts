@@ -47,19 +47,25 @@ import type {
 export class ApiError extends Error {
   // `code` is the body's `error` string when there is one: the server answers
   // several 409s (session_open, no_saved_words, …) that the status alone
-  // cannot tell apart.
+  // cannot tell apart. Phase 53: `reason` is the body's `reason` beside it, which
+  // says why an `invalid target` was refused (no_words, due_date, unknown_import).
   constructor(
     public readonly status: number,
     public readonly code?: string,
+    public readonly reason?: string,
   ) {
-    super(`API request failed with status ${status}${code ? ` (${code})` : ''}`);
+    super(`API request failed with status ${status}${code ? ` (${code}${reason ? `: ${reason}` : ''})` : ''}`);
   }
 }
 
 async function failureOf(res: Response): Promise<ApiError> {
   try {
-    const body = (await res.json()) as { error?: unknown };
-    return new ApiError(res.status, typeof body.error === 'string' ? body.error : undefined);
+    const body = (await res.json()) as { error?: unknown; reason?: unknown };
+    return new ApiError(
+      res.status,
+      typeof body.error === 'string' ? body.error : undefined,
+      typeof body.reason === 'string' ? body.reason : undefined,
+    );
   } catch {
     return new ApiError(res.status);
   }

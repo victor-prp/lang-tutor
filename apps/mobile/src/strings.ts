@@ -408,4 +408,61 @@ export const strings = {
   /** `weekday` is JavaScript's (0 = Sunday), `month` is 1 = January. */
   targetDueDay: (weekday: number, day: number, month: number) =>
     `יום ${TARGET_WEEKDAY_NAMES[weekday]}, ${isolateLtr(String(day))} ${TARGET_MONTH_NAMES[month - 1]}`,
+  // Home's button, which says what a target is for.
+  targetNew: 'הכנה לשיעורי בית או לבוחן',
+  // The wizard: its title for each action, and each step's (spec D10).
+  targetWizardCreate: 'הכנה חדשה',
+  targetWizardAddPhotos: 'מילים מתמונות',
+  targetWizardAddWords: 'הוספת מילים',
+  targetWizardChangeDate: 'שינוי התאריך',
+  targetStepKind: 'למה מתכוננים?',
+  targetStepPhotos: 'תמונות של רשימת המילים',
+  targetStepReview: 'המילים מהתמונות',
+  targetStepWords: 'עוד מילים',
+  targetStepDate: 'באיזה תאריך?',
+  targetPhotosHint: 'אפשר לצלם או לבחור כמה תמונות, או לדלג על השלב.',
+  targetReviewHint: 'אפשר להוריד סימון ממילה או לבחור לה משמעות אחרת.',
+  targetWordsHint: 'חפשו מילה והוסיפו אותה לרשימה.',
+  targetWizardNext: 'הבא',
+  targetWizardDone: 'סיום',
+  // Leaving the wizard with photos or words picked: nothing was saved yet.
+  targetLeaveTitle: 'לצאת בלי לשמור?',
+  targetLeaveMessage: 'התמונות והמילים שנבחרו לא יישמרו.',
+  targetLeaveConfirm: 'יציאה',
+  targetPhotoRemove: 'הסרת התמונה',
+  targetPhotosFull: (max: number) => `אפשר עד ${isolateLtr(String(max))} תמונות`,
+  // While the chosen photos are shrunk, one at a time, before they are shown.
+  targetPhotosPreparing: 'מכינים את התמונות…',
+  // `current` is the photo on its way, counted from 1.
+  targetUploading: (current: number, total: number) =>
+    `שולחים תמונה ${isolateLtr(String(current))} מתוך ${isolateLtr(String(total))}…`,
+  targetPhotoAddFailed: 'לא הצלחנו להוסיף את התמונה. נסו שוב.',
+  targetPhotoRemoveFailed: 'הסרת התמונה נכשלה. נסו שוב.',
+  targetReviewReading: 'קוראים את התמונות…',
+  targetReviewLoadFailed: 'טעינת המילים נכשלה. מנסים שוב…',
+  targetReviewEmpty: 'לא נמצאו מילים בתמונות.',
+  // Ruling R-D9: each photo is its own import, and a failed one is a photo not read.
+  targetPhotosUnread: (unread: number, total: number) =>
+    `לא הצלחנו לקרוא ${isolateLtr(String(unread))} מתוך ${isolateLtr(String(total))} תמונות`,
+  targetPickedCount: (count: number) => `מילים שנבחרו: ${isolateLtr(String(count))}`,
+  targetEntriesFull: (max: number) => `אפשר עד ${isolateLtr(String(max))} מילים`,
+  targetEntryRemove: 'הסרה',
+  targetDatesLoadFailed: 'טעינת התאריכים נכשלה.',
+  // Done refused: what to fix (the 400's reason), or that it did not go through.
+  targetNoWords: 'צריך לפחות מילה אחת. אפשר לחזור ולהוסיף מילים.',
+  targetDueDatePast: 'צריך לבחור תאריך אחרי היום.',
+  targetSaveFailed: 'השמירה נכשלה. נסו שוב.',
+  targetClosed: 'ההכנה הזו כבר הסתיימה.',
+  // The target screen (spec D11).
+  targetAddPhotos: 'הוספת מילים מתמונות',
+  targetAddWord: 'הוספת מילה',
+  targetChangeDate: 'שינוי התאריך',
+  targetEnd: 'סיום ההכנה',
+  targetEndTitle: 'לסיים את ההכנה?',
+  targetEndMessage: 'המילים יישארו שמורות ברשימה שלך.',
+  targetEndConfirm: 'סיום ההכנה',
+  targetWordRemove: 'הסרה',
+  targetEmpty: 'אין מילים בהכנה הזו.',
+  targetLoadFailed: 'טעינת ההכנה נכשלה. אפשר לנסות שוב.',
+  targetActionFailed: 'הפעולה נכשלה. נסו שוב.',
 } as const;

@@ -40,6 +40,9 @@ export function LookupPanel() {
   // information the client was holding. Only the ranking signal is kept: the
   // first card still says which meaning is the common one.
   const showCount = !isSentence && senses.length > 1;
+  // A tutor's tap adds to a student's list, and the target wizard's tap adds to the
+  // wizard's (phase 53): neither saves to the learner's own list, so both say add / added.
+  const adds = t.mode === 'tutor' || t.collecting;
 
   return (
     <>
@@ -196,7 +199,7 @@ export function LookupPanel() {
               onPress={t.saveAll}
               style={styles.secondaryButton}
             >
-              <Text style={styles.secondaryLabel}>{t.mode === 'tutor' ? strings.tutorAddAll : strings.translateSaveAll}</Text>
+              <Text style={styles.secondaryLabel}>{adds ? strings.tutorAddAll : strings.translateSaveAll}</Text>
             </Pressable>
           ) : null}
           {t.saveFailed ? (
@@ -215,7 +218,7 @@ export function LookupPanel() {
               onToggle={() => sense.gloss_id && t.toggleSave(sense.gloss_id)}
               from={answerFrom}
               to={answerTo}
-              tutor={t.mode === 'tutor'}
+              adds={adds}
             />
           ))}
 
@@ -241,7 +244,7 @@ function SenseCard({
   onToggle,
   from,
   to,
-  tutor,
+  adds,
 }: {
   sense: TranslationSense;
   isTop: boolean;
@@ -251,8 +254,9 @@ function SenseCard({
   /** The response's languages: a translation is in `to`, an example in both. */
   from: string;
   to: string;
-  /** Tutor mode: the button reads add / added instead of save / saved. */
-  tutor: boolean;
+  /** The button reads add / added instead of save / saved: a tutor's lookup, and the
+   *  target wizard's, which save nothing to the learner's own list. */
+  adds: boolean;
 }) {
   const partOfSpeech = sense.part_of_speech
     ? strings.partOfSpeech(sense.part_of_speech)
@@ -321,8 +325,8 @@ function SenseCard({
         >
           <Text style={[styles.chooseLabel, saveState && styles.savedLabel]}>
             {saveState
-              ? tutor ? strings.tutorAdded : strings.translateSaved
-              : tutor ? strings.tutorAdd : strings.translateSave}
+              ? adds ? strings.tutorAdded : strings.translateSaved
+              : adds ? strings.tutorAdd : strings.translateSave}
           </Text>
         </Pressable>
       ) : null}

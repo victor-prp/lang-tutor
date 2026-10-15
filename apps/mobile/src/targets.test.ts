@@ -1,13 +1,21 @@
 import { describe, expect, it, jest } from '@jest/globals';
-import type { TargetList } from '@lang-tutor/core/api';
+import type { Target, TargetList } from '@lang-tutor/core/api';
 
+import { ApiError } from './api/client';
 import {
+  actionFailureMessage,
+  dateHasCome,
   dueDateChoices,
+  dueDayLabel,
   daysLeftLabel,
+  doneFailureMessage,
   readinessName,
   readyLabel,
+  stepTitle,
   targetTitle,
   targetsFor,
+  withoutWord,
+  wizardTitle,
   type StoredTargets,
 } from './targets';
 
@@ -140,5 +148,118 @@ describe('targetsFor', () => {
   it('shows nothing before a first read, or with no enrollment active', () => {
     expect(targetsFor(null, 'e1')).toBeNull();
     expect(targetsFor(stored, undefined)).toBeNull();
+  });
+});
+
+describe('dueDayLabel', () => {
+  it("labels a target's own date as the date step labels it", () => {
+    expect(dueDayLabel('2026-10-16')).toBe(`יום שישי, ${ltr('16')} באוקטובר`);
+    expect(dueDayLabel('2027-01-01')).toBe(`יום שישי, ${ltr('1')} בינואר`);
+    expect(dueDateChoices('2026-10-15', 60).every((choice) => dueDayLabel(choice.day) === choice.label)).toBe(true);
+  });
+
+  it('reads no clock either', () => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(new Date('2030-06-15T23:30:00Z'));
+      expect(dueDayLabel('2026-10-16')).toBe(`יום שישי, ${ltr('16')} באוקטובר`);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('refuses a day that is not one', () => {
+    expect(() => dueDayLabel('16.10.2026')).toThrow(RangeError);
+  });
+});
+
+describe('wizardTitle and stepTitle', () => {
+  it('names the wizard of each action', () => {
+    expect(wizardTitle('create')).toBe('הכנה חדשה');
+    expect(wizardTitle('add-photos')).toBe('מילים מתמונות');
+    expect(wizardTitle('add-words')).toBe('הוספת מילים');
+    expect(wizardTitle('change-date')).toBe('שינוי התאריך');
+  });
+
+  it('names each step', () => {
+    expect(stepTitle('kind')).toBe('למה מתכוננים?');
+    expect(stepTitle('photos')).toBe('תמונות של רשימת המילים');
+    expect(stepTitle('review')).toBe('המילים מהתמונות');
+    expect(stepTitle('words')).toBe('עוד מילים');
+    expect(stepTitle('date')).toBe('באיזה תאריך?');
+  });
+});
+
+describe('dateHasCome', () => {
+  // The target screen reads a target by id, which may be past its date (spec D11): it is
+  // closed then, and offers no change.
+  it('is true from the due date on, and false while a day is left', () => {
+    expect(dateHasCome({ days_left: 1 })).toBe(false);
+    expect(dateHasCome({ days_left: 9 })).toBe(false);
+    expect(dateHasCome({ days_left: 0 })).toBe(true);
+    expect(dateHasCome({ days_left: -2 })).toBe(true);
+  });
+});
+
+describe('doneFailureMessage', () => {
+  it("says what to fix when the server says why it refused (the 400's reason)", () => {
+    expect(doneFailureMessage(new ApiError(400, 'invalid target', 'no_words'))).toBe(
+      'צריך לפחות מילה אחת. אפשר לחזור ולהוסיף מילים.',
+    );
+    expect(doneFailureMessage(new ApiError(400, 'invalid target', 'due_date'))).toBe('צריך לבחור תאריך אחרי היום.');
+  });
+
+  it('says the target is closed when it is', () => {
+    expect(doneFailureMessage(new ApiError(409, 'target closed'))).toBe('ההכנה הזו כבר הסתיימה.');
+  });
+
+  it('says only that it failed for anything else', () => {
+    const failed = 'השמירה נכשלה. נסו שוב.';
+    expect(doneFailureMessage(new ApiError(400, 'invalid target', 'unknown_import'))).toBe(failed);
+    expect(doneFailureMessage(new ApiError(400, 'invalid request'))).toBe(failed);
+    expect(doneFailureMessage(new ApiError(409, 'photo import not ready'))).toBe(failed);
+    expect(doneFailureMessage(new ApiError(500))).toBe(failed);
+    expect(doneFailureMessage(new TypeError('Network request failed'))).toBe(failed);
+  });
+});
+
+describe('actionFailureMessage', () => {
+  it('says the target is closed when it is, and only that it failed otherwise', () => {
+    expect(actionFailureMessage(new ApiError(409, 'target closed'))).toBe('ההכנה הזו כבר הסתיימה.');
+    expect(actionFailureMessage(new ApiError(404, 'target not found'))).toBe('הפעולה נכשלה. נסו שוב.');
+    expect(actionFailureMessage(new TypeError('Network request failed'))).toBe('הפעולה נכשלה. נסו שוב.');
+  });
+});
+
+describe('withoutWord', () => {
+  const target: Target = {
+    id: 't1',
+    kind: 'exam',
+    due_on: '2026-10-20',
+    days_left: 5,
+    word_count: 3,
+    ready_count: 1,
+    words: [
+      { gloss_id: 'g1', form: 'cane', meaning: 'כלב', readiness: 'ready' },
+      { gloss_id: 'g2', form: 'casa', meaning: 'בית', readiness: 'almost' },
+      { gloss_id: 'g3', form: 'gatto', meaning: 'חתול', readiness: 'not_started' },
+    ],
+  };
+
+  it('takes the word out and counts it out, and its readiness out of the ready count', () => {
+    expect(withoutWord(target, 'g2')).toEqual({
+      ...target,
+      word_count: 2,
+      ready_count: 1,
+      words: [target.words[0], target.words[2]],
+    });
+    expect(withoutWord(target, 'g1')).toMatchObject({ word_count: 2, ready_count: 0 });
+  });
+
+  it('leaves a target without the word as it was, and never changes the one it is given', () => {
+    expect(withoutWord(target, 'g9')).toEqual(target);
+    withoutWord(target, 'g1');
+    expect(target.words).toHaveLength(3);
+    expect(target.word_count).toBe(3);
   });
 });

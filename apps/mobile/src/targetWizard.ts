@@ -1,5 +1,6 @@
 import type {
   AddTargetWordsRequest,
+  ChangeTargetDateRequest,
   CreateTargetRequest,
   TargetKind,
   TranslationResponse,
@@ -7,6 +8,7 @@ import type {
   VocabularyEntryInput,
 } from '@lang-tutor/core/api';
 
+import { ApiError } from '@/api/client';
 import type { Photo } from '@/photos';
 import type { SavedState } from '@/vocabulary';
 
@@ -38,6 +40,27 @@ const STEPS: Record<WizardMode, readonly WizardStep[]> = {
 /** The steps of a mode in order. The last is where Done is. */
 export function stepsFor(mode: WizardMode): WizardStep[] {
   return [...STEPS[mode]];
+}
+
+const MODES = Object.keys(STEPS) as WizardMode[];
+type RouteParam = string | string[] | undefined;
+
+/** A new target, or one of a target's actions with the target it acts on. */
+export type WizardRoute =
+  | { mode: 'create'; targetId: null }
+  | { mode: Exclude<WizardMode, 'create'>; targetId: string };
+
+/**
+ * What the wizard's route asks for. `/targets/new` alone is a new target; a target
+ * screen's actions add their `mode` and the `targetId` they act on. An unknown mode is a
+ * new target, and an action with no target to act on is nothing (null): the screen
+ * leaves. A repeated parameter (an array) is no answer.
+ */
+export function wizardRouteOf(params: { mode?: RouteParam; targetId?: RouteParam }): WizardRoute | null {
+  const mode = MODES.find((candidate) => candidate === params.mode) ?? 'create';
+  if (mode === 'create') return { mode, targetId: null };
+  const { targetId } = params;
+  return typeof targetId === 'string' && targetId.length > 0 ? { mode, targetId } : null;
 }
 
 /** A word picked in the lookup: what the request needs, and what the wizard shows of it
@@ -127,6 +150,50 @@ export function photosToUpload(state: WizardState): Photo[] {
   return state.photos.slice(state.importIds.length);
 }
 
+/** Whether the step on screen is its mode's first: back from it leaves the wizard. */
+export function isFirstStep(state: WizardState): boolean {
+  return STEPS[state.mode][0] === state.step;
+}
+
+/** Whether the step on screen is its mode's last, where Done is instead of Next. */
+export function isLastStep(state: WizardState): boolean {
+  const steps = STEPS[state.mode];
+  return steps[steps.length - 1] === state.step;
+}
+
+/** Whether the wizard holds photos or words, which leaving it loses: nothing is saved
+ *  until Done, so leaving with them asks first. */
+export function holdsPicks(state: WizardState): boolean {
+  return state.photos.length > 0 || state.entries.length > 0;
+}
+
+/** Whether the wizard holds as many photos as a request carries: Take and Choose stop. */
+export function photosFull(state: WizardState): boolean {
+  return state.photos.length >= MAX_PHOTOS;
+}
+
+/** Whether the wizard holds as many words as a request carries: a card adds no more. */
+export function entriesFull(state: WizardState): boolean {
+  return state.entries.length >= MAX_ENTRIES;
+}
+
+/** Whether a word is picked, known by its gloss: the lookup's collect mode reads a
+ *  card's state from it. */
+export function holdsEntry(state: WizardState, glossId: string): boolean {
+  return state.entries.some((entry) => entry.gloss_id === glossId);
+}
+
+/**
+ * Whether a removed photo may go after the discard of its import failed. A 404 or a 409
+ * is the server saying the import is gone or saved, so nothing is left behind. Anything
+ * else (no answer, a server error) may have left it open, so the photo stays, its
+ * import with it, for another try: dropping the photo would drop the only record of an
+ * import Cancel must discard.
+ */
+export function discardLeftNothing(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 404 || error.status === 409);
+}
+
 /**
  * Whether the step on screen may go on (on the last step: whether Done may be pressed).
  * `reviewSettled` is the review's own answer, that every import it shows has been read
@@ -170,6 +237,12 @@ export function createRequest(state: WizardState): CreateTargetRequest {
 /** Done in `add-photos` and `add-words`. */
 export function addRequest(state: WizardState): AddTargetWordsRequest {
   return { photo_import_ids: [...state.importIds], entries: entriesOf(state.entries) };
+}
+
+/** Done in `change-date`. Throws when no date was chosen, which `canAdvance` prevents. */
+export function dateRequest(state: WizardState): ChangeTargetDateRequest {
+  if (state.dueOn === null) throw new Error('a change of date needs a date');
+  return { due_on: state.dueOn };
 }
 
 /**
