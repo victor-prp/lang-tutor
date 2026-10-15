@@ -277,3 +277,81 @@ word → a date → Done; home shows the target; its screen removes a word and m
 - **A retired stock wastes its preparation calls.** Target changes are rare next to sessions.
 - **Readiness depends on the live skills of the newest session.** A student who switches devices
   can see a word's readiness move without practising.
+
+---
+
+## Rulings
+
+Made while executing the plan ("go till PR, subagents"), each with what it costs if wrong. The
+first six change something approved above and need Victor's confirmation; the rest settle what
+the design left open.
+
+**Changes to the approved design**
+
+- **R1. The wish is graded by readiness, not all-or-nothing** (amends D5, and D4's "20 of 20 ready
+  appears when the main path comes back"). Before the run-up a target asks for
+  `steady + ceil((10 − steady) × (words − ready) / words)` slots: 10 while few words are ready,
+  falling to 5 (exam) or 3 (homework) as they become ready. The simulation showed that with phase
+  37's learner, who misses one card in five, no target is ever *all* ready (exam peaked at 12–13 of
+  20), so the all-or-nothing rule would never let the main path back. Victor's own words were "the
+  ratio based on words stability + how important the target". Cost if wrong: the main path returns
+  gradually instead of at one moment; reverting is one line in `targetWish`.
+- **R2. One photo import per photo** (amends D9, D13). The 3 MB request cap and the all-or-nothing
+  reading job made "one import holding several photos" a rewrite. The wizard uploads each photo as
+  its own import with today's endpoint; the target endpoints take `photo_import_ids`. Rows that
+  resolve to the same gloss across those imports are one row, the first deciding, by core's
+  `firstRowPerGloss`, used by the wizard's review and the target's save alike. The standalone photo
+  import keeps phase 26's rule (a gloss is saved when any of its rows is ticked), because its
+  review shows every row. Cost if wrong: while a wizard runs, its unsaved imports also appear in
+  the photo-import list.
+- **R3. The pace is a floor, and owed words come first** (amends D7). A target may introduce
+  `max(owed, what is left of the 15-a-day cap)` new words, and the words it still owes today come
+  before its returns and due words. The even spread alone let a 14-day list introduce 2 words a
+  day and hand 8 of 10 slots to the main path; without priority, a 50-word list close to its date
+  left words unmet. Cost if wrong: up to 15 new target words on day one, and a crunch day's first
+  session can be all new words.
+- **R4. The stale check runs where home learns of the session, not at start** (amends D12). The
+  app ignores start's reply, and older apps and bots start by answering, so a session rebuilt at
+  start would break the next answer. The home read and the create call check it instead; sessions
+  record `chosen_on`, the learner day their words were chosen. Retiring an unstarted list stock sets
+  it `skipped` with no `practice_day`, logged `session_retired`. Cost if wrong: a home read can
+  write, and skipped counts include retirements (told apart by the null `practice_day` and the log).
+- **R5. A target fills its own share with its own words answered today; the main path's words
+  answered today come last.** Phase 37 asks a word done today only when nothing else is left. A
+  not-ready target owns the whole session, so in a day's later sessions it re-asks its own words
+  rather than handing slots to main words; the main path's done words wait behind everyone's
+  fresh words. Cost if wrong: same-day drilling of target words.
+- **R6. Words on a target are exempt from phase 39's "waiting".** Phase 39 holds a word's second
+  meaning back until its first is known; that also blocked a target word whose sibling meaning was
+  saved, even on the exam's eve (the wizard's "add all" makes this easy). A word on an active target
+  is now a candidate even when its family waits; one meaning per word per session still holds.
+  Cost if wrong: a second meaning can be asked before the first is known, for target words only.
+
+**Settled during the build**
+
+- **R7. Unused slots go forward, then back.** Slots a target cannot fill pass to the next target
+  and the main path; whatever is still unpicked goes back to the targets in a second pass, so a
+  session is as long as today's whenever the saved list allows.
+- **R8. The picker runs pools with shared state** (`choosePools`): picked glosses, keys, families,
+  family claims, the per-skill and hard caps, the day's new-word count and the speaking pick are
+  session-wide. A pool that cannot make the speaking pick passes it on. With no target it is one
+  pool and chooses exactly as before (checked on 50,000 random inputs). Cost if wrong: a session
+  with a target can hold a speaking pick and a spoken-production return (two speaking cards).
+- **R9. Readiness skips speaking for a word that cannot be said** (more than four words), as phase
+  46's known rule does.
+- **R10. A target change retires the unstarted list session and asks the stock job for a new
+  one** (new stock reason `target`), so the targets service stays out of the session service.
+  Unsaving a target word counts as a change.
+- **R11. Creating a target needs at least one word**; removing words later may empty it, and an
+  empty target gives its slots to the main path.
+- **R12. The target screen shows the saved form and the gloss's key** (the Hebrew word) for each word.
+- **R13. Routes:** the service's read is `getTarget`, the word parameter is `{gloss_id}` like the
+  vocabulary route, ending a target whose date has come answers 409, and the 400 carries a
+  `reason` the app uses to say "add a word" or "pick a later day". `LearnerDaySchema` checks a real
+  calendar date (2026-02-30 is a 400, not a database error).
+- **R14. The app:** in the wizard the lookup's buttons read add / added, since nothing is saved
+  until Done; leaving the wizard with photos or words asks first; Android's back acts as the
+  wizard's back; closing the wizard any other way discards its imports.
+- **R15. The simulation** keeps phase 37's learner (misses one card in five) and adds a learner who
+  never misses, to show the steady shares. Ready on the due date, measured, never to be lowered:
+  exam 0.65, homework 0.85.
