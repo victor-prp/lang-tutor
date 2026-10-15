@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import type {
+  ClozeTypedQuestion,
   DictationQuestion,
   LetterTilesQuestion,
   ListenChoiceQuestion,
@@ -10,6 +11,7 @@ import type {
   Question,
   ReadAloudQuestion,
   SayTranslationQuestion,
+  TypedTranslationQuestion,
 } from '../api/types';
 import { seededRng } from '../utils/rng';
 import {
@@ -641,5 +643,23 @@ describe('missed, a ladder (phase 54)', () => {
       evaluate(typed, { text: 'porta' }),
     ];
     expect(missed([...ladder, other], answers).map((item) => item.question.id)).toEqual(['c1', 'q2']);
+  });
+});
+
+describe('phase 55: helped', () => {
+  it('records a helped tiles or typed answer wrong, whatever its text', () => {
+    expect(evaluate(tiles, { text: tiles.answer, helped: true })).toMatchObject({ is_correct: false, verdict: 'wrong', answer_string: tiles.answer });
+    expect(evaluate(typed, { text: (typed as TypedTranslationQuestion).answer, helped: true })).toMatchObject({ is_correct: false, verdict: 'wrong' });
+  });
+  it('grades an unhelped answer as today', () => {
+    expect(evaluate(tiles, { text: tiles.answer, helped: false }).verdict).toBe('exact');
+    expect(evaluate(typed, { text: (typed as TypedTranslationQuestion).answer }).verdict).toBe('exact');
+  });
+  it('ignores helped on any other type', () => {
+    expect(evaluate(dictation, { text: 'parlo', helped: true }).verdict).toBe('exact');
+    expect(evaluate(CLOZE_TYPED, { text: (CLOZE_TYPED as ClozeTypedQuestion).answer, helped: true }).verdict).toBe('exact');
+  });
+  it('records a helped second try wrong', () => {
+    expect(evaluateRetry(typed, { text: (typed as TypedTranslationQuestion).answer, helped: true }).verdict).toBe('wrong');
   });
 });

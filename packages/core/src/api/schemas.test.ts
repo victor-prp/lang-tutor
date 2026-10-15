@@ -144,6 +144,17 @@ describe('NextStepRequestSchema', () => {
     expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'spent', hint_opened: 'yes' }).success).toBe(false);
   });
 
+  // Phase 55 (spec D6). Help used or a wrong tile placed: optional and boolean.
+  it('keeps helped on a text answer, takes one without it, and refuses one that is not a boolean', () => {
+    expect(NextStepRequestSchema.parse({ question_id: 'q1', text: 'casa', helped: true })).toEqual({
+      question_id: 'q1',
+      text: 'casa',
+      helped: true,
+    });
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'casa' }).success).toBe(true);
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'casa', helped: 'yes' }).success).toBe(false);
+  });
+
   // Phase 41 (spec D2). The app asks the server to check an unlisted typed-cloze word.
   it('keeps check_fit on a text answer, and refuses one that is not a boolean', () => {
     expect(NextStepRequestSchema.parse({ question_id: 'q1', text: 'edit', check_fit: true })).toEqual({

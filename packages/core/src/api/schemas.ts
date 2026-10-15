@@ -425,6 +425,9 @@ export const NextStepRequestSchema = z.union([
     // opened its Hebrew sentence. Optional, so an older app is unchanged; stored for
     // `cloze_typed` only, and never changed by a retry.
     hint_opened: z.boolean().optional(),
+    // Phase 55 (spec D6). Help used or a wrong tile placed on a letter_tiles or
+    // typed_translation card: graded wrong. Ignored on any other type.
+    helped: z.boolean().optional(),
     // Phase 41 (spec D2). On a first answer to a typed cloze that the rule calls
     // wrong: the app waits while the server asks the model whether the word fits
     // the gap. Optional, so an older app is graded as before.

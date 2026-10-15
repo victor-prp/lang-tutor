@@ -1,4 +1,5 @@
-import { stripStress } from './languages';
+import { tileLetters } from '@lang-tutor/core/domain';
+
 import { shuffle } from './session';
 
 /**
@@ -6,18 +7,8 @@ import { shuffle } from './session';
  * the tiles themselves. Pure; the rng is passed in (ADR 0001 R3).
  */
 
-export const TILE_MIN_LETTERS = 3;
-export const TILE_MAX_LETTERS = 10;
+export { TILE_MAX_LETTERS, TILE_MIN_LETTERS } from '@lang-tutor/core/domain';
 export const EXTRA_TILES = 2;
-
-/** The word's letters, lowercased and unstressed, one per code point after
- *  NFC; null when it is not one word of 3 to 10 letters. A phrase or an
- *  elision has no sensible tile set, and a long word is a wall of tiles. */
-function tileLetters(form: string): string[] | null {
-  const letters = [...stripStress(form).normalize('NFC').toLowerCase()];
-  if (letters.length < TILE_MIN_LETTERS || letters.length > TILE_MAX_LETTERS) return null;
-  return letters.every((letter) => /\p{L}/u.test(letter)) ? letters : null;
-}
 
 export function tileEligible(form: string): boolean {
   return tileLetters(form) !== null;

@@ -22,6 +22,7 @@ export {
 export type { AnswerInput, ChoiceQuestion, JudgedQuestion, QuestionType, SpeakingQuestion } from './quiz';
 export { MAX_SOUND_PAIRS, MAX_SPOKEN_WORDS, judgeSpoken, soundPairs, speakable, spokenWords } from './spoken';
 export type { SoundPair, SpokenTarget } from './spoken';
+export { TILE_MAX_LETTERS, TILE_MIN_LETTERS, stripStress, tileLetters } from './tiles';
 export { bare as withoutLeadingWord, judgeTiles, judgeTyped, normaliseTyped, wordOnly } from './typed';
 export type { TypedTarget } from './typed';
 export { DIMENSIONS, LIVE_DIMENSIONS, MAX_LEVEL, MIN_LEVEL, badge } from './progress';
