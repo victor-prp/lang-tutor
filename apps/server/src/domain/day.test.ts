@@ -7,6 +7,7 @@ import {
   EXAM_RUN_UP_DAYS,
   KNOWN_STABILITY,
   LADDER_SLOTS,
+  NEW_FLOOR,
   NEW_PER_SESSION,
   RETURNS_PER_DAY,
   SPEAKING_PER_SESSION,
@@ -251,12 +252,29 @@ function familiesChecked(sessions: readonly Session[]): { families: boolean; wai
   };
 }
 
+/** Phase 54 (spec D4). Each session meets NEW_PER_SESSION ladders at most, and at least NEW_FLOOR
+ *  words never met while some are left and the daily cap allows. */
+function expectNewWordsEachSession(sessions: readonly Session[]) {
+  sessions.forEach(({ input, picks }, at) => {
+    const seen = new Set(input.memory.map((row) => row.glossId));
+    const unmetLeft = input.saved.some((gloss) => !seen.has(gloss.glossId));
+    const firstMeetings = picks.filter((pick) => pick.cls === 'NEW' && !seen.has(pick.glossId)).length;
+    expect({
+      at,
+      ladders: picks.filter((pick) => pick.ladder).length <= NEW_PER_SESSION,
+      floor: !unmetLeft || input.newToday >= DAY_NEW_CAP || firstMeetings >= NEW_FLOOR,
+    }).toEqual({ at, ladders: true, floor: true });
+  });
+}
+
 /** A list, its sessions, what the day should meet in new words, and whether it has
- *  gloss families (phase 39). */
-const DAYS: [string, DayList, number, (met: number) => void, boolean][] = [
+ *  gloss families (phase 39). Phase 54 (spec D4): a new learner's list is all ladders, three a
+ *  session at most, and the returns take slots too: the daily limit is out of reach in six
+ *  sessions, so each session is held to the ceiling and the floor instead. */
+const DAYS: [string, DayList, number, (met: number, sessions: readonly Session[]) => void, boolean][] = [
   ['lane 0, the nine sessions of 2026-10-11', LANE0_DAY, LANE0_DAY.sessions, (met) => expect(met).toBeGreaterThan(2), true],
   ['lane 0 over twenty sessions', LANE0_DAY, 20, (met) => expect(met).toBe(DAY_NEW_CAP), true],
-  ['a new learner, thirty words saved and none met, over six sessions', FRESH, 6, (met) => expect(met).toBe(DAY_NEW_CAP), false],
+  ['a new learner, thirty words saved and none met, over six sessions', FRESH, 6, (_met, sessions) => expectNewWordsEachSession(sessions), false],
 ];
 
 describe.each(DAYS)('a day: %s (phase 37)', (_name, list, count, checkMet, withFamilies) => {
@@ -339,8 +357,8 @@ describe.each(DAYS)('a day: %s (phase 37)', (_name, list, count, checkMet, withF
     expectNoWaitingGloss(sessions);
   });
 
-  it('meets new words up to the daily limit, and recalls', () => {
-    checkMet(introduced.size);
+  it('meets new words as the list allows: lane 0 up to the daily limit, the new learner three a session at most and one at least; and recalls', () => {
+    checkMet(introduced.size, sessions);
     expect(log.some((card) => card.rung === 2 && RECALL.has(card.type))).toBe(true);
   });
 });
@@ -561,19 +579,30 @@ function expectSplitsByTheRules(run: TargetRun) {
       })),
     });
 
-    const laddersSpent = session.picks.filter((pick) => pick.ladder).length >= NEW_PER_SESSION;
     let carried = 0;
     const fills = targets.map((target) => {
       const offered = slots.get(target.id)! + carried;
-      const picked = picksOf(session, target.glossIds);
-      carried = offered - slotsOf(picked);
-      const left = target.glossIds.filter((glossId) => !picked.some((pick) => pick.glossId === glossId));
-      const ladders = left.every((glossId) => isLadder(glossId, session.input));
-      return carried === 0 || (carried > 0 && (left.length === 0 || (ladders && (carried < LADDER_SLOTS || laddersSpent))));
+      const passed = unfilled(session, target, offered);
+      carried = offered - slotsOf(picksOf(session, target.glossIds));
+      return passed !== null;
     });
     const mainShare = SESSION_LENGTH - [...slots.values()].reduce((sum, n) => sum + n, 0) + carried;
     expect({ at, fills, main: slotsOf(mainPicks(run, at)) }).toEqual({ at, fills: targets.map(() => true), main: mainShare });
   });
+}
+
+/** Phase 54 (spec D4). The slots `target`, offered `offered`, passed on: 0 when it filled them; all
+ *  it did not fill when it has no word left; the slots no ladder fits when all it has left are
+ *  ladders, fewer than LADDER_SLOTS free or the session's NEW_PER_SESSION ladders spent. Null when
+ *  it passed on a slot it could have filled, or took more than it was offered. */
+function unfilled(session: Session, target: ActiveTarget, offered: number): number | null {
+  const picked = picksOf(session, target.glossIds);
+  const left = offered - slotsOf(picked);
+  if (left <= 0) return left === 0 ? 0 : null;
+  const unpicked = target.glossIds.filter((glossId) => !picked.some((pick) => pick.glossId === glossId));
+  if (unpicked.length === 0) return left;
+  const laddersSpent = session.picks.filter((pick) => pick.ladder).length >= NEW_PER_SESSION;
+  return unpicked.every((glossId) => isLadder(glossId, session.input)) && (left < LADDER_SLOTS || laddersSpent) ? left : null;
 }
 
 /** Phase 54 (spec D2, D4). A gloss the session would ask as a ladder: no right answer in any skill
@@ -644,8 +673,22 @@ describe("a target, phase 37's learner: an exam due in 14 days, twenty words (ph
     expectMetBeforeTheLastDay(run, 'exam');
   });
 
-  it('asks the exam alone while none of its words is ready, then lets the main path back before the run-up', () => {
-    const shared = run.sessions.flatMap((session, at) => (daysLeftIn(at) > EXAM_RUN_UP_DAYS && mainPicks(run, at).length > 0 ? [session] : []));
+  // Phase 54 (spec D4): alone in slots: the main path shares a session only when it takes more than
+  // the slots no ladder of the exam fits. The two halves of phase 53's check, one test each: the
+  // second depends on how soon the exam's words are ready, as the ready share does.
+  const sharedBeforeTheRunUp = (session: Session, at: number) =>
+    daysLeftIn(at) > EXAM_RUN_UP_DAYS && slotsOf(mainPicks(run, at)) > (unfilled(session, exam, session.split[0].slots) ?? 0);
+
+  it('asks the exam alone while none of its words is ready', () => {
+    const unready = run.sessions.flatMap((session, at) =>
+      daysLeftIn(at) > EXAM_RUN_UP_DAYS && session.split[0].readyCount === 0 ? [{ session, at }] : [],
+    );
+    expect(unready.length).toBeGreaterThan(0);
+    for (const { session, at } of unready) expect({ at, shared: sharedBeforeTheRunUp(session, at) }).toEqual({ at, shared: false });
+  });
+
+  it('lets the main path back before the run-up, once some of its words are ready', () => {
+    const shared = run.sessions.filter((session, at) => sharedBeforeTheRunUp(session, at));
     expect(shared.length).toBeGreaterThan(0);
     for (const session of shared) expect(session.split[0].readyCount).toBeGreaterThan(0);
   });
@@ -755,8 +798,16 @@ describe("a target, phase 37's learner: an exam due in 4 days (phase 53, spec §
   it('asks the exam alone in every session before its date', () => {
     const served = run.sessions.flatMap((session, at) => (session.split.length > 0 ? [{ session, at }] : []));
     expect(served).toHaveLength(4 * SESSIONS_A_DAY);
+    // Phase 54 (spec D4): alone in slots: every slot the exam can fill, and on to the main path only
+    // the one or two no ladder fits.
     for (const { session, at } of served) {
-      expect({ at, exam: picksOf(session, exam.glossIds).length }).toEqual({ at, exam: SESSION_LENGTH });
+      const passed = unfilled(session, exam, SESSION_LENGTH);
+      expect({
+        at,
+        slots: session.split[0].slots,
+        passed: passed !== null && passed < LADDER_SLOTS,
+        main: slotsOf(mainPicks(run, at)) - (passed ?? 0),
+      }).toEqual({ at, slots: SESSION_LENGTH, passed: true, main: 0 });
     }
   });
 
@@ -831,13 +882,16 @@ describe("two targets, phase 37's learner: a 4-word exam due in 6 days beside a 
     run.sessions.forEach((session, at) => {
       const [examSplit, homeworkSplit] = session.split;
       if (examSplit?.targetId !== 'exam' || homeworkSplit === undefined) return;
-      const carried = examSplit.slots - picksOf(session, exam.glossIds).length;
+      const carried = examSplit.slots - slotsOf(picksOf(session, exam.glossIds));
       if (carried <= 0) return;
       carriedIn++;
       const homeworkPicks = picksOf(session, homework.glossIds);
-      expect({ at, homework: homeworkPicks.length, main: mainPicks(run, at).length }).toEqual({
+      // Phase 54 (spec D4): in slots: the homework fills them, and passes on only the one or two no
+      // ladder of its own fits.
+      const passed = unfilled(session, homework, homeworkSplit.slots + carried);
+      expect({ at, passed: passed !== null && passed < LADDER_SLOTS, main: slotsOf(mainPicks(run, at)) - (passed ?? 0) }).toEqual({
         at,
-        homework: homeworkSplit.slots + carried,
+        passed: true,
         main: SESSION_LENGTH - examSplit.slots - homeworkSplit.slots,
       });
       if (homeworkPicks.some((pick) => pick.cls === 'DONE')) answeredToday++;
@@ -886,22 +940,47 @@ describe("a target that changes, phase 37's learner: 70 words due in 8 days, mov
     expect(sessionsOn(run, 5)[0].session.split).toEqual([]);
   });
 
-  it('meets each day at least the pace for the words and the days left at its start, past the daily cap when the date comes closer', () => {
-    const days = Array.from({ length: dayIndex(dueIn(5)) }, (_, day) => {
-      const [first] = sessionsOn(run, day);
-      const target = activeIn(run, first.at)[0];
-      const unmet = target.glossIds.filter((glossId) => !first.session.input.memory.some((row) => row.glossId === glossId)).length;
-      const pace = owedNew(unmet, 0, first.session.split[0].daysLeft);
-      const met = sessionsOn(run, day).reduce((sum, { session }) => sum + picksOf(session, target.glossIds).filter((pick) => pick.cls === 'NEW').length, 0);
-      return { day, pace, met };
-    });
-    // The pace binds: the moved date and the added words owe more in a day than DAY_NEW_CAP allows.
-    expect(days.filter(({ pace }) => pace > DAY_NEW_CAP).length).toBeGreaterThan(0);
-    for (const { day, pace, met } of days) expect({ day, pace, metAtLeastThePace: met >= pace }).toEqual({ day, pace, metAtLeastThePace: true });
+  /** Each day to the new last day: the pace for the words and the days left at its start; the words
+   *  it met for the first time; what the ceiling allowed it, NEW_PER_SESSION ladders a session less
+   *  those a word met before took again (spec D2); and whether every session held that many ladders.
+   *  Phase 54 (spec D4). */
+  const days = Array.from({ length: dayIndex(dueIn(5)) }, (_, day) => {
+    const sessions = sessionsOn(run, day);
+    const target = activeIn(run, sessions[0].at)[0];
+    const unmet = target.glossIds.filter((glossId) => !sessions[0].session.input.memory.some((row) => row.glossId === glossId)).length;
+    const pace = owedNew(unmet, 0, sessions[0].session.split[0].daysLeft);
+    let met = 0;
+    let allowed = 0;
+    let atCeiling = true;
+    for (const { session } of sessions) {
+      const seen = new Set(session.input.memory.map((row) => row.glossId));
+      const ladders = session.picks.filter((pick) => pick.ladder);
+      met += picksOf(session, target.glossIds).filter((pick) => pick.cls === 'NEW' && !seen.has(pick.glossId)).length;
+      allowed += NEW_PER_SESSION - ladders.filter((pick) => seen.has(pick.glossId)).length;
+      if (ladders.length < NEW_PER_SESSION) atCeiling = false;
+    }
+    return { day, pace, met, allowed, atCeiling };
   });
 
-  it('meets every word, those added included, before the new last day', () => {
-    expectMetBeforeTheLastDay(run, 'exam');
+  it('meets each day at least the pace for the words and the days left at its start, or what the ceiling allows when that is less, past the daily cap when the date comes closer', () => {
+    // The pace binds: the moved date and the added words owe more in a day than DAY_NEW_CAP allows.
+    expect(days.filter(({ pace }) => pace > DAY_NEW_CAP).length).toBeGreaterThan(0);
+    // Phase 54 (spec D4): and more than the ceiling allows, three ladders a session.
+    expect(days.some(({ pace, allowed }) => pace > allowed)).toBe(true);
+    for (const { day, pace, met, allowed } of days) {
+      expect({ day, pace, allowed, metEnough: met >= Math.min(pace, allowed) }).toEqual({ day, pace, allowed, metEnough: true });
+    }
+  });
+
+  it('meets every word, those added included, before the new last day, but those the ceiling could not reach', () => {
+    // Phase 54 (spec D4): a word still unmet on the last day is one the ceiling could not reach: a
+    // day met its pace or fell short of it, and every day that fell short ran at the ceiling.
+    const last = run.sessions.findIndex((session) => session.split[0]?.daysLeft === 1);
+    const target = activeIn(run, last)[0];
+    const unmet = target.glossIds.filter((glossId) => !run.sessions[last].input.memory.some((row) => row.glossId === glossId));
+    const short = days.filter(({ day, pace, met }) => day < dayOf(last) && met < pace);
+    expect({ unmetExplained: unmet.length === 0 || short.length > 0 }).toEqual({ unmetExplained: true });
+    for (const { day, atCeiling } of short) expect({ day, atCeiling }).toEqual({ day, atCeiling: true });
   });
 
   itKeepsTheSessionRules(run, dueIn(5));
