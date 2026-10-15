@@ -1,3 +1,5 @@
+import type { QuestionType } from '@lang-tutor/core/domain';
+
 import { shuffle } from './session';
 
 /** Phase 48 (spec D3). The fewest cards a session keeps, or every planned card when fewer were planned. */
@@ -44,4 +46,25 @@ export function keepCards(units: readonly CardUnit[], rng: () => number): CardFa
       }),
     )
     .sort((a, b) => a.index - b.index);
+}
+
+/**
+ * Phase 54 (spec D7). A meet card is never the only card of its word: once
+ * keepCards has settled the refusals, a meet position whose gloss has no
+ * practice position left (none kept, refused or not) is dropped with them. A
+ * meet card is never refused itself, and no other fate is touched.
+ */
+export function dropLoneMeets(
+  fates: readonly CardFate[],
+  glossOf: (index: number) => string,
+  typeOf: (index: number) => QuestionType,
+): CardFate[] {
+  const practised = new Set(
+    fates.filter((fate) => fate.fate !== 'drop' && typeOf(fate.index) !== 'meet').map((fate) => glossOf(fate.index)),
+  );
+  return fates.map((fate): CardFate =>
+    typeOf(fate.index) === 'meet' && fate.fate !== 'drop' && !practised.has(glossOf(fate.index))
+      ? { index: fate.index, fate: 'drop', refusal: { stage: 'validation', reason: 'no practice card left for its meet card' } }
+      : fate,
+  );
 }

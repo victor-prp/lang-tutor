@@ -86,7 +86,7 @@ const statusOf = async (sessionId: string) => (await deps.sessions.getSession('u
 // enqueue the job with picks that name their cards; a pick with none of them
 // is a new word, multiple choice. sessionsChoose.test.ts covers how a created
 // session's picks get theirs.
-type Card = Partial<Pick<PrepareSessionPayload['picks'][number], 'dimension' | 'rung' | 'level' | 'r' | 'step'>>;
+type Card = Partial<Pick<PrepareSessionPayload['picks'][number], 'dimension' | 'rung' | 'level' | 'r' | 'step' | 'ladder'>>;
 const RECOGNISE: Card = { dimension: 'written_receptive', rung: 1, level: 1, r: 0.81 }; // multiple choice, p 0.925
 const PICK_FORM: Card = { dimension: 'written_productive', rung: 1, level: 1, r: 0.5 }; // reverse or cloze choice, p 0.78
 const BUILD_FORM: Card = { dimension: 'written_productive', rung: 1, level: 1, r: 0.81 }; // letter tiles, p 0.9
@@ -159,6 +159,26 @@ it('prepares a ten-word session with listening on: the board, then each card by 
   expect(tiles.tiles).toHaveLength([...tiles.answer].length + 2);
 });
 
+// Phase 54 (spec D3, D7). A new word's first session through the queue: its pick,
+// stored as a ladder, is asked as four cards, the meet card first, and the meet
+// card is written as the database takes it.
+it('prepares a ladder pick as a meet card, a multiple choice, a reverse choice and a typed translation (phase 54, spec D3, D7)', async () => {
+  // Tome's meet card q1, which asks nothing, sprint's multiple choice q2, then
+  // tome's choice q3, its reversed card q4 and its typed card q5.
+  await expectDistractors(ns, { tasks: [null, 'meaning', 'meaning', 'word', 'typed'] });
+  await expectCheck(ns);
+  const sessionId = await enqueueSession({ tome: 'ספר', sprint: 'ריצה' }, [{ ladder: true }, RECOGNISE], { listening: false });
+
+  await waitFor(async () => (await statusOf(sessionId)) === 'ready');
+  const { questions } = await deps.sessions.getSession('u_1', sessionId);
+  expect(questions.map((q) => q.type)).toEqual(['meet', 'multiple_choice', 'multiple_choice', 'reverse_choice', 'typed_translation']);
+  const [meet] = questions;
+  expect(meet).toEqual({ id: meet.id, vocab_term_id: meet.vocab_term_id, type: 'meet', question: 'tome', meaning: 'ספר' });
+  expect(questions.filter((q) => q.vocab_term_id === meet.vocab_term_id).map((q) => q.type)).toEqual([
+    'meet', 'multiple_choice', 'reverse_choice', 'typed_translation',
+  ]);
+});
+
 // Phase 27 Part B (spec D5-D8): the three sentence cards, written by the job and
 // read back through getSession.
 describe('sentence cards through the queue', () => {
@@ -229,19 +249,29 @@ describe('sentence cards through the queue', () => {
 describe('prepare-session through the queue', () => {
   it('turns a list session ready, with its saved words as the prompts', async () => {
     await expectCheck(ns);
-    await expectDistractors(ns, { tasks: ['meaning', 'meaning', 'meaning'] });
+    // Phase 54 (spec D3, D5): the three meet cards q1-q3 ask nothing, then the
+    // stages of the three ladders.
+    await expectDistractors(ns, { tasks: [null, null, null, 'meaning', 'meaning', 'meaning', 'word', 'word', 'word', 'typed', 'typed', 'typed'] });
     const sessionId = await requestListSession();
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
     const record = await deps.sessions.getSession('u_1', sessionId);
-    // Phase 35 (spec D6): three new words, each a multiple choice, too few for a board.
-    expect(record.questions.map((q) => q.type)).toEqual(['multiple_choice', 'multiple_choice', 'multiple_choice']);
-    for (const choice of record.questions) {
+    // Phase 35 (spec D6): three new words, too few for a board. Phase 54 (spec D3,
+    // D5, D7): each a ladder, its pick stored as one, and the ladders stage by stage.
+    const stage = (type: string) => [type, type, type];
+    expect(record.questions.map((q) => q.type)).toEqual([
+      ...stage('meet'), ...stage('multiple_choice'), ...stage('reverse_choice'), ...stage('typed_translation'),
+    ]);
+    for (const choice of record.questions.filter((q) => q.type === 'multiple_choice')) {
       if (choice.type !== 'multiple_choice') throw new Error('unreachable');
       expect(choice.options[choice.correct_option]).toBe(WORDS[choice.question]);
       expect([...choice.options].sort()).toEqual([WORDS[choice.question], ...STUB_WRONG_HEBREW].sort());
     }
-    expect(new Set(record.questions.map((q) => (q as { question: string }).question))).toEqual(new Set(Object.keys(WORDS)));
+    for (const meet of record.questions.filter((q) => q.type === 'meet')) {
+      if (meet.type !== 'meet') throw new Error('unreachable');
+      expect(meet.meaning).toBe(WORDS[meet.question]);
+    }
+    expect(new Set(record.questions.slice(0, 3).map((q) => (q as { question: string }).question))).toEqual(new Set(Object.keys(WORDS)));
   });
 
   it('writes each card the content its type needs', async () => {

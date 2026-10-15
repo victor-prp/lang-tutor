@@ -77,7 +77,7 @@ import {
   acceptRenderingKey,
   type StockSessionPayload,
 } from '../domain/jobs';
-import { keepCards, type CardUnit, type Refusal } from '../domain/keepCards';
+import { dropLoneMeets, keepCards, type CardUnit, type Refusal } from '../domain/keepCards';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planCards } from '../domain/plan';
 import { dayState, withSessionInFlight } from '../domain/today';
@@ -447,7 +447,7 @@ export function createSessionService({
     const picks = chosen.flatMap((choice) => {
       const rendering = pickRendering(askableRenderings(savedById.get(choice.glossId)!, renderings), rng);
       if (!rendering) return [];
-      const { dimension, rung, level, r } = choice;
+      const { dimension, rung, level, r, ladder } = choice;
       const step = choice.cls === 'STEP';
       // Phase 39 (spec D6). A family's next meaning, never asked, is introduced with the known ones.
       const knownMeanings = read.families.introductions.get(choice.glossId);
@@ -462,6 +462,8 @@ export function createSessionService({
           r,
           step,
           ...(knownMeanings ? { known_meanings: knownMeanings } : {}),
+          // Phase 54 (spec D3, D7). The prepare job asks a ladder pick as its four cards.
+          ladder,
         },
       ];
     });
@@ -1250,7 +1252,7 @@ export function createSessionService({
       });
       const plan = planCards(
         read.context.map((row, index) => {
-          const { dimension, rung, level, r, step, known_meanings } = read.picked[index];
+          const { dimension, rung, level, r, step, known_meanings, ladder } = read.picked[index];
           return {
             form: row.form,
             translation: row.translation,
@@ -1269,6 +1271,8 @@ export function createSessionService({
             step,
             // Phase 39 (spec D6): a pick with them is a new_meaning card.
             knownMeanings: known_meanings,
+            // Phase 54 (spec D3, D7): a ladder pick is its four cards; a pick stored without the flag is none.
+            ladder: ladder ?? false,
           };
         }),
         { listening: payload.listening, speaking: payload.speaking },
@@ -1282,10 +1286,14 @@ export function createSessionService({
       // validator would refuse on every retry.
       const siblingsOf = (glossId: string) =>
         read.siblings.filter((sibling) => sibling.glossId === glossId).map((sibling) => sibling.lemma);
-      const siblingRows = ordered.flatMap((row) => siblingsOf(row.glossId).map((lemma) => ({ form: lemma, translation: row.translation })));
+      // Phase 54 (spec D7): a ladder's row sits at four positions, and is named once.
+      const rows = [...new Set(ordered)];
+      const siblingRows = rows.flatMap((row) => siblingsOf(row.glossId).map((lemma) => ({ form: lemma, translation: row.translation })));
       // The rows that ask the model nothing are still in the session: the
-      // validation and the prompt must know their words and meanings.
-      const others = [...ordered.filter((_, index) => !tasks[index]), ...siblingRows];
+      // validation and the prompt must know their words and meanings. Phase 54
+      // (spec D7): a meet card's row is not another word: its practice cards are items.
+      const itemRows = new Set(ordered.filter((_, index) => tasks[index]));
+      const others = [...rows.filter((row) => !itemRows.has(row)), ...siblingRows];
       // Where each pick's form sits in its saved example: the same search that
       // made the gap item's blank and the plan's eligibility.
       const gaps = ordered.map((row) => findGap(row.example ?? '', [row.form, row.lemma]));
@@ -1601,7 +1609,11 @@ export function createSessionService({
         units.push({ indexes: Array.from({ length: size }, (_, offset) => index + offset), refusal: refusals.get(index) ?? null });
         index += size;
       }
-      const fateOf = new Map(keepCards(units, rng).map((fate) => [fate.index, fate]));
+      // Phase 54 (spec D7). A meet card is never refused, and never the only card
+      // of its word: one whose practice cards were all dropped goes with them.
+      const fateOf = new Map(
+        dropLoneMeets(keepCards(units, rng), (index) => ordered[index].glossId, (index) => plan.types[index]).map((fate) => [fate.index, fate]),
+      );
       for (const fate of fateOf.values()) {
         if (fate.fate !== 'keep_refused' || fate.shownAs !== 'as_generated' || !CHOSEN.has(generatedAs(plan.types[fate.index]))) continue;
         // An ambiguous card, Victor's call: the survivors first, then the

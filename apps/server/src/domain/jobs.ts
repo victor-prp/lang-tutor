@@ -80,6 +80,9 @@ export const PrepareSessionPayloadSchema = z.object({
         // Phase 39 (spec D6). The known meanings a new_meaning card lists; absent
         // before the deploy and on every other pick.
         known_meanings: z.array(z.string()).optional(),
+        // Phase 54 (spec D3, D7). A new word's first session, asked as four cards,
+        // the meet card first. Absent in a stock prepared before the deploy: no ladder.
+        ladder: z.boolean().optional(),
       }),
     )
     .min(1)

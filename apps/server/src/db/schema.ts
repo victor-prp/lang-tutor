@@ -845,7 +845,7 @@ export const questions = pgTable(
     check('questions_options_valid', sql`${t.options} is null or question_options_valid(${t.options})`),
     check(
       'questions_type_known',
-      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning', 'cloze_choice', 'cloze_typed', 'sentence_translation', 'new_meaning')`,
+      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning', 'cloze_choice', 'cloze_typed', 'sentence_translation', 'new_meaning', 'meet')`,
     ),
     // Phase 23 and 24. Each type's shape (spec D13, phase 24 §2): a choice has
     // options, every type but the Hebrew-option ones stores the Hebrew prompt,
@@ -858,6 +858,8 @@ export const questions = pgTable(
     // Phase 34 (spec D1, D6, D8): at most ten alternatives, a context only on the five
     // types that show a bare word, and a marked word in the Hebrew only on the two
     // sentence types that ask it.
+    // Phase 54 (spec D7). A meet card stores the Hebrew meaning it shows as its
+    // prompt, as a read-aloud card does, and nothing else: no context, no sentence.
     check(
       'questions_shape_valid',
       sql`case ${t.type}
@@ -879,6 +881,7 @@ export const questions = pgTable(
         when 'cloze_typed' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
           and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 10
         when 'sentence_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
+        when 'meet' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         else false end
         and (${t.type} in ('typed_translation', 'say_translation', 'reverse_choice', 'typed_meaning', 'multiple_choice', 'new_meaning')
           or (${t.context} is null and ${t.contextTranslation} is null
@@ -1140,9 +1143,11 @@ export const answers = pgTable(
       'answers_kind_valid',
       sql`(${t.selectedOptionPosition} is null) = (${t.typedText} is not null) and (${t.typedText} is null) = (${t.verdict} is null)`,
     ),
+    // Phase 54 (spec D6, D7). A meet card's `seen`, an empty text with this verdict.
+    // Not a retry's: a meet card has no second try.
     check(
       'answers_verdict_known',
-      sql`${t.verdict} in ('exact', 'near_miss', 'alternative', 'wrong', 'understood', 'gave_up', 'skipped')`,
+      sql`${t.verdict} in ('exact', 'near_miss', 'alternative', 'wrong', 'understood', 'gave_up', 'skipped', 'seen')`,
     ),
     // Phase 27 (spec D11): a judged answer is at most 300 characters.
     check('answers_typed_text_length', sql`length(${t.typedText}) <= 300`),

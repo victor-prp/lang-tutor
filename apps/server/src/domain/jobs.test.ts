@@ -67,6 +67,15 @@ describe('PrepareSessionPayloadSchema', () => {
       expect(PrepareSessionPayloadSchema.safeParse({ session_id: 's', picks: [{ ...pick, ...bad }] }).success).toBe(false);
     }
   });
+
+  // Phase 54 (spec D3, D7). A ladder pick says so; a pick stored without the flag, from
+  // a stock prepared before the deploy, is no ladder.
+  it('keeps a pick’s ladder flag, and reads a pick without one as no ladder', () => {
+    const pick = { gloss_id: 'g', sense_id: 'a', variant_id: 'b', dimension: 'written_receptive', rung: 1, level: 1, r: null, step: false };
+    expect(PrepareSessionPayloadSchema.parse({ session_id: 's', picks: [{ ...pick, ladder: true }] }).picks).toEqual([{ ...pick, ladder: true }]);
+    expect(PrepareSessionPayloadSchema.parse({ session_id: 's', picks: [pick] }).picks[0].ladder).toBeUndefined();
+    expect(PrepareSessionPayloadSchema.safeParse({ session_id: 's', picks: [{ ...pick, ladder: 'yes' }] }).success).toBe(false);
+  });
 });
 
 describe('phase 34 accept queue (spec D1)', () => {

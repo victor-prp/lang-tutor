@@ -108,7 +108,8 @@ function world(opts: {
   state?: SessionState;
   context?: GenerationContext[];
   ready?: boolean;
-  reply?: string | Error;
+  /** The batch's answer; phase 54: or one written from the request. */
+  reply?: string | Error | ((request: LlmJsonRequest) => string);
   recent?: RecentSentences;
   gloss?: GlossRepo;
   /** Phase 31 (spec D18). What findSiblings answers: other headwords with a card's key. */
@@ -2112,5 +2113,91 @@ describe('prepareSession, phase 48 (spec D3, D4, D6): a refused card is dropped,
     expect(events(logger, 'card_dropped')).toEqual(['q6', 'q9', 'q10'].map((key) => expect.objectContaining({ key, stage: 'validation' })));
     expect(events(logger, 'checker_dropped')).toEqual([]);
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 7, planned_count: 10, dropped_count: 3 }));
+  });
+});
+
+// Phase 54 (spec D3, D7). A new word's first session: its pick is asked as four
+// cards, the meet card first, which asks the models nothing.
+describe('prepareSession, a ladder (phase 54, spec D3, D7)', () => {
+  type Item = { key: string; task: string; word: string; correct: string };
+  type Inserted = {
+    type: string; glossId: string; form: string; prompt: string | null; options: { text: string }[] | null;
+    alternatives: string[] | null; tiles: string[] | null; context: string | null;
+  };
+  const insertedOf = (calls: { generated: unknown[] }) => (calls.generated[0] as { questions: Inserted[] }).questions;
+  const events = (logger: { events: unknown[] }, name: string) => (logger.events as { event: string }[]).filter((e) => e.event === name);
+  const itemsOf = (request: { user: string }) => JSON.parse(request.user).items as Item[];
+  const keysAsked = (client: { calls: { user: string }[] }) => client.calls.flatMap((call) => itemsOf(call).map((item) => item.key));
+  /** A model that answers every item, whatever its key, and offers `refused`'s
+   *  choice cards their own answer as every wrong one, which validation refuses. */
+  const answering = (refused: string | null = null) => (request: LlmJsonRequest) =>
+    JSON.stringify({
+      items: itemsOf(request).map((item) => {
+        if (item.task === 'typed') return { key: item.key, distractors: [], alternatives: [] };
+        const own = item.task === 'meaning' ? item.correct : item.word;
+        if (item.word === refused) return { key: item.key, distractors: [own, own, own] };
+        return { key: item.key, distractors: item.task === 'meaning' ? ['כתבה', 'שמעה', 'ראתה'] : ['чеснок', 'морковь', 'капуста'] };
+      }),
+    });
+  const LADDER = { ...PAYLOAD, picks: [{ ...PAYLOAD.picks[0], ladder: true }, PAYLOAD.picks[1]] };
+
+  it('writes the meet card, then a multiple choice, a reverse choice and a typed translation, the meet card asking nothing', async () => {
+    const { service, calls, llm, contextLlm, checkerLlm, logger } = world({ reply: answering() });
+    await service.prepareSession(LADDER);
+    expect(calls.transitions).toEqual(['preparing→ready']);
+    const inserted = insertedOf(calls);
+    expect(inserted).toHaveLength(5);
+    expect(inserted.filter((q) => q.glossId === 'g-s1').map((q) => q.type)).toEqual(['meet', 'multiple_choice', 'reverse_choice', 'typed_translation']);
+    // The meet card: the form, and the rendering's translation as its meaning, nothing generated.
+    const at = inserted.findIndex((q) => q.type === 'meet');
+    expect(inserted[at]).toMatchObject({ form: 'прочитала', prompt: 'קראה', options: null, alternatives: null, tiles: null, context: null });
+    expect(calls.sessionQuestions[0][at]).toEqual({ id: `g${at}`, vocab_term_id: 'l1', type: 'meet', question: 'прочитала', meaning: 'קראה' });
+    // No batch item, context sentence or check is asked for its position; the
+    // batch asks the word once per practice card, and never lists it as another
+    // word of the session.
+    for (const client of [llm, contextLlm, checkerLlm]) expect(keysAsked(client)).not.toContain(`q${at + 1}`);
+    expect(itemsOf(llm.calls[0]).filter((item) => item.word === 'прочитала').map((item) => item.task)).toEqual(['meaning', 'word', 'typed']);
+    expect(JSON.parse(llm.calls[0].user)).not.toHaveProperty('also_in_session');
+    expect(events(logger, 'card_dropped')).toEqual([]);
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 5, planned_count: 5 }));
+  });
+
+  it('asks a pick with no ladder flag as before: one card, and no meet card', async () => {
+    const absent = world({ reply: answering() });
+    await absent.service.prepareSession(PAYLOAD);
+    const off = world({ reply: answering() });
+    await off.service.prepareSession({ ...PAYLOAD, picks: PAYLOAD.picks.map((pick) => ({ ...pick, ladder: false })) });
+    expect(insertedOf(absent.calls).map((q) => q.type)).toEqual(['multiple_choice', 'reverse_choice']);
+    expect(insertedOf(off.calls)).toEqual(insertedOf(absent.calls));
+  });
+
+  // Phase 48's refusals drop a ladder's choice cards as any others. A typed
+  // translation is never refused (phase 48, spec D1), so the ladder keeps its
+  // third practice card and its meet card with it: dropLoneMeets (keepCards.test.ts)
+  // is the guard for a meet card whose practice cards were all dropped.
+  it('drops the ladder’s refused choice cards, and keeps its meet card with its typed card', async () => {
+    const context: GenerationContext[] = [
+      ...CONTEXT,
+      { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
+      { glossId: 'g-s4', senseId: 's4', variantId: 'v4', lexemeId: 'l4', form: 'дом', lemma: 'дом', partOfSpeech: 'noun', translation: 'בית', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
+      { glossId: 'g-s5', senseId: 's5', variantId: 'v5', lexemeId: 'l5', form: 'кот', lemma: 'кот', partOfSpeech: 'noun', translation: 'חתול', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
+    ];
+    // The ladder's four cards and four others: six pass, the floor of six, so the two refused are dropped.
+    const picks = [
+      { gloss_id: 'g-s1', sense_id: 's1', variant_id: 'v1', ladder: true },
+      { gloss_id: 'g-s2', sense_id: 's2', variant_id: 'v2', ...PICK_FORM },
+      { gloss_id: 'g-s3', sense_id: 's3', variant_id: 'v3', ...PICK_FORM },
+      { gloss_id: 'g-s4', sense_id: 's4', variant_id: 'v4', ...RECOGNISE },
+      { gloss_id: 'g-s5', sense_id: 's5', variant_id: 'v5', ...RECOGNISE },
+    ];
+    const { service, calls, logger } = world({ context, reply: answering('прочитала') });
+    await service.prepareSession({ ...PAYLOAD, picks });
+    expect(calls.transitions).toEqual(['preparing→ready']);
+    const inserted = insertedOf(calls);
+    expect(inserted).toHaveLength(6);
+    expect(inserted.filter((q) => q.glossId === 'g-s1').map((q) => q.type)).toEqual(['meet', 'typed_translation']);
+    expect(events(logger, 'card_dropped').map((e) => (e as { type?: string }).type)).toEqual(['multiple_choice', 'reverse_choice']);
+    expect(events(logger, 'card_dropped')).toEqual([expect.objectContaining({ stage: 'validation' }), expect.objectContaining({ stage: 'validation' })]);
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 6, planned_count: 8, dropped_count: 2 }));
   });
 });

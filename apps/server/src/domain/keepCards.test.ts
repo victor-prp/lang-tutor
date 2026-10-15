@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
+import type { QuestionType } from '@lang-tutor/core/domain';
 
-import { keepCards, MIN_SESSION_CARDS, type CardUnit, type Refusal } from './keepCards';
+import { dropLoneMeets, keepCards, MIN_SESSION_CARDS, type CardFate, type CardUnit, type Refusal } from './keepCards';
 
 // Not tests/support/testRng: ADR 0001 R3 greps domain/ for any parent-directory
 // import, test files included. Same LCG.
@@ -67,5 +68,44 @@ describe('keepCards (phase 48, spec D3)', () => {
       return 0.5;
     });
     expect(draws).toBe(0);
+  });
+});
+
+// Phase 54 (spec D7). A meet card is never the only card of its word: once the
+// refusals are settled, a meet card whose practice cards were all dropped goes too.
+describe('dropLoneMeets (phase 54, spec D7)', () => {
+  const LONE: Refusal = { stage: 'validation', reason: 'no practice card left for its meet card' };
+  // Positions 0-3 are gloss a's ladder, 4 and 5 gloss b's cards.
+  const glossOf = (index: number) => (index < 4 ? 'a' : 'b');
+  const typeOf = (index: number): QuestionType => (['meet', 'multiple_choice', 'reverse_choice', 'typed_translation', 'multiple_choice', 'typed_translation'] as const)[index];
+  const keep = (index: number): CardFate => ({ index, fate: 'keep' });
+  const drop = (index: number): CardFate => ({ index, fate: 'drop', refusal: VALIDATION });
+  const keptRefused = (index: number): CardFate => ({ index, fate: 'keep_refused', shownAs: 'typed_translation', refusal: VALIDATION });
+
+  it('drops a meet card whose three practice cards are dropped', () => {
+    const fates = [keep(0), drop(1), drop(2), drop(3), keep(4), keep(5)];
+    expect(dropLoneMeets(fates, glossOf, typeOf)).toEqual([{ index: 0, fate: 'drop', refusal: LONE }, drop(1), drop(2), drop(3), keep(4), keep(5)]);
+  });
+
+  it('keeps it while one practice card is kept, or kept refused', () => {
+    const kept = [keep(0), drop(1), drop(2), keep(3), keep(4), keep(5)];
+    expect(dropLoneMeets(kept, glossOf, typeOf)).toEqual(kept);
+    const refused = [keep(0), keptRefused(1), drop(2), drop(3), keep(4), keep(5)];
+    expect(dropLoneMeets(refused, glossOf, typeOf)).toEqual(refused);
+  });
+
+  it('counts only its own word’s cards', () => {
+    // Gloss b's kept cards are no practice of gloss a.
+    const fates = [keep(0), drop(1), drop(2), drop(3), keep(4), keep(5)];
+    expect(dropLoneMeets(fates, () => 'a', typeOf)[0]).toEqual(keep(0));
+    expect(dropLoneMeets(fates, glossOf, typeOf)[0]).toEqual({ index: 0, fate: 'drop', refusal: LONE });
+  });
+
+  it('never touches a card that is not a meet card', () => {
+    // Gloss b's multiple choice is its word's only kept card, and stays.
+    const fates = [keep(0), keep(1), keep(2), keep(3), keep(4), drop(5)];
+    expect(dropLoneMeets(fates, glossOf, typeOf)).toEqual(fates);
+    const lone = [keptRefused(4), drop(5)];
+    expect(dropLoneMeets(lone, glossOf, typeOf)).toEqual(lone);
   });
 });

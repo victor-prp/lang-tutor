@@ -317,10 +317,15 @@ export const STUB_GAP = 'lantern';
 export async function expectDistractors(
   ns: string,
   /** `alternatives`: what a typed item's alternatives are (phase 34), `STUB_ALTERNATIVE` alone by default.
-   *  `overrides`: per key, fields that replace the task's stub answer (phase 34). */
-  opts: { delayMs?: number; tasks?: Task[]; alternatives?: string[]; overrides?: Record<string, Record<string, unknown>> } = {},
+   *  `overrides`: per key, fields that replace the task's stub answer (phase 34).
+   *  A null task (phase 54) is a position that asks nothing, a meet card: its key
+   *  is skipped, as the batch skips it, so a session of more than ten cards still
+   *  answers in the ten items the schema allows. */
+  opts: { delayMs?: number; tasks?: (Task | null)[]; alternatives?: string[]; overrides?: Record<string, Record<string, unknown>> } = {},
 ): Promise<void> {
-  const items = (opts.tasks ?? CYCLE_TASKS).map((task, i) => ({ ...stubItem(task, `q${i + 1}`, opts), ...opts.overrides?.[`q${i + 1}`] }));
+  const items = (opts.tasks ?? CYCLE_TASKS).flatMap((task, i) =>
+    task === null ? [] : [{ ...stubItem(task, `q${i + 1}`, opts), ...opts.overrides?.[`q${i + 1}`] }],
+  );
   await expectation(ns, {
     match: { body: { type: 'REGEX', regex: `[\\s\\S]*${DISTRACTOR_MARKER}[\\s\\S]*` } },
     action: {

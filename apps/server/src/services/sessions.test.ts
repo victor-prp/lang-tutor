@@ -537,10 +537,11 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
     // Phase 37 (spec D3): the new words, newest saved first, then the due word. Phase 54 (spec
     // D2): the word met this morning and missed, never answered right, is a new word again, not a
     // return. A return is carried as step in tests/integration/services/sessionsChoose.test.ts.
+    // Phase 54 (spec D3, D7): each new word's pick is stored as a ladder, the due word's not.
     expect(picks).toEqual([
-      { gloss_id: 'g_asked', sense_id: 's0', variant_id: 'v_asked', dimension: 'written_receptive', rung: 2, level: 1, r: 1, step: false },
-      { gloss_id: 'g_new', sense_id: 's2', variant_id: 'v_new', dimension: 'written_receptive', rung: 1, level: 1, r: null, step: false },
-      { gloss_id: 'g_due', sense_id: 's1', variant_id: 'v_due', dimension: 'written_receptive', rung: 1, level: 4, r: expect.any(Number), step: false },
+      { gloss_id: 'g_asked', sense_id: 's0', variant_id: 'v_asked', dimension: 'written_receptive', rung: 2, level: 1, r: 1, step: false, ladder: true },
+      { gloss_id: 'g_new', sense_id: 's2', variant_id: 'v_new', dimension: 'written_receptive', rung: 1, level: 1, r: null, step: false, ladder: true },
+      { gloss_id: 'g_due', sense_id: 's1', variant_id: 'v_due', dimension: 'written_receptive', rung: 1, level: 4, r: expect.any(Number), step: false, ladder: false },
     ]);
     expect(picks[2].r).toBeLessThan(0.75);
   });
