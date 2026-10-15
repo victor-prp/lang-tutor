@@ -107,6 +107,10 @@ export function serverView(log: readonly CardEntry[]): (CardView | null)[] {
     const date = session[0].date;
     if (date !== day) [day, answers, introduced] = [date, [], new Set()];
     const owed = new Map(dayState(answers, introduced).steps.map((step) => [step.glossId, step.dimension]));
+    // Phase 54 (spec D3). A word with a meet card in the session is a ladder there: its cards' rungs
+    // are the ladder's, not the rule's, so each is read at its own rung. Memory is written at the
+    // session's end, so the rule would read a ladder's typed card against no memory, at rung 1.
+    const ladders = new Set(session.filter((entry) => entry.type === 'meet' && entry.word !== null).map((entry) => entry.word));
 
     for (const entry of session) {
       if (entry.word === null) {
@@ -139,7 +143,7 @@ export function serverView(log: readonly CardEntry[]): (CardView | null)[] {
         withR.find((o) => o.r === null) ??
         known[0];
       const level = levels.get(key(word, chosen.dimension))?.level ?? 1;
-      const implied = owedDimension === chosen.dimension ? 2 : rungFor(chosen.r);
+      const implied = ladders.has(word) ? chosen.rung : owedDimension === chosen.dimension ? 2 : rungFor(chosen.r);
       view.push({ dimension: chosen.dimension, rung: chosen.rung, level, r: chosen.r, implied });
     }
 
