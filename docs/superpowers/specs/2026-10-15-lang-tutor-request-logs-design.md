@@ -163,3 +163,22 @@ environment in `index.ts`.
   otherwise sign in as a tester.
 - **R5 — No new ADR.** The middleware sits in `routes/` beside `actor.ts` and logs through the
   existing `Logger` (ADR 0001 R7 holds). The log directory is covered by ADR 0006 R5 as it is.
+
+### Rulings of the run
+
+- **R6 — `createServerDeps` takes `requestLog: { bodies } | null`.** Null writes no request lines,
+  and every test built through `createTestServerDeps` passes it: integration tests assert their
+  fake logger's events exactly. `app.test.ts` covers the wired middleware.
+- **R7 — The pass-through lives in `requestLog.ts`, and headers are read through a plain object.**
+  ADR 0001 R6 and ADR 0003 R1 are greps (`await ` in composition, `.get(` under `routes/`) that
+  the first draft tripped; the checks are unchanged.
+- **R8 — The started line never waits for the body (final review, re-graded Important).** A slow
+  upload is exactly the stall this exists to find; the body gets its own `request_body` line.
+- **R9 — A response with no `content-length` is still read, then held to 256 KB.** Hono sends its
+  own JSON without a length. A future streaming route would hold its finished line until the
+  stream ends.
+- **Fixed in the final review:** an unsized (chunked) request body was read in full ahead of
+  every route's own limit; the bot sign-in's session `cookie` reached the log unmasked.
+- **Deferred:** under `--tty` on macOS, a command killed by a signal exits 2, not 130; no test
+  runs the middleware on `@hono/node-server`'s own Request and Response (the reviewer probed it
+  by hand).
