@@ -14,6 +14,8 @@ docs/superpowers/drafts/
 scripts/translation-backfills/en-he/logs/
 .claude/worktrees/
 .lane
+# Request logs: each lane's server and Metro output (scripts/with-log.sh).
+.logs/
 nightly-qa/.out/
 nightly-qa/.work/
 .nightly-qa-canary.txt
