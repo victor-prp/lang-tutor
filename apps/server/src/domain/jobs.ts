@@ -183,8 +183,9 @@ export const STOCK_SESSION_EXPIRY_SECONDS = 60;
 export const STOCK_SAVE_DELAY_SECONDS = 30;
 
 /** What asked for the stock: logged with it, so a stock can be traced to its cause.
- *  Phase 53 (ruling R-D12b): `target`, a change to a target, which retired the stock. */
-export const STOCK_REASONS = ['start', 'answer', 'complete', 'skip', 'save', 'target'] as const;
+ *  Phase 53 (ruling R-D12b): `target`, a change to a target, which retired the stock.
+ *  Phase 58 (final review I1): `words_removed`, a level's words removed, which did too. */
+export const STOCK_REASONS = ['start', 'answer', 'complete', 'skip', 'save', 'target', 'words_removed'] as const;
 
 export const StockSessionPayloadSchema = z.object({
   enrollment_id: z.string().min(1),

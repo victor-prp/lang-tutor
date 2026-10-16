@@ -91,6 +91,7 @@ export function createFakeAppDeps(): AppDeps {
   const vocabulary: VocabularyService = {
     save: unreachable,
     unsave: unreachable,
+    removeLevel: unreachable,
     listWords: unreachable,
     wordDetail: unreachable,
   };
@@ -287,6 +288,10 @@ export function createFakeTargetRepo(overrides: Partial<TargetRepo> = {}): FakeT
     removeGlossFromTargets: async (...args) => {
       written.push({ method: 'removeGlossFromTargets', args });
       return [];
+    },
+    removeGlossesFromTargets: async (...args) => {
+      written.push({ method: 'removeGlossesFromTargets', args });
+      return new Map();
     },
     setDueOn: async (...args) => {
       written.push({ method: 'setDueOn', args });

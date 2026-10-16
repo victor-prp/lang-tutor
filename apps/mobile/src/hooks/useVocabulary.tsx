@@ -41,6 +41,9 @@ export type VocabularyValue = {
   loadWord: (lemma: string) => Promise<VocabularyWordDetail>;
   save: (entries: VocabularyEntryInput[]) => Promise<void>;
   unsave: (glossId: string) => Promise<void>;
+  /** Phase 58 (spec D4). Every word at the level leaves the list, which then reloads.
+   *  Throws when the server refused, so the screen can say so. */
+  removeLevel: (level: number) => Promise<void>;
 };
 
 const VocabularyContext = createContext<VocabularyValue | undefined>(undefined);
@@ -127,6 +130,15 @@ export function VocabularyProvider({ api, children }: { api: ApiClient; children
     [api, active, user],
   );
 
+  const removeLevel = useCallback(
+    async (level: number) => {
+      if (!active || !user) return;
+      await api.removeVocabularyLevel(active.id, level);
+      reload();
+    },
+    [api, active, user, reload],
+  );
+
   const value = useMemo<VocabularyValue>(
     () => ({
       words,
@@ -141,8 +153,9 @@ export function VocabularyProvider({ api, children }: { api: ApiClient; children
       loadWord,
       save,
       unsave,
+      removeLevel,
     }),
-    [words, status, cursor, query, setQuery, fetchPage, reload, loadWord, save, unsave],
+    [words, status, cursor, query, setQuery, fetchPage, reload, loadWord, save, unsave, removeLevel],
   );
 
   return <VocabularyContext.Provider value={value}>{children}</VocabularyContext.Provider>;

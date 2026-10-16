@@ -324,6 +324,12 @@ export const strings = {
   dimensionName: (dimension: Dimension): string => DIMENSION_NAMES[dimension],
   notPractised: 'טרם תורגל',
   vocabularyEmptyLevel: 'אין מילים ברמה הזו',
+  // Phase 58 (spec D4). The new filter's one action, and the question before it.
+  vocabularyRemoveNew: 'הסרת כל המילים החדשות',
+  vocabularyRemoveNewTitle: 'להסיר את כל המילים החדשות?',
+  vocabularyRemoveNewMessage: 'כל המילים ברמה "חדשה" יוסרו מהרשימה ומהיעדים. אי אפשר לבטל.',
+  vocabularyRemoveNewConfirm: 'הסרה',
+  vocabularyRemoveNewFailed: 'ההסרה נכשלה. נסו שוב.',
   resultsPractisedTitle: 'המילים שתרגלת',
   // Known parts of speech only. An unfamiliar value returns undefined and the
   // screen omits the line, so a value the model invents tomorrow degrades to a

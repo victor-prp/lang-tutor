@@ -148,6 +148,56 @@ describe('unsave (spec D1)', () => {
   });
 });
 
+// Phase 58 (spec D3). Removing a level is one unsave for the batch: each target
+// changed gets one words_removed line naming every gloss that left it.
+describe('remove a level (phase 58)', () => {
+  it('takes every removed word out of the target, with one words_removed line', async () => {
+    const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
+    const made = await deps.targets.create('u_1', E, { kind: 'exam', due_on: DUE, photo_import_ids: [], entries: [typed(apple), typed(bread)] });
+
+    expect(await deps.vocabulary.removeLevel('u_1', E, 1)).toEqual({ removed_words: 2, removed_glosses: 2 });
+
+    expect((await deps.targets.getTarget('u_1', made.id)).words).toEqual([]);
+    const events = (await readTargetEvents(t.db, made.id)).map(({ kind, before, after, actorUserId }) => ({ kind, before, after, actorUserId }));
+    expect(events.slice(1)).toEqual([
+      { kind: 'words_removed', before: { gloss_ids: [apple.gloss_id, bread.gloss_id].sort() }, after: { reason: 'unsaved' }, actorUserId: 'u_1' },
+    ]);
+  });
+});
+
+// Phase 58 (final review I1). The removal is a reset: a list stock chosen from the
+// removed words would serve them next, so it goes even when no target held them.
+describe('the stock removing a level leaves (phase 58)', () => {
+  it('retires the unstarted list stock and asks for the next, with no target involved', async () => {
+    const seed = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);
+    await deps.sessions.skipSession('u_1', seed.sessionId);
+    for (const [lemma, hebrew] of [['apple', 'תפוח'], ['bread', 'לחם'], ['cheese', 'גבינה']]) {
+      await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [hebrew] });
+    }
+    const { sessionId: stock, status } = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);
+    expect(status).toBe('preparing');
+
+    await deps.vocabulary.removeLevel('u_1', E, 1);
+
+    expect(await readStockRow(t.db, stock)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY });
+    expect(await jobPayloads(t.db, STOCK_SESSION)).toContainEqual({ enrollment_id: E, reason: 'words_removed' });
+    expect(logger.events).toContainEqual({ event: 'session_retired', enrollment_id: E, session_id: stock, reason: 'words_removed' });
+  });
+
+  it('leaves the stock alone when nothing was at the level', async () => {
+    const seed = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);
+    await deps.sessions.skipSession('u_1', seed.sessionId);
+    for (const [lemma, hebrew] of [['apple', 'תפוח'], ['bread', 'לחם'], ['cheese', 'גבינה']]) {
+      await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [hebrew] });
+    }
+    const { sessionId: stock } = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);
+
+    expect(await deps.vocabulary.removeLevel('u_1', E, 3)).toEqual({ removed_words: 0, removed_glosses: 0 });
+
+    expect((await readStockRow(t.db, stock)).status).not.toBe('skipped');
+  });
+});
+
 describe('the stock a change leaves (ruling R-D12b)', () => {
   it('retires the unstarted list stock and asks the stock job for the next', async () => {
     const seed = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);
