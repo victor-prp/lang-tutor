@@ -437,6 +437,12 @@ export function createQuestionRepo(tx: Tx) {
      * meaning's, or a multiple choice's); else the saved example, as before. A
      * card that fell back stored the saved example as its own, so the two agree.
      */
+    /** Phase 59 (spec D4). A sentence translation's word map, glosses and all; null without one. */
+    findWords: async (questionId: string): Promise<MapWord[] | null> => {
+      const [row] = await tx.select({ words: questions.words }).from(questions).where(eq(questions.id, questionId));
+      return row?.words ?? null;
+    },
+
     findJudgeContext: async (
       questionId: string,
     ): Promise<

@@ -415,6 +415,9 @@ export const SessionViewSchema = z.object({
 // a skip gives up (D9 ends a second try with an answer or a give-up, so a skip
 // there is never stored as skipped). Absent, a request for the held card
 // replays its first answer.
+// Phase 59 (spec D5). Taps on a sentence translation's words: at most one per word.
+const TappedSchema = z.array(z.number().int().nonnegative()).max(20);
+
 export const NextStepRequestSchema = z.union([
   z.object({
     question_id: z.string().min(1),
@@ -524,6 +527,10 @@ export const JudgedAnswerRequestSchema = z.object({
   // Phase 56 (spec D3). Help used on the card: a helped answer is stored wrong,
   // whatever the judge says, and the response's verdict stays the judge's.
   helped: z.boolean().optional(),
+  // Phase 59 (spec D5). The indexes into the card's `words` tapped, in the order
+  // of each word's first tap. A second try sends every tap so far, and a give-up
+  // (an empty text) sends them too (ruling R7): a list word's tap is a miss all the same.
+  tapped: TappedSchema.optional(),
 });
 
 export const JudgedAnswerResponseSchema = z.object({

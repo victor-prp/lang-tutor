@@ -4,8 +4,10 @@ import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import type { Devices, SessionRecord, SessionState, SessionSummary } from '../domain/session';
+import type { Tap } from '../domain/taps';
 import type { DayAnswer } from '../domain/today';
 import {
+  answerTaps,
   answers,
   dictLexemes,
   dictVariants,
@@ -232,16 +234,27 @@ export function createSessionRepo(tx: Tx) {
      *  and a stock is always created after the session it waits behind), each in
      *  its positions' order. */
     findAnswersOn: async (enrollmentId: string, day: string): Promise<DayAnswer[]> => {
+      // Phase 59 (spec D4): a tapped list word's miss, right after its card's answer.
       const rows = await tx.execute<AnswerRow & { session_id: string }>(sql`
-        SELECT s.id AS session_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro
-        FROM answers a
-        JOIN sessions s            ON s.id = a.session_id
-        JOIN questions q           ON q.id = a.question_id
-        JOIN vocabulary_entries ve ON ve.enrollment_id = s.enrollment_id AND ve.gloss_id = q.gloss_id
+        SELECT e.session_id, e.gloss_id, e.type, e.options, e.selected_option_position, e.verdict, e.retry_verdict, e.intro
+        FROM (
+          SELECT a.session_id, q.gloss_id, q.type::text AS type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro,
+                 a.answered_at, a.position, -1 AS word_index
+          FROM answers a
+          JOIN questions q ON q.id = a.question_id
+          UNION ALL
+          SELECT tp.session_id, tp.gloss_id, 'sentence_translation', NULL::jsonb, NULL::integer, 'wrong', NULL::text, false,
+                 a.answered_at, tp.position, tp.word_index
+          FROM answer_taps tp
+          JOIN answers a ON a.session_id = tp.session_id AND a.position = tp.position
+          WHERE tp.kind = 'list'
+        ) e
+        JOIN sessions s            ON s.id = e.session_id
+        JOIN vocabulary_entries ve ON ve.enrollment_id = s.enrollment_id AND ve.gloss_id = e.gloss_id
         WHERE s.enrollment_id = ${enrollmentId}
-          AND a.answered_at >= ve.created_at
+          AND e.answered_at >= ve.created_at
           AND (s.practice_day = ${day}::date OR s.status IN ('preparing', 'ready'))
-        ORDER BY s.created_at, s.id, a.position`);
+        ORDER BY s.created_at, s.id, e.position, e.word_index`);
       return rows.rows.map((row) => ({ ...decodeAnswer(row), sessionId: row.session_id }));
     },
 
@@ -434,6 +447,20 @@ export function createSessionRepo(tx: Tx) {
      * second try. Phase 38 (spec D4): `hintOpened`, a typed cloze's hint. Phase 55
      * (spec D6): `helped`, help used on a tiles or typed card.
      */
+    /** Phase 59 (spec D5). A card's taps, one row per word: a word already
+     *  stored adds nothing, so a replay or a second try re-sending it writes no
+     *  second miss. Answers the taps this call added. */
+    insertTaps: async (sessionId: string, position: number, taps: readonly Tap[]): Promise<Tap[]> => {
+      if (taps.length === 0) return [];
+      const rows = await tx
+        .insert(answerTaps)
+        .values(taps.map((tap) => ({ sessionId, position, wordIndex: tap.index, kind: tap.kind, glossId: tap.glossId })))
+        .onConflictDoNothing()
+        .returning({ wordIndex: answerTaps.wordIndex });
+      const added = new Set(rows.map((row) => row.wordIndex));
+      return taps.filter((tap) => added.has(tap.index));
+    },
+
     insertAnswer: async (
       sessionId: string,
       position: number,

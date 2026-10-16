@@ -1,6 +1,6 @@
 import type { AnswerVerdict } from '@lang-tutor/core/api';
 import { evidenceVerdict, type Dimension } from '@lang-tutor/core/domain';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { sessionProgress, type QuestionOption } from '../db/schema';
@@ -56,6 +56,22 @@ export type AnswerRow = {
  *  with this too, so the returns and the evidence never disagree. Phase 55 (spec D2,
  *  as ruled): an intro card's answer carries `intro`, which both read as no evidence;
  *  any other is read as before, without it. */
+/**
+ * Phase 59 (spec D4). The rows of answer_taps that are misses (a tapped list
+ * word), shaped as an answer row: a written answer to a sentence translation
+ * about that gloss, wrong, so `gradesFor` reads written productive Again. Each
+ * carries its card's answer time, position and its own word index, which orders
+ * it after the card's answer (word_index -1). `where` scopes the taps (`tp`).
+ */
+export const tappedMisses = (where: SQL) => sql`
+  SELECT s.enrollment_id, tp.gloss_id, 'sentence_translation' AS type, NULL::jsonb AS options,
+         NULL::integer AS selected_option_position, 'wrong' AS verdict, NULL::text AS retry_verdict, false AS intro,
+         s.practice_day::text AS day, a.answered_at, tp.position, tp.word_index
+  FROM answer_taps tp
+  JOIN answers a  ON a.session_id = tp.session_id AND a.position = tp.position
+  JOIN sessions s ON s.id = tp.session_id
+  WHERE tp.kind = 'list' AND ${where}`;
+
 export function decodeAnswer(row: AnswerRow): AnsweredQuestion {
   const intro = row.intro ? { intro: true } : {};
   if (TEXT_TYPES.has(row.type)) {
@@ -102,21 +118,34 @@ export function createProgressRepo(tx: Tx) {
           FROM session_questions sq
           JOIN questions q    ON q.id = sq.question_id
           JOIN dict_glosses g ON g.id = q.gloss_id
-          WHERE sq.session_id = ${sessionId})
+          WHERE sq.session_id = ${sessionId}
+          -- Phase 59 (spec D4): a tapped list word is evidence too.
+          UNION
+          SELECT g.lexeme_id
+          FROM answer_taps tp
+          JOIN dict_glosses g ON g.id = tp.gloss_id
+          WHERE tp.session_id = ${sessionId})
         ORDER BY l.id
         FOR SHARE`);
     },
 
     findSessionEvidence: async (sessionId: string): Promise<SessionEvidence | undefined> => {
+      // Phase 59 (spec D4). A tapped list word is one more miss, right after its
+      // card's answer: a written answer to it, wrong (TAPPED_MISS).
       const rows = await tx.execute<AnswerRow & { enrollment_id: string; day: string; last_answered_at: string }>(sql`
-        SELECT s.enrollment_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro,
-               s.practice_day::text AS day,
-               (max(a.answered_at) OVER ())::text AS last_answered_at
-        FROM answers a
-        JOIN sessions s  ON s.id = a.session_id
-        JOIN questions q ON q.id = a.question_id
-        WHERE a.session_id = ${sessionId}
-        ORDER BY a.position`);
+        SELECT enrollment_id, gloss_id, type, options, selected_option_position, verdict, retry_verdict, intro, day,
+               (max(answered_at) OVER ())::text AS last_answered_at
+        FROM (
+          SELECT s.enrollment_id, q.gloss_id, q.type::text AS type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro,
+                 s.practice_day::text AS day, a.answered_at, a.position, -1 AS word_index
+          FROM answers a
+          JOIN sessions s  ON s.id = a.session_id
+          JOIN questions q ON q.id = a.question_id
+          WHERE a.session_id = ${sessionId}
+          UNION ALL
+          ${tappedMisses(sql`tp.session_id = ${sessionId}`)}
+        ) evidence
+        ORDER BY position, word_index`);
       if (rows.rows.length === 0) return undefined;
       const first = rows.rows[0];
       return {

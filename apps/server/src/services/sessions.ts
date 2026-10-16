@@ -102,6 +102,7 @@ import {
 } from '../domain/session';
 import { reminderForSession } from '../domain/reminders';
 import { MAX_AVOID, MAX_LEARNER_WORDS } from '../domain/sentences';
+import { classifyTaps } from '../domain/taps';
 import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
@@ -755,15 +756,30 @@ export function createSessionService({
       sessionId: string,
       questionId: string,
       answer: AnswerInput,
-      { retry = false, hintOpened, fits = false }: { retry?: boolean; hintOpened?: boolean; fits?: boolean } = {},
+      {
+        retry = false,
+        hintOpened,
+        fits = false,
+        tapped = [],
+      }: { retry?: boolean; hintOpened?: boolean; fits?: boolean; tapped?: readonly number[] } = {},
     ): Promise<SessionResult> => {
       // The transaction returns its outcome and the log fires after it resolves:
       // a commit that fails after completeSession must not leave a log claiming a
       // session the database never recorded.
-      const { result, justCompleted } = await transaction(async (repos) => {
+      const { result, justCompleted, tapsLogged } = await transaction(async (repos) => {
         const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
         const loaded = await repos.session.loadSession(sessionId);
         if (!loaded) throw new SessionNotFound(sessionId);
+
+        // Phase 59 (spec D4, D5). The words tapped on a sentence translation, by
+        // its stored map; a tap on the target is help, so it reaches `step` as such.
+        const tappedAt = retry ? loaded.answers.length - 1 : loaded.answers.length;
+        const tappedOn = loaded.questions[tappedAt];
+        const taps =
+          tapped.length > 0 && tappedOn?.id === questionId && tappedOn.type === 'sentence_translation'
+            ? classifyTaps(await repos.question.findWords(questionId), tapped)
+            : [];
+        if (taps.some((tap) => tap.kind === 'target') && ('text' in answer || 'pass' in answer)) answer = { ...answer, helped: true };
 
         // Phase 19. Preparing, skipped and failed sessions take no answers. A
         // completed one still reaches `step`, whose replay path answers a retry.
@@ -800,7 +816,7 @@ export function createSessionService({
         // logs nothing and writes no progress.
         if (outcome.status === 'replayed') {
           const progress = await progressOf(repos, sessionId, outcome.record);
-          return { result: { ...outcome.record, progress }, justCompleted: false };
+          return { result: { ...outcome.record, progress }, justCompleted: false, tapsLogged: null };
         }
 
         // Phase 34 (spec D9). A retry resolves the pending answer in its place; a
@@ -834,6 +850,10 @@ export function createSessionService({
           );
         }
 
+        // Phase 59 (spec D5). Stored with the card's answer, once per word: a
+        // second try re-sending them adds only the new ones.
+        const added = taps.length > 0 ? await repos.session.insertTaps(sessionId, tappedAt, taps) : [];
+
         // Phase 43 (spec D2). A first answer starts a session no start call
         // started (an older app, a bot), and asks for the next one in stock.
         // Another started session refuses it here, before anything commits.
@@ -858,9 +878,19 @@ export function createSessionService({
         }
 
         const progress = await progressOf(repos, sessionId, outcome.record);
-        return { result: { ...outcome.record, progress }, justCompleted: outcome.justCompleted };
+        return { result: { ...outcome.record, progress }, justCompleted: outcome.justCompleted, tapsLogged: added.length > 0 ? { position: tappedAt, taps: added } : null };
       });
 
+      // Phase 59 (spec D5). Which words were looked up, and which list words took a miss.
+      if (tapsLogged) {
+        logger.info({
+          event: 'answer_tapped',
+          session_id: sessionId,
+          position: tapsLogged.position,
+          taps: tapsLogged.taps.length,
+          tap_misses: tapsLogged.taps.filter((tap) => tap.kind === 'list').map((tap) => tap.glossId),
+        });
+      }
       if (justCompleted) {
         logCompletedSession(logger, sessionId, result);
       }
@@ -1067,7 +1097,7 @@ export function createSessionService({
     answerJudged: async (
       actorUserId: string,
       sessionId: string,
-      input: { questionId: string; text: string; retry?: boolean; helped?: boolean },
+      input: { questionId: string; text: string; retry?: boolean; helped?: boolean; tapped?: readonly number[] },
     ): Promise<JudgedResult> => {
       const retry = input.retry ?? false;
       type Checked =
@@ -1150,7 +1180,7 @@ export function createSessionService({
         ...(input.helped ? { helped: true } : {}),
       });
       const answer = input.helped === undefined ? { text, judged: verdict } : { text, judged: verdict, helped: input.helped };
-      const session = await service.submitAnswer(actorUserId, sessionId, input.questionId, answer, { retry });
+      const session = await service.submitAnswer(actorUserId, sessionId, input.questionId, answer, { retry, tapped: input.tapped });
       // Phase 56 (spec D3). A helped answer is stored wrong, and the app tells
       // "right, with help" by the judge's own verdict, so that is the one reported.
       if (input.helped) return { verdict, session };

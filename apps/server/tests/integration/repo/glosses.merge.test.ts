@@ -81,6 +81,39 @@ describe('mergeGlosses (spec D7)', () => {
     expect(survivor.rows[0].alternatives).toContain('אצבעות');
   });
 
+  // Phase 59 (spec D4). A tapped list word, and a word map naming it, follow the merge.
+  it('re-points a tap on the other gloss and a word map that names it', async () => {
+    const w = await twoGlosses();
+    const e1 = enrollmentOf('u_1');
+    await save(e1, w.other, w.fingers, w.lexemeId, '2026-01-01');
+    const session = await insertAnsweredSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: e1,
+      status: 'completed',
+      asked: [{ glossId: w.survivor, variantId: w.finger, translation: 'אצבע' }],
+      answers: [],
+    });
+    const [{ question_id: questionId }] = (
+      await t.db.execute<{ question_id: string }>(sql`select question_id from session_questions where session_id = ${session}`)
+    ).rows;
+    const words = [
+      { start: 0, end: 2, text: 'a', glossId: null, target: true },
+      { start: 3, end: 5, text: 'b', glossId: w.other, target: false },
+    ];
+    await t.db.execute(sql`update questions set words = ${JSON.stringify(words)}::jsonb where id = ${questionId}`);
+    await t.db.execute(sql`
+      insert into answers (session_id, position, question_id, typed_text, verdict) values (${session}, 0, ${questionId}, 'x', 'wrong')`);
+    await t.db.execute(sql`
+      insert into answer_taps (session_id, position, word_index, kind, gloss_id) values (${session}, 0, 1, 'list', ${w.other})`);
+
+    await merge(w.lexemeId, w.survivor, w.other);
+
+    const taps = await t.db.execute<{ gloss_id: string }>(sql`select gloss_id from answer_taps where session_id = ${session}`);
+    expect(taps.rows).toEqual([{ gloss_id: w.survivor }]);
+    const map = await t.db.execute<{ words: typeof words }>(sql`select words from questions where id = ${questionId}`);
+    expect(map.rows[0].words).toEqual([words[0], { ...words[1], glossId: w.survivor }]);
+  });
+
   it('folds the memory of an enrollment that saved both: per dimension the larger stability, and a dimension only the other has moves over', async () => {
     const w = await twoGlosses();
     const e1 = enrollmentOf('u_1');

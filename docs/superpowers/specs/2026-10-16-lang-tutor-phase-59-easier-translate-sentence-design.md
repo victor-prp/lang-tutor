@@ -192,5 +192,6 @@ path as a card's (preferred, so `dayState`, the event log and `reached_on` read 
   call already reads the Hebrew and its reference after the batch, a failure there costs one card's
   mark and never the session, and the batch's schema is the one that once hung on new fields. The
   learner's words go to both calls. Stored as `questions.words`; taps in `answer_taps`.
-- **R7 (planning).** Taps also travel on a pass (show the answer, skip) of a sentence-translation
-  card: giving up after looking a word up is the likeliest case of a list word's miss.
+- **R7 (planning, corrected in Task 3).** Taps also travel on a give-up: giving up after looking a
+  word up is the likeliest case of a list word's miss. A sentence translation is given up through
+  the judged route with an empty text, never a next-step pass, so that route's `tapped` covers it.
