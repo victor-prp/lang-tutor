@@ -349,7 +349,7 @@ describe('answerBySpeech, the second try', () => {
     const { service, inserted } = setup(createFakeTranscriber('{"heard":"lamp"}'), at([]));
     const result = await service.answerBySpeech('u1', SESSION, clip);
     expect(result).toMatchObject({ heard: 'lamp', verdict: 'alternative' });
-    expect(inserted).toEqual([[SESSION, 0, 's1', { text: 'lamp', verdict: 'alternative', pending: true }]]);
+    expect(inserted).toEqual([[SESSION, 0, 's1', { text: 'lamp', verdict: 'alternative', pending: true, helped: null }]]);
     expect(result.session?.answers[0]).toMatchObject({ retry_state: 'pending' });
   });
 

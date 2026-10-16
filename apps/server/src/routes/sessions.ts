@@ -417,6 +417,7 @@ export function createSessionsRouter(sessions: SessionService) {
         audio: body.audio,
         mimeType: body.mime_type,
         retry: body.retry ?? false,
+        helped: body.helped,
       });
       return c.json(
         {
@@ -445,7 +446,12 @@ export function createSessionsRouter(sessions: SessionService) {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
     try {
-      const result = await sessions.answerJudged(c.var.actor, id, { questionId: body.question_id, text: body.text, retry: body.retry ?? false });
+      const result = await sessions.answerJudged(c.var.actor, id, {
+        questionId: body.question_id,
+        text: body.text,
+        retry: body.retry ?? false,
+        helped: body.helped,
+      });
       return c.json({ verdict: result.verdict, next: buildNextStepResponse(id, result.session) }, 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);

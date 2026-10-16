@@ -881,7 +881,7 @@ export function createSessionService({
     answerBySpeech: async (
       actorUserId: string,
       sessionId: string,
-      input: { questionId: string; audio: string; mimeType: string; retry?: boolean },
+      input: { questionId: string; audio: string; mimeType: string; retry?: boolean; helped?: boolean },
     ): Promise<SpeechResult> => {
       const retry = input.retry ?? false;
       type Checked = { replay: SpeechResult } | { current: SpeakingQuestion; language: LanguageCode; record: ModelCallRecord };
@@ -897,7 +897,11 @@ export function createSessionService({
         // An attempt already recorded: the stored answer, or its retry, no call.
         if (attempt.kind === 'replay') {
           const { answer, of } = attempt;
-          const verdict = of === 'retry' ? answer.retry_verdict : answer.verdict;
+          const stored = of === 'retry' ? answer.retry_verdict : answer.verdict;
+          const heard = (of === 'retry' ? answer.retry_answer_string : answer.answer_string) ?? '';
+          // Phase 56 (spec D4). A helped spoken answer is the one given up with
+          // a transcript (a pass stores none): it was heard, so it replays understood.
+          const verdict = stored === 'gave_up' && heard !== '' ? 'understood' : stored;
           // Ruling R1: only a recorded spoken answer is replayed; any other
           // answer to this card means this upload is stale.
           if (verdict !== 'understood' && verdict !== 'alternative') {
@@ -905,7 +909,7 @@ export function createSessionService({
           }
           const progress = await progressOf(repos, sessionId, loaded);
           const replay: SpeechResult = {
-            heard: (of === 'retry' ? answer.retry_answer_string : answer.answer_string) ?? '',
+            heard,
             verdict,
             session: { ...loaded, progress },
           };
@@ -975,8 +979,12 @@ export function createSessionService({
         ...(retry ? { retry: true } : {}),
         // Phase 50 (spec D7).
         ...(look ? { sound_score: look.score, sounds_like: look.form, sound_ms: look.ms, sound_called: look.called } : {}),
+        // Phase 56 (spec D4): said with help, so recorded given up.
+        ...(input.helped ? { helped: true } : {}),
       });
-      const answer: AnswerInput = soundsLike !== null ? { heard, sounds_like: soundsLike } : { heard };
+      // Phase 56 (spec D2). `helped` travels with the transcript, so `step` records a helped answer given up.
+      const helps = input.helped === undefined ? {} : { helped: input.helped };
+      const answer: AnswerInput = soundsLike !== null ? { heard, sounds_like: soundsLike, ...helps } : { heard, ...helps };
       const session =
         verdict === 'unheard' ? null : await service.submitAnswer(actorUserId, sessionId, input.questionId, answer, { retry });
       return { heard, verdict, session };
@@ -999,7 +1007,8 @@ export function createSessionService({
     ): Promise<SessionResult> => {
       const retry = input.retry ?? false;
       const card =
-        input.checkFit && !retry
+        // Phase 56 (spec D4): a helped answer is a miss whatever the model says, so it is not asked.
+        input.checkFit && !retry && !input.helped
           ? await transaction(async (repos) => {
               const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
               const loaded = await repos.session.loadSession(sessionId);
@@ -1055,7 +1064,7 @@ export function createSessionService({
     answerJudged: async (
       actorUserId: string,
       sessionId: string,
-      input: { questionId: string; text: string; retry?: boolean },
+      input: { questionId: string; text: string; retry?: boolean; helped?: boolean },
     ): Promise<JudgedResult> => {
       const retry = input.retry ?? false;
       type Checked =
@@ -1134,8 +1143,14 @@ export function createSessionService({
         chars: text.length,
         // Phase 34 (spec D9): a second try's verdict, the one more a card may cost.
         ...(retry ? { retry: true } : {}),
+        // Phase 56 (spec D4): stored wrong, whatever the verdict.
+        ...(input.helped ? { helped: true } : {}),
       });
-      const session = await service.submitAnswer(actorUserId, sessionId, input.questionId, { text, judged: verdict }, { retry });
+      const answer = input.helped === undefined ? { text, judged: verdict } : { text, judged: verdict, helped: input.helped };
+      const session = await service.submitAnswer(actorUserId, sessionId, input.questionId, answer, { retry });
+      // Phase 56 (spec D3). A helped answer is stored wrong, and the app tells
+      // "right, with help" by the judge's own verdict, so that is the one reported.
+      if (input.helped) return { verdict, session };
       // Two overlapping requests may both have paid for a call; step replayed
       // the first, so report the verdict stored for this card, not our own.
       const stored = session.answers.find((a) => a.question_id === input.questionId);

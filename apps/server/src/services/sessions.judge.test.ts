@@ -108,7 +108,7 @@ describe('answerJudged (spec D3)', () => {
     const { service, inserted } = setup(judge);
     expect((await service.answerJudged('u1', SESSION, answer('  '))).verdict).toBe('wrong');
     expect(judge.calls).toHaveLength(0);
-    expect(inserted).toEqual([[SESSION, 0, 'm1', { text: '  ', verdict: 'wrong' }]]);
+    expect(inserted).toEqual([[SESSION, 0, 'm1', { text: '  ', verdict: 'wrong', helped: null }]]);
   });
 
   it('rules the stored meaning exact, without a call, and logs it as a rule', async () => {
@@ -124,7 +124,7 @@ describe('answerJudged (spec D3)', () => {
     const { service, inserted, logger } = setup(judge, record(), { ...CONTEXT, alternatives: ['לקבוע', 'לשמור'] });
     expect((await service.answerJudged('u1', SESSION, answer('לקבוע'))).verdict).toBe('exact');
     expect(judge.calls).toHaveLength(0);
-    expect(inserted).toEqual([[SESSION, 0, 'm1', { text: 'לקבוע', verdict: 'exact' }]]);
+    expect(inserted).toEqual([[SESSION, 0, 'm1', { text: 'לקבוע', verdict: 'exact', helped: null }]]);
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'answer_judged', judged_by: 'rule', verdict: 'exact' }));
   });
 
@@ -134,7 +134,7 @@ describe('answerJudged (spec D3)', () => {
     const result = await service.answerJudged('u1', SESSION, answer('לשריין'));
     expect(result.verdict).toBe('exact');
     expect(result.session.answers[0]).toMatchObject({ verdict: 'exact', is_correct: true, answer_string: 'לשריין' });
-    expect(inserted).toEqual([[SESSION, 0, 'm1', { text: 'לשריין', verdict: 'exact' }]]);
+    expect(inserted).toEqual([[SESSION, 0, 'm1', { text: 'לשריין', verdict: 'exact', helped: null }]]);
     expect(judge.calls).toHaveLength(1);
     expect(judge.calls[0].system).toContain(JUDGE_MARKER);
     expect(JSON.parse(judge.calls[0].user)).toMatchObject({ saved_meaning: 'להזמין', example: 'Vorrei prenotare un tavolo.', answer: 'לשריין' });
@@ -268,7 +268,7 @@ describe('answerJudged (spec D3)', () => {
     it('records misspelled as a near miss', async () => {
       const { service, inserted } = setup(createFakeLlmClient('{"verdict":"misspelled"}'), first());
       expect((await service.answerJudged('u1', SESSION, sentence('I want to bok a table'))).verdict).toBe('near_miss');
-      expect(inserted).toEqual([[SESSION, 0, 's1', { text: 'I want to bok a table', verdict: 'near_miss' }]]);
+      expect(inserted).toEqual([[SESSION, 0, 's1', { text: 'I want to bok a table', verdict: 'near_miss', helped: null }]]);
     });
   });
 });
@@ -315,7 +315,7 @@ describe('answerJudged, the second try', () => {
     const { service, inserted } = setup(createFakeLlmClient('{"verdict":"other_sense"}'));
     const result = await service.answerJudged('u1', SESSION, answer('ספר'));
     expect(result.verdict).toBe('alternative');
-    expect(inserted).toEqual([[SESSION, 0, 'm1', { text: 'ספר', verdict: 'alternative', pending: true }]]);
+    expect(inserted).toEqual([[SESSION, 0, 'm1', { text: 'ספר', verdict: 'alternative', pending: true, helped: null }]]);
     expect(result.session.answers[0]).toMatchObject({ retry_state: 'pending' });
   });
 
@@ -391,7 +391,7 @@ describe('answerText, the fit check', () => {
     const { service, inserted, logger } = setup(judge, record([CLOZE, CHOICE]));
     const result = await service.answerText('u1', SESSION, cloze('edit'));
     expect(result.answers[0]).toMatchObject({ answer_string: 'edit', verdict: 'alternative', retry_state: 'pending' });
-    expect(inserted).toEqual([[SESSION, 0, 'z1', { text: 'edit', verdict: 'alternative', pending: true, hintOpened: false }]]);
+    expect(inserted).toEqual([[SESSION, 0, 'z1', { text: 'edit', verdict: 'alternative', pending: true, hintOpened: false, helped: null }]]);
     expect(judge.calls).toHaveLength(1);
     expect(judge.calls[0].system).toContain(JUDGE_MARKER);
     expect(JSON.parse(judge.calls[0].user)).toEqual({ sentence: 'Please ___ the file.', word_meant: 'download', answer: 'edit' });
@@ -401,7 +401,7 @@ describe('answerText, the fit check', () => {
   it('records a word that does not fit as wrong', async () => {
     const { service, inserted } = setup(createFakeLlmClient('{"verdict":"wrong"}'), record([CLOZE, CHOICE]));
     await service.answerText('u1', SESSION, cloze('banana'));
-    expect(inserted).toEqual([[SESSION, 0, 'z1', { text: 'banana', verdict: 'wrong', hintOpened: false }]]);
+    expect(inserted).toEqual([[SESSION, 0, 'z1', { text: 'banana', verdict: 'wrong', hintOpened: false, helped: null }]]);
   });
 
   // Review Focus 3: a failed check costs what it cost before the phase, and the card still moves on.
@@ -409,7 +409,7 @@ describe('answerText, the fit check', () => {
     for (const judge of [createFakeLlmClient(new Error('timeout')), createFakeLlmClient('junk')]) {
       const { service, inserted, logger } = setup(judge, record([CLOZE, CHOICE]));
       await service.answerText('u1', SESSION, cloze('edit'));
-      expect(inserted).toEqual([[SESSION, 0, 'z1', { text: 'edit', verdict: 'wrong', hintOpened: false }]]);
+      expect(inserted).toEqual([[SESSION, 0, 'z1', { text: 'edit', verdict: 'wrong', hintOpened: false, helped: null }]]);
       expect(logger.events).toContainEqual(expect.objectContaining({ event: 'answer_fit_check_failed', question_type: 'cloze_typed' }));
     }
   });
