@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import { SEEN_ANSWER_WEIGHT, type ActrState } from './actr.ts';
 import { FakeServer, choiceCard, meaningCard, meetCard, readCard, sayCard, typedCard } from './fakeServer.ts';
+import type { FsrsState } from './fsrsBot.ts';
 import { newLine, playDay } from './play.ts';
 import { ROSTER, type Profile } from './roster.ts';
 import { newState } from './state.ts';
@@ -243,6 +244,21 @@ test('the control bot meets a word without its memory moving, as the grades tabl
 
   assert.deepEqual(steps, [{ question_id: 'q1', seen: true }]);
   assert.deepEqual(state.memory, {});
+});
+
+// Phase 55 (spec D2, as ruled). The server grades a ladder's intro cards nothing, so the control
+// bot, which forgets as the picker assumes, learns nothing from its write-it card either: a typed
+// card between the word's meet card and its multiple choice. Its third practice card grades.
+test("the control bot learns nothing from a ladder's intro card, and from its practice cards as before", async () => {
+  const fsrs: Profile = { ...profile, name: 'control', memory: 'fsrs', actr: undefined };
+  const server = new FakeServer({
+    cardsFor: () => [meetCard('q1', 'alpha'), typedCard('q2', 'alpha', []), choiceCard('q3', 'alpha'), typedCard('q4', 'alpha', [])],
+  });
+  const { state } = await play(server, async () => null, fsrs);
+
+  assert.deepEqual(state.log.map((c) => c.type), ['meet', 'typed_translation', 'multiple_choice', 'typed_translation']);
+  // Written productive is graded once, by q4, whatever q2's answer was.
+  assert.equal((state.memory as FsrsState)['alpha|written_productive']?.reps, 1);
 });
 
 test('a meet card of a word the bot did not save is answered seen and counted unmatched', async () => {

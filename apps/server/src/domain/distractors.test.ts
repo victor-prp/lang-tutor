@@ -435,6 +435,7 @@ describe('phase 24 generation (spec D2, D10)', () => {
         'matching', 'matching', 'matching', 'matching',
         'listen_choice', 'letter_tiles', 'dictation',
       ],
+      intro: Array(10).fill(false),
       board: { start: 3 },
     };
     expect(tasksFor(plan)).toEqual(['meaning', 'word', 'typed', 'meaning', null, null, null, 'meaning', null, null]);

@@ -48,8 +48,12 @@ export type PlanPick = {
 export type PlanInput = { listening: boolean; speaking: boolean };
 
 /** `order[i]` is the index into the picks asked at position `i`, `types[i]`
- *  its type. A board takes positions `start` to `start + 3`. */
-export type SessionPlan = { order: number[]; types: QuestionType[]; board: { start: number } | null };
+ *  its type. A board takes positions `start` to `start + 3`. Phase 55 (spec D2,
+ *  as ruled): `intro[i]`, whether the card is one of a ladder's intro stage (the
+ *  meet card, the read aloud, the card that writes the word), which is for
+ *  encoding, not evidence: it counts in the score, and writes no memory, no
+ *  progress and opens no return. */
+export type SessionPlan = { order: number[]; types: QuestionType[]; intro: boolean[]; board: { start: number } | null };
 
 /** Spec D6. Per dimension, the types of rung 1 (recognition) and rung 2 (recall),
  *  in the order a tie falls to. Matching is never chosen for a pick: the board
@@ -204,8 +208,9 @@ function cardFor(pick: PlanPick, used: ReadonlyMap<QuestionType, number>, listen
 }
 
 /** What the order places: one pick, or the board's four together, or (phase 55,
- *  spec D3) a ladder's intro stage, whose cards are `types`, one per index. */
-type Unit = { indices: number[]; type: QuestionType; types?: QuestionType[]; p: number; step: boolean };
+ *  spec D3) a ladder's intro stage, whose cards are `types`, one per index, and
+ *  (spec D2, as ruled) `intro`. */
+type Unit = { indices: number[]; type: QuestionType; types?: QuestionType[]; intro?: true; p: number; step: boolean };
 
 /** Whether `counts`, the types still to place, can follow `last` with no type
  *  twice in a row: no type more than half of what is left, rounded up, or
@@ -287,6 +292,7 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
     indices: cardsOf[k].intro.map(() => index),
     type: 'meet',
     types: cardsOf[k].intro,
+    intro: true,
     p: 1,
     step: false,
   }));
@@ -323,13 +329,15 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
 
   const order: number[] = [];
   const types: QuestionType[] = [];
+  const inIntro: boolean[] = [];
   let start: number | null = null;
   for (const unit of merged) {
     if (unit.type === 'matching') start = order.length;
     unit.indices.forEach((index, k) => {
       order.push(index);
       types.push(unit.types?.[k] ?? unit.type);
+      inIntro.push(unit.intro ?? false);
     });
   }
-  return { order, types, board: start === null ? null : { start } };
+  return { order, types, intro: inIntro, board: start === null ? null : { start } };
 }

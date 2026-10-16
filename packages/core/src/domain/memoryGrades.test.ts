@@ -90,6 +90,28 @@ describe('gradesFor, one test per row of the table', () => {
   });
 });
 
+// Phase 55 (spec D2, as ruled). A ladder's intro stage is for encoding, not evidence: its
+// cards grade nothing. A helped answer is stored `wrong` (spec D6), so `wrong` is it too.
+describe('gradesFor, a ladder intro card (phase 55, spec D2, as ruled)', () => {
+  it('grades an intro tiles or typed card nothing, right, wrong or helped', () => {
+    for (const verdict of ['exact', 'near_miss', 'wrong', 'gave_up'] as const) {
+      expect(gradesFor({ type: 'letter_tiles', verdict, intro: true })).toEqual([]);
+      expect(gradesFor({ type: 'typed_translation', verdict, intro: true })).toEqual([]);
+    }
+  });
+  it('grades an intro read aloud and meet card nothing, as before', () => {
+    expect(gradesFor({ type: 'read_aloud', verdict: 'understood', intro: true })).toEqual([]);
+    expect(gradesFor({ type: 'meet', verdict: 'seen', intro: true })).toEqual([]);
+  });
+  it('grades the same answers as before without the flag, or with it false', () => {
+    expect(gradesFor({ type: 'letter_tiles', verdict: 'exact' })).toEqual([p(WR, 3), p(WP, 2)]);
+    expect(gradesFor({ type: 'letter_tiles', verdict: 'exact', intro: false })).toEqual([p(WR, 3), p(WP, 2)]);
+    expect(gradesFor({ type: 'letter_tiles', verdict: 'wrong', intro: false })).toEqual([p(WP, 1)]);
+    expect(gradesFor({ type: 'typed_translation', verdict: 'wrong', intro: false })).toEqual([p(WP, 1)]);
+    expect(gradesFor({ type: 'typed_translation', verdict: 'exact', intro: false })).toEqual([p(WR, 3), p(WP, 3), p(SP, 3)]);
+  });
+});
+
 describe('dimensionsTested', () => {
   it('is the dimensions a success evidences', () => {
     expect(dimensionsTested('multiple_choice')).toEqual([WR]);

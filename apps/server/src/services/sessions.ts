@@ -1736,6 +1736,9 @@ export function createSessionService({
             ...contextColumns(generatedAs(type), context, sentence),
             // Phase 39 (spec D6): what a new_meaning lists as known, from its pick.
             knownMeanings: type === 'new_meaning' ? (read.picked[plan.order[index]].known_meanings ?? null) : null,
+            // Phase 55 (spec D2, as ruled): a card of a ladder's intro stage, by its plan index, which
+            // goes with the card past a dropped one; its answer writes no memory and no progress.
+            intro: plan.intro[index],
           })),
         });
         // Each choice shuffled on its own, a board's words once together; the

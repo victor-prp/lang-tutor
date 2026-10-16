@@ -3,11 +3,12 @@ import { isChoice, type ChoiceQuestion, type QuestionType } from '@lang-tutor/co
 import { asc, eq } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
-import { answers, pronunciationScores } from '../../src/db/schema';
+import { answers, pronunciationScores, questions, sessionQuestions } from '../../src/db/schema';
 import { findGap } from '../../src/domain/cloze';
 import { NOTHING_GENERATED, generatedContent, type Generated, type QuestionContent } from '../../src/domain/distractors';
 import { LANGUAGES } from '../../src/domain/languages';
 import { tilesFor } from '../../src/domain/tiles';
+import { dayState, type Step } from '../../src/domain/today';
 import { createQuestionRepo } from '../../src/repo/questions';
 import { createSessionRepo } from '../../src/repo/sessions';
 import { testRng } from './testRng';
@@ -180,4 +181,25 @@ export async function readHelped(db: Db, sessionId: string): Promise<(boolean | 
  *  service test may not reach past composition for a repository. */
 export async function readIntroducedOn(db: Db, enrollmentId: string, day: string): Promise<string[]> {
   return withTx(db, (tx) => createSessionRepo(tx).findIntroducedOn(enrollmentId, day));
+}
+
+/** Phase 55 (spec D2, as ruled). Each question's intro mark, by session position. The wire
+ *  does not carry it: only a read over the table sees it. */
+export async function readIntro(db: Db, sessionId: string): Promise<boolean[]> {
+  const rows = await db
+    .select({ intro: questions.intro })
+    .from(sessionQuestions)
+    .innerJoin(questions, eq(questions.id, sessionQuestions.questionId))
+    .where(eq(sessionQuestions.sessionId, sessionId))
+    .orderBy(asc(sessionQuestions.position));
+  return rows.map((row) => row.intro);
+}
+
+/** Phase 55. The returns `day` leaves owed, as the picker reads them (phase 37, spec D1): a
+ *  service test may not reach past composition for a repository. */
+export async function readSteps(db: Db, enrollmentId: string, day: string): Promise<Step[]> {
+  return withTx(db, async (tx) => {
+    const repo = createSessionRepo(tx);
+    return dayState(await repo.findAnswersOn(enrollmentId, day), new Set(await repo.findIntroducedOn(enrollmentId, day))).steps;
+  });
 }

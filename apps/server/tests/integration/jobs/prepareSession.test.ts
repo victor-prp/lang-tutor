@@ -4,12 +4,14 @@ import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
 import { DISTRACTOR_MARKER } from '../../../src/domain/distractors';
+import { sessionScore } from '../../../src/domain/session';
 import { PREPARE_SESSION, type PrepareSessionPayload } from '../../../src/domain/jobs';
 import { createJobRepo } from '../../../src/repo/jobs';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { registerWorkers } from '../../../src/worker';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
-import { CHOSEN_ON, NO_DEVICES } from '../../support/questions';
+import { CHOSEN_ON, NO_DEVICES, readIntro, readSteps } from '../../support/questions';
+import { readGlossMemory, readProgress, sessionDay } from '../../support/progressRows';
 import { startTestBoss, stopTestBoss, waitFor } from '../../support/jobs';
 import {
   assertMockServerReachable,
@@ -94,6 +96,10 @@ const HEAR: Card = { dimension: 'spoken_receptive', rung: 1, level: 1, r: 0.64 }
 /** Typed recall of the form, p = R: typed translation, typed cloze, sentence translation in turn. */
 const produce = (r: number): Card => ({ dimension: 'written_productive', rung: 2, level: 3, r });
 
+/** The gloss each word was saved as by the last enqueueSession: a test that reads a word's
+ *  memory or progress names it by this. */
+const savedGloss = new Map<string, string>();
+
 /** Saves `words` and enqueues a list session's job with one pick each, carrying `cards[i]`. */
 async function enqueueSession(
   words: Record<string, string>,
@@ -104,6 +110,7 @@ async function enqueueSession(
   for (const [i, [lemma, translation]] of Object.entries(words).entries()) {
     const example = opts.example && { source: `We saw the ${lemma} there.`, target: opts.example.target };
     const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation], ...(example ? { example } : {}) });
+    savedGloss.set(lemma, saved.glossIds[0]);
     picks.push({
       gloss_id: saved.glossIds[0],
       sense_id: saved.senseIds[0],
@@ -193,6 +200,8 @@ describe('a ladder through the queue (phase 54, spec D3, D7; phase 55, spec D2, 
     expect(tiles.tiles).toHaveLength([...'tome'].length + 2);
     expect(tiles.tiles.length).toBeGreaterThanOrEqual(5);
     expect(tiles.tiles.length).toBeLessThanOrEqual(12);
+    // Phase 55 (spec D2, as ruled): the intro's three questions are marked, the practice cards and sprint's are not.
+    expect(await readIntro(t.db, sessionId)).toEqual([true, true, true, false, false, false, false]);
   });
 
   it('prepares the same pick without the read aloud when the session cannot speak', async () => {
@@ -204,6 +213,7 @@ describe('a ladder through the queue (phase 54, spec D3, D7; phase 55, spec D2, 
     const { questions } = await deps.sessions.getSession('u_1', sessionId);
     expect(questions.map((q) => q.type)).toEqual(['meet', 'letter_tiles', 'multiple_choice', 'multiple_choice', 'reverse_choice', 'typed_translation']);
     expect(cardsOf(questions, questions[0].vocab_term_id)).toEqual(['meet', 'letter_tiles', ...PRACTICE]);
+    expect(await readIntro(t.db, sessionId)).toEqual([true, true, false, false, false, false]);
   });
 
   it('prepares a ladder pick on a form without tiles with a typed translation in place of them', async () => {
@@ -218,6 +228,8 @@ describe('a ladder through the queue (phase 54, spec D3, D7; phase 55, spec D2, 
     // A session of one word: the plan's one-word rule leaves the ladder its read aloud.
     expect(questions.map((q) => q.type)).toEqual(['meet', 'read_aloud', 'typed_translation', ...PRACTICE]);
     expect(questions[2]).toMatchObject({ type: 'typed_translation', question: 'להמריא', answer: 'take off' });
+    // The intro's typed translation is marked; the third practice card, the same type, is not.
+    expect(await readIntro(t.db, sessionId)).toEqual([true, true, true, false, false, false]);
   });
 
   it('prepares a payload of three ladders, as a stock chosen before the deploy holds, with all of their cards', async () => {
@@ -241,6 +253,76 @@ describe('a ladder through the queue (phase 54, spec D3, D7; phase 55, spec D2, 
     expect(lexemes).toHaveLength(3);
     for (const lexemeId of lexemes) expect(cardsOf(questions, lexemeId)).toEqual([...intro, ...PRACTICE]);
     for (const at of [0, 3, 6]) expect(new Set(questions.slice(at, at + 3).map((q) => q.vocab_term_id)).size).toBe(1);
+    expect(await readIntro(t.db, sessionId)).toEqual([...Array(9).fill(true), ...Array(9).fill(false)]);
+  });
+
+  // Phase 55 (spec D2, as ruled). The intro stage is for encoding, not evidence: played, its
+  // cards write no memory, no progress, and open no return, while the practice cards grade as
+  // ever. The score still counts them: the read aloud said right, the tiles helped wrong.
+  describe('played through to the end', () => {
+    const WP = 'written_productive';
+
+    /** Tome's ladder and sprint's multiple choice, speaking: the tiles helped, the read aloud said,
+     *  the choices right, and the third practice card `typed`. */
+    async function play(typed: string) {
+      await expectDistractors(ns, { tasks: [null, null, null, 'meaning', 'meaning', 'word', 'typed'] });
+      await expectCheck(ns);
+      const sessionId = await enqueueSession({ tome: 'ספר', sprint: 'ריצה' }, [{ ladder: true }, RECOGNISE], { listening: false, speaking: true });
+      await waitFor(async () => (await statusOf(sessionId)) === 'ready');
+      const { questions } = await deps.sessions.getSession('u_1', sessionId);
+      expect(questions.map((q) => q.type)).toEqual([
+        'meet', 'read_aloud', 'letter_tiles', 'multiple_choice', 'multiple_choice', 'reverse_choice', 'typed_translation',
+      ]);
+      let result;
+      for (const question of questions) {
+        const answer =
+          question.type === 'meet'
+            ? { seen: true as const }
+            : question.type === 'read_aloud'
+              ? { heard: 'tome' }
+              : question.type === 'letter_tiles'
+                ? { text: 'tome', helped: true }
+                : question.type === 'typed_translation'
+                  ? { text: typed }
+                  : { option_index: (question as { correct_option: number }).correct_option };
+        result = await deps.sessions.submitAnswer('u_1', sessionId, question.id, answer);
+      }
+      expect(result!.complete).toBe(true);
+      const tome = savedGloss.get('tome')!;
+      const day = (await sessionDay(t.db, sessionId))!;
+      const progressOf = async (dimension: string) =>
+        (await readProgress(t.db, E)).find((row) => row.glossId === tome && row.dimension === dimension);
+      return { result: result!, tome, day, progressOf };
+    }
+
+    it('writes no memory, no progress and no return for the intro, and the practice cards grade as ever', async () => {
+      const { result, tome, day, progressOf } = await play('tome');
+      // The tiles answer is stored wrong, and the score counts it so: six graded cards (the meet card
+      // is not one), five right, the read aloud among them.
+      expect(result.answers.map((a) => a.is_correct)).toEqual([false, true, false, true, true, true, true]);
+      expect(sessionScore(result)).toEqual({ correct: 5, total: 6 });
+      // Written productive: the reverse choice's Hard and the typed card's Good, and no Again.
+      expect((await readGlossMemory(t.db, tome)).find((row) => row.dimension === WP)).toMatchObject({ reps: 2, lapses: 0 });
+      // Its progress stepped, with no mistake recorded; the read aloud raised no spoken production.
+      expect(await progressOf(WP)).toMatchObject({ level: 2, lastWrongOn: null });
+      expect(await progressOf('spoken_productive')).toMatchObject({ level: 1, lastStepOn: null });
+      // The return a word met today owes, in written receptive: none in written productive.
+      expect((await readSteps(t.db, E, day)).filter((step) => step.glossId === tome).map((step) => step.dimension)).toEqual([
+        'written_receptive',
+      ]);
+    });
+
+    it('writes written productive Again for a wrong third practice card, and nothing for the intro tiles', async () => {
+      const { result, tome, day, progressOf } = await play('qqqqqq');
+      expect(sessionScore(result)).toEqual({ correct: 4, total: 6 });
+      // The reverse choice's Hard and the typed card's Again: two reviews, one lapse.
+      expect((await readGlossMemory(t.db, tome)).find((row) => row.dimension === WP)).toMatchObject({ reps: 2, lapses: 1 });
+      expect(await progressOf(WP)).toMatchObject({ level: 1, lastWrongOn: day });
+      // The typed card's Again opens a return in written productive, from the practice card.
+      expect((await readSteps(t.db, E, day)).filter((step) => step.glossId === tome).map((step) => step.dimension)).toEqual([
+        'written_productive',
+      ]);
+    });
   });
 });
 

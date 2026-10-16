@@ -682,4 +682,64 @@ describe('planCards: a ladder', () => {
     expect(typeOf(pick(0))).toBe('multiple_choice');
     expect(typeOf(pick(0, { ladder: false }))).toBe('multiple_choice');
   });
+
+  // Phase 55 (spec D2, as ruled). The intro stage is for encoding, not evidence: the plan marks
+  // its cards, the prepare job stores the mark on their questions, and they grade nothing.
+  describe('the intro flags', () => {
+    /** The pick's flags, in the order of its cards. */
+    const introOf = (plan: ReturnType<typeof planCards>, index: number) => plan.intro.filter((_, position) => plan.order[position] === index);
+    /** The types at the flagged positions, in the order of the plan. */
+    const flagged = (plan: ReturnType<typeof planCards>) => plan.types.filter((_, position) => plan.intro[position]);
+
+    it('marks the meet card, the read aloud and the tiles of a ladder, and no other card', () => {
+      const plan = planCards([ladder(0), ...others(1).slice(0, 3)], ALL);
+      expect(plan.intro).toHaveLength(plan.order.length);
+      expect(introOf(plan, 0)).toEqual([true, true, true, false, false, false]);
+      for (const index of [1, 2, 3]) expect(introOf(plan, index)).toEqual([false]);
+      expect(flagged(plan)).toEqual(INTRO);
+    });
+
+    it('marks the meet card and the tiles when the session cannot speak', () => {
+      const plan = planCards([ladder(0), ...others(1).slice(0, 3)], NONE);
+      expect(introOf(plan, 0)).toEqual([true, true, false, false, false]);
+      expect(flagged(plan)).toEqual(['meet', 'letter_tiles']);
+    });
+
+    it("marks a form without tiles' intro typed translation, and not its third practice card", () => {
+      for (const input of [ALL, NONE]) {
+        const plan = planCards([ladder(0, { tiles: false }), at(1, WP, 1)], input);
+        const intro: QuestionType[] = input.speaking ? ['meet', 'read_aloud', 'typed_translation'] : ['meet', 'typed_translation'];
+        expect(flagged(plan)).toEqual(intro);
+        expect(introOf(plan, 0)).toEqual([...intro.map(() => true), false, false, false]);
+        // The word's two typed translations: the intro's is marked, P3's is not.
+        const typed = plan.order.flatMap((index, position) =>
+          index === 0 && plan.types[position] === 'typed_translation' ? [plan.intro[position]] : [],
+        );
+        expect(typed).toEqual([true, false]);
+      }
+    });
+
+    it('marks each of two ladders its own intro stage, beside other cards and a return', () => {
+      const plan = planCards([ladder(0), ladder(1), at(2, WP, 1), at(3, SR, 1), back(4, WR)], ALL);
+      for (const index of [0, 1]) expect(introOf(plan, index)).toEqual([true, true, true, false, false, false]);
+      for (const index of [2, 3, 4]) expect(introOf(plan, index)).toEqual([false]);
+      expect(flagged(plan)).toEqual([...INTRO, ...INTRO]);
+    });
+
+    it('marks two intro stages of different lengths, each by its own cards', () => {
+      const plan = planCards([ladder(0), ladder(1, { tiles: false, speakable: false })], ALL);
+      expect(introOf(plan, 0)).toEqual([true, true, true, false, false, false]);
+      expect(introOf(plan, 1)).toEqual([true, true, false, false, false]);
+      expect(flagged(plan)).toEqual([...INTRO, 'meet', 'typed_translation']);
+    });
+
+    it('marks no card of a board, nor of a session without a ladder', () => {
+      const boarded = planCards([ladder(0), ladder(1), ladder(2), pick(3), pick(4), pick(5), pick(6)], ALL);
+      expect(boarded.board).not.toBeNull();
+      expect(boarded.intro.slice(boarded.board!.start, boarded.board!.start + 4)).toEqual([false, false, false, false]);
+      expect(flagged(boarded)).toEqual([...INTRO, ...INTRO, ...INTRO]);
+      const plain = planCards([at(0, WP, 1), at(1, SR, 1), pick(2), back(3, WR)], ALL);
+      expect(plain.intro).toEqual(plain.order.map(() => false));
+    });
+  });
 });

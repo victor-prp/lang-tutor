@@ -839,6 +839,10 @@ export const questions = pgTable(
     // Phase 39 (spec D6). The meanings a new_meaning card listed as known, in family
     // order; set on that type and null on every other (questions_known_meanings_valid).
     knownMeanings: text('known_meanings').array(),
+    // Phase 55 (spec D2, as ruled). A card of a ladder's intro stage: the meet card, the
+    // read aloud and the card that writes the word. It counts in the score, and its answer
+    // writes no memory and no progress and opens no return. False on every other card.
+    intro: boolean('intro').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

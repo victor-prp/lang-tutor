@@ -38,7 +38,8 @@ export type SessionEvidence = {
   answers: AnsweredQuestion[];
 };
 
-/** A stored answer as its question and answer rows give it. */
+/** A stored answer as its question and answer rows give it. Phase 55 (spec D2, as
+ *  ruled): `intro`, the question's mark of a ladder's intro stage. */
 export type AnswerRow = {
   gloss_id: string;
   type: string;
@@ -46,16 +47,20 @@ export type AnswerRow = {
   selected_option_position: number | null;
   verdict: string | null;
   retry_verdict: string | null;
+  intro: boolean;
 };
 
 /** A stored answer as the rules read it: a text answer carries the verdict it was
  *  shown (phases 23 and 24), or its retry's when the retry resolved right (phase 34,
  *  spec D9); a choice is right when its option is. Phase 37 reads today's answers
- *  with this too, so the returns and the evidence never disagree. */
+ *  with this too, so the returns and the evidence never disagree. Phase 55 (spec D2,
+ *  as ruled): an intro card's answer carries `intro`, which both read as no evidence;
+ *  any other is read as before, without it. */
 export function decodeAnswer(row: AnswerRow): AnsweredQuestion {
+  const intro = row.intro ? { intro: true } : {};
   if (TEXT_TYPES.has(row.type)) {
     const verdict = evidenceVerdict(row.verdict as AnswerVerdict, row.retry_verdict as AnswerVerdict | null);
-    return { glossId: row.gloss_id, type: row.type as TextAnswerType, verdict };
+    return { glossId: row.gloss_id, type: row.type as TextAnswerType, verdict, ...intro };
   }
   return {
     glossId: row.gloss_id,
@@ -63,6 +68,7 @@ export function decodeAnswer(row: AnswerRow): AnsweredQuestion {
     // selected_option_position is canonical (sessions.insertAnswer), and
     // question_options_valid makes positions 0..n-1.
     correct: canonicalOptions(row.options!)[row.selected_option_position!].is_correct,
+    ...intro,
   };
 }
 
@@ -102,18 +108,8 @@ export function createProgressRepo(tx: Tx) {
     },
 
     findSessionEvidence: async (sessionId: string): Promise<SessionEvidence | undefined> => {
-      const rows = await tx.execute<{
-        enrollment_id: string;
-        gloss_id: string;
-        type: string;
-        options: QuestionOption[] | null;
-        selected_option_position: number | null;
-        verdict: string | null;
-        retry_verdict: string | null;
-        day: string;
-        last_answered_at: string;
-      }>(sql`
-        SELECT s.enrollment_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict, a.retry_verdict,
+      const rows = await tx.execute<AnswerRow & { enrollment_id: string; day: string; last_answered_at: string }>(sql`
+        SELECT s.enrollment_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro,
                s.practice_day::text AS day,
                (max(a.answered_at) OVER ())::text AS last_answered_at
         FROM answers a

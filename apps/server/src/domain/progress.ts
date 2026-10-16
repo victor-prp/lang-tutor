@@ -13,10 +13,12 @@ export type ChoiceAnswerType = 'multiple_choice' | 'new_meaning' | 'reverse_choi
 export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles' | 'read_aloud' | 'say_translation' | 'typed_meaning' | 'cloze_typed' | 'sentence_translation' | 'meet';
 
 /** One answer as the rule reads it: which gloss, which exercise, and how it
- *  was judged. A choice is right or wrong; a text answer has its verdict. */
+ *  was judged. A choice is right or wrong; a text answer has its verdict.
+ *  Phase 55 (spec D2, as ruled): `intro`, a card of a ladder's intro stage;
+ *  absent is false. */
 export type AnsweredQuestion =
-  | { glossId: string; type: ChoiceAnswerType; correct: boolean }
-  | { glossId: string; type: TextAnswerType; verdict: AnswerVerdict };
+  | { glossId: string; type: ChoiceAnswerType; correct: boolean; intro?: boolean }
+  | { glossId: string; type: TextAnswerType; verdict: AnswerVerdict; intro?: boolean };
 
 /** One piece of evidence about one dimension. A capped piece alone can carry
  *  a dimension to its cap and no further; null is no cap. */
@@ -101,6 +103,9 @@ export function evidenceFor(answer: AnsweredQuestion): Evidence[] {
     correct,
     cap,
   });
+  // Phase 55 (spec D2, as ruled). A ladder's intro stage is for encoding, not evidence: its
+  // write-it card, right, wrong or helped, and its read aloud say nothing, as its meet card.
+  if (answer.intro) return [];
   switch (answer.type) {
     case 'multiple_choice':
     case 'new_meaning':
@@ -233,10 +238,11 @@ export function evaluateSession(
     }
   }
   // A skipped card (spec D7) is in neither list: choice answers never skip.
-  // Phase 54 (spec D1). Nor is a seen meet card, which writes no progress.
+  // Phase 54 (spec D1). Nor is a seen meet card, which writes no progress; phase 55
+  // (spec D2, as ruled), nor any card of a ladder's intro stage.
   const practised = new Set(
     answers
-      .filter((answer) => !('verdict' in answer && (answer.verdict === 'skipped' || answer.verdict === 'seen')))
+      .filter((answer) => !answer.intro && !('verdict' in answer && (answer.verdict === 'skipped' || answer.verdict === 'seen')))
       .map((answer) => answer.glossId),
   );
 

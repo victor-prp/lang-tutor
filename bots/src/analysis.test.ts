@@ -6,6 +6,8 @@ import type { AnswerVerdict } from '@lang-tutor/core/api';
 
 import {
   WEAK_P,
+  introCards,
+  introReader,
   isLastDayOfWeek,
   liveDimensions,
   meanRecall,
@@ -266,4 +268,65 @@ test('a meet card is placed on no dimension and leaves the weeks\' numbers as th
   );
   const days = [day(1, 10, 5), day(2, 10, 5), day(3, 10, 5)];
   assert.deepEqual(weekNumbers(stateWith(withMeet, days), 1, noMemory, WRITTEN), weekNumbers(stateWith(asked, days), 1, noMemory, WRITTEN));
+});
+
+// Phase 55 (spec D2, as ruled). The server marks a ladder's intro cards (the meet card, the read
+// aloud, the write-it card) on their questions and grades them nothing; the wire does not say
+// which they are, so the bots read them from the order the plan gives a ladder.
+test("reads a ladder's intro from its shape: a word's meet card, its read aloud, and the card that writes it", () => {
+  const log = [
+    card(1, 'meet', 'x', false, {}, { verdict: 'seen' }),
+    card(1, 'read_aloud', 'x', true, {}, { verdict: 'understood' }),
+    card(1, 'letter_tiles', 'x', false, {}, { verdict: 'wrong' }),
+    card(1, 'meet', 'y', false, {}, { verdict: 'seen' }),
+    card(1, 'typed_translation', 'y', true, {}, { verdict: 'exact' }),
+    card(1, 'letter_tiles', 'z', true, {}, { verdict: 'exact' }),
+    card(1, 'multiple_choice', 'x', true),
+    card(1, 'typed_translation', null, false, {}, { verdict: 'wrong' }),
+    card(1, 'multiple_choice', 'y', true),
+    card(1, 'reverse_choice', 'x', true),
+    card(1, 'typed_translation', 'y', true, {}, { verdict: 'exact' }),
+  ];
+  assert.deepEqual(introCards(log), [true, true, true, true, true, false, false, false, false, false, false]);
+  // A ladder of the phase 54 shape: the meet card alone.
+  assert.deepEqual(introCards([log[0], log[6], log[9]]), [true, false, false]);
+  // A lone ladder, its six cards in a row, a form without tiles: the intro's typed card is one,
+  // the third practice card is not.
+  const lone = [
+    card(1, 'meet', 'w', false, {}, { verdict: 'seen' }),
+    card(1, 'read_aloud', 'w', true, {}, { verdict: 'understood' }),
+    card(1, 'typed_translation', 'w', true, {}, { verdict: 'exact' }),
+    card(1, 'multiple_choice', 'w', true),
+    card(1, 'reverse_choice', 'w', true),
+    card(1, 'typed_translation', 'w', true, {}, { verdict: 'exact' }),
+  ];
+  assert.deepEqual(introCards(lone), [true, true, true, false, false, false]);
+  // Its multiple choice and reverse choice dropped (phase 48): the typed card after the tiles is a practice card.
+  const dropped = [log[0], log[2], card(1, 'typed_translation', 'x', true, {}, { verdict: 'exact' })];
+  assert.deepEqual(introCards(dropped), [true, true, false]);
+  // Card by card, from the cards of the session already played: a resumed session reads on.
+  const read = introReader(log.slice(0, 2));
+  assert.deepEqual(log.slice(2).map(read), introCards(log).slice(2));
+});
+
+test("the replay grades a ladder's intro card nothing, as the server does", () => {
+  // Day 1, x's ladder; day 3, a reverse choice of x, read at the written productive memory and
+  // level the server keeps. The intro tiles, right or wrong, change neither.
+  const ladder = (right: boolean) => [
+    card(1, 'meet', 'x', false, {}, { verdict: 'seen' }),
+    card(1, 'letter_tiles', 'x', right, {}, { verdict: right ? 'exact' : 'wrong' }),
+    card(1, 'multiple_choice', 'x', true),
+    card(1, 'reverse_choice', 'x', true),
+    card(1, 'typed_translation', 'x', true, {}, { verdict: 'exact' }),
+    card(3, 'reverse_choice', 'x', true),
+  ];
+  // The reverse choice's Hard, then the typed card's Good, on day 1: the intro tiles none.
+  const memory = review(review(null, 2, dateOf(1)), 3, dateOf(1));
+  for (const right of [true, false]) {
+    const view = serverView(ladder(right))[5];
+    assert.equal(view?.dimension, WP);
+    // The reverse choice and the typed card stepped it; a wrong tiles card would have held it.
+    assert.equal(view?.level, 2);
+    assert.equal(view?.r, retrievability(memory, dateOf(3)));
+  }
 });

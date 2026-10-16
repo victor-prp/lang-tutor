@@ -2232,4 +2232,46 @@ describe('prepareSession, a ladder (phase 54, spec D3, D7; phase 55, spec D2)', 
     expect(events(logger, 'card_dropped')).toEqual([expect.objectContaining({ stage: 'validation' }), expect.objectContaining({ stage: 'validation' })]);
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 6, planned_count: 8, dropped_count: 2 }));
   });
+
+  // Phase 55 (spec D2, as ruled). Each question of the intro stage is written with its mark,
+  // which goes with the card: a card dropped before it closes the positions up, and the mark
+  // stays on the meet card and the tiles.
+  describe('the intro mark', () => {
+    const row = (n: number, form: string, translation: string): GenerationContext => ({
+      glossId: `g-s${n}`, senseId: `s${n}`, variantId: `v${n}`, lexemeId: `l${n}`, form, lemma: form, partOfSpeech: 'noun', translation,
+      example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null,
+    });
+    const context = [...CONTEXT, row(3, 'быстро', 'מהר'), row(4, 'дом', 'בית'), row(5, 'окно', 'חלון'), row(6, 'стол', 'שולחן')];
+    // The ladder (g-s1) and five others, which outnumber its four units: the merge places an
+    // other first. In plan order: лук's multiple choice; the ladder's meet card and tiles; быстро's
+    // tiles; the ladder's multiple choice; стол's typed card; the ladder's reverse choice; дом's;
+    // the ladder's typed card; окно's.
+    const picks = [
+      { gloss_id: 'g-s1', sense_id: 's1', variant_id: 'v1', ladder: true },
+      { gloss_id: 'g-s2', sense_id: 's2', variant_id: 'v2', ...RECOGNISE },
+      { gloss_id: 'g-s3', sense_id: 's3', variant_id: 'v3', ...BUILD_FORM },
+      { gloss_id: 'g-s4', sense_id: 's4', variant_id: 'v4', ...PICK_FORM },
+      { gloss_id: 'g-s5', sense_id: 's5', variant_id: 'v5', ...produce(0.7) },
+      { gloss_id: 'g-s6', sense_id: 's6', variant_id: 'v6', ...produce(0.88) },
+    ];
+    const marks = (calls: { generated: unknown[] }) => (calls.generated[0] as { questions: { intro?: boolean }[] }).questions.map((q) => q.intro);
+
+    it('marks the meet card and the tiles of the ladder, and no other question', async () => {
+      const { service, calls } = world({ context, reply: answering() });
+      await service.prepareSession({ ...PAYLOAD, picks });
+      expect(insertedOf(calls).map((q) => `${q.type}:${q.glossId}`)).toEqual([
+        'multiple_choice:g-s2', 'meet:g-s1', 'letter_tiles:g-s1', 'letter_tiles:g-s3', 'multiple_choice:g-s1',
+        'typed_translation:g-s6', 'reverse_choice:g-s1', 'reverse_choice:g-s4', 'typed_translation:g-s1', 'typed_translation:g-s5',
+      ]);
+      expect(marks(calls)).toEqual([false, true, true, false, false, false, false, false, false, false]);
+    });
+
+    it('keeps the mark on its card when a card before it is dropped', async () => {
+      const { service, calls, logger } = world({ context, reply: answering('лук') });
+      await service.prepareSession({ ...PAYLOAD, picks });
+      expect(events(logger, 'card_dropped')).toEqual([expect.objectContaining({ key: 'q1', type: 'multiple_choice', stage: 'validation' })]);
+      expect(insertedOf(calls).slice(0, 3).map((q) => `${q.type}:${q.glossId}`)).toEqual(['meet:g-s1', 'letter_tiles:g-s1', 'letter_tiles:g-s3']);
+      expect(marks(calls)).toEqual([true, true, false, false, false, false, false, false, false]);
+    });
+  });
 });

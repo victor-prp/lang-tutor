@@ -532,6 +532,8 @@ export function createQuestionRepo(tx: Tx) {
         sentenceMarkEnd?: number | null;
         // Phase 39 (spec D6): a new_meaning's known meanings; null on every other type.
         knownMeanings?: string[] | null;
+        // Phase 55 (spec D2, as ruled): a card of a ladder's intro stage; left out (false) on every other.
+        intro?: boolean;
       }[];
     }): Promise<Question[]> => {
       if (input.questions.length === 0) return [];
@@ -563,6 +565,7 @@ export function createQuestionRepo(tx: Tx) {
             sentenceMarkStart: question.sentenceMarkStart ?? null,
             sentenceMarkEnd: question.sentenceMarkEnd ?? null,
             knownMeanings: question.knownMeanings ?? null,
+            intro: question.intro ?? false,
           })),
         )
         .returning({ id: questions.id });

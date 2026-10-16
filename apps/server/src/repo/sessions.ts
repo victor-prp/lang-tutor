@@ -233,7 +233,7 @@ export function createSessionRepo(tx: Tx) {
      *  its positions' order. */
     findAnswersOn: async (enrollmentId: string, day: string): Promise<DayAnswer[]> => {
       const rows = await tx.execute<AnswerRow & { session_id: string }>(sql`
-        SELECT s.id AS session_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict, a.retry_verdict
+        SELECT s.id AS session_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro
         FROM answers a
         JOIN sessions s            ON s.id = a.session_id
         JOIN questions q           ON q.id = a.question_id

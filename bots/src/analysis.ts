@@ -68,14 +68,58 @@ function servedBy(type: QuestionType): { dimension: Dimension; rung: Rung }[] {
 
 const CHOICE_TYPES: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'reverse_choice', 'listen_choice', 'matching', 'cloze_choice', 'new_meaning']);
 
-function answered(entry: CardEntry & { word: string }): AnsweredQuestion {
+/** A card as the intro reading needs it: its type and the word it was matched to. */
+type Asked = { type: QuestionType; word: string | null };
+
+/** The card of a ladder's intro stage that has the learner write the word (phase 55, spec D2). */
+const WRITE_IT: ReadonlySet<QuestionType> = new Set(['letter_tiles', 'typed_translation']);
+
+/**
+ * Phase 55 (spec D2, as ruled). Which of a session's cards are a ladder's intro stage, which the
+ * server marks on their questions and grades nothing. The wire does not say, so it is read from
+ * the stage's shape: a word's meet card, then the word's next cards while they are its read aloud
+ * and then the card that writes it, letter tiles or a typed translation, which ends the stage.
+ * Read by shape and not by the first practice card, so a ladder whose multiple choice was dropped
+ * (phase 48) still ends its intro at the write-it card; no intro card is ever dropped (a meet card,
+ * a read aloud and tiles ask the model nothing, and a typed translation is never refused). Card by
+ * card, as a session is played: `before`, the session's cards already played, as a resumed
+ * session has them in the log.
+ */
+export function introReader(before: readonly Asked[] = []): (card: Asked) => boolean {
+  // Each word whose intro is open, and the card it has reached: the meet card or the read aloud.
+  const open = new Map<string, 'meet' | 'read_aloud'>();
+  const read = ({ type, word }: Asked): boolean => {
+    if (word === null) return false;
+    if (type === 'meet') {
+      open.set(word, 'meet');
+      return true;
+    }
+    const reached = open.get(word);
+    if (reached === undefined) return false;
+    if (type === 'read_aloud' && reached === 'meet') {
+      open.set(word, 'read_aloud');
+      return true;
+    }
+    open.delete(word);
+    return WRITE_IT.has(type);
+  };
+  for (const card of before) read(card);
+  return read;
+}
+
+/** The same over a session's cards, in order. */
+export const introCards = (session: readonly Asked[]): boolean[] => session.map(introReader());
+
+function answered(entry: CardEntry & { word: string; intro: boolean }): AnsweredQuestion {
+  const intro = entry.intro ? { intro: true } : {};
   if (CHOICE_TYPES.has(entry.type)) {
-    return { glossId: entry.word, type: entry.type as Extract<AnsweredQuestion, { correct: boolean }>['type'], correct: entry.correct };
+    return { glossId: entry.word, type: entry.type as Extract<AnsweredQuestion, { correct: boolean }>['type'], correct: entry.correct, ...intro };
   }
   return {
     glossId: entry.word,
     type: entry.type as Extract<AnsweredQuestion, { verdict: unknown }>['type'],
     verdict: entry.verdict ?? (entry.correct ? 'exact' : 'wrong'),
+    ...intro,
   };
 }
 
@@ -147,9 +191,13 @@ export function serverView(log: readonly CardEntry[]): (CardView | null)[] {
       view.push({ dimension: chosen.dimension, rung: chosen.rung, level, r: chosen.r, implied });
     }
 
-    const matched = session.filter((e): e is CardEntry & { word: string } => e.word !== null);
+    // Phase 55 (spec D2, as ruled). The server grades a ladder's intro cards nothing.
+    const intro = introCards(session);
+    const matched = session
+      .map((entry, at) => ({ ...entry, intro: intro[at] }))
+      .filter((e): e is CardEntry & { word: string; intro: boolean } => e.word !== null);
     for (const entry of matched) {
-      for (const { dimension, grade } of gradesFor({ type: entry.type, correct: entry.correct, verdict: entry.verdict })) {
+      for (const { dimension, grade } of gradesFor({ type: entry.type, correct: entry.correct, verdict: entry.verdict, intro: entry.intro })) {
         const k = key(entry.word, dimension);
         memory.set(k, review(memory.get(k) ?? null, grade, date));
       }
@@ -166,7 +214,7 @@ export function serverView(log: readonly CardEntry[]): (CardView | null)[] {
     for (const entry of matched) {
       if (!met.has(entry.word)) introduced.add(entry.word);
       met.add(entry.word);
-      answers.push({ glossId: entry.word, sessionId: entry.session, type: entry.type, correct: entry.correct, verdict: entry.verdict });
+      answers.push({ glossId: entry.word, sessionId: entry.session, type: entry.type, correct: entry.correct, verdict: entry.verdict, intro: entry.intro });
     }
 
     start = end;
