@@ -2,7 +2,9 @@
 
 - **Status:** Victor said "go till PR, subagents" on 2026-10-16 after deciding the one-pager in
   chat, question by question: the design is self-approved (CLAUDE.md, *Continue till PR*).
-  Rulings made during the run are at the end.
+  Implemented on branch `phase-55-new-word-intro`, subagent-driven: eight tasks, one added mid-run
+  (R1), and a final review. D2, D4 and D6 carry amendments from the run (R1, R2); every ruling is at
+  the end.
 - **Date:** 2026-10-16
 - **Source:** `drafts/2026-10-15-new-word-intro-ladder-one-pager.md` (main checkout), and issues 1
   and 2 of `drafts/2026-10-15-phase-54-testing-issues.md`.
@@ -32,7 +34,8 @@ that keeps the learner producing the word instead of failing it.
    phase 54's about zero.
 3. Tests prove it works as designed: the first session's card order (the intro stage back to back,
    the later cards never adjacent), per-tile checking, the helps, the retype after a wrong typed
-   answer, and that an answer without help grades as today.
+   answer, and that an answer without help grades as today (outside a ladder's intro cards,
+   which write no memory: R1).
 4. `npm test`, `npm run test:all`, `npm run lint:arch` and `npm run e2e` pass.
 
 ## Scope
@@ -68,9 +71,9 @@ A ladder pick (phase 54 D3) becomes these cards, in this order:
 | Stage | Card | Type | When | Graded |
 |---|---|---|---|---|
 | Intro | Meet | `meet` | always | no |
-| Intro | Read aloud | `read_aloud` | the session can speak and the form is speakable | no memory (as today) |
-| Intro | Write it | `letter_tiles` | the form takes tiles (`pick.tiles`) | yes |
-| Intro | Write it | `typed_translation` | the form does not take tiles: more than 10 letters, an elision, a phrase | yes |
+| Intro | Read aloud | `read_aloud` | the session can speak and the form is speakable | no memory, no progress (R1); in the score |
+| Intro | Write it | `letter_tiles` | the form takes tiles (`pick.tiles`) | no memory, no progress (R1); in the score |
+| Intro | Write it | `typed_translation` | the form does not take tiles: more than 10 letters, an elision, a phrase | no memory, no progress (R1); in the score |
 | P1 | Italian → choose the Hebrew | `multiple_choice` | always | yes |
 | P2 | Hebrew → choose the Italian | `reverse_choice` | always | yes |
 | P3 | Hebrew → type the Italian | `typed_translation` | always | yes |
@@ -78,10 +81,12 @@ A ladder pick (phase 54 D3) becomes these cards, in this order:
 - **Can speak** for the ladder's read-aloud is `input.speaking && pick.speakable`. The plan's
   `picks.length > 1` rule stays on the session's speaking pick only: a session of one ladder still
   says its word.
-- Every card grades, records and writes progress exactly as the same type does today, help aside
-  (D6). A ladder read-aloud heard `understood` counts as right in the score and raises spoken
-  production up to `READ_ALOUD_MAX_LEVEL`, as any read-aloud does; "can't speak now" skips it unseen
-  and turns speaking off for the rest of the session, as today.
+- *Amended by R1.* A ladder's intro cards — meet, read aloud, write it — write no memory and no
+  progress and open no return (`questions.intro`, migration `0040_intro_cards`); they count in the
+  score as their type does (a read-aloud heard `understood` is right; a write-it card is right or
+  wrong, help or a wrong tile making it wrong). P1, P2 and P3 grade, record and write progress
+  exactly as the same type does today, help aside (D6). "Can't speak now" skips a ladder
+  read-aloud unseen and turns speaking off for the rest of the session, as today.
 - The session's own speaking pick (phase 37 D4) is unchanged; it is another word's card.
 - `LADDER_TYPES` gives way to a function of the pick: `ladderCards(pick, speaking)` returns the
   intro types and the three practice types.
@@ -104,8 +109,9 @@ in stream order.
 ### D4. Slots, and the cap of two
 
 - `LADDER_SLOTS` 3 → **4**: a ladder takes four of the session's `SESSION_LENGTH` (10) slots, its
-  four graded cards (write it, P1, P2, P3). The meet and read-aloud cards are free. Every ladder
-  costs four, tiles or typed.
+  four scored cards (write it, P1, P2, P3; the write-it card writes no memory, R1). The meet and
+  read-aloud cards are free. Every ladder costs four, tiles or typed. It also keeps a session's
+  model batch within its ten items (R2).
 - `NEW_PER_SESSION` 3 → **2**: at most two ladders a session, across every pool and pass. The
   reserve formula, `NEW_FLOOR` and `DAY_NEW_CAP` are unchanged.
 
@@ -137,11 +143,12 @@ for a new *required* field, a removal or a changed meaning; the app ships after 
 
 **Grade.** In core `evaluate`, a `letter_tiles` or `typed_translation` answer with `helped: true`
 is recorded with verdict **`wrong`**, `is_correct: false`, whatever its text — any help is a miss,
-on a first session and on a review. A retry (phase 34) with `helped: true` records `retry_verdict`
+on a first session and on a review (on a ladder's intro card the miss is in the score only, R1). A retry (phase 34) with `helped: true` records `retry_verdict`
 `wrong`. Because the stored verdict is `wrong`, everything downstream already treats it as a miss
 and needs no change: `gradesFor` (written productive Again), `evidenceFor`, `score` (counts as
-wrong), `missed` (lists the word), `dayState` (opens a return). `helped` on any other type is
-ignored and stored null, as `hint_opened` is outside `cloze_typed`.
+wrong), `missed` (lists the word), `dayState` (opens a return; not from an intro card, R1).
+`helped` on any other type is ignored and stored null, as `hint_opened` is outside `cloze_typed`.
+The list of the cards that take help is one export of core, `takesHelp(type)`.
 
 **Storage.** Migration `0039_helped`: `answers.helped boolean` (null unless a first text answer to
 `letter_tiles` or `typed_translation` carried it), with `answers_helped_text` check `helped is null
@@ -258,8 +265,9 @@ never lowered (phase 54 R6, R7; memory: compare five-phase aggregates against ma
 
 ## 3. Counting Done means 2
 
-Run against production after the release (read-only). A ladder's typed cards are the
-`typed_translation` answers in a session that also holds a `meet` card of the same gloss:
+Run against production after the release (read-only). A ladder's end-of-session typed cards are
+the `typed_translation` answers in a session that also holds a `meet` card of the same gloss, less
+the intro typed card of a word tiles cannot take (`questions.intro`, R1):
 
 ```sql
 select date_trunc('week', a.answered_at) as week,
@@ -267,7 +275,7 @@ select date_trunc('week', a.answered_at) as week,
        count(*) filter (where a.verdict in ('exact', 'near_miss')
                           and coalesce(a.helped, false) = false) as right_without_help
 from answers a
-join questions q on q.id = a.question_id and q.type = 'typed_translation'
+join questions q on q.id = a.question_id and q.type = 'typed_translation' and not q.intro
 where exists (
   select 1 from session_questions sq
   join questions m on m.id = sq.question_id and m.type = 'meet' and m.gloss_id = q.gloss_id
@@ -275,10 +283,101 @@ where exists (
 group by 1 order by 1;
 ```
 
-Phase 54's weeks give the baseline (their `helped` is null).
+Phase 54's weeks give the baseline (their `helped` is null and their `intro` false).
 
 ---
 
 ## Rulings
 
 Made during the run under *Continue till PR*; each says what it costs if wrong.
+
+**Changes to the approved design**
+
+- **R1. A ladder's intro cards write no memory and no progress** (amends D2, D4, D6; new task 5b).
+  Graded as ordinary cards, a right tiles build seconds after the meet card wrote written
+  productive Hard, and with the reverse choice's Hard the same day FSRS-6 raised written-productive
+  difficulty from about 6.0 to 7.6 for every new word (stability growth about 30% slower); the intro
+  read-aloud raised spoken production, so the word's next speaking card was a say-the-translation.
+  The day simulation's families measure fell 133 → 96 of 210 over 30 learners, while a meet-only
+  intro matched master exactly; lowering the mark was not an option. Now the intro cards count in
+  the score, the write-it card keeps its slot and `helped` is stored, but `gradesFor` and
+  `evidenceFor` give them nothing (`questions.intro`, set by plan index so it survives dropped
+  cards; read by completion, skip, recompute and `dayState`; the FSRS control bot finds them by the
+  intro's shape). *If wrong:* "help on a first session is a miss" holds in the score but writes no
+  memory for the intro card (P3 still writes Again), and a correct intro build is not evidence;
+  reverting is the `intro` check in `gradesFor` and `evidenceFor`.
+- **R2. A payload with more than two ladders prepares its first two** (D4; final review). A
+  `PREPARE_SESSION` payload chosen by the code before the deploy can hold three ladders (phase 54's
+  3-slot cost); in the new shape, non-tile ladders need up to 13 model batch items against the
+  schema's ten, which would fail the session. The prepare job keeps the first `NEW_PER_SESSION`
+  ladder picks in pick order and drops the rest before reading; it never turns them into plain
+  picks, which would ask an unseen word cold. *If wrong:* such a deploy-minute session is up to one
+  ladder shorter, its third word waits for a later session, and nothing but a smaller
+  `question_count` logs it.
+
+**The picker and the pools**
+
+- **R3. A target's first pass spends the targets' leftovers first** (D5). In the first pass a
+  target uses its own and earlier targets' unused slots before the shared ones, so an empty
+  target's slots still reach the main path when it runs before a target that leaves slots. *If
+  wrong:* the main path would lose an empty target's share.
+- **R4. A target of only never-met words has no speaking pick** (D5): the main path that used to
+  make it gets no slots. Each ladder's read-aloud still says the word. *If wrong:* such a learner
+  practises speaking only through ladders.
+- **R5. Tests whose main path D5 left empty** were given ready target words, so their property
+  (hard cap, per-skill limit, families, speaking pick, daily cap) is still tested with a main-path
+  share of its own; the daily-cap pair was fixed in review to give the main path room for a ladder.
+  *If wrong:* those fixtures differ from phase 54's.
+- **R6. `NEW_PER_SESSION = 2` does not bind at ten slots**: two 4-slot ladders fill eight, so a third
+  never fits; it binds if `SESSION_LENGTH` grows, as the one-pager wanted. *If wrong:* none today.
+
+**The day simulation**
+
+- **R7. Simulated intro cards are never missed and take no turn in the miss rhythm**, like a read
+  aloud: they write nothing, so a turn only moved every later miss (with a turn: row 1 0.58 → 0.55,
+  wide 0.677 → 0.670, both above master's 0.658; row 2 phase 0 0.90 → 0.80; families 11 → 14). It
+  keeps phase 37's learner at one miss in five among cards that write memory. *If wrong:* the
+  simulation never models a failed write-it card, which only the score would see.
+- **R8. The new learner meets its thirty words in five days**, not four (D4): phases 0–3 in four,
+  phase 4 in five, against three on master. *If wrong:* a learner meeting about 8 new words a day
+  instead of about 10 goes unflagged.
+- **R9. No mark was lowered.** Row 1's ready-on-due keeps its five-phase mean and 0.57 (branch
+  0.58, master 0.58); row 2 keeps phase 0 alone and 0.85 (branch 0.90, master 0.90); the families
+  aggregate meets its 11 (master 14; wide 129 vs 133 of 210), the gap being two ladders a session.
+  *If wrong:* families sits exactly at its mark, so one more lost (gloss, phase) pair turns it red.
+- **R10. The split's reference model** states D5 from the final state and asserts that every
+  simulated target has words; outcome 9 also asserts graded cards = slots. *If wrong:* a future run
+  with an empty target, or a new free card type, fails until the model learns it.
+
+**The app**
+
+- **R11. The retype** hides its title together with the right answer at the first character; offers
+  no help; goes through the wrong-script gate (a wrong alphabet uses no attempt); also opens after a
+  first answer sent through the server route; and a helped near miss is told as a near miss on a
+  first try (the retype covers it) but as **נכון, עם עזרה** on a phase 34 second try (final review).
+  *If wrong:* each is one condition.
+- **R12. The header's session skip stays during a retype**: it voids the whole session after a
+  confirm, not the card; the card's own show-answer and try-again are hidden while retyping. Leaving
+  and resuming, like a reload, lands past the retype, the first answer being recorded. *If wrong:* a
+  learner can leave mid-retype.
+- **R13. The typed card is keyed by its question**, so a typed card after a typed card remounts and
+  autofocuses, as after any other card; the one-frame hint flash it fixes has no automated test (no
+  component renderer).
+
+**Storage, bots and tests**
+
+- **R14. A session skipped after only intro answers writes no results row for that word**: intro
+  answers alone are not "practised", as phase 54's seen meet card. *If wrong:* that word drops out
+  of the skipped session's results.
+- **R15. The bots** needed no change to play the new ladder; Task 5b taught the FSRS control bot to
+  skip intro grades (by the intro's shape, not "until the first multiple choice", which a dropped P1
+  would break), and the weekly report's "intervals grow" skips intro cards (final review). *If
+  wrong:* a change to the intro's shape needs `introReader` updated.
+- **R16. Test stubs answer more positions**: the server's `expectCheck` q1–q20, the e2e generation
+  and checker stubs `SESSION_LENGTH + 2 × NEW_PER_SESSION` = 14. *If wrong:* a session with more free
+  cards would drop cards past those silently in tests.
+- **R17. Small calls:** `TILE_MIN_LETTERS`/`TILE_MAX_LETTERS` moved to core with `tileLetters`; no
+  constraint test for `answers_helped_text`; the non-tile prepare-job case uses `take off` and
+  `refrigerator` (the lane's enrollment targets English); the e2e `buildTiles(page, word)` takes the
+  word; `playOut` leaves a played-out tiles or typed card wrong; the stress-mark regex is an escape
+  with no failing-first test. *If wrong:* each is a line or two.
