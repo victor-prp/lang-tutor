@@ -68,13 +68,24 @@ test('a tester starts a session of the question types they chose for one word', 
 
   await clearGemini(request);
   await expectGeneration(request);
-  await page.getByTestId('question-types-start').click();
+  // Final review (minor 7): a double tap makes one session, not two.
+  let creates = 0;
+  page.on('request', (sent) => {
+    if (sent.method() === 'POST' && sent.url().includes('/question-type-sessions')) creates += 1;
+  });
+  await page.getByTestId('question-types-start').dblclick();
 
   // The two cards, in the read's order, then the results.
   const choice = await readCard(page, 1, 2, 'choice');
+  expect(creates).toBe(1);
   await answerChoice(page, choice, true);
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await page.getByTestId('continue-button').click();
+  await readCard(page, 2, 2, 'typed');
+
+  // Final review (important 2): backing out of the session, the screen offers it again.
+  await page.getByTestId('session-back').click();
+  await page.getByTestId('question-types-resume').click();
   await readCard(page, 2, 2, 'typed');
   await answerTyped(page, WORD.form);
   await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');

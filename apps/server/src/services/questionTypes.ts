@@ -88,7 +88,8 @@ export function createQuestionTypesService({ transaction, logger }: { transactio
         await repos.session.lockNextSession(enrollmentId);
         const open = await repos.session.findOpen(enrollmentId);
         if (open.started) throw new SessionOpen(enrollmentId);
-        if (open.stock?.source === 'seed') throw new SeedPending(enrollmentId);
+        // The seed comes first: waiting in stock, or not yet made (no session at all).
+        if (open.stock?.source === 'seed' || !(await repos.session.findLatest(enrollmentId))) throw new SeedPending(enrollmentId);
         const retired = open.stock && (await repos.session.retireStock(open.stock.id)) ? open.stock.id : null;
 
         const sessionId = await repos.session.insertQuestionTypesSession(enrolled.user_id, enrollmentId, devices);

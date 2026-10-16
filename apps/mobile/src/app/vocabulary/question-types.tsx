@@ -10,7 +10,7 @@ import { useApi } from '@/hooks/useApi';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
-import { afterPreparing, initialSelection, toggled } from '@/questionTypes';
+import { initialSelection, pollPrepared, toggled } from '@/questionTypes';
 import { strings } from '@/strings';
 import { colors, fontSizes, radii, spacing } from '@/theme';
 
@@ -19,7 +19,13 @@ const POLL_MS = 1_000;
 
 type Read = { devices: { listening: boolean; speaking: boolean }; senseId: string; types: QuestionTypesResponse['types'] };
 /** Where the screen is: choosing, waiting for the session, or showing what it could not make. */
-type Stage = { kind: 'choose' } | { kind: 'preparing' } | { kind: 'skipped'; sessionId: string; skipped: QuestionType[] } | { kind: 'failed'; skipped: QuestionType[] };
+type Stage =
+  | { kind: 'choose' }
+  | { kind: 'preparing' }
+  | { kind: 'skipped'; sessionId: string; skipped: QuestionType[] }
+  | { kind: 'failed'; skipped: QuestionType[] }
+  // Final review (important 2): entered, so backing out of it lands on a way back in.
+  | { kind: 'entered'; sessionId: string };
 
 /**
  * Phase 61 (spec D6). A tester's session of one saved meaning: every question type,
@@ -39,6 +45,8 @@ export default function QuestionTypesScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   // False once the screen unmounts: a poll or a read that lands after that writes nothing.
   const alive = useRef(true);
+  // Final review (minor 7): one start at a time, whatever a double tap does before a re-render.
+  const inFlight = useRef(false);
   useEffect(
     () => () => {
       alive.current = false;
@@ -68,31 +76,29 @@ export default function QuestionTypesScreen() {
   function enterSession(sessionId: string) {
     void next.start(sessionId);
     enter(sessionId);
+    setStage({ kind: 'entered', sessionId });
     router.push('/session');
   }
 
   async function waitFor(sessionId: string) {
-    while (alive.current) {
-      const view = await api.getSession(sessionId);
-      const outcome = afterPreparing(view);
-      if (outcome.next === 'wait') {
-        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-        continue;
-      }
-      if (!alive.current) return;
-      if (outcome.next === 'enter') enterSession(sessionId);
-      else if (outcome.next === 'show_skipped') setStage({ kind: 'skipped', sessionId, skipped: outcome.skipped });
-      else setStage({ kind: 'failed', skipped: outcome.skipped });
-      return;
-    }
+    const outcome = await pollPrepared(
+      () => api.getSession(sessionId),
+      () => new Promise((resolve) => setTimeout(resolve, POLL_MS)),
+      () => alive.current,
+    );
+    if (!outcome) return;
+    if (outcome.next === 'enter') enterSession(sessionId);
+    else if (outcome.next === 'show_skipped') setStage({ kind: 'skipped', sessionId, skipped: outcome.skipped });
+    else setStage({ kind: 'failed', skipped: outcome.skipped });
   }
 
   async function start() {
-    if (!active || !read || stage.kind !== 'choose') return;
+    if (!active || !read || stage.kind !== 'choose' || inFlight.current) return;
     if (chosen.size === 0) {
       setNotice(strings.questionTypesNoneChosen);
       return;
     }
+    inFlight.current = true;
     setNotice(null);
     setStage({ kind: 'preparing' });
     try {
@@ -116,6 +122,8 @@ export default function QuestionTypesScreen() {
             ? strings.questionTypesSeedPending
             : strings.questionTypesStartFailed,
       );
+    } finally {
+      inFlight.current = false;
     }
   }
 
@@ -143,7 +151,13 @@ export default function QuestionTypesScreen() {
         </Text>
       ) : null}
 
-      {stage.kind === 'skipped' ? (
+      {stage.kind === 'entered' ? (
+        <View style={styles.list}>
+          <Pressable accessibilityRole="button" testID="question-types-resume" style={styles.button} onPress={() => enterSession(stage.sessionId)}>
+            <Text style={styles.buttonLabel}>{strings.questionTypesContinue}</Text>
+          </Pressable>
+        </View>
+      ) : stage.kind === 'skipped' ? (
         <View style={styles.list}>
           {skippedList(stage.skipped)}
           <Pressable accessibilityRole="button" testID="question-types-continue" style={styles.button} onPress={() => enterSession(stage.sessionId)}>

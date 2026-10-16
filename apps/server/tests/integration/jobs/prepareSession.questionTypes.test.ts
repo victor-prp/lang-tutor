@@ -4,7 +4,7 @@ import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
 import { createSessionRepo } from '../../../src/repo/sessions';
-import { createFakeLogger } from '../../support/fakes';
+import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import {
   STUB_GAP,
@@ -29,6 +29,7 @@ let t: TestDb;
 let boss: PgBoss;
 let deps: AppDeps;
 let ns: string;
+let logger: FakeLogger;
 const ENROLLMENT = enrollmentOf('u_1');
 let word: Awaited<ReturnType<typeof seedSavedSenses>>;
 
@@ -45,7 +46,8 @@ beforeEach(async () => {
   });
   ns = mockNamespace(expect.getState().currentTestName ?? 'prepare-session-question-types');
   boss = await startTestBoss(t.db);
-  deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7), boss, geminiBaseUrl: geminiBaseUrlFor(ns) });
+  logger = createFakeLogger();
+  deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7), boss, geminiBaseUrl: geminiBaseUrlFor(ns) });
 });
 
 afterEach(async () => {
@@ -57,8 +59,14 @@ afterEach(async () => {
 type Stub = NonNullable<Parameters<typeof expectDistractors>[1]>;
 
 /** Prepares a question-types session of `types` and reads it back. */
-async function prepared(types: QuestionType[], tasks: Stub['tasks'], stub: Omit<Stub, 'tasks'> = {}, check: Parameters<typeof expectCheck>[1] = {}) {
-  await expectDistractors(ns, { tasks, ...stub });
+async function prepared(
+  types: QuestionType[],
+  tasks: Stub['tasks'] | null,
+  stub: Omit<Stub, 'tasks'> = {},
+  check: Parameters<typeof expectCheck>[1] = {},
+) {
+  // Null: no distractor stub at all, so a batch call would find no answer and fail.
+  if (tasks !== null) await expectDistractors(ns, { tasks, ...stub });
   await expectCheck(ns, check);
   const sessionId = await withTx(t.db, (tx) =>
     createSessionRepo(tx).insertQuestionTypesSession('u_1', ENROLLMENT, { listening: true, speaking: true }),
@@ -121,6 +129,21 @@ describe('prepareSession with question_types', () => {
     });
     expect(record.questions.map((question) => question.type)).toEqual(['multiple_choice', 'typed_translation']);
     expect(record.skipped_types).toEqual([]);
+  });
+
+  // Final review (minor 3). Nothing to ask the model: no batch call is made, so none can fail it.
+  it('makes no batch call when no chosen card needs one', async () => {
+    const { record } = await prepared(['meet', 'typed_meaning', 'letter_tiles', 'dictation', 'read_aloud'], null);
+    expect(record.status).toBe('ready');
+    expect(record.questions.map((question) => question.type)).toEqual(['meet', 'typed_meaning', 'letter_tiles', 'dictation', 'read_aloud']);
+  });
+
+  // Final review (minor 5). Each card the session went without is logged with why.
+  it('logs why each card it went without was dropped, the failed session too', async () => {
+    await prepared(['multiple_choice'], ['meaning'], { overrides: { q1: { distractors: ['קיר'] } } });
+    expect(logger.events).toContainEqual(
+      expect.objectContaining({ event: 'card_dropped', type: 'multiple_choice', stage: 'validation' }),
+    );
   });
 
   it('keeps a meet card alone', async () => {

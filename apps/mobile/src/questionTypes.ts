@@ -1,3 +1,4 @@
+import { ApiError } from '@/api/client';
 import type { QuestionTypesResponse, SessionView } from '@lang-tutor/core/api';
 import type { QuestionType } from '@lang-tutor/core/domain';
 
@@ -30,4 +31,27 @@ export function afterPreparing(view: Pick<SessionView, 'status' | 'skipped_types
   if (view.status === 'preparing') return { next: 'wait' };
   if (view.status === 'ready') return skipped.length > 0 ? { next: 'show_skipped', skipped } : { next: 'enter' };
   return { next: 'failed', skipped };
+}
+
+/**
+ * Phase 61 (final review). Reads the session until afterPreparing has an answer. A failed
+ * read is read again, as home's poll does: a dropped request is not the session failing.
+ * A refusal (4xx) is not, since another read would only repeat it. Null once `alive` says
+ * the screen is gone.
+ */
+export async function pollPrepared(
+  read: () => Promise<Pick<SessionView, 'status' | 'skipped_types'>>,
+  wait: () => Promise<void>,
+  alive: () => boolean,
+): Promise<Exclude<AfterPreparing, { next: 'wait' }> | null> {
+  while (alive()) {
+    try {
+      const outcome = afterPreparing(await read());
+      if (outcome.next !== 'wait') return alive() ? outcome : null;
+    } catch (error) {
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500) return { next: 'failed', skipped: [] };
+    }
+    await wait();
+  }
+  return null;
 }

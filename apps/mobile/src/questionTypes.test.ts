@@ -1,7 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 import { QuestionTypeSchema, UnavailableReasonSchema } from '@lang-tutor/core/api/schemas';
 
-import { afterPreparing, initialSelection, toggled } from './questionTypes';
+import { ApiError } from './api/client';
+import { afterPreparing, initialSelection, pollPrepared, toggled } from './questionTypes';
 import { strings } from './strings';
 
 // Phase 61 (spec D2, D5, D6).
@@ -52,5 +53,34 @@ describe('afterPreparing', () => {
 
   it('treats any other end as failed', () => {
     expect(afterPreparing({ status: 'skipped' })).toEqual({ next: 'failed', skipped: [] });
+  });
+});
+
+// Final review (important 1). A dropped request is not the session failing: the poll goes on.
+describe('pollPrepared', () => {
+  const noWait = async () => {};
+  const reads = (...answers: (Error | { status: 'preparing' | 'ready' | 'failed' })[]) => {
+    let call = 0;
+    return async () => {
+      const answer = answers[Math.min(call++, answers.length - 1)];
+      if (answer instanceof Error) throw answer;
+      return answer;
+    };
+  };
+
+  it('reads again after a failed request, until the session is ready', async () => {
+    const outcome = await pollPrepared(reads({ status: 'preparing' }, new Error('network'), new ApiError(502), { status: 'ready' }), noWait, () => true);
+    expect(outcome).toEqual({ next: 'enter' });
+  });
+
+  it('gives up on a refusal, which another read would only repeat', async () => {
+    const outcome = await pollPrepared(reads({ status: 'preparing' }, new ApiError(404)), noWait, () => true);
+    expect(outcome).toEqual({ next: 'failed', skipped: [] });
+  });
+
+  it('stops, answering nothing, once the screen is gone', async () => {
+    let live = 2;
+    const outcome = await pollPrepared(reads({ status: 'preparing' }), noWait, () => live-- > 0);
+    expect(outcome).toBeNull();
   });
 });

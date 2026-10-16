@@ -10,7 +10,7 @@ import { jobPayloads } from '../../support/jobs';
 import { insertListSession } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, seedUser, setTester } from '../../support/seedUser';
-import { markSeed, markStarted, readSessionRows } from '../../support/sessionRows';
+import { markSeed, markStarted, readSessionRows, seedPastSession } from '../../support/sessionRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -70,7 +70,9 @@ async function readFirst(devices = { listening: 'true', speaking: 'true' }): Pro
   return (await res.json()) as Read;
 }
 
-const sessionRows = () => readSessionRows(t.db, ENROLLMENT);
+/** The enrollment's sessions but the past one a POST test starts from. */
+let past: string | null = null;
+const sessionRows = async () => (await readSessionRows(t.db, ENROLLMENT)).filter((row) => row.id !== past);
 
 describe('GET question-types', () => {
   it('lists all fifteen types for the fixed rendering, with a reason for each the word cannot have', async () => {
@@ -122,6 +124,10 @@ describe('GET question-types', () => {
 });
 
 describe('POST question-type-sessions', () => {
+  beforeEach(async () => {
+    past = await seedPastSession(t.db, OWNER, ENROLLMENT);
+  });
+
   const body = (types: string[], extra: Record<string, unknown> = {}) => ({
     ...first(),
     sense_id: word.senseIds[0],
@@ -205,5 +211,15 @@ describe('POST question-type-sessions', () => {
     const res = await create(body(['meet']));
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'not_a_tester' });
+  });
+});
+
+// Final review (minor 4). Before any session, the next one is the seed: none may take its place.
+describe('POST question-type-sessions on a new enrollment', () => {
+  it('is 409 seed_pending before the enrollment has had any session, and writes nothing', async () => {
+    const res = await create({ ...first(), sense_id: word.senseIds[0], types: ['meet'], listening: false, speaking: false });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'seed_pending' });
+    expect(await readSessionRows(t.db, ENROLLMENT)).toEqual([]);
   });
 });

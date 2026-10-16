@@ -22,3 +22,12 @@ export async function markStarted(db: Db, sessionId: string): Promise<void> {
 export async function markSeed(db: Db, sessionId: string): Promise<void> {
   await db.execute(sql`update sessions set source = 'seed' where id = ${sessionId}`);
 }
+
+/** Phase 61 (final review). A session the enrollment had and is done with: past the seed. */
+export async function seedPastSession(db: Db, userId: string, enrollmentId: string): Promise<string> {
+  const rows = await db.execute<{ id: string }>(
+    sql`insert into sessions (user_id, enrollment_id, status, source, created_at)
+        values (${userId}, ${enrollmentId}, 'skipped', 'seed', now() - interval '1 day') returning id`,
+  );
+  return rows.rows[0].id;
+}

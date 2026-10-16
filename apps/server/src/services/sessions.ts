@@ -1333,32 +1333,36 @@ export function createSessionService({
 
       const started = now();
       let modelMs = 0;
-      let verdict: DistractorVerdict;
+      // Phase 61 (final review): a question-types session may ask the model nothing at all (a
+      // meet, tiles, dictation…); then no call is paid for, and none can fail it.
+      let verdict: DistractorVerdict = { byKey: new Map(), refused: new Map() };
       const board = plan.board;
-      try {
-        const raw = await llm({
-          ...buildDistractorPrompt({ items, from: target, to: read.enrolled.source_language, others }),
-          record: record('session_generation'),
-        });
-        modelMs = now() - started;
-        // An empty string is the provider's "no content" (a safety block). Here,
-        // unlike a lookup, there is nothing useful to serve without it.
-        const answer = raw === '' ? null : parseLlmDistractors(raw);
-        if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
-        // Phase 34 (spec D3, D4): the first three usable of six, none known right.
-        // Phase 48 (spec D1): a card with fewer is refused, not the batch.
-        verdict = validateDistractors(items, answer, read.enrolled.source_language, others, target, read.known);
-      } catch (error) {
-        // Spec D16: a failed attempt is a measurement too, not only the
-        // dead-letter fifteen minutes on.
-        logger.info({
-          event: 'session_preparation_attempt_failed',
-          session_id: sessionId,
-          item_count: items.length,
-          model_ms: now() - started,
-          reason: error instanceof Error ? error.message : String(error),
-        });
-        throw error;
+      if (items.length > 0) {
+        try {
+          const raw = await llm({
+            ...buildDistractorPrompt({ items, from: target, to: read.enrolled.source_language, others }),
+            record: record('session_generation'),
+          });
+          modelMs = now() - started;
+          // An empty string is the provider's "no content" (a safety block). Here,
+          // unlike a lookup, there is nothing useful to serve without it.
+          const answer = raw === '' ? null : parseLlmDistractors(raw);
+          if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
+          // Phase 34 (spec D3, D4): the first three usable of six, none known right.
+          // Phase 48 (spec D1): a card with fewer is refused, not the batch.
+          verdict = validateDistractors(items, answer, read.enrolled.source_language, others, target, read.known);
+        } catch (error) {
+          // Spec D16: a failed attempt is a measurement too, not only the
+          // dead-letter fifteen minutes on.
+          logger.info({
+            event: 'session_preparation_attempt_failed',
+            session_id: sessionId,
+            item_count: items.length,
+            model_ms: now() - started,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
       }
 
       // Phase 48 (spec D1, D2). Why each refused card was refused, by plan index.
@@ -1661,8 +1665,9 @@ export function createSessionService({
           : dropLoneMeets(keepCards(units, rng), (index) => ordered[index].glossId, (index) => plan.types[index])
         ).map((fate) => [fate.index, fate]),
       );
-      // Phase 61 (spec D5). A question-types sentence card the checker finds unnatural is not generated.
-      const notGenerated = new Set<number>();
+      // Phase 61 (spec D5). A question-types sentence card the checker finds unnatural is not
+      // generated, with why.
+      const notGenerated = new Map<number, Refusal>();
       for (const fate of fateOf.values()) {
         if (fate.fate !== 'keep_refused' || fate.shownAs !== 'as_generated' || !CHOSEN.has(generatedAs(plan.types[fate.index]))) continue;
         // An ambiguous card, Victor's call: the survivors first, then the
@@ -1725,7 +1730,7 @@ export function createSessionService({
           if (!translationUses(sentenceFinding.translation, practised)) {
             const reason = `the checker says it "${sentenceFinding.translation}", using neither ${made.word} nor an answer the card accepts`;
             events.push({ event: 'checker_dropped', session_id: sessionId, index: card.index, type, kind: 'sentence', text: made.hebrew, reason });
-            if (qt) notGenerated.add(card.index);
+            if (qt) notGenerated.set(card.index, { stage: 'checker', reason });
             type = 'typed_translation';
             answered = typedAnswered(row, NOTHING_GENERATED);
             degradedReason = reason;
@@ -1752,6 +1757,12 @@ export function createSessionService({
             .filter((card) => !kept.includes(card))
             .map((card) => ({ type: plan.types[card.index], reason: 'not_generated' as const }))
         : null;
+      // Final review (minor 5). Why each card a question-types session went without was dropped.
+      const logNotGenerated = () => {
+        for (const [index, refusal] of notGenerated) {
+          logger.info({ event: 'card_dropped', session_id: sessionId, key: keyOf(index), type: plan.types[index], ...refusal });
+        }
+      };
       if (skipped && kept.length === 0) {
         // Not a throw: a retry would pay for the model calls again, to the same end.
         const failed = await transaction(async ({ session }) => {
@@ -1759,6 +1770,11 @@ export function createSessionService({
           await session.setSkippedTypes(sessionId, skipped);
           return true;
         });
+        for (const fate of fateOf.values()) {
+          if (fate.fate !== 'drop') continue;
+          logger.info({ event: 'card_dropped', session_id: sessionId, key: keyOf(fate.index), type: plan.types[fate.index], ...fate.refusal });
+        }
+        logNotGenerated();
         logger.info({ event: 'session_preparation_failed', session_id: sessionId, marked: failed, reason: 'no_card_generated' });
         return;
       }
@@ -1822,6 +1838,7 @@ export function createSessionService({
               : { event: 'card_kept_refused', ...base, position: writtenAt.get(fate.index), shown_as: fate.shownAs },
           );
         }
+        logNotGenerated();
       }
       logger.info({
         event: written ? 'session_prepared' : 'session_preparation_dropped',
@@ -1829,7 +1846,7 @@ export function createSessionService({
         // Phase 48 (spec D6): the questions written, of the cards planned.
         question_count: written ? kept.length : 0,
         planned_count: ordered.length,
-        dropped_count: [...fateOf.values()].filter((fate) => fate.fate === 'drop').length,
+        dropped_count: [...fateOf.values()].filter((fate) => fate.fate === 'drop').length + notGenerated.size,
         item_count: items.length,
         model_ms: modelMs,
         context_ms: contextMs,
