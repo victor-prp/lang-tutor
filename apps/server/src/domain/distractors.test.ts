@@ -665,7 +665,7 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(prompt.system).toContain('- "sentence":');
       expect(prompt.system).toContain('- "translate":');
       expect(prompt.system).toContain('3 to 12 words');
-      expect(prompt.system).toContain('3 to 10 words');
+      expect(prompt.system).toContain('3 to 5 words');
       expect(prompt.system).toContain(DISTRACTOR_MARKER);
     });
     it('asks a sentence for every word that fits its gap read alone, at most ten (phase 38 D2)', () => {
@@ -673,6 +673,25 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(prompt.system).toContain('at most 10');
       expect(prompt.system).toContain('whatever it then means, not only words of the same meaning');
       expect(prompt.system).toContain('agreeing in gender, number and case with the words around it');
+    });
+    it('sends the learner\'s practised words once, and asks the translation to use them (phase 59 D1)', () => {
+      const learnerWords = [
+        { key: 'w1', glossId: 'g-a', word: 'amico', meaning: 'חבר' },
+        { key: 'w2', glossId: 'g-b', word: 'andare', meaning: 'ללכת' },
+      ];
+      const withWords = buildDistractorPrompt({ items, from: 'it', to: 'he', others: [], learnerWords });
+      const sent = JSON.parse(withWords.user) as { learner_words?: unknown };
+      expect(sent.learner_words).toEqual([
+        { key: 'w1', word: 'amico', meaning: 'חבר' },
+        { key: 'w2', word: 'andare', meaning: 'ללכת' },
+      ]);
+      expect(withWords.system).toContain('learner_words');
+    });
+    it('sends no learner words when no item translates (phase 59 D1)', () => {
+      const plain = distractorItems([ROW], ['meaning'], NO_RECENT);
+      const learnerWords = [{ key: 'w1', glossId: 'g-a', word: 'amico', meaning: 'חבר' }];
+      const sent = JSON.parse(buildDistractorPrompt({ items: plain, from: 'it', to: 'he', others: [], learnerWords }).user) as Record<string, unknown>;
+      expect(sent).not.toHaveProperty('learner_words');
     });
     it('asks for a sentence whose other words point to its word (phase 41 D1)', () => {
       expect(prompt.system).toContain('its other words point to the word');

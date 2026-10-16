@@ -55,6 +55,7 @@ import {
   markFor,
   parseLlmContext,
   resolveContext,
+  wordMapFor,
   type ContextItem,
 } from '../../src/domain/context';
 import {
@@ -72,7 +73,7 @@ import { createGeminiClient, toGeminiSchema } from '../../src/providers/gemini';
 const TIMEOUT_MS = 300_000;
 
 /** The context call's fields (spec D6, D8). */
-const CONTEXT_FIELDS = ['context', 'context_translation', 'context_word', 'sentence_word'] as const;
+const CONTEXT_FIELDS = ['context', 'context_translation', 'context_word', 'sentence_word', 'sentence_words'] as const;
 
 let next = 0;
 const row = (
@@ -271,7 +272,12 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
       sentence: { hebrew: row.exampleTranslation!, target: row.example!, word: row.form },
     })!,
   );
-  const prompt = buildContextPrompt({ items, from: 'it', to: 'he' });
+  // Phase 59 (spec D2): the translation cards' maps, with a learner's list to name.
+  const learnerWords = ['contadino:איכר', 'lavora:עובד', 'tre:שלוש', 'lingue:שפות', 'madre:אמא', 'casa:בית'].map((pair, index) => {
+    const [word, meaning] = pair.split(':');
+    return { key: `w${index + 1}`, glossId: `g-${word}`, word, meaning };
+  });
+  const prompt = buildContextPrompt({ items, from: 'it', to: 'he', learnerWords });
   const llm = createGeminiClient({
     fetch: globalThis.fetch,
     baseUrl: gemini.baseUrl,
@@ -313,6 +319,11 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
     if (item.task === 'mark') {
       const mark = markFor(item, got);
       console.log(`${item.key} mark        ${got?.sentence_word ?? '(none)'} -> ${mark ? item.sentence.slice(mark.start, mark.end) : 'unmarked'}`);
+      if (item.map) {
+        const map = wordMapFor(item, got, mark, learnerWords, 'g-own');
+        console.log(`${item.key} map         ${JSON.stringify(got?.sentence_words ?? null)}`);
+        console.log(`${item.key} kept        ${map ? map.map((word) => `${item.sentence.slice(word.start, word.end)}=${word.text}${word.target ? '*' : ''}${word.glossId ? `(${word.glossId})` : ''}`).join(' ') : 'none'}`);
+      }
       continue;
     }
     const outcome = resolveContext(item, got, { target: 'it', explanation: 'he' });

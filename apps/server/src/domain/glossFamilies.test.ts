@@ -242,6 +242,46 @@ describe('glossFamilies: introductions', () => {
   });
 });
 
+describe('glossFamilies: newMeanings (phase 60)', () => {
+  it('a never-asked current gloss is a new meaning, as it is an introduction', () => {
+    const r = glossFamilies({
+      saved: [gloss('a', 'x', []), gloss('b', 'x', [], { order: [0, 1] })],
+      memory: knownMem('a'),
+      live: LIVE,
+    });
+    expect([...r.newMeanings]).toEqual(['b']);
+  });
+
+  it('a practised current gloss stays a new meaning, though no longer an introduction', () => {
+    const r = glossFamilies({
+      saved: [gloss('a', 'x', []), gloss('b', 'x', [], { order: [0, 1] })],
+      memory: [...knownMem('a'), mem('b', WR, 0.2)],
+      live: LIVE,
+    });
+    expect(r.introductions.size).toBe(0);
+    expect([...r.newMeanings]).toEqual(['b']);
+  });
+
+  it('no known gloss, no new meaning', () => {
+    const r = glossFamilies({
+      saved: [gloss('a', 'x', []), gloss('b', 'x', [])],
+      memory: [],
+      live: LIVE,
+    });
+    expect(r.newMeanings.size).toBe(0);
+  });
+
+  it('a waiting gloss is no new meaning: only the current one is', () => {
+    const r = glossFamilies({
+      saved: [gloss('a', 'x', [], { order: [0, 0] }), gloss('b', 'x', [], { order: [0, 1] }), gloss('c', 'x', [], { order: [0, 2] })],
+      memory: knownMem('a'),
+      live: LIVE,
+    });
+    expect(r.state.get('c')).toBe('waiting');
+    expect([...r.newMeanings]).toEqual(['b']);
+  });
+});
+
 describe('glossFamilies: evidence', () => {
   it('holds the live list and the stabilities', () => {
     const r = glossFamilies({

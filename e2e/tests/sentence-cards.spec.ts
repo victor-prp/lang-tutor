@@ -114,7 +114,13 @@ const MEMORY: MemorySeed[] = [
 
 /** Six saved words, their memory seeded, and a list session started. Phase 38:
  *  `gapAlternatives`, the words the stub says also fit the typed gap. */
-async function reachSentenceSession(page: Page, request: APIRequestContext, username: string, gapAlternatives: string[] = []) {
+async function reachSentenceSession(
+  page: Page,
+  request: APIRequestContext,
+  username: string,
+  gapAlternatives: string[] = [],
+  sentenceWords: { hebrew: string; translation: string; word: string }[] | null = null,
+) {
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
   await signUpLearner(page, username, 'ru');
@@ -129,7 +135,8 @@ async function reachSentenceSession(page: Page, request: APIRequestContext, user
   // no sentence falls back on its saved example, as by default.
   await expectContext(
     request,
-    Array.from({ length: CARDS }, (_, i) => ({ key: `q${i + 1}`, sentence_word: MARKED })),
+    // Phase 59 (spec D2): and, when given, the translation card's word map.
+    Array.from({ length: CARDS }, (_, i) => ({ key: `q${i + 1}`, sentence_word: MARKED, ...(sentenceWords ? { sentence_words: sentenceWords } : {}) })),
   );
   // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
   await openApp(page, 'enrollment-switcher');
@@ -410,6 +417,47 @@ test('help on a typed gap and on a sentence translation', async ({ page, request
     }
   }
   expect(seen.sort()).toEqual(['cloze-typed', 'translate']);
+
+  await expect(page.getByTestId('results-score')).toBeVisible();
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 59 (spec D3, D5). Each mapped word of the translation's Hebrew shows its
+// Russian when tapped; the practised word's tap is help that shows the whole word.
+// The answer says which words were tapped, in order, and that it was helped.
+test('a tap shows a word of the sentence to translate, and the practised word\'s is help', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  await reachSentenceSession(page, request, 'e2e_sentences_taps_ru', [], [
+    { hebrew: 'אתמול', translation: 'Вчера', word: '' },
+    { hebrew: 'היא', translation: 'она', word: '' },
+    { hebrew: MARKED, translation: STUB_GAP, word: '' },
+    { hebrew: 'הספר', translation: 'книгу', word: '' },
+  ]);
+
+  const seen: string[] = [];
+  for (let position = 1; position <= CARDS; position++) {
+    const card = await readCard(page, position, CARDS);
+    if (card.kind === 'translate') {
+      seen.push(card.kind);
+      await expect(page.getByTestId('sentence-translation-word-0-text')).toHaveCount(0);
+      await page.getByTestId('sentence-translation-word-0').click();
+      await expect(page.getByTestId('sentence-translation-word-0-text')).toHaveText(' (Вчера)');
+      await page.getByTestId('sentence-translation-mark').click();
+      await expect(page.getByTestId('typed-hint')).toContainText(STUB_GAP);
+      await expectJudge(request, 'right');
+      const judged = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/judged-answer'));
+      await answerTyped(page, 'Она прочитала эту книгу вчера');
+      expect((await judged).postDataJSON()).toMatchObject({ helped: true, tapped: [0, 2] });
+      await expect(page.getByTestId('feedback-title')).toHaveText('נכון, עם עזרה');
+      // The word tapped stays shown once the card is answered.
+      await expect(page.getByTestId('sentence-translation-word-0-text')).toHaveText(' (Вчера)');
+      await page.getByTestId('continue-button').click();
+    } else {
+      await pass(page, card);
+    }
+  }
+  expect(seen).toEqual(['translate']);
 
   await expect(page.getByTestId('results-score')).toBeVisible();
   expect(diagnostics.pageErrors, report()).toEqual([]);

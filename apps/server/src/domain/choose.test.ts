@@ -48,7 +48,7 @@ type Word = {
   state?: Partial<Record<Dimension, MemoryState>>;
 };
 
-const NO_FAMILIES = { familyOf: new Map<string, number>(), waiting: new Set<string>(), introductions: new Set<string>() };
+const NO_FAMILIES = { familyOf: new Map<string, number>(), waiting: new Set<string>(), newMeanings: new Set<string>() };
 
 const savedAt = (i: number) => `2026-01-01T00:${String(i).padStart(2, '0')}:00.000000Z`;
 
@@ -159,8 +159,8 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
     const words = [known('not-due', { [SP]: 0.93 }), { id: 'expand', memory: { [WR]: 0.95 } }, ...range(4, (i) => fresh(`n${i}`))];
     // Phase 55 (spec D4): two ladders take eight slots and are the session's ceiling.
     expect(chooseWords(input(words)).map((pick) => pick.cls)).toEqual(['NEW', 'NEW', 'EXPAND', 'NOT_DUE']);
-    const introductions = new Set(range(4, (i) => fresh(`n${i}`)).map((word) => word.id));
-    expect(chooseWords(input(words, { families: { ...NO_FAMILIES, introductions } })).map((pick) => pick.cls)).toEqual([
+    const newMeanings = new Set(range(4, (i) => fresh(`n${i}`)).map((word) => word.id));
+    expect(chooseWords(input(words, { families: { ...NO_FAMILIES, newMeanings } })).map((pick) => pick.cls)).toEqual([
       'NEW',
       'NEW',
       'EXPAND',
@@ -510,7 +510,7 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
 
 describe('families (phase 39 D5)', () => {
   const family = (members: Record<string, number>, waiting: string[] = []) => ({
-    families: { familyOf: new Map(Object.entries(members)), waiting: new Set(waiting), introductions: new Set<string>() },
+    families: { familyOf: new Map(Object.entries(members)), waiting: new Set(waiting), newMeanings: new Set<string>() },
   });
 
   it('never picks a waiting gloss, in any pass', () => {
@@ -627,7 +627,7 @@ describe('ladders (phase 54, spec D2, D4; phase 55, spec D4)', () => {
 
   it("does not ladder a family's new meaning that glossFamilies introduces: NEW, one slot", () => {
     const words = [...range(SESSION_LENGTH - 1, (i) => known(`k${i}`)), fresh('meaning')];
-    const introduced = chooseWords(input(words, { families: { ...NO_FAMILIES, introductions: new Set(['meaning']) } }));
+    const introduced = chooseWords(input(words, { families: { ...NO_FAMILIES, newMeanings: new Set(['meaning']) } }));
     expect(introduced.find((pick) => pick.glossId === 'meaning')).toMatchObject({ cls: 'NEW', ladder: false });
     expect(introduced).toHaveLength(SESSION_LENGTH);
     // Laddered, the same word takes four slots: three fewer picks.
@@ -657,6 +657,19 @@ describe('ladders (phase 54, spec D2, D4; phase 55, spec D4)', () => {
       ['spent', 'DONE', WR, false],
       ['met', 'DONE', WR, false],
     ]);
+  });
+
+  it("does not ladder a family's new meaning missed on its new_meaning card (phase 60, spec D1): NEW, one slot", () => {
+    // Missed on its new_meaning card this morning: one Again, its return owed.
+    const words = [...range(SESSION_LENGTH - 1, (i) => known(`k${i}`)), { id: 'meaning', state: { [WR]: again() } }];
+    const steps = [step('meaning', WR)];
+    const asked = chooseWords(input(words, { steps, families: { ...NO_FAMILIES, newMeanings: new Set(['meaning']) } }));
+    expect(asked.find((pick) => pick.glossId === 'meaning')).toMatchObject({ cls: 'NEW', ladder: false });
+    expect(asked).toHaveLength(SESSION_LENGTH);
+    // A new word missed in its ladder, no family's new meaning, is a ladder again (phase 54).
+    const laddered = chooseWords(input(words, { steps }));
+    expect(laddered.find((pick) => pick.glossId === 'meaning')).toMatchObject({ cls: 'NEW', ladder: true });
+    expect(laddered).toHaveLength(SESSION_LENGTH - LADDER_SLOTS + 1);
   });
 
   it('holds two ladders at most (phase 55, spec D4): thirty words never met give two, eight of the ten slots, and no third', () => {

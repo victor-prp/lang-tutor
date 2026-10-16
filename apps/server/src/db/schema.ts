@@ -843,6 +843,12 @@ export const questions = pgTable(
     // read aloud and the card that writes the word. It counts in the score, and its answer
     // writes no memory and no progress and opens no return. False on every other card.
     intro: boolean('intro').notNull().default(false),
+    // Phase 59 (spec D2). A sentence translation's word map: the runs of its Hebrew
+    // (`sentence_translation`) a tap shows the reference's words for, the list
+    // gloss each renders (never the card's own) and the practised word. Null on
+    // every other card, on one from before phase 59, and when the context call
+    // mapped nothing usable.
+    words: jsonb('words').$type<{ start: number; end: number; text: string; glossId: string | null; target: boolean }[]>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -1192,6 +1198,30 @@ export const answers = pgTable(
       sql`${t.retryVerdict} in ('exact', 'near_miss', 'alternative', 'wrong', 'understood', 'gave_up', 'skipped')`,
     ),
     check('answers_retry_text_length', sql`length(${t.retryText}) <= 300`),
+  ],
+);
+
+// Phase 59 (spec D4, D5). The words tapped on a sentence translation card, one row
+// per word, by its index in the question's `words`. `kind` is what the tap cost:
+// `target` helped the card, `list` is a miss on `gloss_id` (a saved word the
+// session's evidence grades after the card's answer), `free` nothing. A re-sent
+// tap adds nothing: the key is the card's and the word's.
+export const answerTaps = pgTable(
+  'answer_taps',
+  {
+    sessionId: uuid('session_id').notNull(),
+    position: integer('position').notNull(),
+    wordIndex: integer('word_index').notNull(),
+    kind: text('kind').notNull(),
+    glossId: text('gloss_id'),
+    tappedAt: timestamp('tapped_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.sessionId, t.position, t.wordIndex] }),
+    foreignKey({ columns: [t.sessionId, t.position], foreignColumns: [answers.sessionId, answers.position] }).onDelete('cascade'),
+    check('answer_taps_kind_known', sql`${t.kind} in ('target', 'list', 'free')`),
+    check('answer_taps_gloss_on_list', sql`(${t.kind} = 'list') = (${t.glossId} is not null)`),
+    check('answer_taps_word_index_nonneg', sql`${t.wordIndex} >= 0`),
   ],
 );
 

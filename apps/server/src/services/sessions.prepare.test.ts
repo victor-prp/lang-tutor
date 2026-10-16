@@ -14,7 +14,7 @@ import {
 } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import { CHECK_MARKER } from '../domain/check';
-import { CONTEXT_MARKER, type RecentContexts } from '../domain/context';
+import { CONTEXT_MARKER, servedWords, type RecentContexts } from '../domain/context';
 import { nothingKnown, type GenerationContext, type KnownRight, type RecentSentences } from '../domain/distractors';
 import type { LlmJsonRequest } from './llm';
 import type { SessionState } from '../domain/session';
@@ -23,6 +23,7 @@ import type { DictRepo } from '../repo/dictionary';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GlossRepo } from '../repo/glosses';
 import type { QuestionRepo } from '../repo/questions';
+import type { MemoryRepo } from '../repo/memory';
 import type { SessionRepo } from '../repo/sessions';
 import { createSessionService } from './sessions';
 
@@ -124,6 +125,8 @@ function world(opts: {
   /** Phase 34 (spec D3). What findKnownRight answers; nothing known by default. */
   known?: KnownRight;
   enrollment?: Enrollment;
+  /** Phase 59 (spec D1). What findPractisedWords answers; none by default. */
+  practised?: { glossId: string; word: string; meaning: string }[];
   /** The clock's ticks; 1 000 then 1 250 by default. */
   clock?: number[];
 }) {
@@ -211,7 +214,7 @@ function world(opts: {
           case 'cloze_typed':
             return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, answer: gapText, alternatives: q.alternatives!, mark };
           case 'sentence_translation':
-            return { ...base, type: q.type, question: q.sentenceTranslation!, meaning: q.prompt!, sentence: q.sentence!, gap, answer: gapText, mark };
+            return { ...base, type: q.type, question: q.sentenceTranslation!, meaning: q.prompt!, sentence: q.sentence!, gap, answer: gapText, mark, words: servedWords(q.words ?? null) };
         }
       });
     },
@@ -239,6 +242,7 @@ function world(opts: {
         },
       }),
       jobs,
+      memory: stub<MemoryRepo>({ findPractisedWords: async () => opts.practised ?? [] }),
     }),
     rng: testRng(7),
     logger,
@@ -707,7 +711,7 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
   it('hands a translate item the recent Hebrew sentences and the example\'s Hebrew, and degrades a card that repeats one', async () => {
     // Three forms typed: a typed translation, a typed cloze and a sentence translation.
     const PAYLOAD_T = tenPayload(TEN_CARDS.map((card, i) => (i === 4 ? produce(0.9) : card)));
-    const hebrew = (row: GenerationContext) => `אתמול ראינו שם את ${row.translation} החדש.`;
+    const hebrew = (row: GenerationContext) => `ראינו את ${row.translation} החדש.`;
     const recent: RecentSentences = new Map(EXAMPLES.map((row) => [row.glossId, { cloze: [], translate: [hebrew(row)] }]));
     const probe = world({ context: EXAMPLES, reply: 'nope', recent });
     await expect(probe.service.prepareSession(PAYLOAD_T)).rejects.toThrow();
@@ -1276,6 +1280,74 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
       type: 'sentence_translation', sentenceTranslation: 'בואו נשלב כוחות.', sentenceMarkStart: 5, sentenceMarkEnd: 9, context: null,
     });
     expect(calls.sessionQuestions[0][2]).toMatchObject({ question: 'בואו נשלב כוחות.', mark: { start: 5, end: 9 } });
+  });
+
+  // Phase 59 (spec D1).
+  it('hands the batch the learner\'s practised words, keyed w1, w2, when a card translates a sentence', async () => {
+    const practised = [
+      { glossId: 'g-p1', word: 'forces', meaning: 'כוחות' },
+      { glossId: 'g-p2', word: 'let', meaning: 'לתת' },
+    ];
+    const { service, llm } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT, checkReply: SENTENCES_CHECK, practised });
+    await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
+    expect(JSON.parse(llm.calls[0].user).learner_words).toEqual([
+      { key: 'w1', word: 'forces', meaning: 'כוחות' },
+      { key: 'w2', word: 'let', meaning: 'לתת' },
+    ]);
+  });
+
+  // Final review. A word another card of the session asks is never in the list a
+  // sentence is built from: its reference would show that card's answer.
+  it('leaves the session\'s own words out of the learner\'s words', async () => {
+    const practised = [
+      { glossId: SAW.glossId, word: 'saw', meaning: 'לנסר' },
+      { glossId: 'g-p2', word: 'let', meaning: 'לתת' },
+    ];
+    const { service, llm, contextLlm } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT, checkReply: SENTENCES_CHECK, practised });
+    await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
+    expect(JSON.parse(llm.calls[0].user).learner_words).toEqual([{ key: 'w1', word: 'let', meaning: 'לתת' }]);
+    expect(JSON.parse(contextLlm.calls[0].user).learner_words).toEqual([{ key: 'w1', word: 'let', meaning: 'לתת' }]);
+  });
+
+  // Phase 59 (spec D2).
+  it('stores a translation card\'s word map, and serves it without the list\'s glosses', async () => {
+    const contextReply = JSON.stringify({
+      items: [
+        { key: 'q1', context: 'Please saw the plank in half.', context_translation: 'בבקשה תנסר את הקרש לשניים.', context_word: 'saw' },
+        { key: 'q3', sentence_word: 'נשלב', sentence_words: [
+          { hebrew: 'בואו', translation: "Let's", word: '' },
+          { hebrew: 'נשלב', translation: 'combine', word: '' },
+          { hebrew: 'כוחות', translation: 'forces', word: 'w1' },
+        ] },
+      ],
+    });
+    const practised = [{ glossId: 'g-forces', word: 'forces', meaning: 'כוחות' }];
+    const { service, calls, contextLlm } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply, checkReply: SENTENCES_CHECK, practised });
+    await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
+    expect(JSON.parse(contextLlm.calls[0].user).learner_words).toEqual([{ key: 'w1', word: 'forces', meaning: 'כוחות' }]);
+    expect(insertedOf(calls)[2]).toMatchObject({
+      type: 'sentence_translation',
+      words: [
+        { start: 0, end: 4, text: "Let's", glossId: null, target: false },
+        { start: 5, end: 9, text: 'combine', glossId: null, target: true },
+        { start: 10, end: 15, text: 'forces', glossId: 'g-forces', target: false },
+      ],
+    });
+    expect(calls.sessionQuestions[0][2]).toMatchObject({
+      words: [
+        { start: 0, end: 4, text: "Let's", target: false },
+        { start: 5, end: 9, text: 'combine', target: true },
+        { start: 10, end: 15, text: 'forces', target: false },
+      ],
+    });
+    expect(JSON.stringify(calls.sessionQuestions[0][2])).not.toContain('g-forces');
+  });
+
+  it('stores no word map on a translation card the context call did not map', async () => {
+    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT, checkReply: SENTENCES_CHECK });
+    await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
+    expect(insertedOf(calls)[2]).toMatchObject({ type: 'sentence_translation', words: null });
+    expect(calls.sessionQuestions[0][2]).toMatchObject({ words: null });
   });
 
   // Review Focus 4.

@@ -1,9 +1,97 @@
 {
-  "id": "7f952d31-31f3-4a1e-b6da-3d10a056df6b",
+  "id": "0407a685-1b5a-4bdb-9d86-963f63881959",
   "prevId": "7d0c9f68-814d-4aec-9cae-b5c264cf3e6b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.answer_taps": {
+      "name": "answer_taps",
+      "schema": "",
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "word_index": {
+          "name": "word_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gloss_id": {
+          "name": "gloss_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tapped_at": {
+          "name": "tapped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "answer_taps_session_id_position_answers_session_id_position_fk": {
+          "name": "answer_taps_session_id_position_answers_session_id_position_fk",
+          "tableFrom": "answer_taps",
+          "tableTo": "answers",
+          "columnsFrom": [
+            "session_id",
+            "position"
+          ],
+          "columnsTo": [
+            "session_id",
+            "position"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "answer_taps_session_id_position_word_index_pk": {
+          "name": "answer_taps_session_id_position_word_index_pk",
+          "columns": [
+            "session_id",
+            "position",
+            "word_index"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "answer_taps_kind_known": {
+          "name": "answer_taps_kind_known",
+          "value": "\"answer_taps\".\"kind\" in ('target', 'list', 'free')"
+        },
+        "answer_taps_gloss_on_list": {
+          "name": "answer_taps_gloss_on_list",
+          "value": "(\"answer_taps\".\"kind\" = 'list') = (\"answer_taps\".\"gloss_id\" is not null)"
+        },
+        "answer_taps_word_index_nonneg": {
+          "name": "answer_taps_word_index_nonneg",
+          "value": "\"answer_taps\".\"word_index\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.answers": {
       "name": "answers",
       "schema": "",
@@ -2918,6 +3006,12 @@
           "notNull": true,
           "default": false
         },
+        "words": {
+          "name": "words",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3398,25 +3492,25 @@
           "name": "wish",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "slots": {
           "name": "slots",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "picked": {
           "name": "picked",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "reason": {
           "name": "reason",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "days_left": {
           "name": "days_left",
@@ -3435,24 +3529,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
-        },
-        "cap_halves": {
-          "name": "cap_halves",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "readiness_pct": {
-          "name": "readiness_pct",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "fsrs_ready_count": {
-          "name": "fsrs_ready_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -3582,12 +3658,6 @@
           "type": "date",
           "primaryKey": false,
           "notNull": false
-        },
-        "target_id": {
-          "name": "target_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -3669,19 +3739,6 @@
           ],
           "columnsTo": [
             "user_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "sessions_target_fk": {
-          "name": "sessions_target_fk",
-          "tableFrom": "sessions",
-          "tableTo": "targets",
-          "columnsFrom": [
-            "target_id"
-          ],
-          "columnsTo": [
             "id"
           ],
           "onDelete": "no action",
@@ -3811,207 +3868,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.target_skill_events": {
-      "name": "target_skill_events",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "target_id": {
-          "name": "target_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "gloss_id": {
-          "name": "gloss_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dimension": {
-          "name": "dimension",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "before": {
-          "name": "before",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "after": {
-          "name": "after",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "why": {
-          "name": "why",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "target_skill_events_target_created_idx": {
-          "name": "target_skill_events_target_created_idx",
-          "columns": [
-            {
-              "expression": "target_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "target_skill_events_target_fk": {
-          "name": "target_skill_events_target_fk",
-          "tableFrom": "target_skill_events",
-          "tableTo": "targets",
-          "columnsFrom": [
-            "target_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "target_skill_events_dimension_known": {
-          "name": "target_skill_events_dimension_known",
-          "value": "\"target_skill_events\".\"dimension\" in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')"
-        },
-        "target_skill_events_why_known": {
-          "name": "target_skill_events_why_known",
-          "value": "\"target_skill_events\".\"why\" in ('miss', 'recall', 'recognition')"
-        },
-        "target_skill_events_values_range": {
-          "name": "target_skill_events_values_range",
-          "value": "\"target_skill_events\".\"before\" between 0 and 20 and \"target_skill_events\".\"after\" between 0 and 20"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.target_skills": {
-      "name": "target_skills",
-      "schema": "",
-      "columns": {
-        "target_id": {
-          "name": "target_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "gloss_id": {
-          "name": "gloss_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dimension": {
-          "name": "dimension",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "halves": {
-          "name": "halves",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "day": {
-          "name": "day",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "target_skills_word_fk": {
-          "name": "target_skills_word_fk",
-          "tableFrom": "target_skills",
-          "tableTo": "target_words",
-          "columnsFrom": [
-            "target_id",
-            "gloss_id"
-          ],
-          "columnsTo": [
-            "target_id",
-            "gloss_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {
-        "target_skills_pkey": {
-          "name": "target_skills_pkey",
-          "columns": [
-            "target_id",
-            "gloss_id",
-            "dimension"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "target_skills_dimension_known": {
-          "name": "target_skills_dimension_known",
-          "value": "\"target_skills\".\"dimension\" in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')"
-        },
-        "target_skills_halves_range": {
-          "name": "target_skills_halves_range",
-          "value": "\"target_skills\".\"halves\" between 0 and 20"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.target_words": {
       "name": "target_words",
       "schema": "",
@@ -4034,12 +3890,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "started_on": {
-          "name": "started_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {

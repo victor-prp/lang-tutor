@@ -232,7 +232,7 @@ function runDays(
         listening: true,
         speaking: true,
         rng: () => 0.5,
-        families: { familyOf: families.familyOf, waiting, introductions: new Set(families.introductions.keys()) },
+        families: { familyOf: families.familyOf, waiting, newMeanings: families.newMeanings },
       };
       const picks = chooseWords(input);
       sessions.push({ input, picks, families });
@@ -352,11 +352,11 @@ type Run = { log: readonly Asked[]; sessions: readonly Session[] };
 const cardsIn = (run: Run, at: number) => run.log.filter((card) => card.at === at);
 
 /** Phase 54 (spec D2, D4). A gloss the session would ask as a ladder: no right answer in any skill
- *  (unlearned), not answered today, and no family's introduction. */
+ *  (unlearned), not answered today, and no family's new meaning (phase 60, spec D1). */
 function isLadder(glossId: string, input: ChoiceInput): boolean {
   return (
     !input.done.has(glossId) &&
-    !input.families.introductions.has(glossId) &&
+    !input.families.newMeanings.has(glossId) &&
     !input.memory.some((row) => row.glossId === glossId && row.state.reps > row.state.lapses)
   );
 }
@@ -746,6 +746,19 @@ describe('families over days: twenty-five days of six sessions, phase 37\'s lear
     expectSecondOnceKnown('h0', ['h1'], { glossId: 'h1', type: 'new_meaning', knownMeanings: ['see'] });
   });
 
+  it('never meets a new meaning after its new_meaning card, though the learner misses every card of it (phase 60, spec D1)', () => {
+    // The second meanings always missed, at each place of the rhythm: a missed new_meaning
+    // leaves the gloss unlearned, which phase 54 alone would ladder.
+    const forgets = new Set(['m1', 'h1']);
+    const missed = EVERY_PHASE.map((learner) => runDays(FAMILIES, 25, 6, { ...learner, forgets }).log);
+    const after = missed.flatMap((asked) =>
+      asked.filter((card, at) => asked.slice(0, at).some((prior) => prior.glossId === card.glossId && prior.type === 'new_meaning')),
+    );
+    // The check can fire: some new meaning is asked again after its new_meaning card.
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.filter((card) => card.type === 'meet' || card.intro)).toEqual([]);
+  });
+
   const known = runs.flatMap(({ knownIn }) => FREE.filter((glossId) => knownIn.has(glossId))).length;
 
   it(`gets the list's words known as often as phase 53 did, over the five phases: ${known} of ${FREE.length * runs.length} (pass ≥ ${KNOWN_ON_PHASE_53}) (phase 46)`, () => {
@@ -1054,7 +1067,7 @@ function runPaths(
           listening: true,
           speaking: true,
           rng: () => 0.5,
-          families: { familyOf: families.familyOf, waiting, introductions: new Set(families.introductions.keys()) },
+          families: { familyOf: families.familyOf, waiting, newMeanings: families.newMeanings },
         };
         picks = chooseWords(input);
       }

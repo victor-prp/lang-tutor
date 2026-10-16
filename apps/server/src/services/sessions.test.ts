@@ -60,6 +60,8 @@ describe('repos', () => {
       // Phase 53 (spec D12).
       findStockChoice: notStubbed,
       retireStock: notStubbed,
+      // Phase 59 (spec D5).
+      insertTaps: notStubbed,
       // Phase 29: every session use case authorizes against this enrollment.
       findEnrollmentId: async () => 'e1',
       ...overrides,
@@ -84,6 +86,9 @@ describe('repos', () => {
     },
     findJudgeContext: () => {
       throw new Error('submitAnswer must not read the judge context');
+    },
+    findWords: () => {
+      throw new Error('submitAnswer must not read a word map without taps');
     },
   };
 
@@ -287,6 +292,7 @@ describe('repos', () => {
   const memoryRepo: MemoryRepo = {
     findEnrollmentRows: unreachableProgress,
     findRows: unreachableProgress,
+    findPractisedWords: unreachableProgress,
     upsertRows: unreachableProgress,
     deleteAll: unreachableProgress,
   };

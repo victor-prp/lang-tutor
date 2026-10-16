@@ -478,6 +478,7 @@ describe('phase 27 Part B: sentence cards', () => {
     sentenceTranslation?: string;
     gapStart?: number;
     gapEnd?: number;
+    words?: { start: number; end: number; text: string; glossId: string | null; target: boolean }[] | null;
   };
   const sentenceRow = (word: Awaited<ReturnType<typeof savedWord>>, extra: SentenceExtra) => ({
     glossId: word.glossIds[0],
@@ -508,7 +509,14 @@ describe('phase 27 Part B: sentence cards', () => {
         questions: [
           sentenceRow(word, { type: 'cloze_choice', options: generatedOptions('parlavamo', ['parlammo', 'parlate', 'parlano']) }),
           sentenceRow(word, { type: 'cloze_typed', alternatives: ['parlammo'] }),
-          sentenceRow(word, { type: 'sentence_translation', sentence: 'Yesterday we talked for hours.', sentenceTranslation: HEBREW, gapStart: 13, gapEnd: 19 }),
+          // Phase 59 (spec D2): with its word map.
+          sentenceRow(word, {
+            type: 'sentence_translation', sentence: 'Yesterday we talked for hours.', sentenceTranslation: HEBREW, gapStart: 13, gapEnd: 19,
+            words: [
+              { start: 6, end: 12, text: 'talked', glossId: null, target: true },
+              { start: 13, end: 17, text: 'hours', glossId: 'g-hours', target: false },
+            ],
+          }),
         ],
       }),
     );
@@ -546,6 +554,10 @@ describe('phase 27 Part B: sentence cards', () => {
       gap: { start: 13, end: 19 },
       answer: 'talked',
       mark: null,
+      words: [
+        { start: 6, end: 12, text: 'talked', target: true },
+        { start: 13, end: 17, text: 'hours', target: false },
+      ],
     });
 
     // loadSession reads the same shapes from the stored rows.

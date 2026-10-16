@@ -25,6 +25,8 @@ CREATE TABLE "target_skills" (
 	CONSTRAINT "target_skills_halves_range" CHECK ("target_skills"."halves" between 0 and 20)
 );
 --> statement-breakpoint
+DROP INDEX "sessions_one_stock_per_enrollment";--> statement-breakpoint
+DROP INDEX "sessions_one_started_per_enrollment";--> statement-breakpoint
 ALTER TABLE "session_targets" ALTER COLUMN "wish" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "session_targets" ALTER COLUMN "slots" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "session_targets" ALTER COLUMN "picked" DROP NOT NULL;--> statement-breakpoint
@@ -32,9 +34,12 @@ ALTER TABLE "session_targets" ALTER COLUMN "reason" DROP NOT NULL;--> statement-
 ALTER TABLE "session_targets" ADD COLUMN "cap_halves" integer;--> statement-breakpoint
 ALTER TABLE "session_targets" ADD COLUMN "readiness_pct" integer;--> statement-breakpoint
 ALTER TABLE "session_targets" ADD COLUMN "fsrs_ready_count" integer;--> statement-breakpoint
+ALTER TABLE "session_targets" ADD COLUMN "owed_gloss_ids" text[];--> statement-breakpoint
 ALTER TABLE "sessions" ADD COLUMN "target_id" uuid;--> statement-breakpoint
 ALTER TABLE "target_words" ADD COLUMN "started_on" date;--> statement-breakpoint
 ALTER TABLE "target_skill_events" ADD CONSTRAINT "target_skill_events_target_fk" FOREIGN KEY ("target_id") REFERENCES "public"."targets"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "target_skills" ADD CONSTRAINT "target_skills_word_fk" FOREIGN KEY ("target_id","gloss_id") REFERENCES "public"."target_words"("target_id","gloss_id") ON DELETE cascade ON UPDATE cascade;--> statement-breakpoint
 CREATE INDEX "target_skill_events_target_created_idx" ON "target_skill_events" USING btree ("target_id","created_at");--> statement-breakpoint
-ALTER TABLE "sessions" ADD CONSTRAINT "sessions_target_fk" FOREIGN KEY ("target_id") REFERENCES "public"."targets"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "sessions" ADD CONSTRAINT "sessions_target_fk" FOREIGN KEY ("target_id") REFERENCES "public"."targets"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "sessions_one_stock_per_path" ON "sessions" USING btree ("enrollment_id",coalesce("target_id", '00000000-0000-0000-0000-000000000000'::uuid)) WHERE "sessions"."status" in ('preparing', 'ready') and "sessions"."started_at" is null;--> statement-breakpoint
+CREATE UNIQUE INDEX "sessions_one_started_per_path" ON "sessions" USING btree ("enrollment_id",coalesce("target_id", '00000000-0000-0000-0000-000000000000'::uuid)) WHERE "sessions"."status" = 'ready' and "sessions"."started_at" is not null;

@@ -1,9 +1,97 @@
 {
-  "id": "8c8b346a-62cb-491e-83f7-e1dc1908eb35",
-  "prevId": "7f952d31-31f3-4a1e-b6da-3d10a056df6b",
+  "id": "a71ea879-5131-409f-ad68-317d37bad70e",
+  "prevId": "0407a685-1b5a-4bdb-9d86-963f63881959",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.answer_taps": {
+      "name": "answer_taps",
+      "schema": "",
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "word_index": {
+          "name": "word_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gloss_id": {
+          "name": "gloss_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tapped_at": {
+          "name": "tapped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "answer_taps_session_id_position_answers_session_id_position_fk": {
+          "name": "answer_taps_session_id_position_answers_session_id_position_fk",
+          "tableFrom": "answer_taps",
+          "tableTo": "answers",
+          "columnsFrom": [
+            "session_id",
+            "position"
+          ],
+          "columnsTo": [
+            "session_id",
+            "position"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "answer_taps_session_id_position_word_index_pk": {
+          "name": "answer_taps_session_id_position_word_index_pk",
+          "columns": [
+            "session_id",
+            "position",
+            "word_index"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "answer_taps_kind_known": {
+          "name": "answer_taps_kind_known",
+          "value": "\"answer_taps\".\"kind\" in ('target', 'list', 'free')"
+        },
+        "answer_taps_gloss_on_list": {
+          "name": "answer_taps_gloss_on_list",
+          "value": "(\"answer_taps\".\"kind\" = 'list') = (\"answer_taps\".\"gloss_id\" is not null)"
+        },
+        "answer_taps_word_index_nonneg": {
+          "name": "answer_taps_word_index_nonneg",
+          "value": "\"answer_taps\".\"word_index\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.answers": {
       "name": "answers",
       "schema": "",
@@ -2917,6 +3005,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "words": {
+          "name": "words",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
