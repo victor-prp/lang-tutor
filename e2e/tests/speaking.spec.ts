@@ -175,10 +175,19 @@ test('speaking: read aloud and say the translation', async ({ page, request }) =
       await expect(page.getByTestId('feedback-line')).toContainText('рамашка');
       await page.getByTestId('continue-button').click();
     } else if (card.kind === 'say') {
-      // Say the translation, understood at once.
-      await expectTranscription(request, FORM_OF[card.prompt]);
+      // Phase 56 (spec D1, D6, D8). Help first: its first letter, above the
+      // microphone. Then said and understood at once: right, with help.
+      const form = FORM_OF[card.prompt];
+      await expect(page.getByTestId('speak-hint')).toHaveCount(0);
+      await expect(page.getByTestId('speak-help')).toHaveText('עזרה');
+      await page.getByTestId('speak-help').click();
+      await expect(page.getByTestId('speak-hint')).toHaveText(`${[...form][0]}…`);
+      await expectTranscription(request, form);
+      const sent = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/speech'));
       await speak(page);
-      await expect(page.getByTestId('feedback-correct')).toBeVisible();
+      expect((await sent).postDataJSON()).toMatchObject({ helped: true });
+      await expect(page.getByTestId('feedback-other')).toBeVisible();
+      await expect(page.getByTestId('feedback-title')).toHaveText('נכון, עם עזרה');
       await page.getByTestId('continue-button').click();
     } else {
       await pass(page, card);
@@ -197,6 +206,60 @@ test('speaking: read aloud and say the translation', async ({ page, request }) =
   }
 
   await expect(page.getByText(/דיבור/).first(), report()).toBeVisible();
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 56 (spec D5). One help count for the card: letters shown while speaking stay
+// shown once "can't speak now" turns say the translation typed, and the typed answer
+// says it was helped.
+test("speaking: help on say the translation carries over when it turns typed", async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  page.on('dialog', (dialog) => void dialog.accept());
+  await withVoices(page, []);
+  await signUpLearner(page, 'e2e_speak_help_ru', 'ru');
+  await saveFourWords(page.request);
+  await seedMemory('e2e_speak_help_ru', FIRST);
+
+  await clearGemini(request);
+  await expectGeneration(request);
+  await openApp(page, 'enrollment-switcher');
+  await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
+  await tapUntil(page, 'start-button', 'progress-label');
+
+  // Every card before say the translation, a read aloud said as its word.
+  let card: Card;
+  for (let position = 1; ; position++) {
+    expect(position, 'the session asked no say the translation').toBeLessThan(CARDS);
+    card = await readCard(page, position, CARDS);
+    if (card.kind === 'say') break;
+    if (card.kind === 'read') {
+      await expectTranscription(request, card.prompt);
+      await speak(page);
+      await expect(page.getByTestId('feedback-correct')).toBeVisible();
+      await page.getByTestId('continue-button').click();
+    } else {
+      await pass(page, card);
+    }
+  }
+  const form = FORM_OF[card.prompt];
+  const two = `${[...form].slice(0, 2).join('')}…`;
+  await page.getByTestId('speak-help').click();
+  await page.getByTestId('speak-help').click();
+  await expect(page.getByTestId('speak-hint')).toHaveText(two);
+
+  // The same card, typed: its two letters still shown, before any press.
+  await page.getByTestId('speak-cant-speak').click();
+  await expect(page.getByTestId('typed-input')).toBeVisible();
+  await expect(page.getByTestId('typed-hint')).toHaveText(two);
+  await page.getByTestId('typed-help').click();
+  await expect(page.getByTestId('typed-hint')).toHaveText(`${[...form].slice(0, 3).join('')}…`);
+  const sent = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/next-step'));
+  await answerTyped(page, form);
+  expect((await sent).postDataJSON()).toMatchObject({ text: form, helped: true });
+  await expect(page.getByTestId('feedback-other')).toBeVisible();
+  await expect(page.getByTestId('feedback-title')).toHaveText('נכון, עם עזרה');
+
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
 

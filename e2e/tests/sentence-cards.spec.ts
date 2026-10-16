@@ -11,6 +11,9 @@ import {
   buildTiles,
   expectGeneration,
   readCard,
+  retypeIfOpen,
+  retypeShown,
+  retypeWrong,
   rightOption,
   type Card,
 } from './support/cards';
@@ -140,13 +143,17 @@ const nextStepSent = (page: Page) =>
 
 /** Gets past a card this spec is not about: a meet card tapped through, a choice
  *  answered right, a typed card and a tiles card by the saved form, and a
- *  sentence to translate by showing the answer. */
+ *  sentence to translate by showing the answer. Phase 56 (spec D7): a typed gap
+ *  shown its answer is typed again first. */
 async function pass(page: Page, card: Card) {
   if (card.kind === 'meet') return continueMeet(page);
   if (card.kind === 'choice' || card.kind === 'reverse' || card.kind === 'cloze-choice') await answerChoice(page, card, true);
   else if (card.kind === 'typed') await answerTyped(page, FORM_OF[card.prompt]);
   else if (card.kind === 'tiles') await buildTiles(page, FORM_OF[card.prompt]);
-  else await page.getByTestId('typed-show-answer').click();
+  else {
+    await page.getByTestId('typed-show-answer').click();
+    await retypeIfOpen(page);
+  }
   await page.getByTestId('continue-button').click();
 }
 
@@ -241,7 +248,11 @@ test('a typed gap refuses the lemma of its inflected word', async ({ page, reque
   const sent = nextStepSent(page);
   await answerTyped(page, STUB_GAP_LEMMA);
   expect((await sent).postDataJSON()).toMatchObject({ text: STUB_GAP_LEMMA, check_fit: true });
-  await expect(page.getByTestId('feedback-wrong')).toBeVisible();
+  // Phase 56 (spec D7): wrong, so the gap's word is typed again; twice wrong ends it.
+  await expect(page.getByTestId('retype')).toBeVisible();
+  await expect(page.getByTestId('retype-title')).toHaveText('התשובה הנכונה:');
+  await expect(page.getByTestId('retype-answer')).toHaveText(STUB_GAP);
+  await retypeWrong(page, STUB_GAP_LEMMA);
   await expect(page.getByTestId('feedback-title')).toHaveText('התשובה הנכונה:');
   expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(STUB_GAP);
 
@@ -347,5 +358,59 @@ test('a translation that uses another word on both tries is told it is still not
   await expect(page.getByTestId('feedback-title')).toHaveText('עדיין לא המילה שתרגלנו:');
   expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(STUB_GAP);
 
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 56 (spec D1, D4, D7, D8). Help on the typed gap, beside its Hebrew hint: a
+// wrong word after it is sent helped and unchecked, and typed again; help on the
+// translation reveals the practised word, and a right sentence after it is right
+// with help.
+test('help on a typed gap and on a sentence translation', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  await reachSentenceSession(page, request, 'e2e_sentences_help_ru');
+
+  const seen: string[] = [];
+  for (let position = 1; position <= CARDS; position++) {
+    const card = await readCard(page, position, CARDS);
+    if (card.kind === 'cloze-typed') {
+      seen.push(card.kind);
+      // Both helps: the Hebrew sentence (a hint, ungraded) and the gap's letters.
+      await expect(page.getByTestId('sentence-hint')).toBeVisible();
+      await page.getByTestId('typed-help').click();
+      await page.getByTestId('typed-help').click();
+      await expect(page.getByTestId('typed-hint')).toHaveText(`${[...STUB_GAP].slice(0, 2).join('')}…`);
+      await expect(page.getByTestId('sentence-hint')).toBeVisible();
+      // A wrong word with help is a miss whatever the model says: no fit check.
+      const sent = nextStepSent(page);
+      await answerTyped(page, STUB_GAP_LEMMA);
+      const body = (await sent).postDataJSON() as Record<string, unknown>;
+      expect(body).toMatchObject({ text: STUB_GAP_LEMMA, helped: true, hint_opened: false });
+      expect(body).not.toHaveProperty('check_fit');
+      await expect(page.getByTestId('retype')).toBeVisible();
+      await expect(page.getByTestId('retype-answer')).toHaveText(STUB_GAP);
+      await retypeShown(page);
+      await page.getByTestId('continue-button').click();
+    } else if (card.kind === 'translate') {
+      seen.push(card.kind);
+      await page.getByTestId('typed-help').click();
+      await expect(page.getByTestId('typed-hint')).toHaveText(`${[...STUB_GAP][0]}…`);
+      await expectJudge(request, 'right');
+      const judged = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/judged-answer'));
+      await answerTyped(page, 'Она прочитала эту книгу вчера');
+      expect((await judged).postDataJSON()).toMatchObject({ text: 'Она прочитала эту книгу вчера', helped: true });
+      await expect(page.getByTestId('feedback-other')).toBeVisible();
+      await expect(page.getByTestId('feedback-title')).toHaveText('נכון, עם עזרה');
+      // No retype on a translation, and its reference is still shown.
+      await expect(page.getByTestId('retype')).toHaveCount(0);
+      expect(stripIsolates(await page.getByTestId('translation-reference').textContent())).toBe(STUB_SENTENCE);
+      await page.getByTestId('continue-button').click();
+    } else {
+      await pass(page, card);
+    }
+  }
+  expect(seen.sort()).toEqual(['cloze-typed', 'translate']);
+
+  await expect(page.getByTestId('results-score')).toBeVisible();
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

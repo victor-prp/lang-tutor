@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerTyped, boardWords, buildTiles, expectGeneration, readCard, type CardKind } from './support/cards';
+import { WRONG_RUSSIAN, answerTyped, boardWords, buildTiles, expectGeneration, readCard, retypeShown, type CardKind } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
@@ -150,15 +150,25 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
       // Meaning recall reads its word on arrival, with no tap.
       await expect.poll(said).toEqual([{ text: card.prompt, lang: 'ru-RU' }]);
       // Passed by showing the answer, after which it says nothing more (R7).
+      // Phase 56 (spec D7): the saved meaning is typed again first.
       await page.getByTestId('typed-show-answer').click();
-      await expect(page.getByTestId('continue-button')).toBeVisible();
+      await expect(page.getByTestId('retype')).toBeVisible();
+      await retypeShown(page);
       expect(await said()).toEqual([{ text: card.prompt, lang: 'ru-RU' }]);
     } else {
       // Hear it, type it.
       expect(card.kind).toBe('dictation');
       const dictated = await spokenAfter(page, before);
-      await answerTyped(page, dictated.text);
-      await expect(page.getByTestId('feedback-correct')).toBeVisible();
+      // Phase 56 (spec D1, D7): help shows how the word heard starts; a wrong
+      // word is sent helped, and the word is typed again before the banner.
+      await page.getByTestId('typed-help').click();
+      await expect(page.getByTestId('typed-hint')).toHaveText(`${[...dictated.text][0]}…`);
+      const sent = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/next-step'));
+      await answerTyped(page, WRONG_RUSSIAN[0]);
+      expect((await sent).postDataJSON()).toMatchObject({ text: WRONG_RUSSIAN[0], helped: true });
+      await expect(page.getByTestId('retype')).toBeVisible();
+      await expect(page.getByTestId('retype-answer')).toHaveText(dictated.text);
+      await retypeShown(page);
       // Once per card (R7): nothing more after the answer.
       expect(await said()).toEqual([dictated]);
     }

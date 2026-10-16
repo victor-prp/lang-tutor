@@ -126,19 +126,27 @@ export async function answerChoice(page: Page, card: Card, right: boolean) {
  * a new meaning is answered right; a typed card is shown its answer. Then it
  * moves on. Phase 55 (spec D7): so is a tiles card; a typed translation shown
  * its answer is typed again, from the answer it shows, before its banner.
+ * Phase 56 (spec D7): so is a typed meaning, a dictation and a typed gap; a
+ * sentence translation has no retype.
  */
 export async function playOut(page: Page, card: Card) {
   if (card.kind === 'meet') return continueMeet(page);
   if (card.kind === 'choice' || card.kind === 'reverse' || card.kind === 'new-meaning') await answerChoice(page, card, true);
   else if (card.kind === 'tiles') await page.getByTestId('tiles-show-answer').click();
-  else if (card.kind === 'typed' || card.kind === 'meaning') {
+  else if (card.kind === 'typed' || card.kind === 'meaning' || card.kind === 'dictation' || card.kind === 'cloze-typed' || card.kind === 'translate') {
     await page.getByTestId('typed-show-answer').click();
-    // A typed meaning has no retype, nor a say-the-translation typed with speaking off.
-    const retype = page.getByTestId('retype');
-    await expect(retype.or(page.getByTestId('continue-button'))).toBeVisible();
-    if (await retype.isVisible()) await retypeShown(page);
+    await retypeIfOpen(page);
   } else throw new Error(`no way to play a ${card.kind} card out`);
   await page.getByTestId('continue-button').click();
+}
+
+/** Phase 56 (spec D7). After an answer that may open a retype — wrong, nearly
+ *  right or "show the answer" on a typed card — waits for the retype or the
+ *  banner, and ends a retype right, so the banner is up either way. */
+export async function retypeIfOpen(page: Page) {
+  const retype = page.getByTestId('retype');
+  await expect(retype.or(page.getByTestId('continue-button'))).toBeVisible();
+  if (await retype.isVisible()) await retypeShown(page);
 }
 
 /** Types an answer on a typed card and checks it. Phase 55 (spec D7): in a
