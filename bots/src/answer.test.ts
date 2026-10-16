@@ -367,3 +367,36 @@ test('a meet card the bot cannot match is still answered seen, and counted unmat
   assert.equal(d.detail.outcome, 'unmatched');
   assert.equal(d.detail.event, null);
 });
+
+// Phase 55 (spec D8). A ladder's intro stage asks the learner to write the word in tiles. The bot
+// answers the card as it answers a typed one: the text, by its recall. It never uses help, so
+// what it sends is the text alone (the request has no `helped`, and `decide` has no way to say it).
+const tiles: Card = { ...base, type: 'letter_tiles', question: 'חתול', part_of_speech: 'noun', answer: 'cat', tiles: ['c', 'a', 't', 'o'] };
+
+test('a letter-tiles card the bot knows is answered with its text, the word', () => {
+  const d = decide(tiles, memory(1), saved, always(0.01), calm);
+  assert.deepEqual(d.kind === 'text' && d.text, 'cat');
+  assert.equal(d.detail.word, 'cat');
+  assert.equal(d.detail.outcome, 'right');
+  assert.deepEqual(d.detail.dimensions, ['written_receptive', 'written_productive']);
+  assert.deepEqual(d.detail.event, { type: 'letter_tiles', verdict: 'exact' });
+  // Help is the learner's to ask for; the bot never does.
+  assert.ok(!('helped' in d));
+});
+
+test('a letter-tiles card the bot has forgotten is answered with another word, or nothing when it gives up', () => {
+  const wrong = decide(tiles, memory(0), saved, always(0.5), calm);
+  assert.equal(wrong.detail.outcome, 'wrong');
+  assert.ok(wrong.kind === 'text' && ['dog', 'house'].includes(wrong.text), JSON.stringify(wrong));
+  const gaveUp = decide(tiles, memory(0), saved, always(0.5), { slip: 0, gaveUp: 1 });
+  assert.equal(gaveUp.detail.outcome, 'gave_up');
+  assert.deepEqual(gaveUp.kind === 'text' && gaveUp.text, '');
+  assert.ok(!('helped' in wrong) && !('helped' in gaveUp));
+});
+
+test('a letter-tiles card matches by the Hebrew prompt it shows', () => {
+  assert.equal(matchCard(tiles, saved)?.form, 'cat');
+  const unknown = decide({ ...tiles, question: 'זברה', answer: 'zebra' }, memory(1), saved, always(0.5), calm);
+  assert.equal(unknown.detail.unmatched, true);
+  assert.equal(unknown.kind, 'text');
+});

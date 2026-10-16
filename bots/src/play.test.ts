@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { SEEN_ANSWER_WEIGHT, type ActrState } from './actr.ts';
-import { FakeServer, choiceCard, meaningCard, meetCard, readCard, sayCard, typedCard } from './fakeServer.ts';
+import { FakeServer, choiceCard, meaningCard, meetCard, readCard, reverseCard, sayCard, tilesCard, typedCard } from './fakeServer.ts';
 import type { FsrsState } from './fsrsBot.ts';
 import { newLine, playDay } from './play.ts';
 import { ROSTER, type Profile } from './roster.ts';
@@ -259,6 +259,83 @@ test("the control bot learns nothing from a ladder's intro card, and from its pr
   assert.deepEqual(state.log.map((c) => c.type), ['meet', 'typed_translation', 'multiple_choice', 'typed_translation']);
   // Written productive is graded once, by q4, whatever q2's answer was.
   assert.equal((state.memory as FsrsState)['alpha|written_productive']?.reps, 1);
+});
+
+// Phase 55 (spec D2, D8). A new word's ladder: its intro unit (meet, read aloud, tiles) back to
+// back, then multiple choice, reverse choice and typed translation. The bot taps through the meet
+// card, says the word, writes it from the tiles as it types, and never asks for help.
+const ladder = () => [
+  meetCard('q1', 'alpha'),
+  readCard('q2', 'alpha'),
+  tilesCard('q3', 'alpha'),
+  choiceCard('q4', 'alpha'),
+  reverseCard('q5', 'alpha'),
+  typedCard('q6', 'alpha', []),
+];
+
+test('a ladder of the intro shape is played through: seen, spoken, tiles and typed as text', async () => {
+  const server = new FakeServer({ cardsFor: ladder });
+  const { steps, spoken, judged, state, line } = await play(server, async () => Buffer.from('webm'));
+
+  assert.deepEqual(
+    state.log.map((c) => [c.card, c.type, c.word]),
+    [
+      ['q1', 'meet', 'alpha'],
+      ['q2', 'read_aloud', 'alpha'],
+      ['q3', 'letter_tiles', 'alpha'],
+      ['q4', 'multiple_choice', 'alpha'],
+      ['q5', 'reverse_choice', 'alpha'],
+      ['q6', 'typed_translation', 'alpha'],
+    ],
+  );
+  // The meet card seen, the read aloud sent as a clip (speech route), the rest on the next-step route.
+  assert.deepEqual(steps[0], { question_id: 'q1', seen: true });
+  assert.deepEqual(spoken, [{ question_id: 'q2', mime_type: 'audio/webm' }]);
+  assert.equal(steps.length, 5);
+  assert.deepEqual(
+    steps.slice(1).map((step) => Object.keys(step as object).sort()),
+    [['question_id', 'text'], ['option_index', 'question_id'], ['option_index', 'question_id'], ['question_id', 'text']],
+  );
+  // The bot never asks for help: no body, on any route, says `helped`.
+  assert.ok([...steps, ...spoken, ...judged].every((body) => !('helped' in (body as object))));
+  // The tiles card is answered as text and judged by the function the server runs: its verdict is in the log.
+  assert.ok(['exact', 'near_miss', 'wrong', 'gave_up'].includes(state.log[2].verdict ?? ''));
+  // The meet card is out of the day's count, the five cards asked are in.
+  assert.deepEqual([line.cards, line.unmatched], [5, 0]);
+});
+
+test('a ladder of the intro shape: the read aloud and the tiles are spoken and written even with no voice', async () => {
+  const server = new FakeServer({ cardsFor: ladder });
+  const { steps, line, state } = await play(server, async () => null);
+
+  assert.deepEqual(steps.slice(0, 3), [
+    { question_id: 'q1', seen: true },
+    { question_id: 'q2', pass: 'skip' },
+    steps[2],
+  ]);
+  assert.ok('text' in (steps[2] as object));
+  assert.equal(line.noVoice, 1);
+  assert.deepEqual(state.log.map((c) => c.type).slice(0, 3), ['meet', 'read_aloud', 'letter_tiles']);
+});
+
+test("the control bot learns nothing from a ladder's meet, read aloud and tiles, and from its practice cards as before", async () => {
+  const fsrs: Profile = { ...profile, name: 'control', memory: 'fsrs', actr: undefined };
+  const server = new FakeServer({ cardsFor: ladder });
+  const { state } = await play(server, async () => Buffer.from('webm'), fsrs);
+
+  const memory = state.memory as FsrsState;
+  // The read aloud grades nothing in any case. The tiles card would have graded written productive,
+  // right or wrong, so it is graded twice, by the reverse choice and the typed card, and not three times.
+  assert.ok(!Object.keys(memory).some((key) => key.endsWith('|spoken_productive')));
+  assert.equal(memory['alpha|written_productive']?.reps, 2);
+});
+
+test("the ACT-R bot still learns from a ladder's tiles card: the person wrote the word, whatever the server grades", async () => {
+  const server = new FakeServer({ cardsFor: () => [meetCard('q1', 'alpha'), tilesCard('q2', 'alpha')] });
+  const { state } = await play(server, async () => null);
+
+  const traces = (state.memory as ActrState).traces;
+  assert.ok((traces['alpha|written_productive'] ?? []).some((trace) => trace.weight === 1), JSON.stringify(traces));
 });
 
 test('a meet card of a word the bot did not save is answered seen and counted unmatched', async () => {

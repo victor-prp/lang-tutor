@@ -223,6 +223,42 @@ test("(d) reads a ladder's cards at their own rungs, and a card outside a ladder
   assert.equal(weekNumbers(stateWith([...log, off]), 1, noMemory, WRITTEN).d, 1 / 10);
 });
 
+test("(d) counts a ladder's intro read aloud and write-it card as ladder cards (phase 55)", () => {
+  // Phase 55 (spec D8). A new word's ladder opens with an intro unit: meet, read aloud, then the
+  // card that writes the word, tiles or, when the form takes no tiles, a typed translation. They
+  // are the design's rungs like the practice cards after them, not the picker's, and the server
+  // asks no memory of them: a typed intro card (written productive, rung 2) read against no memory
+  // would be off-rung. Two ladders, one of each kind, their practice cards spread.
+  const tiles = (word: string) => [
+    card(1, 'meet', word, false, {}, { verdict: 'seen' }),
+    card(1, 'read_aloud', word, true, {}, { verdict: 'understood' }),
+    card(1, 'letter_tiles', word, true, {}, { verdict: 'exact' }),
+    card(1, 'multiple_choice', word, true),
+    card(1, 'reverse_choice', word, true),
+    card(1, 'typed_translation', word, true, {}, { verdict: 'exact' }),
+  ];
+  const typed = (word: string) => [
+    card(1, 'meet', word, false, {}, { verdict: 'seen' }),
+    card(1, 'read_aloud', word, true, {}, { verdict: 'understood' }),
+    card(1, 'typed_translation', word, true, {}, { verdict: 'exact' }),
+    card(1, 'multiple_choice', word, true),
+    card(1, 'reverse_choice', word, true),
+    card(1, 'typed_translation', word, true, {}, { verdict: 'exact' }),
+  ];
+  const [x, y] = [tiles('x'), typed('y')];
+  const log = [...x.slice(0, 3), ...y.slice(0, 3), x[3], y[3], x[4], y[4], x[5], y[5]];
+  assert.equal(weekNumbers(stateWith(log), 1, noMemory, WRITTEN).d, 0);
+  const view = serverView(log);
+  // The intro tiles are written productive at its first rung, the typed intro card at its second, as the plan placed them.
+  assert.deepEqual(view[2], { dimension: WP, rung: 1, level: 1, r: null, implied: 1 });
+  assert.deepEqual(view[5], { dimension: WP, rung: 2, level: 1, r: null, implied: 2 });
+  assert.deepEqual(view[1], { dimension: 'spoken_productive', rung: 1, level: 1, r: null, implied: 1 });
+
+  // The same typed card with no meet card in its session is the picker's, and off-rung against no memory.
+  const alone = [card(1, 'read_aloud', 'w', true, {}, { verdict: 'understood' }), card(1, 'typed_translation', 'w', true, {}, { verdict: 'exact' })];
+  assert.equal(weekNumbers(stateWith(alone), 1, noMemory, WRITTEN).d, 1 / 2);
+});
+
 test('(e) the mean true recall over every saved word and live dimension', () => {
   const recall: Record<string, number> = { 'x|written_receptive': 0.9, 'x|written_productive': 0.3, 'y|written_receptive': 0.6 };
   const memory: BotMemory = { setTime() {}, recall: (w, d) => recall[`${w}|${d}`] ?? 0, learn() {} };

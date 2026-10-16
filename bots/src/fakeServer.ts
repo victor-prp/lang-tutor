@@ -74,6 +74,33 @@ export function meetCard(id: string, form: string): Question {
   return { id, type: 'meet', vocab_term_id: `g-${form}`, question: form, meaning: meaningOf(form) };
 }
 
+/** A reverse choice: the Hebrew meaning shown, the target-language form to pick. */
+export function reverseCard(id: string, form: string): Question {
+  return {
+    id,
+    type: 'reverse_choice',
+    vocab_term_id: `g-${form}`,
+    question: meaningOf(form),
+    part_of_speech: 'noun',
+    options: [form, 'door', 'wall', 'ceiling'],
+    correct_option: 0,
+    context: null,
+  };
+}
+
+/** Phase 55 (spec D2, D8). The card of a ladder's intro that has the learner write `form` from tiles. */
+export function tilesCard(id: string, form: string): Question {
+  return {
+    id,
+    type: 'letter_tiles',
+    vocab_term_id: `g-${form}`,
+    question: meaningOf(form),
+    part_of_speech: 'noun',
+    answer: form,
+    tiles: [...form].sort(),
+  };
+}
+
 /** A typed translation of `form` that also accepts `alternatives`. */
 export function typedCard(id: string, form: string, alternatives: string[]): Question {
   return {

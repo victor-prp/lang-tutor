@@ -190,6 +190,39 @@ test('a meet card is no card asked, and a ladder is not the same word again', ()
   assert.deepEqual(summary.repeated, []);
 });
 
+test("a ladder's intro read aloud and write-it card are ladder cards: not the same word again, and asked cards as before", () => {
+  // Phase 55 (spec D8). A new word's ladder is now meet, read aloud, tiles, then three practice
+  // cards: five asked cards of one word in one session, which are REPEAT_TIMES or more and not a repeat.
+  const state: BotState = {
+    ...newState({ name: 'steady-en', memory: 'actr' }),
+    saved: [{ form: 'kettle', meaning: 'm', glossId: 'g', day: 1 }],
+    days: [{ ...newLine(1), played: true, completed: true, sessions: 1, cards: 5, right: 4, newWords: 1 }],
+    log: [
+      card(1, 's1', 'kettle', false, 'meet'),
+      card(1, 's1', 'kettle', true, 'read_aloud'),
+      card(1, 's1', 'kettle', true, 'letter_tiles'),
+      card(1, 's1', 'kettle', true),
+      card(1, 's1', 'kettle', true, 'reverse_choice'),
+      card(1, 's1', 'kettle', false, 'typed_translation'),
+    ],
+  };
+  const summary = weekSummary(state, 1, { setTime() {}, recall: () => 1, learn() {} });
+  // The meet card is no card asked; the read aloud and the tiles are, as the server's score counts them.
+  assert.equal(summary.cards, 5);
+  assert.equal(summary.right, 4);
+  assert.deepEqual(summary.byType, {
+    read_aloud: { cards: 1, right: 1 },
+    letter_tiles: { cards: 1, right: 1 },
+    multiple_choice: { cards: 1, right: 1 },
+    reverse_choice: { cards: 1, right: 1 },
+    typed_translation: { cards: 1, right: 0 },
+  });
+  assert.deepEqual(summary.repeated, []);
+  // The same five cards with no meet card in the session are the same word again.
+  const withoutMeet: BotState = { ...state, log: state.log.slice(1) };
+  assert.deepEqual(weekSummary(withoutMeet, 1, { setTime() {}, recall: () => 1, learn() {} }).repeated, [{ word: 'kettle', times: 5 }]);
+});
+
 test('a laddered word asked again in another session of the day is a repeat there, as usual', () => {
   const memory: BotMemory = { setTime() {}, recall: () => 1, learn() {} };
   const state: BotState = {
