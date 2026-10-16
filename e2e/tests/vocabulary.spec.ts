@@ -144,11 +144,12 @@ test('a word saved in two parts of speech is one row, and its detail labels each
   await expect(words.first()).not.toContainText('שם עצם');
 });
 
-// Phase 58 (spec D4, D6). прочитать and знать are new; лук, both its senses
-// seeded to 2 in every skill, is not. The new filter removes the two new words
-// in one call, behind a question, and лук stays.
-test('a learner removes every new word at once from the new filter', async ({ page, request }) => {
-  await signUpLearner(page, 'e2e_vocab_remove_new_ru', 'ru');
+// Phase 58 (spec D4, D6), 58b (R2). прочитать and знать are new; лук, both its
+// senses seeded to 2 in every skill, is not. The trash icon on each filter asks,
+// naming the filter's words, and removes them in one call: a level's here, then
+// every word on "all".
+test('a learner removes the words of a level, then every word, with the trash icon', async ({ page, request }) => {
+  await signUpLearner(page, 'e2e_vocab_remove_ru', 'ru');
   await openApp(page);
   await tapUntil(page, 'translate-entry', 'translate-input');
   for (const [text, lexeme] of [
@@ -162,44 +163,56 @@ test('a learner removes every new word at once from the new filter', async ({ pa
     await page.getByTestId('translate-new-word').click();
   }
   await seedMemory(
-    'e2e_vocab_remove_new_ru',
+    'e2e_vocab_remove_ru',
     [...knownSeeds('בצל'), ...knownSeeds('קשת')].map((seed) => ({ ...seed, level: 2 })),
   );
 
   await page.getByTestId('translate-back').click();
   await tapUntil(page, 'vocabulary-entry', 'vocabulary-word');
   const words = page.getByTestId('vocabulary-word');
+  const remove = page.getByTestId('vocabulary-remove');
   await expect(words).toHaveCount(3);
-  const removeNew = page.getByTestId('vocabulary-remove-new');
-  // "All" offers no removal; only the new filter does.
-  await expect(removeNew).toHaveCount(0);
-  await page.getByTestId('vocabulary-level-1').click();
-  await expect(words).toHaveCount(2);
+  await expect(remove).toBeVisible();
 
-  // The question first: declined, nothing goes.
   const removals: string[] = [];
   page.on('request', (req) => {
-    if (req.method() === 'DELETE' && /\/vocabulary\?level=/.test(req.url())) removals.push(req.url());
+    if (req.method() === 'DELETE' && /\/vocabulary\?/.test(req.url())) removals.push(new URL(req.url()).search);
   });
-  page.once('dialog', (dialog) => void dialog.dismiss());
-  await removeNew.click();
+  // The question is read after the dialog is answered: an assertion inside the
+  // handler would leave it open and fail by timeout, not by the assertion.
+  async function answer(accept: boolean): Promise<string> {
+    const asked = page.waitForEvent('dialog').then(async (dialog) => {
+      const message = dialog.message();
+      await (accept ? dialog.accept() : dialog.dismiss());
+      return message;
+    });
+    await remove.click();
+    return asked;
+  }
+
+  // New: declined, nothing goes.
+  await page.getByTestId('vocabulary-level-1').click();
+  await expect(words).toHaveCount(2);
+  expect(await answer(false)).toContain('להסיר את כל המילים ברמה "חדשה"?');
   await expect(words).toHaveCount(2);
   expect(removals).toEqual([]);
 
-  // Accepted: one call, and the filter is empty.
-  page.once('dialog', (dialog) => {
-    expect(dialog.message()).toContain('להסיר את כל המילים החדשות?');
-    void dialog.accept();
-  });
-  const answered = page.waitForResponse((res) => res.request().method() === 'DELETE' && /\/vocabulary\?level=1$/.test(res.url()));
-  await removeNew.click();
-  expect(await (await answered).json()).toEqual({ removed_words: 2, removed_glosses: 4 });
-  await expect(page.getByTestId('vocabulary-empty-level')).toBeVisible();
-  await expect(removeNew).toHaveCount(0);
-  expect(removals).toHaveLength(1);
-
-  // "All" keeps лук alone.
-  await page.getByTestId('vocabulary-level-all').click();
+  // נחשפה: лук alone goes, and the filter is empty.
+  await page.getByTestId('vocabulary-level-2').click();
   await expect(words).toHaveCount(1);
-  await expect(words.first()).toContainText('лук');
+  let answered = page.waitForResponse((res) => res.request().method() === 'DELETE' && /\?level=2$/.test(res.url()));
+  expect(await answer(true)).toContain('להסיר את כל המילים ברמה "נחשפה"?');
+  expect(await (await answered).json()).toEqual({ removed_words: 1, removed_glosses: 2 });
+  await expect(page.getByTestId('vocabulary-empty-level')).toBeVisible();
+  await expect(remove).toHaveCount(0);
+
+  // All: the two new words go, and the list is empty.
+  await page.getByTestId('vocabulary-level-all').click();
+  await expect(words).toHaveCount(2);
+  answered = page.waitForResponse((res) => res.request().method() === 'DELETE' && /\?all=true$/.test(res.url()));
+  expect(await answer(true)).toContain('להסיר את כל המילים ברשימה?');
+  expect(await (await answered).json()).toEqual({ removed_words: 2, removed_glosses: 4 });
+  await expect(page.getByTestId('vocabulary-empty')).toBeVisible();
+  await expect(remove).toHaveCount(0);
+  expect(removals).toEqual(['?level=2', '?all=true']);
 });
