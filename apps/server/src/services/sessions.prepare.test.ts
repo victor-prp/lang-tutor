@@ -1296,6 +1296,19 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
     ]);
   });
 
+  // Final review. A word another card of the session asks is never in the list a
+  // sentence is built from: its reference would show that card's answer.
+  it('leaves the session\'s own words out of the learner\'s words', async () => {
+    const practised = [
+      { glossId: SAW.glossId, word: 'saw', meaning: 'לנסר' },
+      { glossId: 'g-p2', word: 'let', meaning: 'לתת' },
+    ];
+    const { service, llm, contextLlm } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT, checkReply: SENTENCES_CHECK, practised });
+    await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
+    expect(JSON.parse(llm.calls[0].user).learner_words).toEqual([{ key: 'w1', word: 'let', meaning: 'לתת' }]);
+    expect(JSON.parse(contextLlm.calls[0].user).learner_words).toEqual([{ key: 'w1', word: 'let', meaning: 'לתת' }]);
+  });
+
   // Phase 59 (spec D2).
   it('stores a translation card\'s word map, and serves it without the list\'s glosses', async () => {
     const contextReply = JSON.stringify({

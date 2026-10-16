@@ -1295,8 +1295,12 @@ export function createSessionService({
         });
         // Phase 59 (spec D1). The list's practised words, which a translation
         // sentence is built from as much as it can, keyed as the prompts name them.
+        // Final review: never a word this session asks, whose card the reference would answer.
+        const asking = new Set(formed.map((row) => row.glossId));
         const practised = await memory.findPractisedWords({ enrollmentId: state.enrollmentId, limit: MAX_LEARNER_WORDS });
-        const learnerWords: LearnerWord[] = practised.map((word, index) => ({ key: `w${index + 1}`, ...word }));
+        const learnerWords: LearnerWord[] = practised
+          .filter((word) => !asking.has(word.glossId))
+          .map((word, index) => ({ key: `w${index + 1}`, ...word }));
         return { state, enrolled, context: formed, picked: context.map(pickOf), recent, recentContexts, siblings, known, learnerWords };
       });
       if (!read) {
