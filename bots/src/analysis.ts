@@ -301,11 +301,20 @@ export function weekNumbers(state: BotState, week: number, memory: BotMemory, li
   // (c) Per word and dimension, over the whole log so a run can span weeks: the gap to the
   // previous review, for this week's reviews that are the 2nd, 3rd, 4th+ right in a row. Only the
   // first review of a day counts (phase 37 D8): a same-day return is learning, not an interval.
+  // Phase 55 (spec D2, as ruled). A ladder's intro card is no review: the server grades it
+  // nothing. Each session's cards are read in order, every one, as introReader needs them.
+  const readers = new Map<string, (card: Asked) => boolean>();
+  const isIntro = (entry: CardEntry) => {
+    let read = readers.get(entry.session);
+    if (!read) readers.set(entry.session, (read = introReader()));
+    return read(entry);
+  };
   const runs = new Map<string, { streak: number; lastDay: number }>();
   const gaps: Record<keyof Intervals, number[]> = { second: [], third: [], later: [] };
   state.log.forEach((entry, i) => {
     const v = view[i];
-    if (!v || entry.word === null) return;
+    const intro = isIntro(entry);
+    if (!v || entry.word === null || intro) return;
     const k = `${entry.word}|${v.dimension}`;
     const before = runs.get(k);
     if (before && before.lastDay === entry.day) return;

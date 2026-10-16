@@ -144,6 +144,28 @@ test('(c) counts only the first review of a day: a same-day return is learning, 
   assert.deepEqual(weekNumbers(stateWith(log), 1, noMemory, WRITTEN).c, { second: 2, third: null, later: null });
 });
 
+test("(c) counts no ladder intro card as a review: the server grades none (phase 55)", () => {
+  // Phase 55 (spec D2, as ruled). The read aloud and the tiles of x's intro, both right, are not
+  // its day-1 reviews of spoken production and written production: the server writes them no
+  // memory. Its day-1 written production review is the reverse choice, wrong, so day 3's right
+  // reverse choice is a first in a row; its spoken production has no day-1 review at all.
+  const ladder = [
+    card(1, 'meet', 'x', false, {}, { verdict: 'seen' }),
+    card(1, 'read_aloud', 'x', true, {}, { verdict: 'understood' }),
+    card(1, 'letter_tiles', 'x', true, {}, { verdict: 'exact' }),
+    card(1, 'multiple_choice', 'x', true),
+    card(1, 'reverse_choice', 'x', false),
+    card(1, 'typed_translation', 'x', false, {}, { verdict: 'wrong' }),
+    card(3, 'reverse_choice', 'x', true),
+    card(3, 'read_aloud', 'x', true, {}, { verdict: 'understood' }),
+  ];
+  assert.deepEqual(weekNumbers(stateWith(ladder), 1, noMemory, WRITTEN).c, { second: null, third: null, later: null });
+
+  // The same tiles and read aloud outside a ladder, with no meet card, are reviews as before.
+  const plain = [ladder[1], ladder[2], ladder[6], ladder[7]];
+  assert.deepEqual(weekNumbers(stateWith(plain), 1, noMemory, WRITTEN).c, { second: 2, third: null, later: null });
+});
+
 test('the server view replays memory and levels from the log, session by session', () => {
   const log = [
     card(1, 'multiple_choice', 'x', true),
