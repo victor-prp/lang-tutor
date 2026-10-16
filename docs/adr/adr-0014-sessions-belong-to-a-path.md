@@ -21,7 +21,8 @@ main path asks only saved words in no active target; a target's path asks only t
               └─ target B    (target_id = B)   ── stock ≤ 1, started ≤ 1   B's words only
 
   locks:  next-session:<enrollment>:main  →  next-session:<enrollment>:<target>…  (id order)
-          progress:<enrollment>   every session end, and a word taken out of a target
+          → retire stocks → progress:<enrollment> → enqueue stocks
+          (progress: every session end, and a word taken out of a target)
 ```
 
 Memory, levels and target skills are the enrollment's, written by every path's session ends; the
@@ -40,9 +41,13 @@ progress lock serializes those ends, which phase 43's one started session used t
   regex can see: enforced by `tests/integration/services/sessions.targets.test.ts` and
   `src/services/sessions.stock.test.ts`.
 - **R4 — Lock order.** A use case that takes several next-session locks takes the main path's,
-  then the targets' in id order (`services/stock.ts` `lockPaths`), all before the progress lock,
-  and retires stocks before it takes the progress lock (a skip holds its stock's row, then that
-  lock). Enforced by review and by the call orders `src/services/targets.test.ts` asserts.
+  then the targets' in id order (`services/stock.ts` `lockPaths`), all before the progress lock.
+  One that takes the progress lock (a word out of a target, an unsave) retires stocks before it
+  (a skip holds its stock's row, then that lock) and asks for stocks only after it (a session end
+  holds that lock, then enqueues its path's stock under the same singleton key, whose uncommitted
+  row a stately insert waits on). Enforced by review, the call orders
+  `src/services/targets.test.ts` asserts, and `tests/integration/services/sessions.targets.test.ts`
+  ("a removal beside a session end").
 
 ## How to detect a violation
 

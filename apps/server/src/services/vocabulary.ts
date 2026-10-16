@@ -21,7 +21,7 @@ import { EnrollmentNotFound, GlossLanguageMismatch, InvalidCursor, InvalidVocabu
 import type { Logger } from '../logger';
 import { authorize, authorizeEnrollment } from './access';
 import { learnerDay } from './learnerDay';
-import { lockPaths, logTargetRetired, requestStockAfterSave, restockAfterTargetChange } from './stock';
+import { lockPaths, logTargetRetired, requestStockAfterSave, requestStocks, retireStocks } from './stock';
 import type { Repos, Transaction } from './transaction';
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -169,8 +169,8 @@ export function createVocabularyService({
         await lockPaths(repos, enrollmentId, holding);
         // Spec D12: a word removed is a change to its active targets, so the stocks chosen with
         // it go, its targets' and the main path's: retired before the progress lock, since a
-        // skip of a stock holds its row, then that lock.
-        const retired = holding.length > 0 ? await restockAfterTargetChange(repos, enrollmentId, holding) : [];
+        // skip of a stock holds its row, then that lock (ADR 0014 R4).
+        const retired = holding.length > 0 ? await retireStocks(repos, enrollmentId, holding) : [];
         // Phase 57 (ruling T4-k). The word's memory, levels and target skills go with it: a
         // session end that would write them runs wholly before this or reads it gone.
         await repos.progress.lockEnrollment(enrollmentId);
@@ -188,6 +188,9 @@ export function createVocabularyService({
             sessionId: null,
           });
         }
+        // And the next stocks asked for only after the progress lock: a session end holds it,
+        // then enqueues its path's stock under the same singleton key (ADR 0014 R4).
+        if (holding.length > 0) await requestStocks(repos, enrollmentId, holding);
         return retired;
       });
       logger.info({ event: 'vocabulary_unsaved', enrollment_id: enrollmentId });

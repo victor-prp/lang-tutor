@@ -6,9 +6,10 @@ import type { TargetKind } from '../../../src/domain/targets';
 import { AccessDenied, SessionOpen, TargetClosed, TargetNotFound } from '../../../src/errors';
 import type { SessionService } from '../../../src/services/sessions';
 import type { TargetService } from '../../../src/services/targets';
+import type { VocabularyService } from '../../../src/services/vocabulary';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { jobPayloads, startTestBoss, stockJobKeys, stopTestBoss } from '../../support/jobs';
-import { holdProgressLock, waitForBlockedQuery } from '../../support/locks';
+import { holdProgressLock, holdSessionEnd, waitForBlockedQuery } from '../../support/locks';
 import { insertGlossMemory } from '../../support/progressRows';
 import { insertListSession, type AskedGloss } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
@@ -40,6 +41,7 @@ let boss: PgBoss;
 let logger: FakeLogger;
 let service: SessionService;
 let targets: TargetService;
+let vocabulary: VocabularyService;
 
 beforeEach(async () => {
   t = await createTestDb();
@@ -50,6 +52,7 @@ beforeEach(async () => {
   const deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7), boss });
   service = deps.sessions;
   targets = deps.targets;
+  vocabulary = deps.vocabulary;
 });
 afterEach(async () => {
   await stopTestBoss(boss);
@@ -278,6 +281,35 @@ describe('a change to a target (spec D2, ruling R-D12b)', () => {
 
     expect(await readTargetEvents(t.db, exam)).toEqual([
       { kind: 'words_removed', before: { gloss_ids: [words[0].glossId] }, after: { reason: 'removed' }, actorUserId: 'u_1', sessionId: null },
+    ]);
+  });
+});
+
+// ADR 0014 R4. A session end holds the progress lock, then enqueues its path's stock under the
+// path's singleton key. A removal that enqueued under that key before waiting for the lock would
+// hold the uncommitted row the end's stately insert waits on: a deadlock (40P01).
+describe('a removal beside a session end (ADR 0014 R4)', () => {
+  it.each([
+    ['removeWord', (words: AskedGloss[], exam: string) => targets.removeWord('u_1', exam, words[0].glossId)],
+    ['unsave', (words: AskedGloss[]) => vocabulary.unsave('u_1', E, words[0].glossId)],
+  ])('%s asks for the stocks only after the progress lock, so both commit', async (_, remove) => {
+    const words = await savedWords();
+    const exam = await addTarget('exam', '2030-01-13', ids(words.slice(0, 3)));
+    const ending = holdSessionEnd(t.db, boss, E);
+    await ending.ready;
+
+    const removal = remove(words, exam);
+    try {
+      await waitForBlockedQuery(t.db);
+    } finally {
+      ending.finish();
+    }
+    await expect(Promise.all([ending.done, removal])).resolves.toBeDefined();
+
+    expect((await readTargetEvents(t.db, exam)).map((event) => event.kind)).toEqual(['words_removed']);
+    expect(await stockJobs()).toEqual([
+      { key: E, data: { enrollment_id: E, reason: 'complete' } },
+      { key: `${E}:${exam}`, data: { enrollment_id: E, reason: 'target', target_id: exam } },
     ]);
   });
 });

@@ -1,9 +1,12 @@
 import { sql } from 'drizzle-orm';
+import type { PgBoss } from 'pg-boss';
 
 import type { Db, Tx } from '../../src/db/client';
 import { createDictRepo } from '../../src/repo/dictionary';
 import { createGlossRepo } from '../../src/repo/glosses';
+import { createJobRepo } from '../../src/repo/jobs';
 import { createProgressRepo } from '../../src/repo/progress';
+import { STOCK_SESSION } from '../../src/domain/jobs';
 
 /**
  * Phase 31. Runs `work` in a transaction that stays open until `release()`, so a
@@ -85,4 +88,28 @@ export function holdProgressLock(db: Db, enrollmentId: string) {
   return holdOpen(db, async (tx) => {
     await createProgressRepo(tx).lockEnrollment(enrollmentId);
   });
+}
+
+/** Phase 57 (ADR 0014 R4). A session end paused after its progress lock: `finish()` lets it ask
+ *  for its path's next stock (the main path's, under the enrollment's key), as an ending does,
+ *  and commit. `ready` resolves once the lock is held; `done` settles with the transaction. */
+export function holdSessionEnd(db: Db, boss: PgBoss, enrollmentId: string): { ready: Promise<void>; finish: () => void; done: Promise<void> } {
+  let finish!: () => void;
+  let markReady!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    markReady = resolve;
+  });
+  const done = db.transaction(async (tx) => {
+    try {
+      await createProgressRepo(tx).lockEnrollment(enrollmentId);
+    } finally {
+      markReady();
+    }
+    await gate;
+    await createJobRepo(tx, boss).enqueue(STOCK_SESSION, { enrollment_id: enrollmentId, reason: 'complete' }, { singletonKey: enrollmentId });
+  });
+  return { ready, finish, done };
 }

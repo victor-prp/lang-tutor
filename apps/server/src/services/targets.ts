@@ -17,7 +17,7 @@ import type { TargetRow } from '../repo/targets';
 import { authorizeEnrollment } from './access';
 import { learnerDay } from './learnerDay';
 import { logImportSaved, saveImportsInTx, type ImportSaved } from './photoImports';
-import { lockPaths, logTargetRetired, restockAfterTargetChange } from './stock';
+import { lockPaths, logTargetRetired, requestStocks, restockAfterTargetChange, retireStocks } from './stock';
 import type { Repos, Transaction } from './transaction';
 import { saveEntriesInTx } from './vocabulary';
 
@@ -267,16 +267,17 @@ export function createTargetService({
 
     /** Spec D1, D11. Out of the target, still saved. Idempotent: a word it does not hold
      *  changes nothing. Removing every word leaves an empty target (ruling R-D10). Phase 57
-     *  (ruling T4-k): the word's target skills go with it, so the removal waits for a session
-     *  end that would write them (the progress lock), taken once the stocks are retired: a
-     *  skip of the stock holds its row, then that lock. */
+     *  (ruling T4-k, ADR 0014 R4): the word's target skills go with it, so the removal waits
+     *  for a session end that would write them (the progress lock), taken once the stocks are
+     *  retired (a skip of the stock holds its row, then that lock) and before the next stocks
+     *  are asked for (a session end holds that lock, then enqueues its path's stock). */
     removeWord: async (actorUserId: string, targetId: string, glossId: string): Promise<void> => {
       const changed = await transaction(async (repos) => {
         const { enrolled, target, open } = await lockTarget(repos, actorUserId, targetId);
         if (!open) throw new TargetClosed(targetId);
         // Under the target's lock and its paths', its words cannot change before the removal.
         if (!(await repos.target.listWordIds(target.id)).includes(glossId)) return null;
-        const retired = await restockAfterTargetChange(repos, enrolled.id, [target.id]);
+        const retired = await retireStocks(repos, enrolled.id, [target.id]);
         await repos.progress.lockEnrollment(enrolled.id);
         await repos.target.removeWord(target.id, glossId);
         await repos.target.insertEvent({
@@ -287,6 +288,7 @@ export function createTargetService({
           actorUserId,
           sessionId: null,
         });
+        await requestStocks(repos, enrolled.id, [target.id]);
         return { enrollmentId: enrolled.id, retired };
       });
       if (changed === null) return;

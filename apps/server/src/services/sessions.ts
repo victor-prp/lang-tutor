@@ -1544,7 +1544,9 @@ export function createSessionService({
             ladder: ladder ?? false,
           };
         }),
-        { listening: payload.listening, speaking: payload.speaking },
+        // Phase 57 (ruling T3-l): a target path's session plans its picks with no MAX_PER_TYPE and
+        // no one-word speaking rule, so no pick falls back to a card that serves no owed work.
+        { listening: payload.listening, speaking: payload.speaking, target: payload.target ?? false },
       );
       const ordered = plan.order.map((index) => read.context[index]);
       const tasks = tasksFor({ ...plan, types: plan.types.map(generatedAs) });

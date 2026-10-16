@@ -48,26 +48,50 @@ export async function lockPaths(repos: Pick<Repos, 'session'>, enrollmentId: str
   for (const targetId of [...new Set(targetIds)].sort()) await repos.session.lockNextSession(enrollmentId, targetId);
 }
 
+/** The paths a change to `targetIds` touches: the main path's, whose words change with any
+ *  target's, then each target's, in id order. */
+const changedPaths = (targetIds: readonly string[]): Path[] => [null, ...[...new Set(targetIds)].sort()];
+
 /**
- * Phase 53 (spec D12, ruling R-D12b), per path since phase 57 (spec D2). The stocks a
- * change to the learner's targets leaves: the unstarted list stock of the main path, whose
- * words change with any target's, and of each changed target's path, each chosen without the
- * change, retired (a seed, or a session already started, never is), and the next of each
- * asked of the stock job. The caller took lockPaths for the same targets before it locked or
- * wrote anything. Answers the ids of the stocks retired. Shared by the targets service and an
- * unsave that takes a word out of a target (final review M2).
+ * Phase 53 (spec D12, ruling R-D12b), per path since phase 57 (spec D2). The stocks a change
+ * to the learner's targets leaves, chosen without the change: the unstarted list stock of the
+ * main path and of each changed target's path, retired (a seed, or a session already started,
+ * never is). The caller took lockPaths for the same targets before it locked or wrote
+ * anything. Answers the ids of the stocks retired.
+ */
+export async function retireStocks(repos: Pick<Repos, 'session'>, enrollmentId: string, targetIds: readonly string[]): Promise<string[]> {
+  const retired: string[] = [];
+  for (const path of changedPaths(targetIds)) {
+    const { stock } = await repos.session.findOpen(enrollmentId, path);
+    if (stock?.source === 'list' && (await repos.session.retireStock(stock.id))) retired.push(stock.id);
+  }
+  return retired;
+}
+
+/** Phase 53 (ruling R-D12b), phase 57 (spec D2). The next stock of the main path and of each
+ *  changed target's path, asked of the stock job. */
+export async function requestStocks(repos: Pick<Repos, 'jobs'>, enrollmentId: string, targetIds: readonly string[]): Promise<void> {
+  for (const path of changedPaths(targetIds)) {
+    await requestStock(repos, { enrollment_id: enrollmentId, reason: 'target', ...pathPayload(path) });
+  }
+}
+
+/**
+ * Phase 53 (ruling R-D12b), phase 57 (spec D2). A change to targets: its stocks retired, then
+ * the next of each asked for (retireStocks, requestStocks). Shared by the target changes that
+ * take no progress lock. A removal (a word out of a target, an unsave) takes the two steps
+ * apart around that lock (ADR 0014 R4): it retires before it, since a skip holds its stock's
+ * row and then the lock, and it asks after it, since a session end holds the lock and then
+ * enqueues its path's stock under the same singleton key, whose uncommitted row a stately
+ * insert waits on.
  */
 export async function restockAfterTargetChange(
   repos: Pick<Repos, 'session' | 'jobs'>,
   enrollmentId: string,
   targetIds: readonly string[],
 ): Promise<string[]> {
-  const retired: string[] = [];
-  for (const path of [null, ...[...new Set(targetIds)].sort()]) {
-    const { stock } = await repos.session.findOpen(enrollmentId, path);
-    if (stock?.source === 'list' && (await repos.session.retireStock(stock.id))) retired.push(stock.id);
-    await requestStock(repos, { enrollment_id: enrollmentId, reason: 'target', ...pathPayload(path) });
-  }
+  const retired = await retireStocks(repos, enrollmentId, targetIds);
+  await requestStocks(repos, enrollmentId, targetIds);
   return retired;
 }
 

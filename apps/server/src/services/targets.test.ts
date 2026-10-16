@@ -294,7 +294,15 @@ function world(
     }),
     gloss: setup.gloss ?? createFakeGlossRepo(),
     dict: stub<DictRepo>({ claimLemmaRenders: async () => [] }),
-    jobs,
+    // Phase 57 (ADR 0014 R4). Each enqueue named in `calls` by its key, so a test can check
+    // that a removal asks for stocks only after the progress lock.
+    jobs: {
+      ...jobs,
+      enqueue: async (name, data, options) => {
+        calls.push(`enqueue ${options?.singletonKey ?? name}`);
+        await jobs.enqueue(name, data, options);
+      },
+    },
   });
   const service = createTargetService({ transaction, logger, now: createFakeClock(NOW), stockSaveDelaySeconds: 30 });
   const vocabularyService = createVocabularyService({ transaction, logger, now: createFakeClock(NOW), stockSaveDelaySeconds: 30 });
@@ -619,10 +627,17 @@ describe('removeWord', () => {
       { targetId: 't1', kind: 'words_removed', before: { gloss_ids: ['g_casa'] }, after: { reason: 'removed' }, actorUserId: OWNER, sessionId: null },
     ]);
     expect(retired).toEqual(['s_stock', 's_own']);
-    // Ruling T4-k: the progress lock once the stocks are retired (a skip of one holds its row,
-    // then that lock), and before the word goes.
-    expect(calls.indexOf('retireStock')).toBeLessThan(calls.indexOf('lockEnrollment'));
-    expect(calls.indexOf('lockEnrollment')).toBeLessThan(calls.indexOf('insertEvent words_removed'));
+    // Ruling T4-k, ADR 0014 R4: the progress lock once the stocks are retired (a skip of one
+    // holds its row, then that lock), before the word goes, and before the next stocks are
+    // asked for (a session end holds that lock, then enqueues its path's stock).
+    expect(calls.slice(calls.indexOf('findTargetForUpdate') + 1)).toEqual([
+      'retireStock',
+      'retireStock',
+      'lockEnrollment',
+      'insertEvent words_removed',
+      'enqueue e1',
+      'enqueue e1:t1',
+    ]);
     expect(logged(logger, 'target_changed')).toEqual([{ event: 'target_changed', target_id: 't1', change: 'words_removed', count: 1 }]);
   });
 
@@ -861,6 +876,8 @@ describe('vocabulary.unsave (spec D1, Review Focus 2)', () => {
       'deleteEntry g_casa',
       'removeGlossFromTargets g_casa',
       'insertEvent words_removed',
+      'enqueue e1',
+      'enqueue e1:t1',
     ]);
     expect(events.map((event) => event.before)).toEqual([{ gloss_ids: ['g_casa'] }]);
   });
@@ -889,7 +906,8 @@ describe('vocabulary.unsave (spec D1, Review Focus 2)', () => {
       { event: 'session_retired', enrollment_id: 'e1', session_id: 's_stock', reason: 'target_changed' },
     ]);
     // The next-session locks before the entry is deleted, as every change to a target takes them:
-    // the main path's, then its targets' (lockPaths); the stocks retired, then the progress lock.
+    // the main path's, then its targets' (lockPaths); the stocks retired, then the progress lock,
+    // then the next stocks asked for (ADR 0014 R4).
     expect(calls).toEqual([
       'lockNextSession main',
       'lockNextSession main',
@@ -901,6 +919,9 @@ describe('vocabulary.unsave (spec D1, Review Focus 2)', () => {
       'removeGlossFromTargets g_casa',
       'insertEvent words_removed',
       'insertEvent words_removed',
+      'enqueue e1',
+      'enqueue e1:t1',
+      'enqueue e1:t2',
     ]);
   });
 });
