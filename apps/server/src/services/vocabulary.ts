@@ -20,7 +20,8 @@ import {
 import { EnrollmentNotFound, GlossLanguageMismatch, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
 import type { Logger } from '../logger';
 import { authorize, authorizeEnrollment } from './access';
-import { logTargetRetired, requestStockAfterSave, restockAfterTargetChange } from './stock';
+import { learnerDay } from './learnerDay';
+import { lockPaths, logTargetRetired, requestStockAfterSave, restockAfterTargetChange } from './stock';
 import type { Repos, Transaction } from './transaction';
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -115,10 +116,13 @@ export async function saveEntriesInTx(
 export function createVocabularyService({
   transaction,
   logger,
+  now,
   stockSaveDelaySeconds,
 }: {
   transaction: Transaction;
   logger: Logger;
+  /** Phase 57. The clock an unsave reads the learner's today by: which targets are active. */
+  now: () => number;
   /** Phase 43 (ruling R3). How long a save's request for a stock waits. */
   stockSaveDelaySeconds: number;
 }) {
@@ -150,13 +154,26 @@ export function createVocabularyService({
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
         await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.remove' });
         // Phase 53 (ruling R-D12b, final review M2). An unsave may change a target, so it takes
-        // the next-session lock first, as every change to a target does: a stock being written
-        // holds it and reads the targets' words.
-        await repos.session.lockNextSession(enrollmentId);
+        // the next-session locks first, as every change to a target does: a stock being written
+        // holds its path's and reads the targets' words. The main path's first, then, once the
+        // gloss is resolved, the paths of the active targets holding it (phase 57, ADR 0014:
+        // lockPaths' order), which no change can add to while the main path's is held.
+        await repos.session.lockNextSession(enrollmentId, null);
         // Phase 31 (spec D14). A card on screen since before a merge names the
         // forwarded id: share-lock, resolve, and delete the survivor's entry.
         const resolved = await repos.gloss.resolveGlosses([glossId]);
         const survivor = resolved.get(glossId)?.id ?? glossId;
+        const today = await learnerDay(repos, enrolled.user_id, now());
+        const active = new Set((await repos.target.listActive(enrollmentId, today)).map((target) => target.id));
+        const holding = (await repos.target.listHolding(enrollmentId, survivor)).filter((targetId) => active.has(targetId));
+        await lockPaths(repos, enrollmentId, holding);
+        // Spec D12: a word removed is a change to its active targets, so the stocks chosen with
+        // it go, its targets' and the main path's: retired before the progress lock, since a
+        // skip of a stock holds its row, then that lock.
+        const retired = holding.length > 0 ? await restockAfterTargetChange(repos, enrollmentId, holding) : [];
+        // Phase 57 (ruling T4-k). The word's memory, levels and target skills go with it: a
+        // session end that would write them runs wholly before this or reads it gone.
+        await repos.progress.lockEnrollment(enrollmentId);
         await repos.vocabulary.deleteEntry({ enrollmentId, glossId: survivor });
         // Phase 53 (spec D1). A target's words are saved ones: an unsaved word
         // leaves every target that held it, each with a line in its log.
@@ -171,8 +188,7 @@ export function createVocabularyService({
             sessionId: null,
           });
         }
-        // Spec D12: a word removed is a change to its targets, so the stock chosen with it goes.
-        return changed.length > 0 ? restockAfterTargetChange(repos, enrollmentId) : null;
+        return retired;
       });
       logger.info({ event: 'vocabulary_unsaved', enrollment_id: enrollmentId });
       logTargetRetired(logger, enrollmentId, retired);

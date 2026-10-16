@@ -117,6 +117,25 @@ export function rungFor(r: number | null): 1 | 2 {
   return r !== null && r >= RUNG_R ? 2 : 1;
 }
 
+/**
+ * Phase 57 (spec D11). The glosses chooseWords calls due on `today`, by their memory alone: a
+ * gloss whose weakest live skill with memory is at or below R_TARGET, as its DUE class reads
+ * it. Sorted. Home's "words waiting" on the main path.
+ */
+export function dueGlosses(
+  memory: readonly { glossId: string; dimension: Dimension; state: MemoryState }[],
+  live: readonly Dimension[],
+  today: string,
+): string[] {
+  const weakest = new Map<string, number>();
+  for (const row of memory) {
+    if (!live.includes(row.dimension)) continue;
+    const r = retrievability(row.state, today);
+    weakest.set(row.glossId, Math.min(weakest.get(row.glossId) ?? 1, r));
+  }
+  return [...weakest].filter(([, r]) => r <= R_TARGET).map(([glossId]) => glossId).sort();
+}
+
 /** Ruling 3: the rung's best card is four-option at rung 1, typed at rung 2. */
 const isHard = (pick: ChosenPick) => expectedSuccess(pick.r, pick.rung === 1, pick.rung) < HARD_BELOW;
 

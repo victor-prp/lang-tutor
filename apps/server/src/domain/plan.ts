@@ -44,8 +44,11 @@ export type PlanPick = {
 };
 
 /** `listening`: the app said its device has a voice for the target (phase 24 D5).
- *  `speaking`: the app said it can record (phase 25 D4). */
-export type PlanInput = { listening: boolean; speaking: boolean };
+ *  `speaking`: the app said it can record (phase 25 D4). `target`: phase 57 (spec D7,
+ *  ruling T3-l), a target path's session, whose picks each serve owed work: no type is held
+ *  to MAX_PER_TYPE and a session of one word may still speak, so no pick falls back to a
+ *  card that serves none of it. Absent is false. */
+export type PlanInput = { listening: boolean; speaking: boolean; target?: boolean };
 
 /** `order[i]` is the index into the picks asked at position `i`, `types[i]`
  *  its type. A board takes positions `start` to `start + 3`. Phase 55 (spec D2,
@@ -172,18 +175,20 @@ type Choice = Card & { chosen: boolean };
  *  a tie goes to the type used least, then to the table's order. Null when the
  *  rung has no eligible type left. A return (phase 37 D6) is not held to
  *  MAX_PER_TYPE: written receptive has one recall type, and a word met today
- *  would otherwise be settled by a multiple choice, never recalled. */
+ *  would otherwise be settled by a multiple choice, never recalled. Nor is a
+ *  target path's pick (`free`, phase 57 ruling T3-l). */
 function bestIn(
   rung: 1 | 2,
   pick: PlanPick,
   used: ReadonlyMap<QuestionType, number>,
   listening: boolean,
   speaking: boolean,
+  free: boolean,
 ): Card | null {
   let best: (Card & { distance: number; uses: number }) | null = null;
   for (const type of RUNGS[pick.dimension][rung - 1]) {
     const uses = used.get(type) ?? 0;
-    if ((uses >= MAX_PER_TYPE && !pick.step) || !eligible(type, pick, listening, speaking)) continue;
+    if ((uses >= MAX_PER_TYPE && !pick.step && !free) || !eligible(type, pick, listening, speaking)) continue;
     // The exponent is the rung the type sits in, also when it is the fallback rung.
     const p = expectedSuccess(pick.r, FOUR_OPTION.has(type), rung);
     const distance = Math.abs(p - CARD_TARGET);
@@ -196,14 +201,14 @@ function bestIn(
 
 /** The pick's rung, then the other rung, then multiple choice, always
  *  eligible. A new word has no R and takes multiple choice (spec D6). */
-function cardFor(pick: PlanPick, used: ReadonlyMap<QuestionType, number>, listening: boolean, speaking: boolean): Choice {
+function cardFor(pick: PlanPick, used: ReadonlyMap<QuestionType, number>, listening: boolean, speaking: boolean, free: boolean): Choice {
   // Phase 39 (spec D6): a new gloss of a known word is a new_meaning, not chosen
   // from a rung: it does not count toward MAX_PER_TYPE, nor go on a board.
   if (pick.knownMeanings?.length) return { type: 'new_meaning', p: expectedSuccess(pick.r, true, 1), chosen: false };
   const multipleChoice = { type: 'multiple_choice' as const, p: expectedSuccess(pick.r, true, 1), chosen: false };
   if (pick.dimension === 'written_receptive' && pick.r === null) return multipleChoice;
   const other = pick.rung === 1 ? 2 : 1;
-  const card = bestIn(pick.rung, pick, used, listening, speaking) ?? bestIn(other, pick, used, listening, speaking);
+  const card = bestIn(pick.rung, pick, used, listening, speaking, free) ?? bestIn(other, pick, used, listening, speaking, free);
   return card ? { ...card, chosen: true } : multipleChoice;
 }
 
@@ -255,15 +260,17 @@ function ordered(units: Unit[], before: QuestionType | null): { out: Unit[]; las
 
 export function planCards(picks: readonly PlanPick[], input: PlanInput): SessionPlan {
   // Phase 25. A session of one word gets no speaking card: its only card's
-  // "can't speak now" could pass, leaving nothing to score.
-  const speaking = input.speaking && picks.length > 1;
+  // "can't speak now" could pass, leaving nothing to score. Phase 57 (ruling T3-l): a
+  // target's may, since its one pick can be the target's only owed work.
+  const target = input.target ?? false;
+  const speaking = input.speaking && (picks.length > 1 || target);
 
   // Phase 54 (spec D3). A ladder pick has no card of its own: its cards are
   // fixed, and it touches no type's count.
   const used = new Map<QuestionType, number>();
   const cards = picks.map((pick): Card | null => {
     if (pick.ladder) return null;
-    const { chosen, ...card } = cardFor(pick, used, input.listening, speaking);
+    const { chosen, ...card } = cardFor(pick, used, input.listening, speaking, target);
     if (chosen) used.set(card.type, (used.get(card.type) ?? 0) + 1);
     return card;
   });

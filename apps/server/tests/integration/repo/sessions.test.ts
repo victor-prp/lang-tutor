@@ -9,6 +9,8 @@ import { CHOSEN_ON, NO_DEVICES, asChoice, insertListSession } from '../../suppor
 import { testRng } from '../../support/testRng';
 import { insertLexeme } from '../../support/dictRows';
 import { seedSavedSenses } from '../../support/vocabularyRows';
+import { holdOpen, waitForBlockedQuery } from '../../support/locks';
+import { seedTarget } from '../../support/targetRows';
 import { withTx } from '../../support/withTx';
 import type { Tx } from '../../../src/db/client';
 import { newSessionRecord } from '../../../src/domain/session';
@@ -178,7 +180,7 @@ describe('phase 23: typed answers', () => {
         },
       ],
     });
-    const sessionId = await sessionRepo.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES, CHOSEN_ON);
+    const sessionId = await sessionRepo.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES, CHOSEN_ON, null);
     await sessionRepo.insertSessionQuestions(sessionId, [typed]);
     return { sessionRepo, sessionId, typed };
   }
@@ -269,19 +271,19 @@ describe('session state (phase 19)', () => {
     withTx(t.db, (tx) => fn(createSessionRepo(tx)));
 
   it('inserts a preparing list session, and refuses a second open one', async () => {
-    const id = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON));
+    const id = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null));
     const state = await repo((r) => r.findState(id));
-    expect(state).toEqual({ id, userId: 'u_1', enrollmentId: E, status: 'preparing', source: 'list' });
-    await expect(repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON))).rejects.toBeInstanceOf(SessionOpen);
+    expect(state).toEqual({ id, userId: 'u_1', enrollmentId: E, status: 'preparing', source: 'list', targetId: null });
+    await expect(repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null))).rejects.toBeInstanceOf(SessionOpen);
   });
 
   it('refuses a seed session while one is open, as SessionOpen', async () => {
-    await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON));
+    await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null));
     await expect(withTx(t.db, (tx) => startSession(tx))).rejects.toBeInstanceOf(SessionOpen);
   });
 
   it('transitions only from the statuses named', async () => {
-    const id = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON));
+    const id = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null));
     expect(await repo((r) => r.transition(id, ['ready'], 'skipped'))).toBe(false);
     expect(await repo((r) => r.transition(id, ['preparing'], 'ready'))).toBe(true);
     expect((await repo((r) => r.findState(id)))?.status).toBe('ready');
@@ -295,16 +297,16 @@ describe('session state (phase 19)', () => {
 
   // Phase 29 (spec D13): what a session-addressed use case authorizes against.
   it('names the enrollment a session belongs to, and none for an unknown id', async () => {
-    const id = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON));
+    const id = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null));
     expect(await repo((r) => r.findEnrollmentId(id))).toBe(E);
     expect(await repo((r) => r.findEnrollmentId('00000000-0000-0000-0000-000000000000'))).toBeUndefined();
   });
 
   it('summarises the newest session: answered and total', async () => {
-    expect(await repo((r) => r.findLatest(E))).toBeUndefined();
+    expect(await repo((r) => r.findLatest(E, 'any'))).toBeUndefined();
     const { sessionId, record } = await withTx(t.db, (tx) => startSession(tx));
     await repo((r) => r.insertAnswer(sessionId, 0, record.questions[0].id, { displayIndex: 0 }));
-    expect(await repo((r) => r.findLatest(E))).toEqual({
+    expect(await repo((r) => r.findLatest(E, 'any'))).toEqual({
       id: sessionId,
       status: 'ready',
       source: 'seed',
@@ -328,15 +330,57 @@ describe('phase 43: a started session and one in stock', () => {
   it('keeps a stock beside a started session, and refuses a second of either', async () => {
     const { sessionId: started } = await withTx(t.db, (tx) => startSession(tx));
     expect(await repo((r) => r.markStarted(started))).toBe(true);
-    const stock = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON));
-    expect(await repo((r) => r.findOpen(E))).toEqual({
+    const stock = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null));
+    expect(await repo((r) => r.findOpen(E, null))).toEqual({
       started: { id: started, status: 'ready', source: 'seed', answered: 0, total: SESSION_LENGTH },
       stock: { id: stock, status: 'preparing', source: 'list', answered: 0, total: 0 },
     });
-    await expect(repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON))).rejects.toBeInstanceOf(SessionOpen);
+    await expect(repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null))).rejects.toBeInstanceOf(SessionOpen);
 
     await repo((r) => r.transition(stock, ['preparing'], 'ready'));
     await expect(repo((r) => r.markStarted(stock))).rejects.toBeInstanceOf(SessionOpen);
+  });
+
+  // Phase 57 (spec D1, D2, ADR 0014).
+  it('keeps a stock and a started session per path, each path read on its own', async () => {
+    const [glossId] = (await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'apple', translations: ['תפוח'] })).glossIds;
+    const target = await seedTarget(t.db, { enrollmentId: E, kind: 'exam', dueOn: '2030-01-10', glossIds: [glossId] });
+    const main = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null));
+    const own = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, target));
+    await expect(repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, target))).rejects.toBeInstanceOf(SessionOpen);
+    expect(await repo((r) => r.findOpen(E, null))).toEqual({ stock: { id: main, status: 'preparing', source: 'list', answered: 0, total: 0 } });
+    expect(await repo((r) => r.findOpen(E, target))).toEqual({ stock: { id: own, status: 'preparing', source: 'list', answered: 0, total: 0 } });
+    expect((await repo((r) => r.findState(own)))?.targetId).toBe(target);
+
+    for (const id of [main, own]) {
+      await repo((r) => r.transition(id, ['preparing'], 'ready'));
+      expect(await repo((r) => r.markStarted(id))).toBe(true);
+    }
+    const second = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, target));
+    await repo((r) => r.transition(second, ['preparing'], 'ready'));
+    await expect(repo((r) => r.markStarted(second))).rejects.toBeInstanceOf(SessionOpen);
+    // The newest of a path, and of any.
+    expect((await repo((r) => r.findLatest(E, null)))?.id).toBe(main);
+    expect((await repo((r) => r.findLatest(E, target)))?.id).toBe(second);
+    expect((await repo((r) => r.findLatest(E, 'any')))?.id).toBe(second);
+  });
+
+  it("serializes each path's next session on a lock of its own (review C1, ADR 0014)", async () => {
+    const [glossId] = (await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'apple', translations: ['תפוח'] })).glossIds;
+    const target = await seedTarget(t.db, { enrollmentId: E, kind: 'exam', dueOn: '2030-01-10', glossIds: [glossId] });
+    const held = holdOpen(t.db, (tx) => createSessionRepo(tx).lockNextSession(E, null));
+    await held.ready;
+    try {
+      // Another path's lock is free while the main path's is held.
+      await withTx(t.db, (tx) => createSessionRepo(tx).lockNextSession(E, target));
+      const waiting = withTx(t.db, (tx) => createSessionRepo(tx).lockNextSession(E, null));
+      await waitForBlockedQuery(t.db);
+      held.release();
+      await waiting;
+    } finally {
+      held.release();
+      await held.done;
+    }
   });
 
   it('starts a session once', async () => {
@@ -347,21 +391,21 @@ describe('phase 43: a started session and one in stock', () => {
   });
 
   it('finds nothing open once both sessions end', async () => {
-    expect(await repo((r) => r.findOpen(E))).toEqual({});
+    expect(await repo((r) => r.findOpen(E, null))).toEqual({});
     const { sessionId } = await withTx(t.db, (tx) => startSession(tx));
-    expect(await repo((r) => r.findOpen(E))).toEqual({
+    expect(await repo((r) => r.findOpen(E, null))).toEqual({
       stock: { id: sessionId, status: 'ready', source: 'seed', answered: 0, total: SESSION_LENGTH },
     });
     await repo((r) => r.transition(sessionId, ['ready'], 'skipped', '2026-10-12'));
-    expect(await repo((r) => r.findOpen(E))).toEqual({});
+    expect(await repo((r) => r.findOpen(E, null))).toEqual({});
   });
 
   it("stores what a session was built for, and reads the enrollment's newest", async () => {
     expect(await repo((r) => r.findNewestDevices(E))).toBeUndefined();
-    const first = await repo((r) => r.insertPreparingSession('u_1', E, { listening: true, speaking: false }, CHOSEN_ON));
+    const first = await repo((r) => r.insertPreparingSession('u_1', E, { listening: true, speaking: false }, CHOSEN_ON, null));
     expect(await repo((r) => r.findNewestDevices(E))).toEqual({ listening: true, speaking: false });
     await repo((r) => r.transition(first, ['preparing'], 'failed'));
-    await repo((r) => r.insertPreparingSession('u_1', E, { listening: false, speaking: true }, CHOSEN_ON));
+    await repo((r) => r.insertPreparingSession('u_1', E, { listening: false, speaking: true }, CHOSEN_ON, null));
     expect(await repo((r) => r.findNewestDevices(E))).toEqual({ listening: false, speaking: true });
   });
 
@@ -383,6 +427,13 @@ describe('phase 43: a started session and one in stock', () => {
       types: ['multiple_choice', 'multiple_choice', 'typed_translation'],
     });
     expect((await repo((r) => r.findSessionGlosses(sessionId))).sort()).toEqual([apple.glossIds[0], bread.glossIds[0]].sort());
+    // Phase 57 (ruling T3-j): its cards, in order, each with whether it is a ladder's intro card.
+    expect(await repo((r) => r.findSessionCards(sessionId))).toEqual([
+      { glossId: apple.glossIds[0], type: 'multiple_choice', intro: false },
+      { glossId: bread.glossIds[0], type: 'multiple_choice', intro: false },
+      { glossId: apple.glossIds[0], type: 'typed_translation', intro: false },
+    ]);
+    expect(await repo((r) => r.findSessionCards('nope'))).toEqual([]);
   });
 });
 
@@ -399,13 +450,13 @@ describe('phase 53: the day a stock was chosen, and retiring it', () => {
     )[0];
   /** A list session in stock, ready to be started. */
   const readyStock = async () => {
-    const id = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON));
+    const id = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null));
     await repo((r) => r.transition(id, ['preparing'], 'ready'));
     return id;
   };
 
   it('writes the learner day a stock was chosen, and reads it back with the devices it was built for', async () => {
-    const id = await repo((r) => r.insertPreparingSession('u_1', E, { listening: true, speaking: false }, '2026-10-13'));
+    const id = await repo((r) => r.insertPreparingSession('u_1', E, { listening: true, speaking: false }, '2026-10-13', null));
     expect((await read(id)).chosenOn).toBe('2026-10-13');
     expect(await repo((r) => r.findStockChoice(id))).toEqual({ chosenOn: '2026-10-13', listening: true, speaking: false });
   });
@@ -421,17 +472,17 @@ describe('phase 53: the day a stock was chosen, and retiring it', () => {
   });
 
   it('retires a stock nobody has started, preparing or ready, and only once: it is skipped with no practice day', async () => {
-    const preparing = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON));
+    const preparing = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null));
     expect(await repo((r) => r.retireStock(preparing))).toBe(true);
     expect(await read(preparing)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: CHOSEN_ON });
     expect(await repo((r) => r.retireStock(preparing))).toBe(false);
     // A retired stock no longer holds the enrollment's one place in stock.
-    expect(await repo((r) => r.findOpen(E))).toEqual({});
+    expect(await repo((r) => r.findOpen(E, null))).toEqual({});
 
     const ready = await readyStock();
     expect(await repo((r) => r.retireStock(ready))).toBe(true);
     expect(await read(ready)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: CHOSEN_ON });
-    expect(await repo((r) => r.findOpen(E))).toEqual({});
+    expect(await repo((r) => r.findOpen(E, null))).toEqual({});
   });
 
   it('leaves a session alone once it was started', async () => {
@@ -441,7 +492,7 @@ describe('phase 53: the day a stock was chosen, and retiring it', () => {
     expect(await repo((r) => r.retireStock(id))).toBe(false);
 
     expect((await read(id)).status).toBe('ready');
-    expect(await repo((r) => r.findOpen(E))).toMatchObject({ started: { id, status: 'ready' } });
+    expect(await repo((r) => r.findOpen(E, null))).toMatchObject({ started: { id, status: 'ready' } });
   });
 
   it('leaves a seed session alone: it is the first session, not a list stock', async () => {
@@ -459,12 +510,12 @@ describe('phase 53: the day a stock was chosen, and retiring it', () => {
     expect(await repo((r) => r.retireStock(completed))).toBe(false);
     expect(await read(completed)).toMatchObject({ status: 'completed', practiceDay: '2026-10-14' });
 
-    const skipped = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON));
+    const skipped = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null));
     await repo((r) => r.transition(skipped, ['preparing'], 'skipped', '2026-10-14'));
     expect(await repo((r) => r.retireStock(skipped))).toBe(false);
     expect(await read(skipped)).toMatchObject({ status: 'skipped', practiceDay: '2026-10-14' });
 
-    const failed = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON));
+    const failed = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null));
     await repo((r) => r.transition(failed, ['preparing'], 'failed'));
     expect(await repo((r) => r.retireStock(failed))).toBe(false);
     expect((await read(failed)).status).toBe('failed');
@@ -589,9 +640,9 @@ describe('phase 37: answers and introductions on a day', () => {
     const s2 = await playTyped([c, a], D2, ['exact', 'wrong']);
     const s3 = await playTyped([d], 'open', ['near_miss']);
     expect(await read((repo) => repo.findAnswersOn(E, D2))).toEqual([
-      { glossId: c.glossId, sessionId: s2, type: 'typed_translation', verdict: 'exact' },
-      { glossId: a.glossId, sessionId: s2, type: 'typed_translation', verdict: 'wrong' },
-      { glossId: d.glossId, sessionId: s3, type: 'typed_translation', verdict: 'near_miss' },
+      { glossId: c.glossId, sessionId: s2, type: 'typed_translation', verdict: 'exact', targetId: null },
+      { glossId: a.glossId, sessionId: s2, type: 'typed_translation', verdict: 'wrong', targetId: null },
+      { glossId: d.glossId, sessionId: s3, type: 'typed_translation', verdict: 'near_miss', targetId: null },
     ]);
     expect((await read((repo) => repo.findAnswersOn(E, D1))).map((answer) => [answer.glossId, answer.sessionId])).toEqual([
       [a.glossId, s1],
@@ -599,6 +650,15 @@ describe('phase 37: answers and introductions on a day', () => {
     ]);
     await seedUser(t.db, 'u_2');
     expect(await read((repo) => repo.findAnswersOn(enrollmentOf('u_2'), D2))).toEqual([]);
+  });
+
+  // Phase 57 (spec D1). A target path's session's answers name its target.
+  it("names each answer's path", async () => {
+    const a = await savedWord('apple', 'תפוח');
+    const target = await seedTarget(t.db, { enrollmentId: E, kind: 'exam', dueOn: '2030-01-10', glossIds: [a.glossId] });
+    const { sessionId, questions } = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [a], types: ['multiple_choice'], targetId: target });
+    await withTx(t.db, (tx) => createSessionRepo(tx).insertAnswer(sessionId, 0, questions[0].id, { displayIndex: 0 }));
+    expect((await read((repo) => repo.findAnswersOn(E, D2))).map((answer) => [answer.glossId, answer.targetId])).toEqual([[a.glossId, target]]);
   });
 
   it('leaves out an answer given before its gloss was saved, as the memory does', async () => {
@@ -616,7 +676,7 @@ describe('phase 37: answers and introductions on a day', () => {
     const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
     // Phase 57: the evidence also carries helped and answeredAt, which a day's answers do not.
     expect(await read((repo) => repo.findAnswersOn(E, D2))).toEqual(
-      evidence!.answers.map(({ helped: _helped, answeredAt: _answeredAt, ...answer }) => ({ ...answer, sessionId })),
+      evidence!.answers.map(({ helped: _helped, answeredAt: _answeredAt, ...answer }) => ({ ...answer, sessionId, targetId: null })),
     );
   });
 
@@ -637,8 +697,8 @@ describe('phase 37: answers and introductions on a day', () => {
     });
     // The first resolved right, so it reads as its retry; the second is still pending.
     expect(await read((repo) => repo.findAnswersOn(E, D2))).toEqual([
-      { glossId: a.glossId, sessionId, type: 'typed_translation', verdict: 'exact' },
-      { glossId: b.glossId, sessionId, type: 'typed_translation', verdict: 'alternative' },
+      { glossId: a.glossId, sessionId, type: 'typed_translation', verdict: 'exact', targetId: null },
+      { glossId: b.glossId, sessionId, type: 'typed_translation', verdict: 'alternative', targetId: null },
     ]);
   });
 

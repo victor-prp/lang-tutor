@@ -88,14 +88,23 @@ const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}
  * list's level aggregate lives in repo/vocabulary.ts.
  *
  * No row locks on progress: an enrollment's progress is written only when one
- * of its sessions ends, its sessions end one at a time (the session row is
- * locked by loadSession and findState, and at most one is open), and the
- * recompute holds a table lock on sessions (lockSessions) so no session ends
- * while it runs. The one lock here is on the dictionary: lockSessionGlosses,
+ * of its sessions ends, its sessions end one at a time (phase 57, ADR 0014: each
+ * path has a started session of its own, so lockEnrollment serializes their ends),
+ * and the recompute holds a table lock on sessions (lockSessions) so no session ends
+ * while it runs. The other lock here is on the dictionary: lockSessionGlosses,
  * which keeps a gloss merge out of a session's end (phase 31, spec D14).
  */
 export function createProgressRepo(tx: Tx) {
   return {
+    /** Phase 57 (rulings T4-i, T4-k). Serializes, per enrollment, the writes that read and
+     *  then write its memory, levels and target skills: a session's end, and a word taken out
+     *  of a target, whose skills that end would otherwise write after they are gone. Taken
+     *  before the dictionary's lock and every read of the evidence; held to the end of the
+     *  transaction. */
+    lockEnrollment: async (enrollmentId: string): Promise<void> => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`progress:${enrollmentId}`}, 0))`);
+    },
+
     /** Phase 31 (spec D14). FOR SHARE on the lexemes of every gloss this session's
      *  questions practise, in id order, before its evidence is read. A gloss never
      *  changes lexeme, so this holds the right rows even while a merge re-keys

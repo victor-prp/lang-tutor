@@ -1,25 +1,32 @@
 import { STOCK_SESSION, type StockSessionPayload } from '../domain/jobs';
+import type { Path } from '../domain/session';
 import type { Logger } from '../logger';
 import type { Repos } from './transaction';
 
 /**
- * Phase 43 (spec D3). Asks for the enrollment's next session in stock, in the
+ * Phase 43 (spec D3). Asks for a path's next session in stock, in the
  * transaction of the change that calls for it. The queue is `stately`: one job
  * queued and one running per key, so a burst of triggers is one job and one
- * arriving mid-run is queued, not lost.
+ * arriving mid-run is queued, not lost. Phase 57 (spec D2, ADR 0014): one key per
+ * path, the enrollment's id for the main path (as before) and the enrollment's and the
+ * target's for a target's, so one path's request never holds another's back.
  */
 export async function requestStock(
   repos: Pick<Repos, 'jobs'>,
   payload: StockSessionPayload & { reason: Exclude<StockSessionPayload['reason'], 'save'> },
 ): Promise<void> {
-  await repos.jobs.enqueue(STOCK_SESSION, payload, { singletonKey: payload.enrollment_id });
+  const singletonKey = payload.target_id === undefined ? payload.enrollment_id : `${payload.enrollment_id}:${payload.target_id}`;
+  await repos.jobs.enqueue(STOCK_SESSION, payload, { singletonKey });
 }
+
+/** Phase 57 (spec D2). The stock payload's path: its target, or none for the main path. */
+export const pathPayload = (path: Path): { target_id?: string } => (path === null ? {} : { target_id: path });
 
 /**
  * Phase 43 (ruling R3, review I1). After a save the stock waits `delaySeconds`
  * past the last save of a burst, so the burst becomes one session holding every
  * word of it. Under a key of its own, so a save just before a start never holds
- * the start's job back.
+ * the start's job back. Phase 57: the main path's, which a saved word joins.
  */
 export async function requestStockAfterSave(repos: Pick<Repos, 'jobs'>, enrollmentId: string, delaySeconds: number): Promise<void> {
   await repos.jobs.enqueueOrPostpone(
@@ -30,23 +37,43 @@ export async function requestStockAfterSave(repos: Pick<Repos, 'jobs'>, enrollme
 }
 
 /**
- * Phase 53 (spec D12, ruling R-D12b). The stock a change to the learner's targets leaves: the
- * unstarted list stock, chosen without the change, retired (a seed, or a session already
- * started, never is), and the next asked of the stock job. The caller took lockNextSession
- * before it locked or wrote anything: a stock being written holds that lock and references
- * the active targets' rows. Answers the id of the stock retired, or null. Shared by the
- * targets service and an unsave that takes a word out of a target (final review M2).
+ * Phase 57 (ADR 0014). Takes the next-session locks of the main path and of `targetIds`'
+ * paths, the main path's first and then the targets' in id order, so two use cases that each
+ * take several never wait on each other. A change to targets takes them before it locks or
+ * writes anything: a stock being written holds its path's lock and references the targets'
+ * rows (phase 53, ruling R-D12b).
  */
-export async function restockAfterTargetChange(repos: Pick<Repos, 'session' | 'jobs'>, enrollmentId: string): Promise<string | null> {
-  const { stock } = await repos.session.findOpen(enrollmentId);
-  const retired = stock?.source === 'list' && (await repos.session.retireStock(stock.id)) ? stock.id : null;
-  await requestStock(repos, { enrollment_id: enrollmentId, reason: 'target' });
+export async function lockPaths(repos: Pick<Repos, 'session'>, enrollmentId: string, targetIds: readonly string[]): Promise<void> {
+  await repos.session.lockNextSession(enrollmentId, null);
+  for (const targetId of [...new Set(targetIds)].sort()) await repos.session.lockNextSession(enrollmentId, targetId);
+}
+
+/**
+ * Phase 53 (spec D12, ruling R-D12b), per path since phase 57 (spec D2). The stocks a
+ * change to the learner's targets leaves: the unstarted list stock of the main path, whose
+ * words change with any target's, and of each changed target's path, each chosen without the
+ * change, retired (a seed, or a session already started, never is), and the next of each
+ * asked of the stock job. The caller took lockPaths for the same targets before it locked or
+ * wrote anything. Answers the ids of the stocks retired. Shared by the targets service and an
+ * unsave that takes a word out of a target (final review M2).
+ */
+export async function restockAfterTargetChange(
+  repos: Pick<Repos, 'session' | 'jobs'>,
+  enrollmentId: string,
+  targetIds: readonly string[],
+): Promise<string[]> {
+  const retired: string[] = [];
+  for (const path of [null, ...[...new Set(targetIds)].sort()]) {
+    const { stock } = await repos.session.findOpen(enrollmentId, path);
+    if (stock?.source === 'list' && (await repos.session.retireStock(stock.id))) retired.push(stock.id);
+    await requestStock(repos, { enrollment_id: enrollmentId, reason: 'target', ...pathPayload(path) });
+  }
   return retired;
 }
 
-/** Phase 53 (ruling R-D12b). Once the change committed: the stock it retired, if any. */
-export function logTargetRetired(logger: Logger, enrollmentId: string, sessionId: string | null): void {
-  if (sessionId !== null) {
+/** Phase 53 (ruling R-D12b). Once the change committed: each stock it retired. */
+export function logTargetRetired(logger: Logger, enrollmentId: string, sessionIds: readonly string[]): void {
+  for (const sessionId of sessionIds) {
     logger.info({ event: 'session_retired', enrollment_id: enrollmentId, session_id: sessionId, reason: 'target_changed' });
   }
 }

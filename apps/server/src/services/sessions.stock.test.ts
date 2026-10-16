@@ -17,9 +17,7 @@ import {
 import { testRng } from '../../tests/support/testRng';
 import { PREPARE_SESSION, STOCK_SESSION } from '../domain/jobs';
 import type { SessionSummary } from '../domain/session';
-import type { TargetSplit } from '../domain/targetSession';
-import type { TargetKind } from '../domain/targets';
-import { NoSavedWords, SessionNotFound, SessionNotReady, SessionOpen } from '../errors';
+import { NoSavedWords, SessionNotFound, SessionNotReady, SessionOpen, TargetClosed } from '../errors';
 import type { DictRepo } from '../repo/dictionary';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GlossFamiliesRepo } from '../repo/glossFamilies';
@@ -69,6 +67,7 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
         lockNextSession: async (enrollmentId) => {
           locked.push(enrollmentId);
         },
+        findNewestDevices: async () => undefined,
         insertPreparingSession: async (...args) => {
           inserted.push(args);
           return 's_new';
@@ -82,7 +81,7 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
         ...session,
       }),
       vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => SAVED, countEntries: async () => SAVED.length, markKnown: async () => {} }),
-      memory: stub<MemoryRepo>({ findRows: async () => [] }),
+      memory: stub<MemoryRepo>({ findRows: async () => [], findEnrollmentRows: async () => [] }),
       progress: stub<ProgressRepo>({ findRows: async () => [] }),
       glossFamilies: stub<GlossFamiliesRepo>({ load: async () => [] }),
       dict: stub<DictRepo>({
@@ -117,7 +116,7 @@ describe('stockSession (spec D3, D4)', () => {
   it('builds a stock beside the started session, asking its words last, for the device the start named', async () => {
     const asked: string[] = [];
     const { service, jobs, logger, inserted } = world({
-      findOpen: async () => ({ started: summary('s_started', 'ready') }),
+      findOpen: async (_enrollmentId, path) => (path === null ? { started: summary('s_started', 'ready') } : {}),
       findLatest: async () => summary('s_started', 'ready'),
       findSessionGlosses: async (sessionId) => {
         asked.push(sessionId);
@@ -130,7 +129,7 @@ describe('stockSession (spec D3, D4)', () => {
 
     expect(asked).toEqual(['s_started']);
     expect(pickedGlosses(jobs)).toEqual(['g_b', 'g_a']);
-    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY]]);
+    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY, null]]);
     expect(jobs.enqueued.find((job) => job.name === PREPARE_SESSION)?.data).toMatchObject({
       session_id: 's_new',
       listening: true,
@@ -146,7 +145,7 @@ describe('stockSession (spec D3, D4)', () => {
       findNewestDevices: async () => ({ listening: false, speaking: true }),
     });
     await service.stockSession({ enrollment_id: E, reason: 'complete' });
-    expect(inserted).toEqual([['u1', E, { listening: false, speaking: true }, TODAY]]);
+    expect(inserted).toEqual([['u1', E, { listening: false, speaking: true }, TODAY, null]]);
   });
 
   it.each([
@@ -210,7 +209,7 @@ describe('createNextSession (spec D5)', () => {
       source: 'list',
       created: true,
     });
-    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY]]);
+    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY, null]]);
     expect(eventsOf(logger, 'session_stocked')).toEqual([{ event: 'session_stocked', enrollment_id: E, session_id: 's_new', reason: 'create' }]);
   });
 
@@ -224,7 +223,7 @@ describe('createNextSession (spec D5)', () => {
 });
 
 describe('startSession (spec D2)', () => {
-  const state = (status: 'preparing' | 'ready' | 'completed') => ({ id: 's1', userId: 'u1', enrollmentId: E, status, source: 'list' as const });
+  const state = (status: 'preparing' | 'ready' | 'completed') => ({ id: 's1', userId: 'u1', enrollmentId: E, status, source: 'list' as const, targetId: null });
 
   it('starts a ready session and asks for the next one in stock, built for this device', async () => {
     const { service, jobs, logger } = world({ findEnrollmentId: async () => E, findState: async () => state('ready'), markStarted: async () => true });
@@ -265,7 +264,7 @@ describe('currentSession (spec D6, D8)', () => {
 
   it('offers the stock when no session is started, and logs how it found it', async () => {
     const { service, logger } = world({ findOpen: async () => ({ stock: summary('s_stock', 'preparing') }), findLatest: async () => summary('s_stock', 'preparing') });
-    expect(await service.currentSession('u1', E)).toEqual({ current: summary('s_stock', 'preparing'), nextSource: 'list', savedCount: 2 });
+    expect(await service.currentSession('u1', E)).toEqual({ current: summary('s_stock', 'preparing'), nextSource: 'list', savedCount: 2, dueCount: 0 });
     expect(eventsOf(logger, 'session_offered')).toEqual([{ event: 'session_offered', enrollment_id: E, session_id: 's_stock', status: 'preparing' }]);
   });
 
@@ -287,55 +286,27 @@ describe('currentSession (spec D6, D8)', () => {
   });
 });
 
-// Phase 53 (spec D6, D8, D12, ruling R-D12). A stock serves the learner's targets and
-// records the split it was chosen with. One chosen on an earlier learner day is replaced
-// where home learns of it, the home read and create, when today's split differs from the
-// one it recorded; never at start.
+// Phase 57 (spec D1, D2, D10, ADR 0014). Every session belongs to a path: the main path, which
+// asks saved words in no active target, or a target's. The target paths' own choice, its stale
+// check and its records are tests/integration/services/sessions.targets.test.ts'.
 
 const YESTERDAY = '2026-10-11';
 const NO_DEVICES = { listening: false, speaking: false };
 
-const activeTarget = (id: string, kind: TargetKind, dueOn: string, glossIds: string[]) => ({
+const target = (id: string, dueOn: string, glossIds: string[], endedAt: Date | null = null) => ({
   id,
   enrollmentId: E,
-  kind,
+  kind: 'exam' as const,
   dueOn,
   createdAt: new Date('2026-10-01T09:00:00Z'),
-  endedAt: null,
+  endedAt,
   glossIds,
 });
-/** On TODAY, the exam's eve, which takes every slot (spec D5), and a homework a week off,
- *  not ready. The exam's one word is g_b, saved before g_a. */
-const EXAM = activeTarget('t_exam', 'exam', '2026-10-13', ['g_b']);
-const HOMEWORK = activeTarget('t_homework', 'homework', '2026-10-20', ['g_a']);
-const row = (targetId: string, over: Partial<TargetSplit> = {}): TargetSplit => ({
-  targetId,
-  wish: 10,
-  slots: 10,
-  picked: 1,
-  reason: 'not_ready',
-  daysLeft: 1,
-  readyCount: 0,
-  wordCount: 1,
-  ...over,
-});
-/** TODAY's split of EXAM and HOMEWORK. The exam's eve leaves the homework no slot; the nine its
- *  one word cannot fill pass on, so the homework's word is picked all the same. */
-const TODAYS_SPLIT = [row('t_exam', { reason: 'exclusive' }), row('t_homework', { slots: 0, daysLeft: 8 })];
-/** What the stock chosen YESTERDAY recorded: the exam's run-up beside the homework, half each. */
-const YESTERDAYS_SPLIT = [row('t_exam', { slots: 5, reason: 'run_up', daysLeft: 2 }), row('t_homework', { slots: 5, daysLeft: 9 })];
-
-/** A learner with `active` targets today, whose stock s_stock recorded `recorded`. */
-const withTargets = (active = [EXAM, HOMEWORK], recorded: TargetSplit[] = YESTERDAYS_SPLIT) =>
-  createFakeTargetRepo({
-    listActive: async () => active,
-    findSessionSplit: async (sessionId) => (sessionId === 's_stock' ? recorded : []),
-  });
 
 /** s_stock in stock, unstarted and ready, its words chosen on `chosenOn` for a device that listens. */
-const stockChosenOn = (chosenOn: string | null, source: SessionSummary['source'] = 'list'): Partial<SessionRepo> => ({
-  findOpen: async () => ({ stock: summary('s_stock', 'ready', source) }),
-  findLatest: async () => summary('s_stock', 'ready', source),
+const stockChosenOn = (chosenOn: string | null): Partial<SessionRepo> => ({
+  findOpen: async () => ({ stock: summary('s_stock', 'ready') }),
+  findLatest: async () => summary('s_stock', 'ready'),
   findStockChoice: async () => ({ chosenOn, listening: true, speaking: false }),
 });
 /** Nothing open, after a session that ended: the stock job and create both build. */
@@ -347,203 +318,129 @@ const nothingOpen: Partial<SessionRepo> = {
 
 const writes = (target: FakeTargetRepo, method: string) => target.written.filter((write) => write.method === method).map((write) => write.args);
 
-describe('a stock serves the targets (spec D6, D8)', () => {
-  it('with no active target, chooses as before and records no split', async () => {
-    const target = createFakeTargetRepo();
-    const { service, jobs, inserted } = world(nothingOpen, { target });
+describe('the main path (spec D1, D2)', () => {
+  it('with no active target, chooses as before on the main path and records no target', async () => {
+    const targets = createFakeTargetRepo();
+    const paths: unknown[][] = [];
+    const { service, jobs, inserted, locked } = world(
+      {
+        ...nothingOpen,
+        findOpen: async (...args) => {
+          paths.push(args);
+          return {};
+        },
+      },
+      { target: targets },
+    );
     await service.stockSession({ enrollment_id: E, reason: 'complete' });
     // Newest new words first (phase 35 D5), as chooseWords alone picks them.
     expect(pickedGlosses(jobs)).toEqual(['g_a', 'g_b']);
-    expect(inserted).toEqual([['u1', E, NO_DEVICES, TODAY]]);
-    expect(target.written).toEqual([]);
+    expect(inserted).toEqual([['u1', E, NO_DEVICES, TODAY, null]]);
+    expect(locked).toEqual([E]);
+    expect(paths.every(([, path]) => path === null)).toBe(true);
+    expect(targets.written).toEqual([]);
+    expect(jobs.enqueued.find((job) => job.name === PREPARE_SESSION)?.data).not.toHaveProperty('target');
   });
 
-  it('serves each target active on the learner day and records one split row per target', async () => {
+  it("asks no word an active target holds, on the learner's day", async () => {
     const asked: unknown[][] = [];
-    const target = createFakeTargetRepo({
+    const targets = createFakeTargetRepo({
       listActive: async (...args) => {
         asked.push(args);
-        return [EXAM, HOMEWORK];
+        return [target('t_exam', '2026-10-13', ['g_b'])];
       },
     });
-    const { service, jobs, inserted } = world(nothingOpen, { target });
+    const { service, jobs } = world(nothingOpen, { target: targets });
     await service.stockSession({ enrollment_id: E, reason: 'complete' });
     expect(asked).toEqual([[E, TODAY]]);
-    // The exam's word first, though saved before the homework's: its eve is its own.
-    expect(pickedGlosses(jobs)).toEqual(['g_b', 'g_a']);
-    expect(inserted).toEqual([['u1', E, NO_DEVICES, TODAY]]);
-    expect(writes(target, 'insertSessionSplit')).toEqual([['s_new', TODAYS_SPLIT]]);
+    expect(pickedGlosses(jobs)).toEqual(['g_a']);
+    expect(writes(targets, 'insertSessionTarget')).toEqual([]);
+  });
+
+  it('has nothing to ask when every saved word is in an active target', async () => {
+    const targets = createFakeTargetRepo({ listActive: async () => [target('t_exam', '2026-10-13', ['g_a', 'g_b'])] });
+    const { service, logger } = world(nothingOpen, { target: targets });
+    await service.stockSession({ enrollment_id: E, reason: 'complete' });
+    expect(eventsOf(logger, 'session_stock_skipped')).toEqual([{ event: 'session_stock_skipped', enrollment_id: E, reason: 'complete', why: 'no_saved_words' }]);
   });
 
   it.each([
     ['the stock job', (service: SessionService) => service.stockSession({ enrollment_id: E, reason: 'complete' })],
     ['create', (service: SessionService) => service.createNextSession('u1', E, NO_DEVICES)],
-  ])('%s records each target whose date has come as ended on it, naming the new session', async (_, run) => {
+  ])('%s records each target whose date has passed as ended on it, naming the new session, and retires its stock', async (_, run) => {
     const asked: unknown[][] = [];
-    const ended = (id: string, dueOn: string) => ({
-      id,
-      enrollmentId: E,
-      kind: 'exam' as const,
-      dueOn,
-      createdAt: new Date('2026-10-01T09:00:00Z'),
-      endedAt: null,
-    });
-    const target = createFakeTargetRepo({
+    const ended = (id: string, dueOn: string) => ({ ...target(id, dueOn, []), glossIds: undefined });
+    const targets = createFakeTargetRepo({
       listEndedUnrecorded: async (...args) => {
         asked.push(args);
-        return [ended('t_older', '2026-10-05'), ended('t_today', TODAY)];
+        return [ended('t_older', '2026-10-05'), ended('t_yesterday', YESTERDAY)];
       },
     });
-    const { service, logger } = world(nothingOpen, { target });
+    const { service, logger, retired } = world(
+      {
+        ...nothingOpen,
+        findOpen: async (_enrollmentId, path) => (path === 't_yesterday' ? { stock: summary('s_left', 'ready') } : {}),
+      },
+      { target: targets },
+    );
     await run(service);
     expect(asked).toEqual([[E, TODAY]]);
-    expect(writes(target, 'insertEvent')).toEqual([
+    expect(writes(targets, 'insertEvent')).toEqual([
       [{ targetId: 't_older', kind: 'ended_on_date', before: null, after: { due_on: '2026-10-05' }, actorUserId: null, sessionId: 's_new' }],
-      [{ targetId: 't_today', kind: 'ended_on_date', before: null, after: { due_on: TODAY }, actorUserId: null, sessionId: 's_new' }],
+      [{ targetId: 't_yesterday', kind: 'ended_on_date', before: null, after: { due_on: YESTERDAY }, actorUserId: null, sessionId: 's_new' }],
     ]);
+    expect(retired).toEqual(['s_left']);
     expect(eventsOf(logger, 'target_ended')).toEqual([
       { event: 'target_ended', target_id: 't_older', how: 'on_date' },
-      { event: 'target_ended', target_id: 't_today', how: 'on_date' },
+      { event: 'target_ended', target_id: 't_yesterday', how: 'on_date' },
     ]);
-  });
-});
-
-describe('a stock chosen on an earlier day (spec D12, ruling R-D12)', () => {
-  it("is replaced on the home read when today's split differs from the one it recorded, built for the stock's device", async () => {
-    const target = withTargets();
-    const { service, logger, inserted, retired, locked } = world(stockChosenOn(YESTERDAY), { target });
-    expect(await service.currentSession('u1', E)).toEqual({
-      current: { id: 's_new', status: 'preparing', source: 'list', answered: 0, total: 0 },
-      nextSource: 'list',
-      savedCount: 2,
-    });
-    expect(locked).toEqual([E]);
-    expect(retired).toEqual(['s_stock']);
-    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY]]);
-    expect(writes(target, 'insertSessionSplit')).toEqual([['s_new', TODAYS_SPLIT]]);
-    expect(eventsOf(logger, 'session_retired')).toEqual([
-      { event: 'session_retired', enrollment_id: E, session_id: 's_stock', reason: 'stale_split' },
-    ]);
-    expect(eventsOf(logger, 'session_stocked')).toEqual([
-      { event: 'session_stocked', enrollment_id: E, session_id: 's_new', reason: 'stale_split' },
-    ]);
-    expect(eventsOf(logger, 'session_offered')).toEqual([
-      { event: 'session_offered', enrollment_id: E, session_id: 's_new', status: 'preparing' },
-    ]);
+    expect(eventsOf(logger, 'session_retired')).toEqual([{ event: 'session_retired', enrollment_id: E, session_id: 's_left', reason: 'target_ended' }]);
   });
 
-  it('is played as it is when today gives each target the slots it recorded (phase 43 R5)', async () => {
-    // A day nearer the homework's date, still not ready: the same ten slots.
-    const target = withTargets([HOMEWORK], [row('t_homework', { daysLeft: 9 })]);
-    const { service, logger, inserted, retired } = world(stockChosenOn(YESTERDAY), { target });
-    expect((await service.currentSession('u1', E)).current?.id).toBe('s_stock');
-    expect(retired).toEqual([]);
-    expect(inserted).toEqual([]);
-    expect(target.written).toEqual([]);
-    expect(eventsOf(logger, 'session_retired')).toEqual([]);
-  });
-
-  it('is played as it is with no target active and none recorded, choosing nothing and taking no lock', async () => {
-    // The list is not even read: listSavedGlosses is not stubbed here. Nor is create's lock
-    // taken (final review item 16): the home read of a learner with no target stays a read.
+  it('plays a stock chosen on an earlier day as it is (phase 43 R5), reading nothing and taking no lock', async () => {
+    // The list is not even read: listSavedGlosses is not stubbed here, and the words due are
+    // counted from memory alone. Nor is a lock taken: the home read of the main path stays a read.
     const { service, retired, locked } = world(stockChosenOn(YESTERDAY), {
+      target: createFakeTargetRepo({ listActive: async () => [target('t_exam', '2026-10-13', ['g_b'])] }),
       vocabulary: stub<VocabularyRepo>({ countEntries: async () => SAVED.length }),
     });
     expect((await service.currentSession('u1', E)).current?.id).toBe('s_stock');
     expect(retired).toEqual([]);
     expect(locked).toEqual([]);
   });
+});
 
-  // Final review item 16: either half is enough for the home read to take the lock and check.
-  it.each([
-    ['it recorded a split and no target is active today: its target ended', withTargets([], YESTERDAYS_SPLIT)],
-    ['a target is active today and it recorded no split', withTargets([HOMEWORK], [])],
-  ])('is replaced on the home read when %s', async (_, target) => {
-    const { service, retired, locked } = world(stockChosenOn(YESTERDAY), { target });
-    expect((await service.currentSession('u1', E)).current?.id).toBe('s_new');
-    expect(locked).toEqual([E]);
-    expect(retired).toEqual(['s_stock']);
-  });
+describe("a target's path (spec D1, D2, D10)", () => {
+  const ownState = { id: 's1', userId: 'u1', enrollmentId: E, status: 'ready' as const, source: 'list' as const, targetId: 't_exam' };
 
-  it("reads the stock's day and split once on the home read: under the lock, the same stock's are not read again", async () => {
-    const asked: string[] = [];
-    const target = withTargets();
-    const findSessionSplit = target.findSessionSplit;
-    target.findSessionSplit = async (sessionId) => {
-      asked.push(`findSessionSplit ${sessionId}`);
-      return findSessionSplit(sessionId);
-    };
-    const { service } = world(
+  it("starts a target's session and asks for that path's next stock only, under its own key", async () => {
+    const { service, jobs } = world({ findEnrollmentId: async () => E, findState: async () => ownState, markStarted: async () => true });
+    await service.startSession('u1', 's1', { listening: true, speaking: false });
+    expect(jobs.enqueued).toEqual([
       {
-        ...stockChosenOn(YESTERDAY),
-        findStockChoice: async (sessionId) => {
-          asked.push(`findStockChoice ${sessionId}`);
-          return { chosenOn: YESTERDAY, listening: true, speaking: false };
-        },
+        name: STOCK_SESSION,
+        data: { enrollment_id: E, reason: 'start', listening: true, speaking: false, target_id: 't_exam' },
+        options: { singletonKey: `${E}:t_exam` },
       },
-      { target },
-    );
-    expect((await service.currentSession('u1', E)).current?.id).toBe('s_new');
-    expect(asked).toEqual(['findStockChoice s_stock', 'findSessionSplit s_stock']);
+    ]);
   });
 
-  it('is played as it is when its replacement cannot be built: no word chosen today has a rendering (final review item 17)', async () => {
-    const dict = stub<DictRepo>({ findLexemeForms: async () => [], findGlossRenderings: async () => [] });
-    const { service, logger, inserted, retired, locked } = world(stockChosenOn(YESTERDAY), { target: withTargets(), dict });
-    expect((await service.currentSession('u1', E)).current?.id).toBe('s_stock');
-    expect(locked).toEqual([E]);
-    expect(retired).toEqual([]);
-    expect(inserted).toEqual([]);
-    expect(eventsOf(logger, 'session_retired')).toEqual([]);
-  });
-
-  // Every stock here says it was chosen yesterday, and today's split differs from the one it
-  // recorded: only the case named keeps it.
   it.each([
-    ['a session is started: home shows it, and the stock beside it waits', { findOpen: async () => ({ started: summary('s_started', 'ready'), stock: summary('s_stock', 'ready') }) }, 's_started'],
-    ['it is the seed', stockChosenOn(YESTERDAY, 'seed'), 's_stock'],
-    ['its day was not recorded (chosen before phase 53)', stockChosenOn(null), 's_stock'],
-    ['it was chosen today', stockChosenOn(TODAY), 's_stock'],
-  ])('is never replaced when %s', async (_, session, current) => {
-    const { service, inserted, retired, locked } = world({ ...stockChosenOn(YESTERDAY), ...session }, { target: withTargets() });
-    expect((await service.currentSession('u1', E)).current?.id).toBe(current);
-    expect(retired).toEqual([]);
-    expect(inserted).toEqual([]);
-    expect(locked).toEqual([]);
-  });
-
-  it('builds nothing when a start took the stock first', async () => {
-    const { service, inserted, logger } = world({ ...stockChosenOn(YESTERDAY), retireStock: async () => false }, { target: withTargets() });
-    await service.currentSession('u1', E);
-    expect(inserted).toEqual([]);
-    expect(eventsOf(logger, 'session_retired')).toEqual([]);
-  });
-
-  it('is replaced by create too, before it is answered', async () => {
-    const target = withTargets();
-    const { service, logger, inserted, retired, locked } = world(stockChosenOn(YESTERDAY), { target });
-    expect(await service.createNextSession('u1', E, { listening: false, speaking: true })).toEqual({
-      sessionId: 's_new',
-      status: 'preparing',
-      source: 'list',
-      created: true,
-    });
+    ['ended early', target('t_exam', '2026-10-13', ['g_b'], new Date('2026-10-11T09:00:00Z'))],
+    ['past its date', target('t_exam', YESTERDAY, ['g_b'])],
+  ])('builds no stock for a target %s', async (_, found) => {
+    const { service, jobs, logger, locked } = world(nothingOpen, { target: createFakeTargetRepo({ findTarget: async () => found }) });
+    await service.stockSession({ enrollment_id: E, reason: 'target', target_id: 't_exam' });
+    expect(jobs.enqueued).toEqual([]);
     expect(locked).toEqual([E]);
-    expect(retired).toEqual(['s_stock']);
-    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY]]);
-    expect(eventsOf(logger, 'session_retired')).toEqual([
-      { event: 'session_retired', enrollment_id: E, session_id: 's_stock', reason: 'stale_split' },
-    ]);
-    expect(eventsOf(logger, 'session_stocked')).toEqual([
-      { event: 'session_stocked', enrollment_id: E, session_id: 's_new', reason: 'stale_split' },
+    expect(eventsOf(logger, 'session_stock_skipped')).toEqual([
+      { event: 'session_stock_skipped', enrollment_id: E, reason: 'target', why: 'target_closed', target_id: 't_exam' },
     ]);
   });
 
-  it('is answered by create as it is when the split is unchanged', async () => {
-    const target = withTargets([HOMEWORK], [row('t_homework', { daysLeft: 9 })]);
-    const { service, retired, inserted } = world(stockChosenOn(YESTERDAY), { target });
-    expect(await service.createNextSession('u1', E, NO_DEVICES)).toEqual({ sessionId: 's_stock', status: 'ready', source: 'list', created: false });
-    expect(retired).toEqual([]);
-    expect(inserted).toEqual([]);
+  it('refuses a create for a target past its date', async () => {
+    const { service, locked } = world(nothingOpen, { target: createFakeTargetRepo({ findTarget: async () => target('t_exam', YESTERDAY, ['g_b']) }) });
+    await expect(service.createNextSession('u1', E, NO_DEVICES, 't_exam')).rejects.toBeInstanceOf(TargetClosed);
+    expect(locked).toEqual([]);
   });
 });

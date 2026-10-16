@@ -18,6 +18,7 @@ import type {
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   CreateUserRequestSchema,
+  CurrentSessionQuerySchema,
   CurrentSessionResponseSchema,
   CurrentSessionSchema,
   EnrollmentSchema,
@@ -218,6 +219,7 @@ export type LlmCheck = z.infer<typeof LlmCheckSchema>;
 export type SessionView = z.infer<typeof SessionViewSchema>;
 export type PendingRetry = z.infer<typeof PendingRetrySchema>;
 export type CurrentSession = z.infer<typeof CurrentSessionSchema>;
+export type CurrentSessionQuery = z.infer<typeof CurrentSessionQuerySchema>;
 export type CurrentSessionResponse = z.infer<typeof CurrentSessionResponseSchema>;
 export type KnowledgeDimension = z.infer<typeof KnowledgeDimensionSchema>;
 export type GlossProgress = z.infer<typeof GlossProgressSchema>;

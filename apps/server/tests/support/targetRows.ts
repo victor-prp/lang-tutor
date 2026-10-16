@@ -1,8 +1,7 @@
 import { asc, eq, sql } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
-import { sessions, targetEvents } from '../../src/db/schema';
-import type { TargetSplit } from '../../src/domain/targetSession';
+import { sessions, sessionTargets, targetEvents } from '../../src/db/schema';
 import type { TargetKind } from '../../src/domain/targets';
 import { createTargetRepo } from '../../src/repo/targets';
 import { withTx } from './withTx';
@@ -26,9 +25,27 @@ export function seedTarget(
   });
 }
 
-/** The split a session was chosen with (spec D8), one row per target it served. */
-export function readSessionSplit(db: Db, sessionId: string): Promise<TargetSplit[]> {
-  return withTx(db, (tx) => createTargetRepo(tx).findSessionSplit(sessionId));
+/** Phase 57 (spec D2, D9). What each target path's stock recorded of its target's day, one row
+ *  per target (a target path's stock records its own only), without the phase 53 columns. */
+export function readSessionTargets(db: Db, sessionId: string) {
+  return db
+    .select({
+      targetId: sessionTargets.targetId,
+      daysLeft: sessionTargets.daysLeft,
+      capHalves: sessionTargets.capHalves,
+      readinessPct: sessionTargets.readinessPct,
+      readyCount: sessionTargets.readyCount,
+      wordCount: sessionTargets.wordCount,
+      fsrsReadyCount: sessionTargets.fsrsReadyCount,
+      owedGlossIds: sessionTargets.owedGlossIds,
+      wish: sessionTargets.wish,
+      slots: sessionTargets.slots,
+      picked: sessionTargets.picked,
+      reason: sessionTargets.reason,
+    })
+    .from(sessionTargets)
+    .where(eq(sessionTargets.sessionId, sessionId))
+    .orderBy(asc(sessionTargets.targetId));
 }
 
 /** A target's log (spec D8), oldest first. */
@@ -47,10 +64,10 @@ export function readTargetEvents(db: Db, targetId: string) {
 }
 
 /** Spec D12. What became of a stock: its status, the day it counted for (none for one
- *  retired) and the learner day its words were chosen on. */
+ *  retired), the learner day its words were chosen on and (phase 57) its path. */
 export async function readStockRow(db: Db, sessionId: string) {
   const [row] = await db
-    .select({ status: sessions.status, practiceDay: sessions.practiceDay, chosenOn: sessions.chosenOn })
+    .select({ status: sessions.status, practiceDay: sessions.practiceDay, chosenOn: sessions.chosenOn, targetId: sessions.targetId })
     .from(sessions)
     .where(eq(sessions.id, sessionId));
   return row;
@@ -102,4 +119,18 @@ export async function spoilTargetSkills(db: Db): Promise<void> {
     insert into target_skill_events (target_id, gloss_id, dimension, session_id, before, after, why)
     select target_id, gloss_id, 'spoken_productive', gen_random_uuid(), 0, 20, 'recall' from target_words`);
   await db.execute(sql`update target_words set started_on = '2000-01-01'`);
+}
+
+/** Phase 57 (spec D3, D6). A target word as sessions would have left it: started on `startedOn`
+ *  with these skill values in half-points, written directly. */
+export async function setTargetWord(
+  db: Db,
+  input: { targetId: string; glossId: string; startedOn: string; halves: Partial<Record<string, number>> },
+): Promise<void> {
+  await db.execute(sql`update target_words set started_on = ${input.startedOn}::date where target_id = ${input.targetId} and gloss_id = ${input.glossId}`);
+  for (const [dimension, halves] of Object.entries(input.halves)) {
+    await db.execute(sql`
+      insert into target_skills (target_id, gloss_id, dimension, halves) values (${input.targetId}, ${input.glossId}, ${dimension}, ${halves!})
+      on conflict (target_id, gloss_id, dimension) do update set halves = excluded.halves`);
+  }
 }

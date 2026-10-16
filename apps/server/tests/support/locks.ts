@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { Db, Tx } from '../../src/db/client';
 import { createDictRepo } from '../../src/repo/dictionary';
 import { createGlossRepo } from '../../src/repo/glosses';
+import { createProgressRepo } from '../../src/repo/progress';
 
 /**
  * Phase 31. Runs `work` in a transaction that stays open until `release()`, so a
@@ -76,4 +77,12 @@ export async function waitForBlockedQuery(db: Db, timeoutMs = 10_000): Promise<v
     if (Date.now() > deadline) throw new Error(`no query blocked on a lock within ${timeoutMs} ms`);
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+}
+
+/** Phase 57 (rulings T4-i, T4-k). An enrollment's progress lock held open: a session end, paused
+ *  before it reads its evidence. */
+export function holdProgressLock(db: Db, enrollmentId: string) {
+  return holdOpen(db, async (tx) => {
+    await createProgressRepo(tx).lockEnrollment(enrollmentId);
+  });
 }

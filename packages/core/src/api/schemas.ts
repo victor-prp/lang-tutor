@@ -369,6 +369,9 @@ export const CreateSessionRequestSchema = z.object({
   // Phase 25 (spec D4). Whether the device can record, so the session may hold
   // speaking cards. Absent means no.
   speaking: z.boolean().optional(),
+  // Phase 57 (spec D1, D13). The path the session is for: a target of this enrollment,
+  // whose own words it asks. Absent means the main path ("My words"), as before.
+  target_id: z.string().min(1).optional(),
 });
 
 // Phase 19. Creating a session no longer returns its first question: a list
@@ -541,10 +544,20 @@ export const CurrentSessionSchema = z.object({
   total: z.number().int(),
 });
 
+// Phase 57 (spec D1, D13). Which path's session: a target of the enrollment. Absent means
+// the main path ("My words"), as before.
+export const CurrentSessionQuerySchema = z.object({
+  target_id: z.string().min(1).optional(),
+});
+
 export const CurrentSessionResponseSchema = z.object({
   current: CurrentSessionSchema.nullable(),
   next_source: SessionSourceSchema,
   saved_count: z.number().int(),
+  // Phase 57 (spec D11). How many of the path's words wait: on the main path, those due for
+  // review (their weakest skill's recall today at or below the picker's bar); on a target's,
+  // those with work owed today.
+  due_count: z.number().int(),
 });
 
 export const SkipSessionResponseSchema = z.object({

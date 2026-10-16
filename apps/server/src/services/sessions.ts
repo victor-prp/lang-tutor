@@ -5,6 +5,7 @@ import {
   MAX_JUDGED_TEXT,
   evaluate,
   gatesScript,
+  gradesFor,
   isJudged,
   isSpeaking,
   wrongScript,
@@ -15,7 +16,9 @@ import {
   spokenVerdict,
   takesHelp,
   type AnswerInput,
+  type Dimension,
   type JudgedQuestion,
+  type MemoryState,
   type QuestionType,
   type SpeakingQuestion,
 } from '@lang-tutor/core/domain';
@@ -34,8 +37,8 @@ import {
   type CheckFinding,
   type CheckItem,
 } from '../domain/check';
-import { liveDimensions } from '../domain/choose';
-import { NEW_PER_SESSION } from '../domain/chooseConstants';
+import { chooseWords, dueGlosses, liveDimensions, type ChoiceInput } from '../domain/choose';
+import { DAY_NEW_CAP, NEW_PER_SESSION } from '../domain/chooseConstants';
 import { findGap } from '../domain/cloze';
 import {
   buildContextPrompt,
@@ -85,7 +88,7 @@ import { BOARD_SIZE, planCards } from '../domain/plan';
 import { dayState, withSessionInFlight } from '../domain/today';
 import { applySession } from '../domain/memoryUpdate';
 import { evaluateSession, progressChanges, type ProgressChange } from '../domain/progress';
-import type { Devices, SessionRecord, SessionSummary } from '../domain/session';
+import type { Devices, Path, SavedGloss, SessionRecord, SessionSummary } from '../domain/session';
 import {
   SESSION_LENGTH,
   askableRenderings,
@@ -102,7 +105,9 @@ import { MAX_AVOID } from '../domain/sentences';
 import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
-import { chooseWithTargets, splitChanged, targetSplit, type TargetSessionInput, type TargetSplit } from '../domain/targetSession';
+import { targetDay } from '../domain/targetDay';
+import { chooseTargetPicks, owedWords, targetMode, type TargetPickInput } from '../domain/targetPicker';
+import { activeOn, readinessOf, recallOnDue } from '../domain/targets';
 import { targetSessionWrite } from '../domain/targetSkills';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
@@ -118,15 +123,18 @@ import {
   SessionNotReady,
   SessionNotSkippable,
   SessionOpen,
+  TargetClosed,
+  TargetNotFound,
   WrongScript,
 } from '../errors';
 import type { Logger } from '../logger';
 import { authorizeEnrollment } from './access';
-import { learnerDay } from './learnerDay';
+import { learnerDay, learnerDays } from './learnerDay';
 import type { LlmClient, ModelCallRecord } from './llm';
 import type { SpeechTranscriber } from './speech';
-import { requestStock } from './stock';
+import { pathPayload, requestStock } from './stock';
 import type { SessionEvidence } from '../repo/progress';
+import type { SessionTargetRow, TargetRow } from '../repo/targets';
 import type { Repos, Transaction } from './transaction';
 
 export type { Transaction } from './transaction';
@@ -172,16 +180,17 @@ export type JudgedResult = { verdict: TypedVerdict; session: SessionResult };
 /** Phase 43 (spec D5). The session create answers, and whether this call made it. */
 type NextSession = { sessionId: string; status: SessionStatus; source: SessionSource; created: boolean };
 
-/** Phase 53 (spec D8). A stock written: its session, and the targets its choice found ended
- *  on their date, whose events name it. Logged once its transaction commits. */
-type Stocked = { sessionId: string; endedOnDate: string[] };
+/** Phase 53 (spec D8). A stock written: its session, its path (phase 57), the targets its
+ *  choice found ended on their date, whose events name it, and the stocks those left on their
+ *  paths, retired. Logged once its transaction commits. */
+type Stocked = { sessionId: string; path: Path; endedOnDate: string[]; endedStocks: string[] };
 
 /** Phase 53 (ruling R-D12). A stale stock retired, and the stock built in its place. */
 type Replaced = Stocked & { retired: string };
 
 /** Phase 53 (ruling R-D12). What the cheap half of the stale check read of one stock: the
- *  learner's today, the devices the stock was built for, and the split it recorded. */
-type MaybeStale = { stockId: string; today: string; devices: Devices; recorded: TargetSplit[] };
+ *  learner's today and the devices the stock was built for. */
+type MaybeStale = { stockId: string; today: string; devices: Devices };
 
 /**
  * Phase 20. Runs the progress rule over an ended session's answers, inside the
@@ -198,9 +207,13 @@ type MaybeStale = { stockId: string; today: string; devices: Devices; recorded: 
  * is read or wholly after the progress is written: never between.
  *
  * Phase 57 (spec D4). The target skills are written here too, in the same
- * transaction: an ended session with part of its write would be as wrong.
+ * transaction: an ended session with part of its write would be as wrong. Each path has a
+ * started session of its own (ADR 0014), so two of an enrollment's sessions can end at once:
+ * the enrollment's progress lock is taken first (rulings T4-i, T4-k), so one end reads what
+ * the other wrote, and a word taken out of a target waits for it.
  */
-async function recordProgress(repos: Repos, sessionId: string): Promise<void> {
+async function recordProgress(repos: Repos, sessionId: string, enrollmentId: string): Promise<void> {
+  await repos.progress.lockEnrollment(enrollmentId);
   await repos.progress.lockSessionGlosses(sessionId);
   const evidence = await repos.progress.findSessionEvidence(sessionId);
   if (!evidence) return;
@@ -379,34 +392,52 @@ export function createSessionService({
   }
 
   /**
-   * Phase 53 (spec D6, D7, D12). What a stock's words are chosen from, read on the owner's
-   * learner day: the picker's input, with the targets active that day, and the families the
-   * choice refreshes. Null when the list is empty, before anything else is read. A stock and
-   * the stale check both read through here, so the split the check compares is the split a
-   * stock built now would record.
+   * Phase 57 (spec D1, D2, ADR 0014). The target a request names as its path: unknown, or
+   * another enrollment's, is TargetNotFound, and another learner's is refused first, by the
+   * same check its own enrollment would get (AccessDenied).
    */
-  async function readChoice(repos: Repos, enrolled: Enrollment, devices: Devices) {
+  async function pathTarget(repos: Repos, actorUserId: string, enrolled: Enrollment, targetId: string): Promise<TargetRow> {
+    const target = await repos.target.findTarget(targetId);
+    if (!target) throw new TargetNotFound(targetId);
+    if (target.enrollmentId !== enrolled.id) {
+      await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId: target.enrollmentId, permission: 'session.practice' });
+      throw new TargetNotFound(targetId);
+    }
+    return target;
+  }
+
+  /**
+   * Phase 35, 43, 53; phase 57 (spec D1): the main path's choice, read on the owner's learner
+   * day: the picker's input over the saved glosses in no target active that day, and the
+   * families the choice refreshes, which are every saved gloss's. Null when the path has no
+   * word, before anything else is read.
+   */
+  async function readMain(repos: Repos, enrolled: Enrollment, devices: Devices) {
     const { session, vocabulary, dict } = repos;
     const enrollmentId = enrolled.id;
-    const saved = await vocabulary.listSavedGlosses(enrollmentId);
+    const all = await vocabulary.listSavedGlosses(enrollmentId);
+    if (all.length === 0) return null;
+    const at = now();
+    const today = await learnerDay(repos, enrolled.user_id, at);
+    // Phase 57 (spec D1). A word leaves the main path while an active target holds it.
+    const held = new Set((await repos.target.listActive(enrollmentId, today)).flatMap((target) => target.glossIds));
+    const saved = all.filter((gloss) => !held.has(gloss.glossId));
     if (saved.length === 0) return null;
     // Phase 35 (spec D5, D10). The words, each with a dimension and a rung,
     // from what the learner knows: memory and levels, on the owner's day,
     // with what that day already asked and introduced. At most one gloss per
     // key, across headwords (phase 31 D18), is chooseWords' rule now.
-    const glossIds = saved.map((gloss) => gloss.glossId);
-    const at = now();
-    const today = await learnerDay(repos, enrolled.user_id, at);
+    const glossIds = all.map((gloss) => gloss.glossId);
     const memory = await repos.memory.findRows({ enrollmentId, glossIds });
     const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
     // Phase 39 (spec D4, D5). The families, derived from the dictionary and
     // memory with the session's live skills. Phase 46 (spec D3): known_at is the
     // gloss's own, family or not.
-    const forms = await dict.findLexemeForms({ lexemeIds: [...new Set(saved.map((gloss) => gloss.lexemeId))] });
+    const forms = await dict.findLexemeForms({ lexemeIds: [...new Set(all.map((gloss) => gloss.lexemeId))] });
     const formsOf = new Map<string, string[]>();
     for (const row of forms) formsOf.set(row.lexemeId, [...(formsOf.get(row.lexemeId) ?? []), row.form]);
     const stored = await repos.glossFamilies.load(enrollmentId);
-    const members = saved.map((gloss) => ({
+    const members = all.map((gloss) => ({
       glossId: gloss.glossId,
       lexemeId: gloss.lexemeId,
       lemma: gloss.lemma,
@@ -422,10 +453,10 @@ export function createSessionService({
     // Phase 37 (spec D1, D7). Today's answers leave the returns owed and the
     // words done for the day.
     const introduced = await session.findIntroducedOn(enrollmentId, today);
-    // Phase 43 (spec D4). Picked beside the started session, whose saved
+    // Phase 43 (spec D4). Picked beside the path's started session, whose saved
     // glosses count as answered today: the two ask different words while the
-    // list has others, and its first meetings are today's new words too.
-    const { started } = await session.findOpen(enrollmentId);
+    // path has others, and its first meetings are today's new words too.
+    const { started } = await session.findOpen(enrollmentId, null);
     const inFlight = started ? (await session.findSessionGlosses(started.id)).filter((glossId) => glossIds.includes(glossId)) : [];
     const met = new Set([...memory.map((row) => row.glossId), ...introduced]);
     const { steps, done, extraNew } = withSessionInFlight(
@@ -433,39 +464,149 @@ export function createSessionService({
       inFlight,
       met,
     );
-    // Phase 53 (spec D1, D7, ruling R-D4). The targets active on the day; whether each word
-    // can be said, as the families read it; and the words first met on the day, the session
-    // in flight's first meetings (extraNew's) among them.
-    const input: TargetSessionInput = {
-      choice: {
-        saved,
-        memory,
-        levels,
-        today,
-        steps,
-        done,
-        newToday: introduced.length + extraNew,
-        listening: devices.listening,
-        speaking: devices.speaking,
-        rng,
-        // Phase 54 (spec D2): a family's introduction keeps its new_meaning card, no ladder.
-        families: { familyOf: families.familyOf, waiting, introductions: new Set(families.introductions.keys()) },
-      },
-      targets: await repos.target.listActive(enrollmentId, today),
-      speakable: new Map(members.map((member) => [member.glossId, member.speakable])),
-      introducedToday: new Set([...introduced, ...inFlight.filter((glossId) => !met.has(glossId))]),
+    const choice: ChoiceInput = {
+      saved,
+      memory,
+      levels,
+      today,
+      steps,
+      done,
+      // Spec D8: every path's first meetings today count toward the day's cap.
+      newToday: introduced.length + extraNew,
+      listening: devices.listening,
+      speaking: devices.speaking,
+      rng,
+      // Phase 54 (spec D2): a family's introduction keeps its new_meaning card, no ladder.
+      families: { familyOf: families.familyOf, waiting, introductions: new Set(families.introductions.keys()) },
     };
-    return { at, today, saved, families, stored, input };
+    return { path: null, at, today, saved, families, stored, picks: chooseWords(choice) };
   }
-  type ChoiceRead = NonNullable<Awaited<ReturnType<typeof readChoice>>>;
 
   /**
-   * Phase 53 (spec D6, D8). A stock's words, chosen from `read`: the picks its preparation is
-   * given, in the order chosen, and the split they were chosen with. Null when no chosen
-   * gloss has a rendering to ask.
+   * Phase 57 (spec D5, D6, D9, rulings P4, T3-j). A target's day as its path reads it on
+   * `today`: its words (those still saved), each with the day it joined (learnerDays, from
+   * when it was added, ruling P4), the day it started and its live skills (speaking skipped
+   * for a word that cannot be said, phase 53 R9), its skills, the skills answered right today
+   * and whether its path was practised today. `words` are the target's saved words with
+   * their forms. Null for a target with no saved word.
+   */
+  async function readTargetDay(
+    repos: Repos,
+    enrolled: Enrollment,
+    target: TargetRow,
+    devices: Devices,
+    today: string,
+    saved: readonly { glossId: string; form: string }[],
+  ) {
+    const rows = await repos.target.listWords(target.id);
+    const formOf = new Map(saved.map((gloss) => [gloss.glossId, gloss.form]));
+    const words = rows.filter((row) => formOf.has(row.glossId));
+    if (words.length === 0) return null;
+    const [createdOn, ...addedOn] = await learnerDays(repos, enrolled.user_id, [
+      target.createdAt.getTime(),
+      ...words.map((word) => word.addedAt.getTime()),
+    ]);
+    const live = liveDimensions(devices.listening, devices.speaking);
+    const liveOf = (glossId: string) => (speakable(formOf.get(glossId)!) ? live : live.filter((dimension) => dimension !== 'spoken_productive'));
+    const glossIds = words.map((word) => word.glossId);
+    const skills = await repos.targetSkills.findRows([target.id], glossIds);
+    const answers = await repos.session.findAnswersOn(enrolled.id, today);
+    const rightToday = new Set(
+      answers.flatMap((answer) =>
+        answer.intro ? [] : gradesFor(answer).flatMap((piece) => (piece.grade > 1 ? [`${answer.glossId}|${piece.dimension}`] : [])),
+      ),
+    );
+    const day = targetDay({
+      today,
+      createdOn,
+      dueOn: target.dueOn,
+      words: words.map((word, i) => ({ glossId: word.glossId, addedOn: addedOn[i], startedOn: word.startedOn, live: liveOf(word.glossId) })),
+      skills,
+      rightToday,
+      answeredToday: answers.some((answer) => answer.targetId === target.id),
+    });
+    return { day, glossIds, live, canSay: (glossId: string) => speakable(formOf.get(glossId)!) };
+  }
+
+  /**
+   * Phase 57 (spec D1, D6–D9, rulings T3-j, T3-m, T3-n). A target path's choice, read on the
+   * owner's learner day: its day (readTargetDay), and the picks its picker makes of it beside
+   * the path's started session, whose graded cards it credits; owed work first, and practice
+   * more when the session in flight covers all of it, so the path always has a next session.
+   * With what its stock records of the day: the cap, readiness, the words at 100% and by FSRS
+   * on the date, and the words owed (none for practice more). Null when the target is no
+   * longer active or has no word.
+   */
+  async function readTarget(repos: Repos, enrolled: Enrollment, target: TargetRow, devices: Devices) {
+    const enrollmentId = enrolled.id;
+    const at = now();
+    const today = await learnerDay(repos, enrolled.user_id, at);
+    if (!activeOn(target, today)) return null;
+    const saved = await repos.vocabulary.listSavedGlosses(enrollmentId);
+    const read = await readTargetDay(repos, enrolled, target, devices, today, saved);
+    if (!read) return null;
+    const { day, glossIds, live, canSay } = read;
+    const memory = await repos.memory.findRows({ enrollmentId, glossIds });
+    const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
+    const { started } = await repos.session.findOpen(enrollmentId, target.id);
+    const cards = started ? await repos.session.findSessionCards(started.id) : [];
+    // Ruling T3-n (spec D8). The day's room for new words: the cap less every path's first
+    // meetings today and this path's session in flight's.
+    const introduced = await repos.session.findIntroducedOn(enrollmentId, today);
+    const met = new Set([...memory.map((row) => row.glossId), ...introduced]);
+    const meeting = new Set(cards.map((card) => card.glossId).filter((glossId) => glossIds.includes(glossId) && !met.has(glossId)));
+    const input: TargetPickInput = {
+      day,
+      mode: targetMode(day),
+      levels: new Map(levels.map((row) => [`${row.glossId}|${row.dimension}`, row.level])),
+      known: new Set(memory.map((row) => row.glossId)),
+      keys: new Map(saved.map((gloss) => [gloss.glossId, gloss.key])),
+      // Ruling T3-j: a ladder's intro stage grades nothing.
+      inFlight: cards.filter((card) => !card.intro),
+      newRoom: Math.max(0, DAY_NEW_CAP - introduced.length - meeting.size),
+    };
+    let mode = input.mode;
+    let picks = chooseTargetPicks(input);
+    // Ruling T3-m. Owed work all asked by the session in flight: practice more instead.
+    if (picks.length === 0 && mode === 'owed') {
+      mode = 'more';
+      picks = chooseTargetPicks({ ...input, mode });
+    }
+    const rowsOf = new Map<string, { dimension: Dimension; state: MemoryState }[]>();
+    for (const row of memory) rowsOf.set(row.glossId, [...(rowsOf.get(row.glossId) ?? []), row]);
+    const fsrsReady = glossIds.filter(
+      (glossId) => readinessOf(target.kind, recallOnDue(rowsOf.get(glossId) ?? [], live, canSay(glossId), target.dueOn)) === 'ready',
+    );
+    const row: SessionTargetRow = {
+      targetId: target.id,
+      daysLeft: day.daysLeft,
+      capHalves: day.capHalves,
+      readinessPct: day.readinessPct,
+      readyCount: day.readyCount,
+      wordCount: glossIds.length,
+      fsrsReadyCount: fsrsReady.length,
+      owedGlossIds: owedWords(day, mode),
+    };
+    return { path: target.id, at, today, saved: saved.filter((gloss) => glossIds.includes(gloss.glossId)), picks, row };
+  }
+  type MainRead = NonNullable<Awaited<ReturnType<typeof readMain>>>;
+  type TargetRead = NonNullable<Awaited<ReturnType<typeof readTarget>>>;
+  type ChoiceRead = MainRead | TargetRead;
+
+  /** Phase 57 (spec D1). A path's choice: the main path's, or its target's. Null when the path
+   *  has nothing to ask, or its target is no longer active. */
+  async function readChoice(repos: Repos, enrolled: Enrollment, devices: Devices, path: Path): Promise<ChoiceRead | null> {
+    if (path === null) return readMain(repos, enrolled, devices);
+    const target = await repos.target.findTarget(path);
+    return target && target.enrollmentId === enrolled.id ? readTarget(repos, enrolled, target, devices) : null;
+  }
+
+  /**
+   * Phase 53 (spec D6, D8). A stock's picks as its preparation is given them, each with a
+   * rendering to ask, in the order chosen. Null when no chosen gloss has a rendering to ask.
    */
   async function choosePicks(repos: Repos, enrolled: Enrollment, read: ChoiceRead) {
-    const { picks: chosen, split } = chooseWithTargets(read.input);
+    const chosen = read.picks;
     // Phase 31 (spec D12). One rendering per gloss, uniformly over every form of
     // every member that agrees with the gloss, the saved form always among them.
     // No model call: a lemma form not yet rendered joins once its job lands.
@@ -473,14 +614,15 @@ export function createSessionService({
       glossIds: chosen.map((choice) => choice.glossId),
       userLanguageCode: enrolled.source_language,
     });
-    const savedById = new Map(read.saved.map((gloss) => [gloss.glossId, gloss]));
+    const savedById = new Map<string, SavedGloss>(read.saved.map((gloss) => [gloss.glossId, gloss]));
+    const introductions = read.path === null ? read.families.introductions : null;
     const picks = chosen.flatMap((choice) => {
       const rendering = pickRendering(askableRenderings(savedById.get(choice.glossId)!, renderings), rng);
       if (!rendering) return [];
       const { dimension, rung, level, r, ladder } = choice;
       const step = choice.cls === 'STEP';
       // Phase 39 (spec D6). A family's next meaning, never asked, is introduced with the known ones.
-      const knownMeanings = read.families.introductions.get(choice.glossId);
+      const knownMeanings = introductions?.get(choice.glossId);
       return [
         {
           gloss_id: choice.glossId,
@@ -497,134 +639,180 @@ export function createSessionService({
         },
       ];
     });
-    return picks.length === 0 ? null : { picks, split };
+    return picks.length === 0 ? null : picks;
   }
   type ChosenStock = NonNullable<Awaited<ReturnType<typeof choosePicks>>>;
 
   /**
    * Phase 43 (spec D3). A stock chosen from `read`, written: the session inserted preparing
-   * for `devices`, the families' refresh, and its preparation enqueued in the same
-   * transaction, so the row and its job commit together. Phase 53 (spec D8, D12): the
-   * session records the learner day its words were chosen on and the split they were chosen
-   * with, and each target whose date has come is recorded as ended on it, naming the session.
+   * on the read's path for `devices`, and its preparation enqueued in the same transaction,
+   * so the row and its job commit together. Phase 53 (spec D8, D12): the session records the
+   * learner day its words were chosen on. Phase 57 (spec D1, D2, D10): a target path's stock
+   * records its target's day (session_targets) and is planned as a target's (ruling T3-l);
+   * the main path's records each target whose date has passed as ended on it, naming the
+   * session, retires that target path's unstarted stock, and refreshes the families. The
+   * caller holds the path's next-session lock.
    */
-  async function writeStock(repos: Repos, enrolled: Enrollment, devices: Devices, read: ChoiceRead, chosen: ChosenStock): Promise<Stocked> {
+  async function writeStock(repos: Repos, enrolled: Enrollment, devices: Devices, read: ChoiceRead, picks: ChosenStock): Promise<Stocked> {
     const { session, vocabulary, jobs } = repos;
     const enrollmentId = enrolled.id;
-    const { at, today, families, stored } = read;
-    const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId, devices, today);
-    if (chosen.split.length > 0) await repos.target.insertSessionSplit(sessionId, chosen.split);
-    // Phase 53 (spec D8). A target ends on its date by itself; the first stock chosen from
-    // that day on writes its ended_on_date.
-    const endedOnDate = await repos.target.listEndedUnrecorded(enrollmentId, today);
-    for (const target of endedOnDate) {
-      await repos.target.insertEvent({
-        targetId: target.id,
-        kind: 'ended_on_date',
-        before: null,
-        after: { due_on: target.dueOn },
-        actorUserId: null,
-        sessionId,
-      });
+    const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId, devices, read.today, read.path);
+    const endedOnDate: string[] = [];
+    const endedStocks: string[] = [];
+    if (read.path !== null) {
+      await repos.target.insertSessionTarget(sessionId, read.row);
+    } else {
+      // Phase 53 (spec D8), phase 57 (spec D10). A target ends by itself the day after its
+      // date; the first main-path stock chosen from then on writes its ended_on_date. Its
+      // path is off home: an unstarted stock left on it is retired.
+      for (const target of await repos.target.listEndedUnrecorded(enrollmentId, read.today)) {
+        await repos.target.insertEvent({
+          targetId: target.id,
+          kind: 'ended_on_date',
+          before: null,
+          after: { due_on: target.dueOn },
+          actorUserId: null,
+          sessionId,
+        });
+        endedOnDate.push(target.id);
+        const { stock } = await session.findOpen(enrollmentId, target.id);
+        if (stock?.source === 'list' && (await session.retireStock(stock.id))) endedStocks.push(stock.id);
+      }
+      // Phase 39 (spec D4). The refresh is recorded once the session exists, so
+      // each event names it; one that changed nothing writes nothing. Phase 46
+      // (spec D3): every gloss known for the first time is stamped, family or not.
+      const { families, stored, at } = read;
+      if (families.newlyKnown.size > 0) {
+        await vocabulary.markKnown({ enrollmentId, glossIds: [...families.newlyKnown], at: new Date(at).toISOString() });
+      }
+      const write = familyChanges(stored, families);
+      if (!isEmptyFamilyWrite(write)) await repos.glossFamilies.apply(enrollmentId, sessionId, write);
     }
-    // Phase 39 (spec D4). The refresh is recorded once the session exists, so
-    // each event names it; one that changed nothing writes nothing. Phase 46
-    // (spec D3): every gloss known for the first time is stamped, family or not.
-    if (families.newlyKnown.size > 0) {
-      await vocabulary.markKnown({ enrollmentId, glossIds: [...families.newlyKnown], at: new Date(at).toISOString() });
-    }
-    const write = familyChanges(stored, families);
-    if (!isEmptyFamilyWrite(write)) await repos.glossFamilies.apply(enrollmentId, sessionId, write);
     await jobs.enqueue(PREPARE_SESSION, {
       session_id: sessionId,
-      picks: chosen.picks,
+      picks,
       listening: devices.listening,
       speaking: devices.speaking,
+      ...(read.path === null ? {} : { target: true }),
     });
-    return { sessionId, endedOnDate: endedOnDate.map((target) => target.id) };
+    return { sessionId, path: read.path, endedOnDate, endedStocks };
   }
 
   /**
    * Phase 43 (spec D3). Phase 19's list branch of create, shared by create and
-   * the stock job: the words read and chosen, then written. NoSavedWords when
-   * the list has nothing to ask. Phase 53 (spec D6): the words serve the
-   * targets active on the learner day.
+   * the stock job: the path's words read and chosen, then written. NoSavedWords when
+   * the path has nothing to ask.
    */
-  async function stockNext(repos: Repos, enrolled: Enrollment, devices: Devices): Promise<Stocked> {
-    const read = await readChoice(repos, enrolled, devices);
-    const chosen = read ? await choosePicks(repos, enrolled, read) : null;
-    if (!read || !chosen) throw new NoSavedWords(enrolled.id);
-    return writeStock(repos, enrolled, devices, read, chosen);
+  async function stockNext(repos: Repos, enrolled: Enrollment, devices: Devices, path: Path): Promise<Stocked> {
+    const read = await readChoice(repos, enrolled, devices, path);
+    const picks = read ? await choosePicks(repos, enrolled, read) : null;
+    if (!read || !picks) throw new NoSavedWords(enrolled.id);
+    return writeStock(repos, enrolled, devices, read, picks);
   }
 
   /**
-   * Phase 53 (ruling R-D12). The cheap half of the stale check: a list stock whose words were
-   * chosen on an earlier learner day than today, and which recorded a split or has a target
-   * active today beside it. A seed, a stock from before phase 53 (no chosen_on) and today's
-   * never are, and with no target on either side phase 43 R5 holds without the list being
-   * read (final review item 16: the home read takes no lock for it). Answers what it read, or
-   * null. `stock` is unstarted: findOpen's.
+   * Phase 53 (ruling R-D12), per path since phase 57 (spec D2). The cheap half of the stale
+   * check: a target path's list stock whose words were chosen on an earlier learner day than
+   * today. A seed, a stock from before phase 53 (no chosen_on), today's, and any of the main
+   * path's never are: the main path plays a stock as it is (phase 43 R5), without reading
+   * anything. Answers what it read, or null. `stock` is unstarted: findOpen's.
    */
-  async function mayBeStale(repos: Repos, enrolled: Enrollment, stock: SessionSummary): Promise<MaybeStale | null> {
-    if (stock.source !== 'list') return null;
+  async function mayBeStale(repos: Repos, enrolled: Enrollment, stock: SessionSummary, path: Path): Promise<MaybeStale | null> {
+    if (path === null || stock.source !== 'list') return null;
     const choice = await repos.session.findStockChoice(stock.id);
     if (!choice || choice.chosenOn === null) return null;
     const today = await learnerDay(repos, enrolled.user_id, now());
     if (choice.chosenOn >= today) return null;
-    const recorded = await repos.target.findSessionSplit(stock.id);
-    if (recorded.length === 0 && (await repos.target.listActive(enrolled.id, today)).length === 0) return null;
-    return { stockId: stock.id, today, devices: { listening: choice.listening, speaking: choice.speaking }, recorded };
+    return { stockId: stock.id, today, devices: { listening: choice.listening, speaking: choice.speaking } };
   }
 
   /**
-   * Phase 53 (spec D12, ruling R-D12). A stock chosen on an earlier learner day is played as
-   * it is (phase 43 R5) unless today's split differs from the one it recorded: then it is
-   * retired and the next is built in its place, for the devices it was built for. A list
-   * with nothing to ask, or chosen words with no rendering, leave the stock as it is, and so
-   * does a start that took it first. The caller holds lockNextSession and read `stock` under
-   * it. `checked` is mayBeStale's answer from before the lock: a stock's day and split are
-   * written with it and never change, so for the same stock they are not read again. Answers
-   * the stock built, or null.
+   * Phase 53 (spec D12, ruling R-D12), per path since phase 57 (spec D2). A target path's
+   * stock chosen on an earlier learner day is played as it is (phase 43 R5) unless today's
+   * day of its target differs from the one it recorded, in its cap or in its owed words: then
+   * it is retired and the next is built in its place, for the devices it was built for. A
+   * target no longer active, a choice with nothing to ask or no rendering, leave the stock as
+   * it is, and so does a start that took it first. The caller holds the path's next-session
+   * lock and read `stock` under it. `checked` is mayBeStale's answer from before the lock: a
+   * stock's day is written with it and never changes, so for the same stock it is not read
+   * again. Answers the stock built, or null.
    */
   async function replaceIfStale(
     repos: Repos,
     enrolled: Enrollment,
     stock: SessionSummary,
+    path: Path,
     checked: MaybeStale | null = null,
   ): Promise<Replaced | null> {
-    const stale = checked?.stockId === stock.id ? checked : await mayBeStale(repos, enrolled, stock);
-    if (!stale) return null;
-    const read = await readChoice(repos, enrolled, stale.devices);
-    if (!read || !splitChanged(stale.recorded, targetSplit(read.input))) return null;
-    const chosen = await choosePicks(repos, enrolled, read);
-    if (!chosen || !(await repos.session.retireStock(stock.id))) return null;
-    return { retired: stock.id, ...(await writeStock(repos, enrolled, stale.devices, read, chosen)) };
+    const stale = checked?.stockId === stock.id ? checked : await mayBeStale(repos, enrolled, stock, path);
+    if (!stale || path === null) return null;
+    const read = await readChoice(repos, enrolled, stale.devices, path);
+    if (!read || read.path === null) return null;
+    const recorded = await repos.target.findSessionTarget(stock.id, path);
+    const same = recorded?.capHalves === read.row.capHalves && recorded.owedGlossIds.join(' ') === read.row.owedGlossIds.join(' ');
+    if (same) return null;
+    const picks = await choosePicks(repos, enrolled, read);
+    if (!picks || !(await repos.session.retireStock(stock.id))) return null;
+    return { retired: stock.id, ...(await writeStock(repos, enrolled, stale.devices, read, picks)) };
   }
 
   /** Phase 43 (spec D3). A stock made, once its transaction committed. Phase 53 (spec D8):
-   *  each target its choice found ended on its date, first. */
-  function logStocked(enrollmentId: string, stocked: Stocked, reason: StockSessionPayload['reason'] | 'create' | 'stale_split'): void {
+   *  each target its choice found ended on its date, first, and (phase 57) the stock each
+   *  left on its path, retired. */
+  function logStocked(enrollmentId: string, stocked: Stocked, reason: StockSessionPayload['reason'] | 'create' | 'stale_target'): void {
     for (const targetId of stocked.endedOnDate) logger.info({ event: 'target_ended', target_id: targetId, how: 'on_date' });
-    logger.info({ event: 'session_stocked', enrollment_id: enrollmentId, session_id: stocked.sessionId, reason });
+    for (const sessionId of stocked.endedStocks) {
+      logger.info({ event: 'session_retired', enrollment_id: enrollmentId, session_id: sessionId, reason: 'target_ended' });
+    }
+    logger.info({
+      event: 'session_stocked',
+      enrollment_id: enrollmentId,
+      session_id: stocked.sessionId,
+      reason,
+      ...(stocked.path === null ? {} : { target_id: stocked.path }),
+    });
   }
 
   /** Phase 53 (ruling R-D12). A stale stock retired, and the stock built in its place. */
   function logReplaced(enrollmentId: string, replaced: Replaced): void {
-    logger.info({ event: 'session_retired', enrollment_id: enrollmentId, session_id: replaced.retired, reason: 'stale_split' });
-    logStocked(enrollmentId, replaced, 'stale_split');
+    logger.info({ event: 'session_retired', enrollment_id: enrollmentId, session_id: replaced.retired, reason: 'stale_target' });
+    logStocked(enrollmentId, replaced, 'stale_target');
+  }
+
+  /**
+   * Phase 57 (spec D11). How many words wait on a path: on the main path, its words chooseWords
+   * calls due (dueGlosses), with the live skills of the enrollment's newest session; on a
+   * target's, its words with work owed today (none once it ended).
+   */
+  async function waitingOn(repos: Repos, enrolled: Enrollment, target: TargetRow | null): Promise<number> {
+    const enrollmentId = enrolled.id;
+    const today = await learnerDay(repos, enrolled.user_id, now());
+    const devices = (await repos.session.findNewestDevices(enrollmentId)) ?? { listening: false, speaking: false };
+    if (target !== null) {
+      if (!activeOn(target, today)) return 0;
+      const words = await repos.vocabulary.findSavedWords({ enrollmentId, glossIds: await repos.target.listWordIds(target.id) });
+      const read = await readTargetDay(repos, enrolled, target, devices, today, words);
+      return read ? read.day.words.filter((word) => word.state === 'owed').length : 0;
+    }
+    // A memory row is a saved gloss's (its key is the vocabulary entry): no read of the list.
+    const held = new Set((await repos.target.listActive(enrollmentId, today)).flatMap((active) => active.glossIds));
+    const memory = (await repos.memory.findEnrollmentRows(enrollmentId)).filter((row) => !held.has(row.glossId));
+    return dueGlosses(memory, liveDimensions(devices.listening, devices.speaking), today).length;
   }
 
   const service = {
     /**
-     * The next session to play (phase 43, spec D5). A started session is
-     * resumed, not replaced: SessionOpen. The stock is the next one, answered
-     * as it is, built for whichever device asked first. Otherwise the first
-     * session is the seed, ready at once, and every later one is built here
-     * from the saved list, preparing. The indexes (repo -> SessionOpen) are what
-     * hold under a race. Phase 53 (ruling R-D12): a stock chosen on an earlier
-     * day whose split is stale is replaced first, and the new one answered.
+     * The next session to play (phase 43, spec D5), on a path (phase 57, spec D1: the main
+     * path, or the target `path` names). A started session of the path is resumed, not
+     * replaced: SessionOpen. The path's stock is the next one, answered as it is, built for
+     * whichever device asked first. Otherwise the enrollment's first session is the seed, the
+     * main path's, ready at once, and every later one is built here from the path's words,
+     * preparing. The indexes (repo -> SessionOpen) are what hold under a race. Phase 53
+     * (ruling R-D12): a target's stock chosen on an earlier day whose day is stale is replaced
+     * first, and the new one answered. A target that is not the enrollment's is
+     * TargetNotFound (another learner's, AccessDenied), and one no longer active TargetClosed.
      */
-    createNextSession: async (actorUserId: string, enrollmentId: string, options: Devices): Promise<NextSession> => {
+    createNextSession: async (actorUserId: string, enrollmentId: string, options: Devices, path: Path = null): Promise<NextSession> => {
       const { stocked, replaced, ...next } = await transaction(async (repos): Promise<NextSession & { stocked?: Stocked; replaced?: Replaced }> => {
         const { session, question } = repos;
         // No implicit creation: an unknown enrollment is a 404, another
@@ -634,20 +822,24 @@ export function createSessionService({
           enrollmentId,
           permission: 'session.practice',
         });
+        if (path !== null) {
+          const target = await pathTarget(repos, actorUserId, enrolled, path);
+          if (!activeOn(target, await learnerDay(repos, enrolled.user_id, now()))) throw new TargetClosed(path);
+        }
 
         // Review C1. A double tap, or the stock job, waits here for the other.
-        await session.lockNextSession(enrollmentId);
-        const open = await session.findOpen(enrollmentId);
+        await session.lockNextSession(enrollmentId, path);
+        const open = await session.findOpen(enrollmentId, path);
         if (open.started) throw new SessionOpen(enrollmentId);
         if (open.stock) {
-          // Phase 53 (ruling R-D12). Answered as it is, unless its split is stale.
-          const replaced = await replaceIfStale(repos, enrolled, open.stock);
+          // Phase 53 (ruling R-D12). Answered as it is, unless its target's day is stale.
+          const replaced = await replaceIfStale(repos, enrolled, open.stock, path);
           if (replaced) return { sessionId: replaced.sessionId, status: 'preparing', source: 'list', created: true, replaced };
           return { sessionId: open.stock.id, status: open.stock.status, source: open.stock.source, created: false };
         }
 
-        const latest = await session.findLatest(enrollmentId);
-        if (nextSource(latest !== undefined) === 'seed') {
+        // Phase 57 (spec D2). The seed is the main path's: a target's path never plays it.
+        if (path === null && nextSource((await session.findLatest(enrollmentId, 'any')) !== undefined) === 'seed') {
           const pool = await question.loadQuestionPool(
             enrolled.target_language,
             enrolled.source_language,
@@ -660,7 +852,7 @@ export function createSessionService({
           return { sessionId, status: 'ready', source: 'seed', created: true };
         }
 
-        const stocked = await stockNext(repos, enrolled, options);
+        const stocked = await stockNext(repos, enrolled, options, path);
         return { sessionId: stocked.sessionId, status: 'preparing', source: 'list', created: true, stocked };
       });
       if (replaced) logReplaced(enrollmentId, replaced);
@@ -672,7 +864,8 @@ export function createSessionService({
      * Phase 43 (spec D2). Starts a ready session, and asks for the next one in
      * stock, built for the device that started this one (ruling R2). Started
      * already: a no-op. A session that is not ready has nothing to start;
-     * another started session of the enrollment is SessionOpen.
+     * another started session of its path is SessionOpen. Phase 57 (spec D2): the stock
+     * asked for is the next of the session's path only.
      */
     startSession: async (actorUserId: string, sessionId: string, devices: Devices): Promise<{ sessionId: string; status: SessionStatus }> => {
       const started = await transaction(async (repos) => {
@@ -681,7 +874,7 @@ export function createSessionService({
         if (!state) throw new SessionNotFound(sessionId);
         if (state.status !== 'ready') throw new SessionNotReady(sessionId, state.status);
         const changed = await repos.session.markStarted(sessionId);
-        if (changed) await requestStock(repos, { enrollment_id: enrolled.id, reason: 'start', ...devices });
+        if (changed) await requestStock(repos, { enrollment_id: enrolled.id, reason: 'start', ...devices, ...pathPayload(state.targetId) });
         return changed;
       });
       if (started) logger.info({ event: 'session_started', session_id: sessionId, by: 'start' });
@@ -698,45 +891,56 @@ export function createSessionService({
         return { ...record, progress: await progressOf(repos, sessionId, record) };
       }),
 
-    /** What the home screen needs in one read. Phase 43 (spec D6): the started
-     *  session, else the stock, else the newest session if it failed, so a
-     *  failure is never silent. Spec D8: an unstarted list session offered is
-     *  logged with its status, which counts how often a learner found it ready.
-     *  Phase 53 (ruling R-D12): home learns of the stock here, so a stock chosen
-     *  on an earlier day is checked here, and offered replaced when its split is
-     *  stale. Create's lock is taken only when the cheap half holds (a stock
-     *  chosen on an earlier day, with a split recorded or a target active), and
-     *  the stock is read again under it. */
+    /** What the home screen needs in one read, of one path (phase 57, spec D1: the main
+     *  path, or the target `path` names). Phase 43 (spec D6): the path's started session,
+     *  else its stock, else its newest session if it failed, so a failure is never silent.
+     *  Spec D8: an unstarted list session offered is logged with its status, which counts how
+     *  often a learner found it ready. Phase 53 (ruling R-D12): home learns of the stock
+     *  here, so a target's stock chosen on an earlier day is checked here, and offered
+     *  replaced when its day is stale. The path's lock is taken only when the cheap half
+     *  holds (a target's stock chosen on an earlier day), and the stock is read again under
+     *  it. Phase 57 (spec D11): and how many of the path's words wait (waitingOn). */
     currentSession: async (
       actorUserId: string,
       enrollmentId: string,
-    ): Promise<{ current: SessionSummary | null; nextSource: SessionSource; savedCount: number }> => {
+      path: Path = null,
+    ): Promise<{ current: SessionSummary | null; nextSource: SessionSource; savedCount: number; dueCount: number }> => {
       const read = await transaction(async (repos) => {
         const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
-        let open = await repos.session.findOpen(enrollmentId);
+        const target = path === null ? null : await pathTarget(repos, actorUserId, enrolled, path);
+        let open = await repos.session.findOpen(enrollmentId, path);
         let replaced: Replaced | null = null;
-        // Phase 53 (ruling R-D12). The lock only for a stock chosen on an earlier day that a
-        // target can have made stale; what that read is not read again for the same stock.
-        const checked = !open.started && open.stock ? await mayBeStale(repos, enrolled, open.stock) : null;
+        // Phase 53 (ruling R-D12). The lock only for a stock chosen on an earlier day that its
+        // target's day can have made stale; what that read is not read again for the same stock.
+        const checked = !open.started && open.stock ? await mayBeStale(repos, enrolled, open.stock, path) : null;
         if (checked) {
-          await repos.session.lockNextSession(enrollmentId);
-          open = await repos.session.findOpen(enrollmentId);
-          replaced = !open.started && open.stock ? await replaceIfStale(repos, enrolled, open.stock, checked) : null;
+          await repos.session.lockNextSession(enrollmentId, path);
+          open = await repos.session.findOpen(enrollmentId, path);
+          replaced = !open.started && open.stock ? await replaceIfStale(repos, enrolled, open.stock, path, checked) : null;
           if (replaced) open = { stock: { id: replaced.sessionId, status: 'preparing', source: 'list', answered: 0, total: 0 } };
         }
-        const latest = await repos.session.findLatest(enrollmentId);
+        const latest = await repos.session.findLatest(enrollmentId, path);
+        // The seed is the main path's (phase 57, spec D2): any session at all puts it behind.
+        const any = latest ?? (await repos.session.findLatest(enrollmentId, 'any'));
         return {
           current: open.started ?? open.stock ?? (latest?.status === 'failed' ? latest : null),
           offered: open.started ? undefined : open.stock,
-          nextSource: nextSource(latest !== undefined),
+          nextSource: path === null ? nextSource(any !== undefined) : ('list' as const),
           savedCount: await repos.vocabulary.countEntries(enrollmentId),
+          dueCount: await waitingOn(repos, enrolled, target),
           replaced,
         };
       });
       const { offered, replaced, ...home } = read;
       if (replaced) logReplaced(enrollmentId, replaced);
       if (offered && offered.source === 'list') {
-        logger.info({ event: 'session_offered', enrollment_id: enrollmentId, session_id: offered.id, status: offered.status });
+        logger.info({
+          event: 'session_offered',
+          enrollment_id: enrollmentId,
+          session_id: offered.id,
+          status: offered.status,
+          ...(path === null ? {} : { target_id: path }),
+        });
       }
       return home;
     },
@@ -760,11 +964,14 @@ export function createSessionService({
         // Phase 20. The answers given before the skip are real answers.
         if (changed) {
           await repos.session.resolvePendingRetry(sessionId, { text: '', verdict: 'gave_up' });
-          await recordProgress(repos, sessionId);
+          await recordProgress(repos, sessionId, enrolled.id);
           // Phase 43 (spec D3). The next session in stock, if this was it. Not
           // after the seed (ruling R8): it is played before anything is saved,
           // and a stock built behind the first saves would hold one word.
-          if (state.source === 'list') await requestStock(repos, { enrollment_id: enrolled.id, reason: 'skip' });
+          // Phase 57 (spec D2): its path's.
+          if (state.source === 'list') {
+            await requestStock(repos, { enrollment_id: enrolled.id, reason: 'skip', ...pathPayload(state.targetId) });
+          }
         }
         return changed;
       });
@@ -861,9 +1068,11 @@ export function createSessionService({
 
         // Phase 43 (spec D2). A first answer starts a session no start call
         // started (an older app, a bot), and asks for the next one in stock.
-        // Another started session refuses it here, before anything commits.
+        // Another started session of its path refuses it here, before anything
+        // commits. Phase 57 (spec D2): the stock asked for is its path's.
+        const pathOf = async () => (await repos.session.findState(sessionId))?.targetId ?? null;
         if (outcome.recorded === 'answer' && loaded.answers.length === 0 && (await repos.session.markStarted(sessionId))) {
-          await requestStock(repos, { enrollment_id: enrolled.id, reason: 'answer' });
+          await requestStock(repos, { enrollment_id: enrolled.id, reason: 'answer', ...pathPayload(await pathOf()) });
         }
 
         if (outcome.justCompleted) {
@@ -876,10 +1085,10 @@ export function createSessionService({
           // for the day, so a tutor finishing a session marks the learner's reminder.
           const reminderId = reminderForSession(await repos.reminders.sentOnDay(enrolled.user_id, day), endedAt);
           if (reminderId) await repos.reminders.markSession(reminderId, sessionId);
-          await recordProgress(repos, sessionId);
+          await recordProgress(repos, sessionId, enrolled.id);
           // Phase 43 (spec D3). A stock that failed, or was never built, is
-          // built now; one already there makes this a no-op.
-          await requestStock(repos, { enrollment_id: enrolled.id, reason: 'complete' });
+          // built now; one already there makes this a no-op. Its path's (phase 57).
+          await requestStock(repos, { enrollment_id: enrolled.id, reason: 'complete', ...pathPayload(await pathOf()) });
         }
 
         const progress = await progressOf(repos, sessionId, outcome.record);
@@ -1833,30 +2042,37 @@ export function createSessionService({
     },
 
     /**
-     * Phase 43 (spec D3). The stock job: builds the enrollment's next session in
-     * stock when it has none, has had a session (else the seed comes next) and
-     * has words to ask. Anything else is a no-op, logged with why; so is a race
-     * lost to another stock. Built for the start's device when the trigger was a
-     * start, else the newest session's (ruling R2).
+     * Phase 43 (spec D3). The stock job: builds a path's next session in stock (phase 57,
+     * spec D2: the main path's, or the target's the payload names) when it has none, the
+     * enrollment has had a session (else the seed, the main path's, comes next; a target's
+     * path never waits for it), its target is still active, and it has words to ask. Anything
+     * else is a no-op, logged with why; so is a race lost to another stock. Built for the
+     * start's device when the trigger was a start, else the newest session's (ruling R2).
      */
     stockSession: async (data: unknown): Promise<void> => {
       const payload = StockSessionPayloadSchema.parse(data);
       const enrollmentId = payload.enrollment_id;
-      type Outcome = Stocked | { why: 'no_enrollment' | 'stocked' | 'seed_next' | 'no_saved_words' };
+      const path = payload.target_id ?? null;
+      type Outcome = Stocked | { why: 'no_enrollment' | 'stocked' | 'seed_next' | 'no_saved_words' | 'target_closed' };
       let outcome: Outcome;
       try {
         outcome = await transaction(async (repos): Promise<Outcome> => {
           const enrolled = await repos.enrollment.findById(enrollmentId);
           if (!enrolled) return { why: 'no_enrollment' };
           // Review C1. A create running now finishes first, and its stock is seen.
-          await repos.session.lockNextSession(enrollmentId);
-          if ((await repos.session.findOpen(enrollmentId)).stock) return { why: 'stocked' };
-          if (!(await repos.session.findLatest(enrollmentId))) return { why: 'seed_next' };
+          await repos.session.lockNextSession(enrollmentId, path);
+          if ((await repos.session.findOpen(enrollmentId, path)).stock) return { why: 'stocked' };
+          if (path === null && !(await repos.session.findLatest(enrollmentId, 'any'))) return { why: 'seed_next' };
+          if (path !== null) {
+            const target = await repos.target.findTarget(path);
+            const today = await learnerDay(repos, enrolled.user_id, now());
+            if (!target || target.enrollmentId !== enrollmentId || !activeOn(target, today)) return { why: 'target_closed' };
+          }
           const devices =
             payload.listening !== undefined && payload.speaking !== undefined
               ? { listening: payload.listening, speaking: payload.speaking }
               : ((await repos.session.findNewestDevices(enrollmentId)) ?? { listening: false, speaking: false });
-          return stockNext(repos, enrolled, devices);
+          return stockNext(repos, enrolled, devices, path);
         });
       } catch (error) {
         if (error instanceof SessionOpen) outcome = { why: 'stocked' };
@@ -1864,7 +2080,15 @@ export function createSessionService({
         else throw error;
       }
       if ('sessionId' in outcome) logStocked(enrollmentId, outcome, payload.reason);
-      else logger.info({ event: 'session_stock_skipped', enrollment_id: enrollmentId, reason: payload.reason, why: outcome.why });
+      else {
+        logger.info({
+          event: 'session_stock_skipped',
+          enrollment_id: enrollmentId,
+          reason: payload.reason,
+          why: outcome.why,
+          ...(path === null ? {} : { target_id: path }),
+        });
+      }
     },
 
     /** The dead-letter handler: retries are spent or the job expired. Marks the

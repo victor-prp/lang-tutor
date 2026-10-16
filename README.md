@@ -129,8 +129,9 @@ enforced.
 | [0011](docs/adr/adr-0011-learner-unit-is-the-gloss.md) | The learner's unit is the gloss — the learner's tables hold gloss ids rather than sense ids, senses stay the dictionary's, and no table outside the `dict_` prefix references `dict_senses` or `dict_var_translations` |
 | [0012](docs/adr/adr-0012-native-client-releases.md) | The Android and iOS apps ship with every release, after the server, by fingerprint — an update lands only on a matching build, builds go to Play's internal track and TestFlight, and `X-Api-Level` is named only in `packages/core` |
 | [0013](docs/adr/adr-0013-learner-day.md) | A learner's day comes from one place — only `services/learnerDay.ts` computes a progress day, `bot_day` is read and written only in `repo/users.ts`, and `routes/bots.ts` is the only route file naming the bot kind or its secret |
+| [0014](docs/adr/adr-0014-sessions-belong-to-a-path.md) | Every session belongs to one path, the main path or a target's — one stock and one started session per path, held by two unique indexes on `(enrollment_id, coalesce(target_id, nil uuid))`, and the next-session lock is per path |
 
-All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 + 4 + 3 = 71 checks, grep only, no deps,
+All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 + 4 + 3 + 2 = 73 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
@@ -596,7 +597,7 @@ npm run db:up       # Postgres + MockServer (+ the pg-boss dashboard, outside CI
 npm run test:integration  # apps/server's database-backed tests; needs db:up
 npm run test:all    # both buckets — run this before pushing
 npm run typecheck   # every workspace
-npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0006 lanes, 0007 jobs, 0008 grants, 0009 sign-in, 0010 single container, 0011 learner unit, 0012 native releases) — grep only, no deps, no database
+npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0006 lanes, 0007 jobs, 0008 grants, 0009 sign-in, 0010 single container, 0011 learner unit, 0012 native releases, 0013 learner day, 0014 sessions per path) — grep only, no deps, no database
 ```
 
 **Run `npm run test:all` before you push.** Bare `npm test` is unit-only, so it can go

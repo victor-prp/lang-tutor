@@ -1074,14 +1074,15 @@ export const sessions = pgTable(
       sql`(${t.status} = 'completed') = (${t.completedAt} is not null)`,
     ),
     // Phase 43 (spec D1). Phase 19's one-open-session rule, split by started_at:
-    // one open session in stock and one started, per enrollment. A concurrent
-    // second of either fails here and becomes a 409, which no read-then-insert
-    // check could promise.
-    uniqueIndex('sessions_one_stock_per_enrollment')
-      .on(t.enrollmentId)
+    // one open session in stock and one started. A concurrent second of either
+    // fails here and becomes a 409, which no read-then-insert check could promise.
+    // Phase 57 (spec D1, D2, ADR 0014): per path, not per enrollment: the main path
+    // (target_id null, read as the nil uuid) and each target have their own.
+    uniqueIndex('sessions_one_stock_per_path')
+      .on(t.enrollmentId, sql`coalesce(${t.targetId}, '00000000-0000-0000-0000-000000000000'::uuid)`)
       .where(sql`${t.status} in ('preparing', 'ready') and ${t.startedAt} is null`),
-    uniqueIndex('sessions_one_started_per_enrollment')
-      .on(t.enrollmentId)
+    uniqueIndex('sessions_one_started_per_path')
+      .on(t.enrollmentId, sql`coalesce(${t.targetId}, '00000000-0000-0000-0000-000000000000'::uuid)`)
       .where(sql`${t.status} = 'ready' and ${t.startedAt} is not null`),
     // The home screen's read: one enrollment's newest session. Nothing indexed
     // sessions by enrollment before, and this read runs on every focus and every
@@ -1433,10 +1434,11 @@ export const reminders = pgTable(
 );
 
 // Phase 53 (spec D1). A learner's preparation for homework or a test: a kind, a
-// due date and words (target_words). `due_on` is a learner day (ADR 0013). A
-// target is active while today is before `due_on` and `ended_at` is null: on
-// `due_on` it ends by itself and nothing is written for that, bar the
-// `ended_on_date` event the first session chosen after it records (D8).
+// due date and words (target_words). `due_on` is a learner day (ADR 0013). Phase 57
+// (spec D10): a target is active through `due_on` while `ended_at` is null, and has a
+// path of its own (sessions.target_id); the day after it ends by itself and nothing is
+// written for that, bar the `ended_on_date` event the first main-path stock chosen
+// after it records (phase 53 D8). Changing it is refused from `due_on` on.
 // `ended_at` is the learner ending it early. The kind is a fact the picker reads
 // (domain/targets.ts TARGET_KINDS), never a skill filter (D3).
 export const targets = pgTable(
@@ -1510,14 +1512,14 @@ export const targetEvents = pgTable(
 );
 
 // Phase 53 (spec D8). One row per session and target it served: what the target
-// wished, the slots it was given, how many words came from it, why (a ShareReason
-// of domain/targets.ts) and the readiness the wish came from. Written in the
-// transaction that chooses the session's words; read back only by the stale-stock
-// check (D12). Nothing ties `picked` to `slots`: a target is handed slots the main
-// path could not use in a second pass, so it can pick more than it was given.
-// Phase 57 (spec D2, D9). A target path's stock writes one row with no wish, slots,
-// picks or reason (null, which the reason check passes), and with the cap of its day
-// in half-points, its readiness in percent and its words ready by FSRS on the date.
+// wished, the slots it was given, how many words came from it, why (a ShareReason)
+// and the readiness the wish came from. Phase 57 (spec D1, D2, D9): the split is
+// gone with phase 53's shared session, and those four columns are kept for its rows
+// only. A target path's stock writes one row, in the transaction that chooses its
+// words, with no wish, slots, picks or reason (null, which the reason check passes):
+// its days left, the cap of its day in half-points, its readiness in percent, its
+// words at 100% (ready_count), its words ready by FSRS on the date (fsrs_ready_count,
+// the recorded yardstick, never shown) and its owed words, which the stale check reads.
 export const sessionTargets = pgTable(
   'session_targets',
   {
@@ -1533,6 +1535,10 @@ export const sessionTargets = pgTable(
     capHalves: integer('cap_halves'),
     readinessPct: integer('readiness_pct'),
     fsrsReadyCount: integer('fsrs_ready_count'),
+    // Phase 57 (spec D2). The target's words with work owed on the day the stock was chosen
+    // (none when it was chosen as practice more), sorted: with cap_halves, what the stale
+    // check compares with today's. Null on a phase 53 split row.
+    owedGlossIds: text('owed_gloss_ids').array(),
   },
   (t) => [
     primaryKey({ name: 'session_targets_pkey', columns: [t.sessionId, t.targetId] }),

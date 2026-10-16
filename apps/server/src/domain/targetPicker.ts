@@ -39,6 +39,9 @@ export type TargetPickInput = {
    *  stock built mid-session asks the next skill. A ladder's intro-stage cards grade nothing
    *  (phase 55): the caller leaves them out. */
   inFlight: readonly { glossId: string; type: QuestionType }[];
+  /** Spec D8, ruling T3-n. New words the day still has room for (DAY_NEW_CAP less today's new
+   *  words): the ladders practice more starts early, never an owed start. Absent: no limit. */
+  newRoom?: number;
 };
 
 /** Spec D7, D10. A day with work owed asks it; the due date gives the last review; a done or
@@ -47,6 +50,17 @@ export function targetMode(day: TargetDay): TargetMode {
   if (day.state === 'owed') return 'owed';
   if (day.state === 'due_today') return 'last_review';
   return 'more';
+}
+
+/** Phase 57 (spec D2). The words a stock chosen in `mode` serves as owed work, sorted: the
+ *  day's owed words, or none for practice more. With the cap, what a target path's stale
+ *  check compares. */
+export function owedWords(day: TargetDay, mode: TargetMode): string[] {
+  if (mode === 'more') return [];
+  return day.words
+    .filter((word) => word.state === 'owed')
+    .map((word) => word.glossId)
+    .sort();
 }
 
 const SPEAKING: Dimension = 'spoken_productive';
@@ -139,6 +153,7 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
   let slots = 0;
   let ladders = 0;
   let spoken = 0;
+  let newRoom = input.newRoom ?? Number.POSITIVE_INFINITY;
 
   const levelOf = (glossId: string, dimension: Dimension) => input.levels.get(`${glossId}|${dimension}`) ?? MIN_LEVEL;
   const open = (word: Word, cost: number) =>
@@ -178,16 +193,18 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
   const furthest = (pool: readonly Word[]) => [...pool].sort((a, b) => shortfall(b) - shortfall(a) || a.index - b.index);
 
   /** Spec D6, D7 step 1, ruling T3-a. In the plan's order: a new word's ladder, NEW_PER_SESSION
-   *  a session at most; a known word's one recall card on its skill furthest below the cap. */
-  const start = (pool: readonly Word[]) => {
+   *  a session at most; a known word's one recall card on its skill furthest below the cap.
+   *  Ruling T3-n: an early start (`early`) is a new word of the day's only while it has room. */
+  const start = (pool: readonly Word[], early: boolean) => {
     for (const word of pool) {
       if (input.known.has(word.glossId)) {
         if (!open(word, 1)) continue;
         const all = [...word.halves].filter(([, halves]) => halves < cap).map(([d]) => d);
         const dimension = skillOf(word, all, all);
         if (dimension) add(word, dimension, 2, false);
-      } else if (ladders < NEW_PER_SESSION && open(word, LADDER_SLOTS)) {
+      } else if (ladders < NEW_PER_SESSION && (!early || newRoom > 0) && open(word, LADDER_SLOTS)) {
         add(word, 'written_receptive', 1, true);
+        if (early) newRoom -= 1;
       }
     }
   };
@@ -240,13 +257,19 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
     // Spec D7 step 3: today's extra words up to the cap, then the next planned words started
     // early as extra, then the hardest cards.
     belowCapWork(words.filter((word) => word.state === 'extra'));
-    start(words.filter((word) => word.state === 'later'));
+    start(
+      words.filter((word) => word.state === 'later'),
+      true,
+    );
     hardest(words);
   } else {
     // Spec D7 steps 1–2 and D5's checks; on the due date (D10) the cap is 20, so this asks the
     // skills below 20, furthest first, and then the hardest cards fill what is left.
     const owed = words.filter((word) => word.state === 'owed');
-    start(owed.filter((word) => word.toStart));
+    start(
+      owed.filter((word) => word.toStart),
+      false,
+    );
     belowCapWork(owed);
     checkWork(owed);
     if (mode === 'last_review') hardest(words);

@@ -358,7 +358,7 @@ export function createServerDeps(io: {
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations,
-    vocabulary: createVocabularyService({ transaction, logger: io.logger, stockSaveDelaySeconds: io.stockSaveDelaySeconds }),
+    vocabulary: createVocabularyService({ transaction, logger: io.logger, now: io.now, stockSaveDelaySeconds: io.stockSaveDelaySeconds }),
     grants: createGrantService({ transaction, logger: io.logger }),
     reminders,
     // Phase 26. Handed the lookup use case itself, so a row is looked up exactly

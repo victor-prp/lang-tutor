@@ -84,11 +84,11 @@ const CYCLE: QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_trans
  * as prepare-session writes it, minus the model: wrong options are fixed
  * strings and a typed card accepts `alternatives`. Options keep their canonical
  * order: the right index is 0, except for a board word, whose right index is
- * its place on the board.
+ * its place on the board. Phase 57: on the main path, or on `targetId`'s.
  */
 export async function insertListSession(
   db: Db,
-  input: { userId: string; enrollmentId: string; asked: AskedGloss[]; alternatives?: string[]; types?: QuestionType[] },
+  input: { userId: string; enrollmentId: string; asked: AskedGloss[]; alternatives?: string[]; types?: QuestionType[]; targetId?: string },
 ): Promise<{ sessionId: string; questions: Question[] }> {
   return withTx(db, async (tx) => {
     const sessionRepo = createSessionRepo(tx);
@@ -124,7 +124,7 @@ export async function insertListSession(
         ),
       })),
     });
-    const sessionId = await sessionRepo.insertPreparingSession(input.userId, input.enrollmentId, NO_DEVICES, CHOSEN_ON);
+    const sessionId = await sessionRepo.insertPreparingSession(input.userId, input.enrollmentId, NO_DEVICES, CHOSEN_ON, input.targetId ?? null);
     await sessionRepo.insertSessionQuestions(sessionId, generated);
     await sessionRepo.transition(sessionId, ['preparing'], 'ready');
     return { sessionId, questions: generated };

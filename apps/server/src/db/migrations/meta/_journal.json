@@ -295,6 +295,13 @@
       "when": 1792170221835,
       "tag": "0041_target_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792171829549,
+      "tag": "0042_sessions_per_path",
+      "breakpoints": true
     }
   ]
 }

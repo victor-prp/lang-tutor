@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import {
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
+  CurrentSessionQuerySchema,
   CurrentSessionResponseSchema,
   ErrorSchema,
   JudgedAnswerRequestSchema,
@@ -39,6 +40,8 @@ import {
   SessionNotReady,
   SessionNotSkippable,
   SessionOpen,
+  TargetClosed,
+  TargetNotFound,
   WrongScript,
 } from '../errors';
 import type { SessionResult, SessionService } from '../services/sessions';
@@ -109,7 +112,7 @@ const createSessionRoute = createRoute({
   tags: ['sessions'],
   summary: 'The next session to play',
   description:
-    "The session in stock, the one not yet started, when there is one: answered as it is, built for the device that asked first, so this request's `listening` and `speaking` do not change it. Otherwise one is created. An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Its question types come from a plan: runs of three cards that climb from recognition to recall, a matching board in sessions of seven words or more, listening cards only when the request says `listening: true`, and speaking cards only when it says `speaking: true`. Read it with GET /sessions/{id}.",
+    "The session in stock, the one not yet started, when there is one: answered as it is, built for the device that asked first, so this request's `listening` and `speaking` do not change it. Otherwise one is created. An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Its question types come from a plan: runs of three cards that climb from recognition to recall, a matching board in sessions of seven words or more, listening cards only when the request says `listening: true`, and speaking cards only when it says `speaking: true`. Read it with GET /sessions/{id}. With `target_id`, the session is the target's (phase 57): it asks only that target's words, from what the target owes today, and has a stock and a started session of its own; without it, the main path's, which asks only saved words in no active target.",
   request: {
     body: { required: true, content: { 'application/json': { schema: CreateSessionRequestSchema } } },
   },
@@ -123,9 +126,9 @@ const createSessionRoute = createRoute({
       description: 'The session was created.',
     },
     400: failure('The request body did not validate.'),
-    404: failure('No enrollment has this `enrollment_id`.'),
+    404: failure('No enrollment has this `enrollment_id`, or it has no target with this `target_id` (`target not found`).'),
     409: failure(
-      'A session is started (`session_open`), which is continued rather than replaced, the saved list is empty (`no_saved_words`), or the seed has too few questions for this pair (`not enough questions`).',
+      "A session of the path is started (`session_open`), which is continued rather than replaced, the path has nothing to ask (`no_saved_words`), the target's date has passed or it was ended (`target closed`), or the seed has too few questions for this pair (`not enough questions`).",
     ),
     ...learnerResponses,
     403: NOT_YOURS,
@@ -276,14 +279,15 @@ const currentSessionRoute = createRoute({
   tags: ['sessions'],
   summary: "An enrollment's current session",
   description:
-    'The started session, else the one in stock (not yet started: preparing or ready), else the newest session if it failed; where the next one will come from; and how many glosses are saved.',
-  request: { params: z.object({ id: z.string() }) },
+    "Of one path (phase 57): the main path's, or with `target_id` the target's. Its started session, else the one in stock (not yet started: preparing or ready), else its newest session if it failed; where the next one will come from; how many glosses are saved; and how many of the path's words wait (`due_count`): on the main path those due for review, on a target's those with work owed today.",
+  request: { params: z.object({ id: z.string() }), query: CurrentSessionQuerySchema },
   responses: {
     200: {
       content: { 'application/json': { schema: CurrentSessionResponseSchema } },
       description: 'The home screen state.',
     },
-    404: failure('No enrollment has this id.'),
+    400: failure('The query did not validate.'),
+    404: failure('No enrollment has this id, or it has no target with this `target_id` (`target not found`).'),
     ...learnerResponses,
     403: NOT_YOURS,
   },
@@ -300,19 +304,23 @@ export function createSessionsRouter(sessions: SessionService) {
   });
 
   router.openapi(createSessionRoute, async (c) => {
-    const { enrollment_id, listening, speaking } = c.req.valid('json');
+    const { enrollment_id, listening, speaking, target_id } = c.req.valid('json');
     try {
-      const next = await sessions.createNextSession(c.var.actor, enrollment_id, {
-        listening: listening ?? false,
-        speaking: speaking ?? false,
-      });
+      const next = await sessions.createNextSession(
+        c.var.actor,
+        enrollment_id,
+        { listening: listening ?? false, speaking: speaking ?? false },
+        target_id ?? null,
+      );
       const body = { session_id: next.sessionId, status: next.status, source: next.source };
       // Phase 43 (spec D5): the stock is answered, not created.
       return next.created ? c.json(body, 201) : c.json(body, 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
+      if (error instanceof TargetNotFound) return c.json({ error: 'target not found' }, 404);
       if (error instanceof SessionOpen) return c.json({ error: 'session_open' }, 409);
+      if (error instanceof TargetClosed) return c.json({ error: 'target closed' }, 409);
       if (error instanceof NoSavedWords) return c.json({ error: 'no_saved_words' }, 409);
       if (error instanceof InsufficientQuestions) return c.json({ error: 'not enough questions' }, 409);
       throw error;
@@ -478,8 +486,9 @@ export function createSessionsRouter(sessions: SessionService) {
 
   router.openapi(currentSessionRoute, async (c) => {
     const { id } = c.req.valid('param');
+    const { target_id } = c.req.valid('query');
     try {
-      const { current, nextSource, savedCount } = await sessions.currentSession(c.var.actor, id);
+      const { current, nextSource, savedCount, dueCount } = await sessions.currentSession(c.var.actor, id, target_id ?? null);
       return c.json(
         {
           current: current
@@ -493,12 +502,14 @@ export function createSessionsRouter(sessions: SessionService) {
             : null,
           next_source: nextSource,
           saved_count: savedCount,
+          due_count: dueCount,
         },
         200,
       );
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
+      if (error instanceof TargetNotFound) return c.json({ error: 'target not found' }, 404);
       throw error;
     }
   });

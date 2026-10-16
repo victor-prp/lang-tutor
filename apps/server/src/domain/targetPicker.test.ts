@@ -346,6 +346,33 @@ describe('chooseTargetPicks, practice more', () => {
   });
 });
 
+// Ruling T3-n (spec D8).
+describe("chooseTargetPicks, the day's room for new words", () => {
+  it('starts early only as many new words as the day has room for, and known ones whatever it says', () => {
+    const day = dayOf(
+      12,
+      [
+        { id: 'g0', state: 'later' },
+        { id: 'g1', state: 'later' },
+        { id: 'g2', state: 'later' },
+      ],
+      'rest',
+    );
+    expect(pick(day).filter((p) => p.ladder).map((p) => p.glossId)).toEqual(['g0', 'g1']);
+    expect(pick(day, { newRoom: 1 }).filter((p) => p.ladder).map((p) => p.glossId)).toEqual(['g0']);
+    expect(pick(day, { newRoom: 0 }).filter((p) => p.ladder)).toEqual([]);
+    expect(short(pick(day, { newRoom: 0, known: new Set(['g1']) }))).toEqual([['g1', WP, 2]]);
+  });
+
+  it('never holds an owed start back', () => {
+    const day = dayOf(4, [
+      { id: 'g0', toStart: true },
+      { id: 'g1', toStart: true },
+    ]);
+    expect(pick(day, { newRoom: 0 }).filter((p) => p.ladder).map((p) => p.glossId)).toEqual(['g0', 'g1']);
+  });
+});
+
 describe('chooseTargetPicks, last review', () => {
   it('asks a skill at 16 before the hardest cards', () => {
     const day = dayOf(

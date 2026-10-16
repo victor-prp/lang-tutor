@@ -383,7 +383,7 @@ describe('sessions status (phase 19)', () => {
     await expect(
       db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking)
                      values ('u_open', ${first}, 'preparing', 'list', false, false)`),
-    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_stock_per_enrollment' } });
+    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_stock_per_path' } });
   });
 
   it('allows one started session per enrollment, beside the one in stock', async () => {
@@ -395,7 +395,31 @@ describe('sessions status (phase 19)', () => {
     await expect(
       db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking, started_at)
                      values ('u_started', ${first}, 'ready', 'list', false, false, now())`),
-    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_started_per_enrollment' } });
+    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_started_per_path' } });
+  });
+
+  // Phase 57 (spec D1, D2, ADR 0014): per path. The main path is target_id null, read as the nil
+  // uuid, which no target has (targets.id is generated), so it is a path of its own.
+  it("allows one stock and one started session per path: the main path's and each target's", async () => {
+    const { first } = await learner('u_paths');
+    const target = async () =>
+      (await db.execute<{ id: string }>(sql`
+        insert into targets (enrollment_id, kind, due_on) values (${first}, 'exam', '2030-01-10') returning id`)).rows[0].id;
+    const [exam, homework] = [await target(), await target()];
+    const open = (targetId: string | null, started: boolean) => sql`
+      insert into sessions (user_id, enrollment_id, status, source, listening, speaking, target_id, started_at)
+      values ('u_paths', ${first}, 'ready', 'list', false, false, ${targetId}, ${started ? sql`now()` : null})`;
+    for (const path of [null, exam, homework]) {
+      await db.execute(open(path, false));
+      await db.execute(open(path, true));
+    }
+    await expect(db.execute(open(exam, false))).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_stock_per_path' } });
+    await expect(db.execute(open(exam, true))).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_started_per_path' } });
+    // The code before this phase names no target_id (ADR 0010): its sessions are the main path's.
+    await expect(
+      db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking)
+                     values ('u_paths', ${first}, 'preparing', 'list', false, false)`),
+    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_stock_per_path' } });
   });
 
   it('does not count skipped, failed or completed sessions as open', async () => {

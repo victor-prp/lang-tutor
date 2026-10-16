@@ -256,14 +256,15 @@ describe('GET /api/enrollments/{id}/targets', () => {
     expect(await call('GET', createUrl)).toEqual({ status: 200, body: { today: DAY, targets: [] } });
   });
 
-  it('leaves out a target that was ended and one whose date has come', async () => {
+  it('leaves out a target that was ended and one whose date has passed, and keeps one due today (phase 57, spec D10)', async () => {
     const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
     const kept = await made('exam', DUE, apple);
     const ended = await made('exam', '2030-01-15', apple);
     expect(await call('POST', '/targets/' + ended.id + '/end')).toEqual({ status: 204, body: '' });
-    await seedTarget(t.db, { enrollmentId: E, kind: 'homework', dueOn: DAY, glossIds: [bread.gloss_id] });
+    await seedTarget(t.db, { enrollmentId: E, kind: 'homework', dueOn: '2030-01-07', glossIds: [bread.gloss_id] });
+    const dueToday = await seedTarget(t.db, { enrollmentId: E, kind: 'homework', dueOn: DAY, glossIds: [bread.gloss_id] });
 
-    expect((await listed()).targets.map((target) => target.id)).toEqual([kept.id]);
+    expect((await listed()).targets.map((target) => target.id)).toEqual([dueToday, kept.id]);
   });
 
   it('answers 404 for an enrollment that does not exist', async () => {

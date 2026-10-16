@@ -15,6 +15,7 @@ const none = (next_source: 'seed' | 'list', saved_count = 0): CurrentSessionResp
   current: null,
   next_source,
   saved_count,
+  due_count: 0,
 });
 const withCurrent = (
   status: 'preparing' | 'ready' | 'failed',
@@ -24,6 +25,7 @@ const withCurrent = (
   current: { session_id: 's1', status, source: 'list', answered, total: status === 'preparing' ? 0 : 4 },
   next_source: 'list',
   saved_count,
+  due_count: 0,
 });
 
 describe('homeActionOf — the seven home states', () => {

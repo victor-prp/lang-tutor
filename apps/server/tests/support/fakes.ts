@@ -259,8 +259,9 @@ export type FakeTargetRepo = TargetRepo & {
 
 /**
  * Phase 53. A target repository for a learner with no target: the reads a session
- * makes find nothing (no active target, no recorded split, no target ended on its
- * date), and the writes are recorded no-ops that report nothing happened. Every other
+ * makes find nothing (no active target, no target's day recorded, no target ended on its
+ * date, no target holding a word), and the writes are recorded no-ops that report nothing
+ * happened. Every other
  * method throws with its name, so a test that reaches a target it never set up fails
  * there. insertTarget is one of those: its caller needs the row it makes, which a
  * no-op cannot invent, so a test that creates a target says what comes back.
@@ -301,10 +302,12 @@ export function createFakeTargetRepo(overrides: Partial<TargetRepo> = {}): FakeT
     insertEvent: async (...args) => {
       written.push({ method: 'insertEvent', args });
     },
-    insertSessionSplit: async (...args) => {
-      written.push({ method: 'insertSessionSplit', args });
+    insertSessionTarget: async (...args) => {
+      written.push({ method: 'insertSessionTarget', args });
     },
-    findSessionSplit: async () => [],
+    findSessionTarget: async () => undefined,
+    listWords: missing.listWords,
+    listHolding: async () => [],
     markStarted: async (...args) => {
       written.push({ method: 'markStarted', args });
     },

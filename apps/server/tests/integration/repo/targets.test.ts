@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { sql, type SQL } from 'drizzle-orm';
 
-import type { TargetSplit } from '../../../src/domain/targetSession';
-import type { ShareReason, TargetKind } from '../../../src/domain/targets';
+import type { TargetKind } from '../../../src/domain/targets';
 import { createSessionRepo } from '../../../src/repo/sessions';
-import { createTargetRepo, type TargetEventInput, type TargetRepo } from '../../../src/repo/targets';
+import { createTargetRepo, type SessionTargetRow, type TargetEventInput, type TargetRepo } from '../../../src/repo/targets';
 import { CHOSEN_ON, NO_DEVICES } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -42,9 +41,10 @@ const repo = <T>(run: (r: TargetRepo) => Promise<T>) => withTx(t.db, (tx) => run
 const make = (over: Partial<{ enrollmentId: string; kind: TargetKind; dueOn: string }> = {}) =>
   repo((r) => r.insertTarget({ enrollmentId: E1, kind: 'exam', dueOn: '2026-10-20', ...over }));
 
-/** An unstarted list session in stock for u_1, or for u_2 (the unique index allows one per enrollment). */
-const stock = (userId: 'u_1' | 'u_2' = 'u_1') =>
-  withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession(userId, enrollmentOf(userId), NO_DEVICES, CHOSEN_ON));
+/** An unstarted list session in stock for u_1's or u_2's main path, or (phase 57) a target's (the
+ *  unique index allows one per path). */
+const stock = (userId: 'u_1' | 'u_2' = 'u_1', path: string | null = null) =>
+  withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession(userId, enrollmentOf(userId), NO_DEVICES, CHOSEN_ON, path));
 
 const count = async (query: SQL) => (await t.db.execute<{ n: number }>(query)).rows[0].n;
 
@@ -55,15 +55,16 @@ const violating = (constraint: string) =>
     cause: expect.objectContaining({ message: expect.stringContaining(constraint) }),
   });
 
-const split = (targetId: string, over: Partial<TargetSplit> = {}): TargetSplit => ({
+/** Phase 57 (spec D2, D9). What a target path's stock records of its target's day. */
+const pathRow = (targetId: string, over: Partial<SessionTargetRow> = {}): SessionTargetRow => ({
   targetId,
-  wish: 10,
-  slots: 10,
-  picked: 10,
-  reason: 'not_ready',
   daysLeft: 5,
-  readyCount: 2,
+  capHalves: 7,
+  readinessPct: 18,
+  readyCount: 1,
   wordCount: 8,
+  fsrsReadyCount: 2,
+  owedGlossIds: ['g_a', 'g_b'],
   ...over,
 });
 
@@ -104,48 +105,40 @@ describe('the tables', () => {
     );
   });
 
-  it('refuses a reason it does not know, and a split for a session or a target that is not there', async () => {
+  it("refuses a target path's row for a session or a target that is not there, and a target twice in one session", async () => {
     const target = await make();
-    const sessionId = await stock();
-    await expect(repo((r) => r.insertSessionSplit(sessionId, [split(target.id, { reason: 'bored' as ShareReason })]))).rejects.toEqual(
-      violating('session_targets_reason_known'),
+    const sessionId = await stock('u_1', target.id);
+    await expect(repo((r) => r.insertSessionTarget('00000000-0000-0000-0000-000000000000', pathRow(target.id)))).rejects.toEqual(
+      violating('session_targets_session_fk'),
     );
-    await expect(
-      repo((r) => r.insertSessionSplit('00000000-0000-0000-0000-000000000000', [split(target.id)])),
-    ).rejects.toEqual(violating('session_targets_session_fk'));
-    await expect(
-      repo((r) => r.insertSessionSplit(sessionId, [split('00000000-0000-0000-0000-000000000000')])),
-    ).rejects.toEqual(violating('session_targets_target_fk'));
+    await expect(repo((r) => r.insertSessionTarget(sessionId, pathRow('00000000-0000-0000-0000-000000000000')))).rejects.toEqual(
+      violating('session_targets_target_fk'),
+    );
+    await repo((r) => r.insertSessionTarget(sessionId, pathRow(target.id)));
+    await expect(repo((r) => r.insertSessionTarget(sessionId, pathRow(target.id)))).rejects.toEqual(violating('session_targets_pkey'));
   });
 
-  // A target is handed the slots the main path could not use in a second pass, so it can
-  // pick more than the slots it was given: nothing ties the two.
-  it('lets a target pick more words than the slots it was given', async () => {
+  it("takes a target's words, log and its sessions' rows with it, once none of its sessions is left", async () => {
     const target = await make();
-    const sessionId = await stock();
-    await repo((r) => r.insertSessionSplit(sessionId, [split(target.id, { slots: 3, picked: 7 })]));
-    expect(await repo((r) => r.findSessionSplit(sessionId))).toEqual([split(target.id, { slots: 3, picked: 7 })]);
-  });
-
-  it("takes a target's words, log and split with it", async () => {
-    const target = await make();
-    const sessionId = await stock();
+    const sessionId = await stock('u_1', target.id);
     await repo((r) => r.addWords(target.id, glossIds));
     await repo((r) => r.insertEvent({ targetId: target.id, kind: 'created', before: null, after: null, actorUserId: 'u_1', sessionId: null }));
-    await repo((r) => r.insertSessionSplit(sessionId, [split(target.id)]));
+    await repo((r) => r.insertSessionTarget(sessionId, pathRow(target.id)));
+    // Phase 57 (ADR 0014): a session holds its path's target (sessions_target_fk, no action).
+    await expect(t.db.execute(sql`delete from targets where id = ${target.id}`)).rejects.toEqual(violating('sessions_target_fk'));
 
+    await t.db.execute(sql`delete from sessions where id = ${sessionId}`);
     await t.db.execute(sql`delete from targets where id = ${target.id}`);
 
     expect(await count(sql`select count(*)::int as n from target_words`)).toBe(0);
     expect(await count(sql`select count(*)::int as n from target_events`)).toBe(0);
     expect(await count(sql`select count(*)::int as n from session_targets`)).toBe(0);
-    expect(await count(sql`select count(*)::int as n from sessions where id = ${sessionId}`)).toBe(1);
   });
 
-  it("takes a session's split with it, and leaves the target", async () => {
+  it("takes a session's row with it, and leaves the target", async () => {
     const target = await make();
-    const sessionId = await stock();
-    await repo((r) => r.insertSessionSplit(sessionId, [split(target.id)]));
+    const sessionId = await stock('u_1', target.id);
+    await repo((r) => r.insertSessionTarget(sessionId, pathRow(target.id)));
 
     await t.db.execute(sql`delete from sessions where id = ${sessionId}`);
 
@@ -180,7 +173,7 @@ describe('insertTarget, findTarget and findTargetForUpdate', () => {
 describe('listActive', () => {
   const TODAY = '2026-10-14';
 
-  it('lists what is due after today and not ended, nearest date first and then by id, with the words in the order added', async () => {
+  it('lists what is due today or later and not ended, nearest date first and then by id, with the words in the order added', async () => {
     const far = await make({ kind: 'exam', dueOn: '2026-10-30' });
     const tomorrowA = await make({ kind: 'homework', dueOn: '2026-10-15' });
     const tomorrowB = await make({ kind: 'exam', dueOn: '2026-10-15' });
@@ -195,16 +188,17 @@ describe('listActive', () => {
 
     const active = await repo((r) => r.listActive(E1, TODAY));
 
-    expect(active.map((row) => row.id)).toEqual([...byId([tomorrowA, tomorrowB]).map((row) => row.id), far.id]);
+    expect(active.map((row) => row.id)).toEqual([dueToday.id, ...byId([tomorrowA, tomorrowB]).map((row) => row.id), far.id]);
+    expect(active.find((row) => row.id === dueToday.id)).toEqual({ ...dueToday, glossIds: [glossIds[3]] });
     expect(active.find((row) => row.id === far.id)).toEqual({ ...far, glossIds: [glossIds[2], glossIds[0], glossIds[1]] });
     expect(active.find((row) => row.id === tomorrowA.id)).toEqual({ ...tomorrowA, glossIds: [glossIds[1]] });
     expect(active.find((row) => row.id === tomorrowB.id)).toEqual({ ...tomorrowB, glossIds: [] });
   });
 
-  it('counts a target as active until the day it is due', async () => {
+  it('counts a target as active through the day it is due (phase 57, spec D10)', async () => {
     const target = await make({ dueOn: '2026-10-15' });
     expect((await repo((r) => r.listActive(E1, '2026-10-14'))).map((row) => row.id)).toEqual([target.id]);
-    expect(await repo((r) => r.listActive(E1, '2026-10-15'))).toEqual([]);
+    expect((await repo((r) => r.listActive(E1, '2026-10-15'))).map((row) => row.id)).toEqual([target.id]);
     expect(await repo((r) => r.listActive(E1, '2026-10-16'))).toEqual([]);
   });
 
@@ -305,7 +299,7 @@ describe('listEndedUnrecorded', () => {
     sessionId: null,
   });
 
-  it('lists the targets whose date has come that the log does not yet record, nearest date first', async () => {
+  it('lists the targets whose date has passed that the log does not yet record, nearest date first', async () => {
     const dueToday = await make({ dueOn: TODAY });
     const past = await make({ dueOn: '2026-10-01' });
     const otherEvents = await make({ dueOn: '2026-10-03' });
@@ -322,13 +316,16 @@ describe('listEndedUnrecorded', () => {
 
     const unrecorded = await repo((r) => r.listEndedUnrecorded(E1, TODAY));
 
-    expect(unrecorded).toEqual([past, otherEvents, dueToday]);
+    // Phase 57 (spec D10): due today, it is still active.
+    expect(unrecorded).toEqual([past, otherEvents]);
+    expect(dueToday.dueOn).toBe(TODAY);
   });
 
-  it('lists a target from the day it is due, and drops it once its ended_on_date event is written', async () => {
+  it('lists a target from the day after it is due, and drops it once its ended_on_date event is written', async () => {
     const target = await make({ dueOn: '2026-10-01' });
     expect(await repo((r) => r.listEndedUnrecorded(E1, '2026-09-30'))).toEqual([]);
-    expect((await repo((r) => r.listEndedUnrecorded(E1, '2026-10-01'))).map((row) => row.id)).toEqual([target.id]);
+    expect(await repo((r) => r.listEndedUnrecorded(E1, '2026-10-01'))).toEqual([]);
+    expect((await repo((r) => r.listEndedUnrecorded(E1, '2026-10-02'))).map((row) => row.id)).toEqual([target.id]);
     expect((await repo((r) => r.listEndedUnrecorded(E1, TODAY))).map((row) => row.id)).toEqual([target.id]);
 
     await repo((r) => r.insertEvent(endedOnDate(target.id)));
@@ -392,41 +389,58 @@ describe('insertEvent', () => {
   });
 });
 
-describe('the session split', () => {
-  it("stores one row per target a session served and reads them back by target id, with nothing for another session's", async () => {
-    const [a, b, c, d] = [await make(), await make({ kind: 'homework' }), await make(), await make()];
-    const theirs = await make({ enrollmentId: E2 });
-    const sessionId = await stock();
-    const otherSession = await stock('u_2');
-    const rows = [
-      split(a.id, { reason: 'exclusive', wish: 10, slots: 10, picked: 10, daysLeft: 1 }),
-      split(b.id, { reason: 'run_up', slots: 0, picked: 0 }),
-      split(c.id, { reason: 'not_ready', slots: 4, picked: 5 }),
-      split(d.id, { reason: 'steady', wish: 3, slots: 3, picked: 2, readyCount: 8, wordCount: 8 }),
-    ];
+// Phase 57 (spec D2, D9). The one row a target path's stock records.
+describe("a target path's session row", () => {
+  it('stores the row and reads back its cap and owed words for that session and target only', async () => {
+    const [a, b] = [await make(), await make({ kind: 'homework' })];
+    const first = await stock('u_1', a.id);
+    const second = await stock('u_1', b.id);
 
-    await repo((r) => r.insertSessionSplit(sessionId, rows));
-    await repo((r) => r.insertSessionSplit(otherSession, [split(theirs.id, { slots: 1, picked: 1 })]));
+    await repo((r) => r.insertSessionTarget(first, pathRow(a.id)));
+    await repo((r) => r.insertSessionTarget(second, pathRow(b.id, { capHalves: 20, owedGlossIds: [] })));
 
-    const found = await repo((r) => r.findSessionSplit(sessionId));
-    expect(found).toEqual([...rows].sort((x, y) => (x.targetId < y.targetId ? -1 : 1)));
-    expect(await repo((r) => r.findSessionSplit(otherSession))).toEqual([split(theirs.id, { slots: 1, picked: 1 })]);
+    expect(await repo((r) => r.findSessionTarget(first, a.id))).toEqual({ capHalves: 7, owedGlossIds: ['g_a', 'g_b'] });
+    expect(await repo((r) => r.findSessionTarget(second, b.id))).toEqual({ capHalves: 20, owedGlossIds: [] });
+    expect(await repo((r) => r.findSessionTarget(first, b.id))).toBeUndefined();
+    const stored = await t.db.execute(sql`
+      select days_left, cap_halves, readiness_pct, ready_count, word_count, fsrs_ready_count, wish, slots, picked, reason
+      from session_targets where session_id = ${first}`);
+    expect(stored.rows).toEqual([
+      { days_left: 5, cap_halves: 7, readiness_pct: 18, ready_count: 1, word_count: 8, fsrs_ready_count: 2, wish: null, slots: null, picked: null, reason: null },
+    ]);
   });
 
-  it('writes nothing for a session that served no target, and finds nothing for one, for an unknown id or a malformed one', async () => {
-    const sessionId = await stock();
-    await repo((r) => r.insertSessionSplit(sessionId, []));
-    expect(await count(sql`select count(*)::int as n from session_targets`)).toBe(0);
-    expect(await repo((r) => r.findSessionSplit(sessionId))).toEqual([]);
-    expect(await repo((r) => r.findSessionSplit('00000000-0000-0000-0000-000000000000'))).toEqual([]);
-    expect(await repo((r) => r.findSessionSplit('nope'))).toEqual([]);
-  });
-
-  it('refuses a target twice in one session', async () => {
+  it('finds nothing for an unknown or malformed id, nor for a phase 53 split row, which recorded no cap', async () => {
     const target = await make();
     const sessionId = await stock();
-    await expect(repo((r) => r.insertSessionSplit(sessionId, [split(target.id), split(target.id)]))).rejects.toEqual(
-      violating('session_targets_pkey'),
-    );
+    await t.db.execute(sql`
+      insert into session_targets (session_id, target_id, wish, slots, picked, reason, days_left, ready_count, word_count)
+      values (${sessionId}, ${target.id}, 10, 10, 2, 'not_ready', 5, 0, 3)`);
+    expect(await repo((r) => r.findSessionTarget(sessionId, target.id))).toBeUndefined();
+    expect(await repo((r) => r.findSessionTarget('00000000-0000-0000-0000-000000000000', target.id))).toBeUndefined();
+    expect(await repo((r) => r.findSessionTarget('nope', target.id))).toBeUndefined();
+    expect(await repo((r) => r.findSessionTarget(sessionId, 'nope'))).toBeUndefined();
+  });
+});
+
+// Phase 57 (spec D6, ADR 0014).
+describe('listWords and listHolding', () => {
+  it("lists a target's words with when each joined and the day it started, in the order added", async () => {
+    const target = await make();
+    await repo((r) => r.addWords(target.id, [glossIds[1], glossIds[0]]));
+    await repo((r) => r.markStarted(target.id, [glossIds[0]], '2026-10-12'));
+    expect(await repo((r) => r.listWords(target.id))).toEqual([
+      { glossId: glossIds[1], addedAt: expect.any(Date), startedOn: null },
+      { glossId: glossIds[0], addedAt: expect.any(Date), startedOn: '2026-10-12' },
+    ]);
+  });
+
+  it('answers the targets of the enrollment holding a gloss, ended ones too, sorted', async () => {
+    const [a, b, c] = [await make(), await make({ dueOn: '2026-10-01' }), await make()];
+    const theirs = await make({ enrollmentId: E2 });
+    for (const target of [a, b, theirs]) await repo((r) => r.addWords(target.id, [glossIds[0]]));
+    await repo((r) => r.addWords(c.id, [glossIds[1]]));
+    expect(await repo((r) => r.listHolding(E1, glossIds[0]))).toEqual([a.id, b.id].sort());
+    expect(await repo((r) => r.listHolding(E1, glossIds[2]))).toEqual([]);
   });
 });

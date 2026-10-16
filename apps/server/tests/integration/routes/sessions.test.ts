@@ -11,6 +11,7 @@ import {
 import { saveSessionGlosses } from '../../support/progressRows';
 import { insertListSession, readStoredAnswers } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
+import { seedTarget } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
@@ -561,7 +562,7 @@ describe('phase 19 session routes', () => {
   it('GET current answers before, during and after a session, and 404s an unknown enrollment', async () => {
     const app = buildTestApp();
     const before = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
-    expect(before).toEqual({ current: null, next_source: 'seed', saved_count: 0 });
+    expect(before).toEqual({ current: null, next_source: 'seed', saved_count: 0, due_count: 0 });
 
     const { session_id } = await startSeed(app, E());
     const during = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
@@ -569,11 +570,68 @@ describe('phase 19 session routes', () => {
       current: { session_id, status: 'ready', source: 'seed', answered: 0, total: 10 },
       next_source: 'list',
       saved_count: 0,
+      due_count: 0,
     });
 
     const missing = await getJson(app, '/api/enrollments/e_nobody/sessions/current');
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({ error: 'enrollment not found' });
+  });
+});
+
+// Phase 57 (spec D1, D13, ADR 0014). A path: the main one without `target_id`, a target's with it.
+describe('a target path on create and current', () => {
+  const E = () => enrollmentOf('u_1');
+  const answered = async (res: Response) => ({ status: res.status, body: await res.json() });
+  const UNKNOWN = '00000000-0000-0000-0000-000000000000';
+  const targetOf = async (userId: string, dueOn: string) => {
+    const [glossId] = (await seedSavedSenses(t.db, { enrollmentId: enrollmentOf(userId), lemma: `w${userId}${dueOn}`, translations: ['מילה'] })).glossIds;
+    return seedTarget(t.db, { enrollmentId: enrollmentOf(userId), kind: 'exam', dueOn, glossIds: [glossId] });
+  };
+
+  it("answers 404 for a target the enrollment does not have, and 403 for another learner's", async () => {
+    const app = buildTestApp();
+    const theirs = await targetOf('u_2', '2099-01-01');
+    for (const target of [UNKNOWN, 'nope']) {
+      expect(await answered(await postJson(app, '/api/sessions', { enrollment_id: E(), target_id: target }))).toEqual({
+        status: 404,
+        body: { error: 'target not found' },
+      });
+      expect(await answered(await getJson(app, `/api/enrollments/${E()}/sessions/current?target_id=${target}`))).toEqual({
+        status: 404,
+        body: { error: 'target not found' },
+      });
+    }
+    const FORBIDDEN = { status: 403, body: { error: 'forbidden' } };
+    expect(await answered(await postJson(app, '/api/sessions', { enrollment_id: E(), target_id: theirs }))).toEqual(FORBIDDEN);
+    expect(await answered(await getJson(app, `/api/enrollments/${E()}/sessions/current?target_id=${theirs}`))).toEqual(FORBIDDEN);
+  });
+
+  it('answers 409 target closed for a target whose date has passed, and 400 for an empty target_id', async () => {
+    const app = buildTestApp();
+    const past = await targetOf('u_1', '2020-01-01');
+    expect(await answered(await postJson(app, '/api/sessions', { enrollment_id: E(), target_id: past }))).toEqual({
+      status: 409,
+      body: { error: 'target closed' },
+    });
+    expect(await answered(await postJson(app, '/api/sessions', { enrollment_id: E(), target_id: '' }))).toEqual({
+      status: 400,
+      body: { error: 'invalid request' },
+    });
+    expect(await answered(await getJson(app, `/api/enrollments/${E()}/sessions/current?target_id=`))).toEqual({
+      status: 400,
+      body: { error: 'invalid request' },
+    });
+  });
+
+  it("answers a target's path on current: nothing open yet, and the words it owes today", async () => {
+    const app = buildTestApp();
+    const target = await targetOf('u_1', '2099-01-01');
+    expect(await answered(await getJson(app, `/api/enrollments/${E()}/sessions/current?target_id=${target}`))).toEqual({
+      status: 200,
+      // Far off, the plan's first day meets its one word (spec D6).
+      body: { current: null, next_source: 'list', saved_count: 1, due_count: 1 },
+    });
   });
 });
 
@@ -589,7 +647,7 @@ describe('another learner', () => {
     expect(await answered(await postJson(app, '/api/sessions', { enrollment_id: E() }, 'u_2'))).toEqual(FORBIDDEN);
     expect(await answered(await getJson(app, `/api/enrollments/${E()}/sessions/current`, 'u_2'))).toEqual(FORBIDDEN);
     const mine = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
-    expect(mine).toEqual({ current: null, next_source: 'seed', saved_count: 0 });
+    expect(mine).toEqual({ current: null, next_source: 'seed', saved_count: 0, due_count: 0 });
   });
 
   it("is answered 403 on someone else's session, which stays as it was", async () => {
