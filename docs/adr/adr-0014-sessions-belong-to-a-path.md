@@ -44,8 +44,9 @@ progress lock serializes those ends, which phase 43's one started session used t
   then the targets' in id order (`services/stock.ts` `lockPaths`), all before the progress lock.
   One that takes the progress lock (a word out of a target, an unsave, the removal of a level's
   words or of every word, and a target's end, early or on its date, which skips the session
-  started on its path: `services/sessionEnd.ts` `skipOpenSession`) retires stocks and changes a
-  skipped session's row before it (a skip holds its session's row, then that lock) and asks for
+  started on its path: `services/sessionEnd.ts` `skipOpenSession`, `closeOpenSession`) retires
+  stocks and changes every skipped session's row before it, all of them first when it skips
+  several (a skip holds its session's row, then that lock) and asks for
   stocks only after it (a session end holds that lock, then enqueues its path's stock under the
   same singleton key, whose uncommitted row a stately insert waits on). Enforced by review, the
   call orders `src/services/targets.test.ts` and `src/services/sessions.stock.test.ts` assert,

@@ -129,7 +129,7 @@ import { learnerDay } from './learnerDay';
 import { readTargetDay } from './targetDayRead';
 import type { LlmClient, ModelCallRecord } from './llm';
 import type { SpeechTranscriber } from './speech';
-import { recordProgress, skipOpenSession } from './sessionEnd';
+import { closeOpenSession, lastAnswerDay, recordProgress, skipOpenSession } from './sessionEnd';
 import { pathPayload, requestStock } from './stock';
 import type { SessionTargetRow, TargetRow } from '../repo/targets';
 import type { Repos, Transaction } from './transaction';
@@ -534,9 +534,9 @@ export function createSessionService({
    * records its target's day (session_targets) and is planned as a target's (ruling T3-l);
    * the main path's records each target whose date has passed as ended on it, naming the
    * session, retires that target path's unstarted stock and skips its started one (final
-   * review I1: its answers counted once as a skip's, the progress lock taken after its row, as
-   * ADR 0014 R4 orders it), and refreshes the families. The caller holds the path's
-   * next-session lock.
+   * review I1: its answers counted once as a skip's, on its last answer's learner day; every
+   * ended path's rows change before the progress lock is first taken, as ADR 0014 R4 orders
+   * it), and refreshes the families. The caller holds the path's next-session lock.
    */
   async function writeStock(repos: Repos, enrolled: Enrollment, devices: Devices, read: ChoiceRead, picks: ChosenStock): Promise<Stocked> {
     const { session, vocabulary, jobs } = repos;
@@ -564,8 +564,12 @@ export function createSessionService({
         endedOnDate.push(target.id);
         const { stock, started } = await session.findOpen(enrollmentId, target.id);
         if (stock?.source === 'list' && (await session.retireStock(stock.id))) endedStocks.push(stock.id);
-        if (started && (await skipOpenSession(repos, started.id, enrollmentId, read.today))) endedStarted.push(started.id);
+        // Re-review N2: only the row here; every ended path's rows change before the progress
+        // lock, which the loop below takes. Ruling I1-c: on its last answer's learner day.
+        const day = started ? await lastAnswerDay(repos, enrolled.user_id, started.id, read.today) : read.today;
+        if (started && (await closeOpenSession(repos, started.id, day))) endedStarted.push(started.id);
       }
+      for (const skipped of endedStarted) await recordProgress(repos, skipped, enrollmentId);
       // Phase 39 (spec D4). The refresh is recorded once the session exists, so
       // each event names it; one that changed nothing writes nothing. Phase 46
       // (spec D3): every gloss known for the first time is stamped, family or not.
@@ -813,7 +817,7 @@ export function createSessionService({
       actorUserId: string,
       enrollmentId: string,
       path: Path = null,
-    ): Promise<{ current: SessionSummary | null; nextSource: SessionSource; savedCount: number; dueCount: number }> => {
+    ): Promise<{ current: (SessionSummary & { started: boolean }) | null; nextSource: SessionSource; savedCount: number; dueCount: number }> => {
       const read = await transaction(async (repos) => {
         const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
         const target = path === null ? null : await pathTarget(repos, actorUserId, enrolled, path);
@@ -832,7 +836,14 @@ export function createSessionService({
         // The seed is the main path's (phase 57, spec D2): any session at all puts it behind.
         const any = latest ?? (await repos.session.findLatest(enrollmentId, 'any'));
         return {
-          current: open.started ?? open.stock ?? (latest?.status === 'failed' ? latest : null),
+          // Final review N1: whether it was started, which a session left before any answer is.
+          current: open.started
+            ? { ...open.started, started: true }
+            : open.stock
+              ? { ...open.stock, started: false }
+              : latest?.status === 'failed'
+                ? { ...latest, started: false }
+                : null,
           offered: open.started ? undefined : open.stock,
           nextSource: path === null ? nextSource(any !== undefined) : ('list' as const),
           savedCount: await savedOn(repos, enrolled, path),

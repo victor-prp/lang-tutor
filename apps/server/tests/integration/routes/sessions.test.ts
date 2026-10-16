@@ -567,7 +567,8 @@ describe('phase 19 session routes', () => {
     const { session_id } = await startSeed(app, E());
     const during = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
     expect(during).toEqual({
-      current: { session_id, status: 'ready', source: 'seed', answered: 0, total: 10 },
+      // Created, not yet started (final review N1: the wire says which).
+      current: { session_id, status: 'ready', source: 'seed', answered: 0, total: 10, started: false },
       next_source: 'list',
       saved_count: 0,
       due_count: 0,

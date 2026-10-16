@@ -9,6 +9,7 @@ import {
   loadFailedFor,
   mainEmptyNote,
   myWordsLine,
+  openSessionOf,
   reminderStartOf,
   shouldAutoCreate,
   shouldPoll,
@@ -27,7 +28,7 @@ const withCurrent = (
   answered = 0,
   saved_count = 4,
 ): CurrentSessionResponse => ({
-  current: { session_id: 's1', status, source: 'list', answered, total: status === 'preparing' ? 0 : 4 },
+  current: { session_id: 's1', status, source: 'list', answered, total: status === 'preparing' ? 0 : 4, started: answered > 0 },
   next_source: 'list',
   saved_count,
   due_count: 0,
@@ -185,12 +186,13 @@ const targetWith = (session: CurrentSessionResponse['current']): TargetSummary =
   today: { state: 'owed', done: 0, planned: 8, extra: 0, next_practice_in: null },
   session,
 });
-const session = (status: 'preparing' | 'ready' | 'failed' | 'completed', answered = 0) => ({
+const session = (status: 'preparing' | 'ready' | 'failed' | 'completed', answered = 0, started = answered > 0) => ({
   session_id: 'ts1',
   status,
   source: 'list' as const,
   answered,
   total: status === 'preparing' ? 0 : 4,
+  started,
 });
 
 describe('targetSessionAction', () => {
@@ -199,6 +201,8 @@ describe('targetSessionAction', () => {
     ['preparing', session('preparing'), { kind: 'preparing', sessionId: 'ts1' }],
     ['ready and untouched: start', session('ready', 0), { kind: 'start', sessionId: 'ts1' }],
     ['ready with answers: resume', session('ready', 3), { kind: 'resume', sessionId: 'ts1' }],
+    // Final review N1. Entered and left before any answer: started, so resumed, never created.
+    ['started with no answer: resume', session('ready', 0, true), { kind: 'resume', sessionId: 'ts1' }],
     // Every target has words, so a failed one is always offered again.
     ['failed: try again', session('failed'), { kind: 'failed' }],
     ['a finished session is not offered: create', session('completed', 4), { kind: 'create' }],
@@ -210,9 +214,25 @@ describe('targetSessionAction', () => {
 // Phase 57 (spec D1, final review C1). A target's button: a started session is resumed as it
 // is; an unstarted one, none, or a failed one goes through create, which answers the path's stock
 // (replaced when it no longer serves the day) or builds one; a preparing one does nothing.
+// Final review N1. After a create refused with session_open, the path's session in a list read
+// since: the one to enter, if it is ready.
+describe('openSessionOf', () => {
+  it("answers the target's ready session, started or not", () => {
+    expect(openSessionOf([targetWith(session('ready', 0, true))], 't1')).toBe('ts1');
+    expect(openSessionOf([targetWith(session('ready', 2))], 't1')).toBe('ts1');
+  });
+
+  it('answers none for a session not ready, another target, or no list', () => {
+    expect(openSessionOf([targetWith(session('preparing'))], 't1')).toBeNull();
+    expect(openSessionOf([targetWith(session('ready', 0, true))], 't2')).toBeNull();
+    expect(openSessionOf(null, 't1')).toBeNull();
+  });
+});
+
 describe('targetPress', () => {
   it.each([
     ['resumes a started session as it is', session('ready', 3), { kind: 'enter', sessionId: 'ts1', fresh: false }],
+    ['resumes one started with no answer, with no create (final review N1)', session('ready', 0, true), { kind: 'enter', sessionId: 'ts1', fresh: false }],
     // The stock is answered or replaced for the devices it was built for: no wait on the voices.
     ['sends an unstarted stock through create', session('ready', 0), { kind: 'create', waitForVoices: false }],
     ['creates with no session, for this device', null, { kind: 'create', waitForVoices: true }],
@@ -288,6 +308,18 @@ describe('homeReminderStartOf', () => {
 
   it("resumes the first target's started session as it is, with no create", () => {
     expect(homeReminderStartOf(owed(session('ready', 2)), null, stale)).toEqual({ kind: 'enter', sessionId: 'ts1', fresh: false });
+    // Final review N1: started and left before any answer.
+    expect(homeReminderStartOf(owed(session('ready', 0, true)), null, stale)).toEqual({ kind: 'enter', sessionId: 'ts1', fresh: false });
+  });
+
+  // Final review N1. Create refused with session_open: the path has a started session after all
+  // (a list read before it was started); the reminder enters it, as it was, read again.
+  it('enters the started session a refused create points to', () => {
+    expect(homeReminderStartOf(owed(session('ready', 0)), mainReady, fresh, { kind: 'open', sessionId: 'ts9' })).toEqual({
+      kind: 'enter',
+      sessionId: 'ts9',
+      fresh: false,
+    });
   });
 
   it('clears when the first target failed, or its create did', () => {

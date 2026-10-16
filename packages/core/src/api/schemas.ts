@@ -542,6 +542,9 @@ export const CurrentSessionSchema = z.object({
   source: SessionSourceSchema,
   answered: z.number().int(),
   total: z.number().int(),
+  // Phase 57 (final review N1). Whether it was started: a session entered and left before any
+  // answer is started with none, and is resumed, never created again (create answers 409).
+  started: z.boolean(),
 });
 
 // Phase 57 (spec D1, D13). Which path's session: a target of the enrollment. Absent means

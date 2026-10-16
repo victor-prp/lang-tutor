@@ -9,11 +9,11 @@ import type { TargetService } from '../../../src/services/targets';
 import type { VocabularyService } from '../../../src/services/vocabulary';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { jobPayloads, startTestBoss, stockJobKeys, stopTestBoss } from '../../support/jobs';
-import { holdProgressLock, holdSessionEnd, waitForBlockedQuery } from '../../support/locks';
-import { insertGlossMemory, readLearnerDay, readMemory, setLevel } from '../../support/progressRows';
+import { holdProgressLock, holdSessionEnd, holdSessionRowEnd, waitForBlockedQuery } from '../../support/locks';
+import { insertGlossMemory, moveAnswersBack, readLearnerDay, readMemory, setLevel } from '../../support/progressRows';
 import { asChoice, insertListSession, type AskedGloss } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
-import { enrollmentOf, makeBot, seedUser } from '../../support/seedUser';
+import { enrollmentOf, makeBot, seedUser, setTimeZone } from '../../support/seedUser';
 import { endTargetNow, readSessionTargets, readStockRow, readTargetEvents, readTargetSkills, seedTarget, setTargetWord } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
@@ -186,6 +186,25 @@ describe('a path per target (spec D1, D2)', () => {
   });
 });
 
+// Final review N1. A session entered and left before any answer is started with none: both home
+// reads say so, so the app resumes it rather than send a create that answers session_open.
+describe('a target session started with no answer (final review N1)', () => {
+  it('reads started on the home read and on the targets list, and create refuses it while it is open', async () => {
+    const words = await savedWords();
+    const exam = await addTarget('exam', '2030-01-13', ids(words.slice(0, 3)));
+    const own = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [words[0]], types: ['multiple_choice'], targetId: exam });
+    // In stock, not started. (The home read would check it: it records no day of its target.)
+    expect((await targets.getTarget('u_1', exam)).session).toMatchObject({ session_id: own.sessionId, answered: 0, started: false });
+
+    await service.startSession('u_1', own.sessionId, NO_DEVICES);
+
+    expect((await service.currentSession('u_1', E, exam)).current).toMatchObject({ id: own.sessionId, answered: 0, started: true });
+    expect((await targets.getTarget('u_1', exam)).session).toMatchObject({ session_id: own.sessionId, answered: 0, started: true });
+    expect((await service.currentSession('u_1', E)).current).toBeNull();
+    await expect(service.createNextSession('u_1', E, NO_DEVICES, exam)).rejects.toBeInstanceOf(SessionOpen);
+  });
+});
+
 describe('the main path asks no active target\'s words (spec D1)', () => {
   it('and asks them again once the target is ended: the change retires its stock and asks for the next', async () => {
     const words = await savedWords();
@@ -315,6 +334,42 @@ describe('a removal beside a session end (ADR 0014 R4)', () => {
       { key: E, data: { enrollment_id: E, reason: 'complete' } },
       { key: `${E}:${exam}`, data: { enrollment_id: E, reason, target_id: exam } },
     ]);
+  });
+});
+
+// Re-review N2 (ADR 0014 R4). Two targets ended on their date at once: the main path's stock
+// that records both closes both started sessions before it takes the progress lock. An end of the
+// second session that holds its row and then waits for that lock lets both commit; were the first
+// session's progress recorded before the second's row, each would wait on the other (40P01).
+describe('targets ended on their date at once (re-review N2, ADR 0014 R4)', () => {
+  it("closes every ended path's started session before the progress lock, beside an end of one of them", async () => {
+    const words = await savedWords();
+    const first = await addTarget('exam', DAY, [words[0].glossId]);
+    const second = await addTarget('exam', DAY, [words[1].glossId]);
+    // The ended targets are read by date, then id: `later` is the one whose session is closed second.
+    const [one, later] = [first, second].sort();
+    const started: Record<string, string> = {};
+    for (const [exam, word] of [[first, words[0]], [second, words[1]]] as const) {
+      const own = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [word], types: ['multiple_choice'], targetId: exam });
+      await service.startSession('u_1', own.sessionId, NO_DEVICES);
+      started[exam] = own.sessionId;
+    }
+    await makeBot(t.db, 'u_1', NEXT_DAY);
+    const ending = holdSessionRowEnd(t.db, started[later], E);
+    await ending.ready;
+
+    const main = service.createNextSession('u_1', E, NO_DEVICES);
+    try {
+      await waitForBlockedQuery(t.db);
+    } finally {
+      ending.finish();
+    }
+    await expect(Promise.all([ending.done, main])).resolves.toBeDefined();
+
+    for (const exam of [one, later]) {
+      expect((await readStockRow(t.db, started[exam])).status).toBe('skipped');
+      expect((await readTargetEvents(t.db, exam)).map((event) => event.kind)).toEqual(['ended_on_date']);
+    }
   });
 });
 
@@ -597,6 +652,29 @@ describe("a target's end skips the session started on its path (final review I1)
     expect((await readMemory(t.db, E)).map((row) => row.glossId)).toContain(word.glossId);
     expect(await readTargetSkills(t.db, exam)).toEqual([{ glossId: word.glossId, dimension: 'written_receptive', halves: 2, sessionId: own, day: DAY }]);
     expect(logged('session_skipped').filter((entry) => entry.session_id === own)).toEqual([{ event: 'session_skipped', session_id: own, reason: 'target_ended' }]);
+  });
+
+  // Correction (ruling I1-c). A learner, not a bot, whose day follows the clock: a session last
+  // answered two days ago, left open, counts for that day when the end skips it, so its reviews
+  // are dated when they were given.
+  it("counts the skip for the day of the session's last answer", async () => {
+    await seedUser(t.db, 'u_3');
+    await setTimeZone(t.db, 'u_3', 'UTC');
+    const enrollment = enrollmentOf('u_3');
+    await service.skipSession('u_3', (await service.createNextSession('u_3', enrollment, NO_DEVICES)).sessionId);
+    const saved = await seedSavedSenses(t.db, { enrollmentId: enrollment, lemma: 'grape', translations: ['ענב'] });
+    const word: AskedGloss = { glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'grape', lemma: 'grape', translation: 'ענב' };
+    const dayOf = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const exam = await seedTarget(t.db, { enrollmentId: enrollment, kind: 'exam', dueOn: dayOf(5), glossIds: [word.glossId] });
+    const own = await insertListSession(t.db, { userId: 'u_3', enrollmentId: enrollment, asked: [word, word], types: ['multiple_choice', 'multiple_choice'], targetId: exam });
+    await service.startSession('u_3', own.sessionId, NO_DEVICES);
+    const card = asChoice(own.questions[0]);
+    await service.submitAnswer('u_3', own.sessionId, card.id, { option_index: card.correct_option });
+    await moveAnswersBack(t.db, own.sessionId, 2);
+
+    await targets.end('u_3', exam);
+
+    expect(await readStockRow(t.db, own.sessionId)).toMatchObject({ status: 'skipped', practiceDay: dayOf(-2) });
   });
 
   it('ended on its date: skipped by the first main-path stock that records the end', async () => {

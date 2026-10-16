@@ -151,6 +151,8 @@ function world(
     atLevel?: string[];
     /** Phase 57. The target skills rows read. */
     skills?: TargetSkillRow[];
+    /** Final review I1-c. When each session was last answered; none when not given. */
+    lastAnswerAt?: Record<string, Date>;
     /** Whether retireStock finds the stock still unstarted; false when a start took it first. */
     retires?: boolean;
     gloss?: Repos['gloss'];
@@ -302,6 +304,7 @@ function world(
     resolvePendingRetry: async (sessionId) => {
       calls.push(`resolvePendingRetry ${sessionId}`);
     },
+    findLastAnswerAt: async (sessionId) => setup.lastAnswerAt?.[sessionId] ?? null,
     findOpen: async (_enrollmentId, path) => (path === null ? (setup.open ?? {}) : (setup.openOn?.[path] ?? {})),
     retireStock: async (sessionId) => {
       calls.push('retireStock');
@@ -809,6 +812,18 @@ describe('end', () => {
     expect(logged(logger, 'session_skipped')).toEqual([{ event: 'session_skipped', session_id: 's_started', reason: 'target_ended' }]);
   });
 
+  // Correction (ruling I1-c). The skip counts for the learner day of its last answer, so the
+  // reviews it writes are dated when they were given: here, the day before.
+  it("counts the skip for the day of the session's last answer", async () => {
+    const { service, calls } = world({
+      targets: [target()],
+      openOn: { t1: { started: { ...listStock('s_started'), answered: 2 } } },
+      lastAnswerAt: { s_started: new Date('2026-10-14T20:00:00Z') },
+    });
+    await service.end(OWNER, 't1');
+    expect(calls).toContain('transition s_started preparing|ready skipped 2026-10-14');
+  });
+
   it('skips nothing when its path has no started session', async () => {
     const { service, calls } = world({ targets: [target()], openOn: { t1: { stock: listStock('s_t1') } } });
     await service.end(OWNER, 't1');
@@ -912,9 +927,12 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
       source: 'list',
       answered: 2,
       total: 10,
+      started: true,
     });
-    expect(await sessionOf({ openOn: { t1: { stock: listStock() } } })).toMatchObject({ session_id: 's_stock' });
-    expect(await sessionOf({ latestOn: { t1: failed } })).toMatchObject({ session_id: 's_failed', status: 'failed' });
+    // Final review N1: started though nothing is answered yet, so the app resumes it.
+    expect(await sessionOf({ openOn: { t1: { started: { ...started, answered: 0 } } } })).toMatchObject({ answered: 0, started: true });
+    expect(await sessionOf({ openOn: { t1: { stock: listStock() } } })).toMatchObject({ session_id: 's_stock', started: false });
+    expect(await sessionOf({ latestOn: { t1: failed } })).toMatchObject({ session_id: 's_failed', status: 'failed', started: false });
     expect(await sessionOf({ latestOn: { t1: done } })).toBeNull();
     expect(await sessionOf({})).toBeNull();
   });

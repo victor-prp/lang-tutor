@@ -1433,7 +1433,7 @@ describe('the target read models', () => {
     ready_count: 1,
     readiness_pct: 60,
     today: { state: 'owed', done: 1, planned: 2, extra: 0, next_practice_in: null },
-    session: { session_id: 's1', status: 'ready', source: 'list', answered: 0, total: 10 },
+    session: { session_id: 's1', status: 'ready', source: 'list', answered: 0, total: 10, started: false },
   };
   const word = {
     gloss_id: 'g1',

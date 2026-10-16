@@ -44,7 +44,9 @@ export function targetSessionAction(target: Pick<TargetSummary, 'session'>): Hom
     case 'preparing':
       return { kind: 'preparing', sessionId: session.session_id };
     case 'ready':
-      return session.answered > 0
+      // Final review N1: a session entered and left before any answer is started with none,
+      // and resumed; create would answer it 409. `started` is absent from an older server.
+      return session.started || session.answered > 0
         ? { kind: 'resume', sessionId: session.session_id }
         : { kind: 'start', sessionId: session.session_id };
     case 'failed':
@@ -133,7 +135,17 @@ export type TargetCreate =
   | { kind: 'none' }
   | { kind: 'sending' }
   | { kind: 'failed' }
-  | { kind: 'answered'; sessionId: string; status: SessionStatus };
+  | { kind: 'answered'; sessionId: string; status: SessionStatus }
+  /** Final review N1. Refused with session_open: the path's started session, read again. */
+  | { kind: 'open'; sessionId: string };
+
+/** Final review N1. A target path's session to enter after a create refused with session_open,
+ *  from a list read since: its session when it is ready (started, or a stock the list read
+ *  before the start), else none. */
+export function openSessionOf(targets: readonly TargetSummary[] | null, targetId: string): string | null {
+  const session = targets?.find((target) => target.id === targetId)?.session;
+  return session?.status === 'ready' ? session.session_id : null;
+}
 
 export function reminderStartOf(
   action: HomeAction | null,
@@ -192,6 +204,8 @@ export function homeReminderStartOf(
       return { kind: 'wait' };
     case 'failed':
       return { kind: 'clear' };
+    case 'open':
+      return { kind: 'enter', sessionId: created.sessionId, fresh: false };
     case 'answered': {
       if (created.status === 'ready') return { kind: 'enter', sessionId: created.sessionId, fresh: true };
       if (created.status !== 'preparing') return { kind: 'clear' };

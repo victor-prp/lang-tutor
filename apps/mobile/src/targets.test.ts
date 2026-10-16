@@ -480,7 +480,7 @@ describe('readinessColor', () => {
 });
 
 describe('shouldPollTargets', () => {
-  const preparing = { session_id: 's1', status: 'preparing' as const, source: 'list' as const, answered: 0, total: 0 };
+  const preparing = { session_id: 's1', status: 'preparing' as const, source: 'list' as const, answered: 0, total: 0, started: false };
   const ready = { ...preparing, status: 'ready' as const, total: 4 };
 
   it("polls while any target's session is preparing", () => {

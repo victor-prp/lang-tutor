@@ -113,3 +113,27 @@ export function holdSessionEnd(db: Db, boss: PgBoss, enrollmentId: string): { re
   });
   return { ready, finish, done };
 }
+
+/** Final review N2 (ADR 0014 R4). A session end paused between its two locks: it holds the
+ *  session's row, as completing it does, and `finish()` lets it take the enrollment's progress
+ *  lock and commit. `ready` resolves once the row is held; `done` settles with the transaction. */
+export function holdSessionRowEnd(db: Db, sessionId: string, enrollmentId: string): { ready: Promise<void>; finish: () => void; done: Promise<void> } {
+  let finish!: () => void;
+  let markReady!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    markReady = resolve;
+  });
+  const done = db.transaction(async (tx) => {
+    try {
+      await tx.execute(sql`update sessions set status = status where id = ${sessionId}`);
+    } finally {
+      markReady();
+    }
+    await gate;
+    await createProgressRepo(tx).lockEnrollment(enrollmentId);
+  });
+  return { ready, finish, done };
+}

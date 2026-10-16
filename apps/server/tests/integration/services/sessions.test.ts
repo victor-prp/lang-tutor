@@ -200,7 +200,8 @@ describe('currentSession', () => {
     const { sessionId, record } = await startSeed(E);
     await service.submitAnswer('u_1', sessionId, record.questions[0].id, { option_index: 0 });
     expect(await service.currentSession('u_1', E)).toEqual({
-      current: { id: sessionId, status: 'ready', source: 'seed', answered: 1, total: SESSION_LENGTH },
+      // Its first answer started it (final review N1: started is on the read).
+      current: { id: sessionId, status: 'ready', source: 'seed', answered: 1, total: SESSION_LENGTH, started: true },
       nextSource: 'list',
       savedCount: 0,
       dueCount: 0,

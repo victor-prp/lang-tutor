@@ -18,6 +18,7 @@ import {
   homeReminderStartOf,
   mainEmptyNote,
   myWordsLine,
+  openSessionOf,
   shouldAutoCreate,
   shouldPoll,
   targetPress,
@@ -29,6 +30,9 @@ import { homePhotoCard, isWorking, type HomePhotoCard } from '@/photoImports';
 import { strings } from '@/strings';
 import { homeOrder, shouldPollTargets } from '@/targets';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+
+/** Final review N1. Create refused: the path has a started session (409 session_open). */
+const isSessionOpen = (error: unknown) => error instanceof ApiError && error.code === 'session_open';
 
 function photoCardLabel(card: NonNullable<HomePhotoCard>): string {
   switch (card.kind) {
@@ -201,13 +205,22 @@ export function LearningSection({ active }: { active: Enrollment }) {
   // answers the path's stock, replaced first when it no longer serves the target's day, or
   // builds one), and the session create answers is entered when ready, else the card shows
   // it preparing (home polls the targets meanwhile). A preparing one is not pressable.
+  // Final review N1: a create refused with session_open means the path has a started session
+  // after all (the card's list predates the start); the list read again names it, and it is
+  // entered as it is.
   const practiceTarget = (target: TargetSummary) => {
     const press = targetPress(targetSessionAction(target));
     if (press.kind === 'enter') enterSession(press.sessionId, press.fresh);
     if (press.kind !== 'create') return;
     void run(async () => {
-      const created = await createTargetSession(target.id, { waitForVoices: press.waitForVoices });
-      if (created.status === 'ready') enterSession(created.session_id, true);
+      try {
+        const created = await createTargetSession(target.id, { waitForVoices: press.waitForVoices });
+        if (created.status === 'ready') enterSession(created.session_id, true);
+      } catch (error) {
+        if (!isSessionOpen(error)) throw error;
+        const open = openSessionOf((await reloadTargets())?.targets ?? null, target.id);
+        if (open) enterSession(open, false);
+      }
     });
   };
 
@@ -267,7 +280,11 @@ export function LearningSection({ active }: { active: Enrollment }) {
       };
       void createTargetSession(step.targetId, { waitForVoices: step.waitForVoices }).then(
         (created) => landed({ kind: 'answered', sessionId: created.session_id, status: created.status }),
-        () => landed({ kind: 'failed' }),
+        async (error: unknown) => {
+          // Final review N1: refused because the path has a started session; enter it.
+          const open = isSessionOpen(error) ? openSessionOf((await reloadTargets())?.targets ?? null, step.targetId) : null;
+          landed(open ? { kind: 'open', sessionId: open } : { kind: 'failed' });
+        },
       );
       return;
     }

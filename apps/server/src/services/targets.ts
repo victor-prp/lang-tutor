@@ -19,7 +19,7 @@ import { readTargetDay } from './targetDayRead';
 import { logImportSaved, saveImportsInTx, type ImportSaved } from './photoImports';
 import { lockPaths, logTargetRetired, requestStocks, restockAfterTargetChange, retireStocks } from './stock';
 import type { Repos, Transaction } from './transaction';
-import { skipOpenSession } from './sessionEnd';
+import { lastAnswerDay, skipOpenSession } from './sessionEnd';
 import { saveEntriesInTx } from './vocabulary';
 
 /** A target with its words, in the order they were added. */
@@ -167,7 +167,15 @@ export function createTargetService({
         readiness_pct: day.readinessPct,
         today: { state: day.state, done: day.done, planned: day.planned, extra: day.extra, next_practice_in: day.nextPracticeIn },
         session: current
-          ? { session_id: current.id, status: current.status, source: current.source, answered: current.answered, total: current.total }
+          ? {
+              session_id: current.id,
+              status: current.status,
+              source: current.source,
+              answered: current.answered,
+              total: current.total,
+              // Final review N1: a session left before any answer is started with none.
+              started: current === started,
+            }
           : null,
         words,
       });
@@ -363,7 +371,8 @@ export function createTargetService({
         });
         const retired = await retireStocks(repos, enrolled.id, [target.id]);
         const { started } = await repos.session.findOpen(enrolled.id, target.id);
-        const skipped = started && (await skipOpenSession(repos, started.id, enrolled.id, today)) ? started.id : null;
+        const day = started ? await lastAnswerDay(repos, enrolled.user_id, started.id, today) : today;
+        const skipped = started && (await skipOpenSession(repos, started.id, enrolled.id, day)) ? started.id : null;
         await requestStocks(repos, enrolled.id, [target.id]);
         return { enrollmentId: enrolled.id, retired, skipped };
       });

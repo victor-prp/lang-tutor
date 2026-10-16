@@ -447,6 +447,18 @@ test('a new homework comes first with practice now, which asks its words alone; 
   await tapUntil(page, `target-practice-${target.id}`, 'progress-label');
   expect(createsSent(diagnostics), report()).toBeGreaterThan(before);
   expect((await readCurrent(page.request, enrollmentId, target.id)).current?.session_id).toBe(stock);
+
+  // Final review N1. Left before any answer, once its start has landed: started with none. Home
+  // resumes it on the next tap, with no create (which would answer session_open).
+  await expect
+    .poll(async () => (await readCurrent(page.request, enrollmentId, target.id)).current?.started, { message: report() })
+    .toBe(true);
+  await page.getByTestId('session-back').click();
+  await expect(practice, report()).toBeVisible();
+  const resumed = createsSent(diagnostics);
+  await tapUntil(page, `target-practice-${target.id}`, 'progress-label');
+  expect(createsSent(diagnostics), report()).toBe(resumed);
+  expect((await readCurrent(page.request, enrollmentId, target.id)).current).toMatchObject({ session_id: stock, answered: 0, started: true });
   const asked = await playSessionRight(page, request, EVERY_WORD);
   expect([...new Set(asked)].sort(), asked.join(', ')).toEqual(formsOf(target, 'owed'));
 

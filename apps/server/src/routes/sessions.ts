@@ -498,6 +498,7 @@ export function createSessionsRouter(sessions: SessionService) {
                 source: current.source,
                 answered: current.answered,
                 total: current.total,
+                started: current.started,
               }
             : null,
           next_source: nextSource,

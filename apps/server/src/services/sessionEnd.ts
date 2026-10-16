@@ -2,6 +2,7 @@ import { applySession } from '../domain/memoryUpdate';
 import { evaluateSession } from '../domain/progress';
 import { targetSessionWrite } from '../domain/targetSkills';
 import type { SessionEvidence } from '../repo/progress';
+import { learnerDay } from './learnerDay';
 import type { Repos } from './transaction';
 
 /**
@@ -87,9 +88,30 @@ async function recordTargetSkills(repos: Repos, sessionId: string, evidence: Ses
  * if any, after: ADR 0014 R4.
  */
 export async function skipOpenSession(repos: Repos, sessionId: string, enrollmentId: string, day: string): Promise<boolean> {
-  const changed = await repos.session.transition(sessionId, ['preparing', 'ready'], 'skipped', day);
-  if (!changed) return false;
-  await repos.session.resolvePendingRetry(sessionId, { text: '', verdict: 'gave_up' });
+  if (!(await closeOpenSession(repos, sessionId, day))) return false;
   await recordProgress(repos, sessionId, enrollmentId);
   return true;
+}
+
+/**
+ * Final review I1, re-review N2. The first half of skipOpenSession: the session's row skipped
+ * on `day` and a held card given up, before any progress lock. A use case that skips several
+ * sessions closes every one first and records their progress after (ADR 0014 R4): a session row
+ * changed while that lock is held would wait on an end of that session, which holds its row and
+ * waits for the lock. True when this call skipped it.
+ */
+export async function closeOpenSession(repos: Repos, sessionId: string, day: string): Promise<boolean> {
+  const changed = await repos.session.transition(sessionId, ['preparing', 'ready'], 'skipped', day);
+  if (changed) await repos.session.resolvePendingRetry(sessionId, { text: '', verdict: 'gave_up' });
+  return changed;
+}
+
+/**
+ * Final review I1-c. The learner day a target's end skips its started session on: the day of
+ * the session's last answer, so the reviews its answers write are dated when they were given,
+ * not when the end found them; `today` when it has none.
+ */
+export async function lastAnswerDay(repos: Repos, userId: string, sessionId: string, today: string): Promise<string> {
+  const at = await repos.session.findLastAnswerAt(sessionId);
+  return at === null ? today : learnerDay(repos, userId, at.getTime());
 }

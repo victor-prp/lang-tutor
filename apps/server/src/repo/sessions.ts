@@ -185,6 +185,17 @@ export function createSessionRepo(tx: Tx) {
 
     /** Phase 57 (spec D2, ruling T3-j). A session's cards, in position order: the gloss each
      *  asks, its type, and whether it is one of a ladder's intro stage. */
+    /** Final review I1-c. When a session's last answer was given, or null with none: a target's
+     *  end skips its started session on that answer's learner day. */
+    findLastAnswerAt: async (sessionId: string): Promise<Date | null> => {
+      if (!UUID_RE.test(sessionId)) return null;
+      const [row] = await tx
+        .select({ ms: sql<number | null>`(extract(epoch from max(${answers.answeredAt})) * 1000)::float8` })
+        .from(answers)
+        .where(eq(answers.sessionId, sessionId));
+      return row?.ms === null || row?.ms === undefined ? null : new Date(Number(row.ms));
+    },
+
     findSessionCards: async (sessionId: string): Promise<{ glossId: string; type: QuestionType; intro: boolean }[]> => {
       if (!UUID_RE.test(sessionId)) return [];
       const rows = await tx

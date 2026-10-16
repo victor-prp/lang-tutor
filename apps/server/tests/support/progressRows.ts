@@ -310,3 +310,8 @@ export async function readLearnerDay(db: Db, enrollmentId: string, day: string):
     };
   });
 }
+
+/** Final review I1-c. Moves every answer of a session `days` days back, as if given then. */
+export async function moveAnswersBack(db: Db, sessionId: string, days: number): Promise<void> {
+  await db.execute(sql`update answers set answered_at = answered_at - make_interval(days => ${days}) where session_id = ${sessionId}`);
+}

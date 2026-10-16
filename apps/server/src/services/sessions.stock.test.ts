@@ -260,13 +260,18 @@ describe('currentSession (spec D6, D8)', () => {
       findOpen: async () => ({ started: summary('s_started', 'ready'), stock: summary('s_stock', 'ready') }),
       findLatest: async () => summary('s_stock', 'ready'),
     });
-    expect((await service.currentSession('u1', E)).current?.id).toBe('s_started');
+    expect((await service.currentSession('u1', E)).current).toMatchObject({ id: 's_started', started: true });
     expect(eventsOf(logger, 'session_offered')).toEqual([]);
   });
 
   it('offers the stock when no session is started, and logs how it found it', async () => {
     const { service, logger } = world({ findOpen: async () => ({ stock: summary('s_stock', 'preparing') }), findLatest: async () => summary('s_stock', 'preparing') });
-    expect(await service.currentSession('u1', E)).toEqual({ current: summary('s_stock', 'preparing'), nextSource: 'list', savedCount: 2, dueCount: 0 });
+    expect(await service.currentSession('u1', E)).toEqual({
+      current: { ...summary('s_stock', 'preparing'), started: false },
+      nextSource: 'list',
+      savedCount: 2,
+      dueCount: 0,
+    });
     expect(eventsOf(logger, 'session_offered')).toEqual([{ event: 'session_offered', enrollment_id: E, session_id: 's_stock', status: 'preparing' }]);
   });
 
@@ -403,19 +408,28 @@ describe('the main path (spec D1, D2)', () => {
   // Final review I1, ADR 0014 R4. A target that ended on its date leaves its path closed: a
   // session started there could never be resumed or skipped, its words answered and met
   // "today" every day. The main path's stock that records the end skips it, its answers counted
-  // once as a skip's: the stocks retired and its row changed, then the progress lock.
+  // once as a skip's. Re-review N2: with two targets ended at once, every one's stock is retired
+  // and started session's row changed before the progress lock is first taken, then each skipped
+  // session's progress is recorded. Correction (ruling I1-c): the skip counts for the learner day
+  // of the session's last answer, today when it has none.
   it.each([
     ['the stock job', (service: SessionService) => service.stockSession({ enrollment_id: E, reason: 'complete' })],
     ['create', (service: SessionService) => service.createNextSession('u1', E, NO_DEVICES)],
-  ])("%s skips the started session of each target whose date has passed, counting its answers once", async (_, run) => {
+  ])("%s skips the started sessions of the targets whose date has passed, every row before the progress lock", async (_, run) => {
     const calls: string[] = [];
-    const ended = { ...target('t_yesterday', YESTERDAY, []), glossIds: undefined };
-    const targets = createFakeTargetRepo({ listEndedUnrecorded: async () => [ended] });
+    const ended = (id: string) => ({ ...target(id, YESTERDAY, []), glossIds: undefined });
+    const targets = createFakeTargetRepo({ listEndedUnrecorded: async () => [ended('t_one'), ended('t_two')] });
     const { service, logger } = world(
       {
         ...nothingOpen,
         findOpen: async (_enrollmentId, path) =>
-          path === 't_yesterday' ? { started: { ...summary('s_left', 'ready'), answered: 4 }, stock: summary('s_stock', 'ready') } : {},
+          path === 't_one'
+            ? { started: { ...summary('s_one', 'ready'), answered: 4 }, stock: summary('s_stock', 'ready') }
+            : path === 't_two'
+              ? { started: { ...summary('s_two', 'ready'), answered: 0 } }
+              : {},
+        // s_one was last answered on its target's date, two days ago in UTC; s_two never.
+        findLastAnswerAt: async (sessionId) => (sessionId === 's_one' ? new Date('2026-10-10T21:30:00Z') : null),
         retireStock: async (sessionId) => {
           calls.push(`retireStock ${sessionId}`);
           return true;
@@ -446,12 +460,19 @@ describe('the main path (spec D1, D2)', () => {
     await run(service);
     expect(calls).toEqual([
       'retireStock s_stock',
-      `transition s_left preparing|ready skipped ${TODAY}`,
-      'resolvePendingRetry s_left',
+      'transition s_one preparing|ready skipped 2026-10-10',
+      'resolvePendingRetry s_one',
+      `transition s_two preparing|ready skipped ${TODAY}`,
+      'resolvePendingRetry s_two',
       'lockEnrollment',
-      'findSessionEvidence s_left',
+      'findSessionEvidence s_one',
+      'lockEnrollment',
+      'findSessionEvidence s_two',
     ]);
-    expect(eventsOf(logger, 'session_skipped')).toEqual([{ event: 'session_skipped', session_id: 's_left', reason: 'target_ended' }]);
+    expect(eventsOf(logger, 'session_skipped')).toEqual([
+      { event: 'session_skipped', session_id: 's_one', reason: 'target_ended' },
+      { event: 'session_skipped', session_id: 's_two', reason: 'target_ended' },
+    ]);
   });
 
   it('plays a stock chosen on an earlier day as it is (phase 43 R5), reading nothing and taking no lock', async () => {
@@ -579,6 +600,7 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
       source: 'list',
       answered: 0,
       total: 0,
+      started: false,
     });
     expect(paths).toEqual(['t_exam']);
     expect(retired).toEqual(['s_stock']);

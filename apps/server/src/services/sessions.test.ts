@@ -56,6 +56,7 @@ describe('repos', () => {
       findNewestDevices: notStubbed,
       // Phase 57 (spec D2, ruling T3-j).
       findSessionCards: notStubbed,
+      findLastAnswerAt: notStubbed,
       // Phase 53 (spec D12).
       findStockChoice: notStubbed,
       retireStock: notStubbed,

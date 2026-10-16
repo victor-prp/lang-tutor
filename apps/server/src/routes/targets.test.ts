@@ -60,7 +60,7 @@ const LIST: TargetList = {
       ready_count: 0,
       readiness_pct: 0,
       today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1 },
-      session: { session_id: 's1', status: 'ready', source: 'list', answered: 0, total: 10 },
+      session: { session_id: 's1', status: 'ready', source: 'list', answered: 0, total: 10, started: false },
     },
   ],
 };
