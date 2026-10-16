@@ -102,6 +102,9 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
     url: `/api/enrollments/${ids.enrollment}/vocabulary`,
     body: { entries: [ids.unsaved] },
   }),
+  // Phase 58. The owner's saved word is new (level 1), so a removal that got
+  // through would show in the count of vocabulary_entries.
+  'delete /api/enrollments/{id}/vocabulary': () => ({ url: `/api/enrollments/${ids.enrollment}/vocabulary?level=1` }),
   'delete /api/enrollments/{id}/vocabulary/glosses/{gloss_id}': () => ({
     url: `/api/enrollments/${ids.enrollment}/vocabulary/glosses/${ids.saved.gloss_id}`,
   }),
