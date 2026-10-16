@@ -3,7 +3,7 @@
 - **Status:** Victor said "go till PR, subagents" on 2026-10-16 after approving the extra words; the
   rest of the design is self-approved (CLAUDE.md, *Continue till PR*). Built on branch
   `phase-57-target-skills` by subagents: ten tasks, two merges of master (phases 58 and 58b), a final
-  review and its fix wave. Every ruling of the run is at the end (R1–R41).
+  review and its fix wave. Every ruling of the run is at the end (R1–R43).
 - **Date:** 2026-10-16
 - **Source:** `drafts/2026-10-16-target-skills-one-pager.md` (main checkout, gitignored) and its
   evidence folder `drafts/2026-10-16-target-skills-evidence/`; the brainstorming chat of 2026-10-16
@@ -501,8 +501,9 @@ under task ids (in brackets).
   target path, its owed words.
 - **R25. The seed is the main path's** [T5-g]; a learner whose first session is a target's skips it.
 - **R26. ADR 0014 has a check script** [T5-j] (two greppable rules, planted violations fire).
-- **R27. Families** are computed over every saved word, chosen over main words, refreshed by main stocks
-  [T5-k].
+- **R27. Families** are computed over every saved word and read on every path (phase 60's new meanings
+  reach target sessions too), chosen over each path's own words, recorded only by main-path stocks [T5-k,
+  merge 3].
 - **R28. Logs** [T5-n, F-I1-d]: session_retired reasons stale_target and target_ended; target_id on target
   paths' stock events; skip reason target_closed; a skip on a target's end logs reason target_ended.
 - **R29. The target's wire `session` is a plain read** [T6-d]; a past target read by id answers
@@ -534,3 +535,9 @@ under task ids (in brackets).
 - **R41. When several targets end on their date, every started session is closed before any progress is
   recorded** (ADR 0014 R4), and a target's end dates its skip by the session's last answer, today when
   none [F2-N2-a, F2-I1-c].
+- **R42. A known word's new meaning starts on a target with its single new_meaning card**, one slot, no
+  ladder and outside NEW_PER_SESSION; an early one in practice more counts against the day's new-word room
+  (phase 60, merge 3).
+- **R43. A tapped list word's miss (phase 59) is evidence for target skills as for FSRS**: −2 in written
+  productive in every active target holding the word, and it marks the word started (merge 3). Master's
+  0041_sentence_words keeps its number; this branch's migration is one 0042_target_skills.
