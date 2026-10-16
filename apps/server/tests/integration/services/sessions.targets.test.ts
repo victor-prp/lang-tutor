@@ -10,7 +10,7 @@ import type { VocabularyService } from '../../../src/services/vocabulary';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { jobPayloads, startTestBoss, stockJobKeys, stopTestBoss } from '../../support/jobs';
 import { holdProgressLock, holdSessionEnd, waitForBlockedQuery } from '../../support/locks';
-import { insertGlossMemory } from '../../support/progressRows';
+import { insertGlossMemory, setLevel } from '../../support/progressRows';
 import { insertListSession, type AskedGloss } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, makeBot, seedUser } from '../../support/seedUser';
@@ -289,10 +289,12 @@ describe('a change to a target (spec D2, ruling R-D12b)', () => {
 // path's singleton key. A removal that enqueued under that key before waiting for the lock would
 // hold the uncommitted row the end's stately insert waits on: a deadlock (40P01).
 describe('a removal beside a session end (ADR 0014 R4)', () => {
-  it.each([
-    ['removeWord', (words: AskedGloss[], exam: string) => targets.removeWord('u_1', exam, words[0].glossId)],
-    ['unsave', (words: AskedGloss[]) => vocabulary.unsave('u_1', E, words[0].glossId)],
-  ])('%s asks for the stocks only after the progress lock, so both commit', async (_, remove) => {
+  it.each<[string, (words: AskedGloss[], exam: string) => Promise<unknown>, 'target' | 'words_removed']>([
+    ['removeWord', (words, exam) => targets.removeWord('u_1', exam, words[0].glossId), 'target'],
+    ['unsave', (words) => vocabulary.unsave('u_1', E, words[0].glossId), 'target'],
+    // Phase 58 (ruling M1). Every saved word is new, so the level is all six, the exam's three among them.
+    ['removeLevel', () => vocabulary.removeLevel('u_1', E, 1), 'words_removed'],
+  ])('%s asks for the stocks only after the progress lock, so both commit', async (_, remove, reason) => {
     const words = await savedWords();
     const exam = await addTarget('exam', '2030-01-13', ids(words.slice(0, 3)));
     const ending = holdSessionEnd(t.db, boss, E);
@@ -309,8 +311,43 @@ describe('a removal beside a session end (ADR 0014 R4)', () => {
     expect((await readTargetEvents(t.db, exam)).map((event) => event.kind)).toEqual(['words_removed']);
     expect(await stockJobs()).toEqual([
       { key: E, data: { enrollment_id: E, reason: 'complete' } },
-      { key: `${E}:${exam}`, data: { enrollment_id: E, reason: 'target', target_id: exam } },
+      { key: `${E}:${exam}`, data: { enrollment_id: E, reason, target_id: exam } },
     ]);
+  });
+});
+
+// Phase 58 meets phase 57 (ruling M1). Removing a level is an unsave of every word at it, by
+// path: the main path's stock and the stock of each active target that held a removed word go,
+// and the next of each is asked for; a target that held none keeps its stock.
+describe('removing a level (phase 58, ruling M1)', () => {
+  it("retires the main path's stock and the stock of the target holding a removed word, and asks for both", async () => {
+    const words = await savedWords();
+    // apple, eggs and flour stay new (level 1); bread, cheese and dates are lifted to 2.
+    for (const word of [words[1], words[2], words[3]]) await setLevel(t.db, { enrollmentId: E, glossId: word.glossId, level: 2 });
+    const exam = await addTarget('exam', '2030-01-13', ids(words.slice(0, 2)));
+    const homework = await addTarget('homework', '2030-01-13', ids(words.slice(2, 4)));
+    const main = await service.createNextSession('u_1', E, NO_DEVICES);
+    const examStock = await service.createNextSession('u_1', E, NO_DEVICES, exam);
+    const homeworkStock = await service.createNextSession('u_1', E, NO_DEVICES, homework);
+    expect([main.status, examStock.status, homeworkStock.status]).toEqual(['preparing', 'preparing', 'preparing']);
+
+    expect(await vocabulary.removeLevel('u_1', E, 1)).toEqual({ removed_words: 3, removed_glosses: 3 });
+
+    expect(await readStockRow(t.db, main.sessionId)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY, targetId: null });
+    expect(await readStockRow(t.db, examStock.sessionId)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY, targetId: exam });
+    expect((await readStockRow(t.db, homeworkStock.sessionId)).status).toBe('preparing');
+    expect(await stockJobs()).toEqual([
+      { key: E, data: { enrollment_id: E, reason: 'words_removed' } },
+      { key: `${E}:${exam}`, data: { enrollment_id: E, reason: 'words_removed', target_id: exam } },
+    ]);
+    expect(logged('session_retired')).toEqual([
+      { event: 'session_retired', enrollment_id: E, session_id: main.sessionId, reason: 'words_removed' },
+      { event: 'session_retired', enrollment_id: E, session_id: examStock.sessionId, reason: 'words_removed' },
+    ]);
+    expect(await readTargetEvents(t.db, exam)).toEqual([
+      { kind: 'words_removed', before: { gloss_ids: [words[0].glossId] }, after: { reason: 'unsaved' }, actorUserId: 'u_1', sessionId: null },
+    ]);
+    expect(await readTargetEvents(t.db, homework)).toEqual([]);
   });
 });
 

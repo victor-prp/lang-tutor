@@ -200,13 +200,17 @@ export function createVocabularyService({
 
     /**
      * Phase 58 (spec D1–D3). Every word whose badge is `level` leaves the list, every
-     * saved sense of it, in one transaction: unsave once for the batch. One lock, one
-     * words_removed line per target changed, one restock. Nothing at the level is a
-     * 200 with zeros, so a retry after a lost answer is safe.
+     * saved sense of it, in one transaction: unsave once for the batch. One words_removed
+     * line per target changed, one restock of each path it touched. Nothing at the level
+     * is a 200 with zeros, so a retry after a lost answer is safe.
      *
      * Final review I1: unlike a single unsave, it restocks whenever anything went, a
      * target or not. The removal is a reset, and a list stock chosen from the removed
      * words would otherwise serve them as the next session.
+     *
+     * Phase 57 (ADR 0014, ruling M1): as unsave, by path. The main path's stock goes, and
+     * the stock of each active target that held a removed word; the locks in lockPaths'
+     * order, the stocks retired before the progress lock and asked for only after it (R4).
      */
     removeLevel: async (
       actorUserId: string,
@@ -216,14 +220,27 @@ export function createVocabularyService({
       const { removed, retired } = await transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
         await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.remove' });
-        // As unsave: a change to a target takes the next-session lock first.
-        await repos.session.lockNextSession(enrollmentId);
+        // As unsave: a change to a target takes the main path's next-session lock first, and
+        // the active targets' once it knows which hold the words, which no change can add to
+        // while the main path's is held.
+        await repos.session.lockNextSession(enrollmentId, null);
         const atLevel = await repos.vocabulary.findGlossIdsAtLevel({ enrollmentId, level, live: LIVE_DIMENSIONS });
-        if (atLevel.length === 0) return { removed: { removed_words: 0, removed_glosses: 0 }, retired: null };
+        if (atLevel.length === 0) return { removed: { removed_words: 0, removed_glosses: 0 }, retired: [] };
         // Phase 31 (spec D14). Share-lock and resolve: a merge that forwarded one of
         // these meanwhile stays inside its lexeme, so its survivor is the same word's.
         const resolved = await repos.gloss.resolveGlosses(atLevel.map((row) => row.glossId));
         const survivors = [...new Set(atLevel.map((row) => resolved.get(row.glossId)?.id ?? row.glossId))];
+        const going = new Set(survivors);
+        const today = await learnerDay(repos, enrolled.user_id, now());
+        const holding = (await repos.target.listActive(enrollmentId, today))
+          .filter((target) => target.glossIds.some((glossId) => going.has(glossId)))
+          .map((target) => target.id);
+        await lockPaths(repos, enrollmentId, holding);
+        // Retired before the progress lock: a skip of a stock holds its row, then that lock.
+        const retired = await retireStocks(repos, enrollmentId, holding);
+        // Phase 57 (ruling T4-k). The words' memory, levels and target skills go with them: a
+        // session end that would write them runs wholly before this or reads them gone.
+        await repos.progress.lockEnrollment(enrollmentId);
         await repos.vocabulary.deleteEntries({ enrollmentId, glossIds: survivors });
         const lost = await repos.target.removeGlossesFromTargets(enrollmentId, survivors);
         for (const [targetId, glossIds] of lost) {
@@ -236,9 +253,12 @@ export function createVocabularyService({
             sessionId: null,
           });
         }
+        // And the next stocks asked for only after the progress lock: a session end holds it,
+        // then enqueues its path's stock under the same singleton key (ADR 0014 R4).
+        await requestStocks(repos, enrollmentId, holding, 'words_removed');
         return {
           removed: { removed_words: new Set(atLevel.map((row) => row.lemma)).size, removed_glosses: survivors.length },
-          retired: await restockAfterTargetChange(repos, enrollmentId, 'words_removed'),
+          retired,
         };
       });
       logger.info({

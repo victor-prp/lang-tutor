@@ -147,6 +147,8 @@ function world(
     openOn?: Record<string, { started?: SessionSummary; stock?: SessionSummary }>;
     /** Phase 57 (spec D13). Each target path's newest session, by target id. */
     latestOn?: Record<string, SessionSummary>;
+    /** Phase 58. The saved glosses a level's removal finds at its level. */
+    atLevel?: string[];
     /** Phase 57. The target skills rows read. */
     skills?: TargetSkillRow[];
     /** Whether retireStock finds the stock still unstarted; false when a start took it first. */
@@ -175,6 +177,11 @@ function world(
     deleteEntry: async ({ glossId }) => {
       calls.push(`deleteEntry ${glossId}`);
       if (saved.includes(glossId)) saved.splice(saved.indexOf(glossId), 1);
+    },
+    findGlossIdsAtLevel: async () => (setup.atLevel ?? []).map((glossId) => ({ lemma: WORDS[glossId].lemma, glossId })),
+    deleteEntries: async ({ glossIds }) => {
+      calls.push(`deleteEntries ${glossIds.join(' ')}`);
+      for (const glossId of glossIds) if (saved.includes(glossId)) saved.splice(saved.indexOf(glossId), 1);
     },
     // A target's words, as the repository reads them, keep the form as saved (final review M3).
     // The saved list (listSavedGlosses), which lowercases it, is not stubbed: a target is read
@@ -253,6 +260,17 @@ function world(
       const left = [...stored.values()].filter((row) => row.enrollmentId === enrollmentId && row.words.includes(glossId));
       for (const row of left) row.words = row.words.filter((word) => word !== glossId);
       return left.map((row) => row.id).sort();
+    },
+    removeGlossesFromTargets: async (enrollmentId, glossIds) => {
+      calls.push(`removeGlossesFromTargets ${glossIds.join(' ')}`);
+      const lost = new Map<string, string[]>();
+      for (const row of [...stored.values()].sort((a, b) => a.id.localeCompare(b.id))) {
+        const gone = row.words.filter((word) => glossIds.includes(word));
+        if (row.enrollmentId !== enrollmentId || gone.length === 0) continue;
+        row.words = row.words.filter((word) => !glossIds.includes(word));
+        lost.set(row.id, gone.sort());
+      }
+      return lost;
     },
     setDueOn: async (id, dueOn) => {
       stored.get(id)!.dueOn = dueOn;
@@ -984,6 +1002,97 @@ describe('vocabulary.unsave (spec D1, Review Focus 2)', () => {
       'enqueue e1:t1',
       'enqueue e1:t2',
     ]);
+  });
+});
+
+// Phase 58 meets phase 57 (ruling M1). Removing a level is an unsave of every word at it, by
+// path: the main path's stock and the stock of each active target that held a removed word are
+// retired before the progress lock and asked for again after it (ADR 0014 R4).
+describe('vocabulary.removeLevel (phase 58, ruling M1)', () => {
+  const wordsRemoved = (job: { name: string; data: object; options: object }) => ({ ...job, data: { ...job.data, reason: 'words_removed' } });
+
+  it('locks the main path and the active targets holding a removed word, retires their stocks, and asks for them after the progress lock', async () => {
+    const { vocabularyService, calls, retired, jobs, logger, events, stored, saved } = world({
+      saved: ['g_casa', 'g_gatto', 'g_cane'],
+      atLevel: ['g_casa', 'g_gatto'],
+      targets: [
+        target({ words: ['g_casa', 'g_cane'] }),
+        target({ id: 't2', words: ['g_cane'] }),
+        // Ended: it loses the word, but has no path to restock.
+        target({ id: 't3', words: ['g_gatto'], endedAt: new Date(NOW - 60_000) }),
+      ],
+      open: { stock: listStock() },
+      openOn: { t1: { stock: listStock('s_t1') }, t2: { stock: listStock('s_t2') } },
+    });
+
+    expect(await vocabularyService.removeLevel(OWNER, 'e1', 1)).toEqual({ removed_words: 2, removed_glosses: 2 });
+
+    expect(saved).toEqual(['g_cane']);
+    expect([...stored.values()].map((row) => [row.id, row.words])).toEqual([
+      ['t1', ['g_cane']],
+      ['t2', ['g_cane']],
+      ['t3', []],
+    ]);
+    expect(events.map((event) => [event.targetId, event.kind, event.before, event.after])).toEqual([
+      ['t1', 'words_removed', { gloss_ids: ['g_casa'] }, { reason: 'unsaved' }],
+      ['t3', 'words_removed', { gloss_ids: ['g_gatto'] }, { reason: 'unsaved' }],
+    ]);
+    // t2 held no word at the level: its stock stays.
+    expect(retired).toEqual(['s_stock', 's_t1']);
+    expect(jobs.enqueued).toEqual([wordsRemoved(MAIN_STOCK), wordsRemoved(targetStock('t1'))]);
+    expect(logged(logger, 'session_retired')).toEqual([
+      { event: 'session_retired', enrollment_id: 'e1', session_id: 's_stock', reason: 'words_removed' },
+      { event: 'session_retired', enrollment_id: 'e1', session_id: 's_t1', reason: 'words_removed' },
+    ]);
+    expect(calls).toEqual([
+      'lockNextSession main',
+      'lockNextSession main',
+      'lockNextSession t1',
+      'retireStock',
+      'retireStock',
+      'lockEnrollment',
+      'deleteEntries g_casa g_gatto',
+      'removeGlossesFromTargets g_casa g_gatto',
+      'insertEvent words_removed',
+      'insertEvent words_removed',
+      'enqueue e1',
+      'enqueue e1:t1',
+    ]);
+  });
+
+  it("retires and asks for the main path's stock alone when no target held a removed word (final review I1)", async () => {
+    const { vocabularyService, calls, retired, jobs, events } = world({
+      saved: ['g_casa', 'g_gatto'],
+      atLevel: ['g_gatto'],
+      targets: [target()],
+      open: { stock: listStock() },
+      openOn: { t1: { stock: listStock('s_t1') } },
+    });
+
+    await vocabularyService.removeLevel(OWNER, 'e1', 1);
+
+    expect(events).toEqual([]);
+    expect(retired).toEqual(['s_stock']);
+    expect(jobs.enqueued).toEqual([wordsRemoved(MAIN_STOCK)]);
+    expect(calls).toEqual([
+      'lockNextSession main',
+      'lockNextSession main',
+      'retireStock',
+      'lockEnrollment',
+      'deleteEntries g_gatto',
+      'removeGlossesFromTargets g_gatto',
+      'enqueue e1',
+    ]);
+  });
+
+  it('takes no lock past the main path and touches no stock when nothing is at the level', async () => {
+    const { vocabularyService, calls, retired, jobs } = world({ saved: ['g_casa'], targets: [target()], open: { stock: listStock() } });
+
+    expect(await vocabularyService.removeLevel(OWNER, 'e1', 3)).toEqual({ removed_words: 0, removed_glosses: 0 });
+
+    expect(calls).toEqual(['lockNextSession main']);
+    expect(retired).toEqual([]);
+    expect(jobs.enqueued).toEqual([]);
   });
 });
 

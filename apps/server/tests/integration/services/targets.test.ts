@@ -179,7 +179,7 @@ describe('the stock removing a level leaves (phase 58)', () => {
 
     await deps.vocabulary.removeLevel('u_1', E, 1);
 
-    expect(await readStockRow(t.db, stock)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY });
+    expect(await readStockRow(t.db, stock)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY, targetId: null });
     expect(await jobPayloads(t.db, STOCK_SESSION)).toContainEqual({ enrollment_id: E, reason: 'words_removed' });
     expect(logger.events).toContainEqual({ event: 'session_retired', enrollment_id: E, session_id: stock, reason: 'words_removed' });
   });
