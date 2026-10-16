@@ -64,7 +64,7 @@ The service's `removeLevel` does what `unsave` does, once for the batch: authori
 level; share-lock and resolve them through merges (phase 31), deleting the survivors' entries (their
 `gloss_progress` rows cascade, phase 20); remove them from every target and write one
 `words_removed` event per target changed, `before.gloss_ids` listing every gloss that left it
-(sorted) and `after.reason` `'unsaved'`; then restock once if any target changed. It logs one
+(sorted) and `after.reason` `'unsaved'`; then restock once, whenever anything was removed (R1). It logs one
 `vocabulary_level_removed` line with the enrollment, the level and both counts, after the
 transaction, and `logTargetRetired` as unsave does. No new table: undo is out, and the request log
 already keeps the call and its answer.
@@ -96,3 +96,12 @@ gloss ids it lost. The route is transport only; the client gains `removeVocabula
 - e2e: a learner with two new words and one at level 2 selects new, removes all, accepts the
   dialog, and sees the empty-level notice; the unfiltered list keeps only the level 2 word.
 - `npm test`, `npm run test:all`, `npm run lint:arch` and `npm run e2e` pass.
+
+## Rulings
+
+- **R1 (final review I1) — D3 amended: the removal restocks even when no target held its
+  words.** A single unsave restocks only for a target (phase 53 D12), and a stray card is
+  accepted there. For the reset this phase exists for, an unstarted list stock chosen from the
+  removed words would serve them as the next session, so the stock goes and a new one is asked
+  for, with the stock reason and the `session_retired` reason `words_removed`. Nothing at the
+  level leaves the stock alone. Cost if wrong: one extra stock build per removal.

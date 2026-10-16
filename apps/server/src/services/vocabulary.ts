@@ -184,6 +184,10 @@ export function createVocabularyService({
      * saved sense of it, in one transaction: unsave once for the batch. One lock, one
      * words_removed line per target changed, one restock. Nothing at the level is a
      * 200 with zeros, so a retry after a lost answer is safe.
+     *
+     * Final review I1: unlike a single unsave, it restocks whenever anything went, a
+     * target or not. The removal is a reset, and a list stock chosen from the removed
+     * words would otherwise serve them as the next session.
      */
     removeLevel: async (
       actorUserId: string,
@@ -215,7 +219,7 @@ export function createVocabularyService({
         }
         return {
           removed: { removed_words: new Set(atLevel.map((row) => row.lemma)).size, removed_glosses: survivors.length },
-          retired: lost.size > 0 ? await restockAfterTargetChange(repos, enrollmentId) : null,
+          retired: await restockAfterTargetChange(repos, enrollmentId, 'words_removed'),
         };
       });
       logger.info({
@@ -225,7 +229,7 @@ export function createVocabularyService({
         word_count: removed.removed_words,
         gloss_count: removed.removed_glosses,
       });
-      logTargetRetired(logger, enrollmentId, retired);
+      logTargetRetired(logger, enrollmentId, retired, 'words_removed');
       return removed;
     },
 
