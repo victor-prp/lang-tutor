@@ -53,16 +53,23 @@ merged or applied, and it keeps a hand-run `gh workflow run bots.yml` from playi
 accident. A restart turns both on again, and the runbook's *Stop* and *Start again* sections say
 so. *(my call)*
 
-**D4 — Close the open nightly QA issues as "not planned", after the merge.** This covers every
-open issue labelled `nightly-qa` or `nightly-qa-triage-report`, each with one comment saying it
-was closed to cut noise while nightly QA is paused, not because it was fixed. No `wontfix`
-or `by-design` label: `filing.ts` treats those as settled and would never mention the issue
-again. A plain close means a finding that still reproduces after the restart comes back as a
-"reproduced again after close" comment on the old issue, not as a duplicate. The bots' own
-weekly issues are all closed already.
+**D4 — Close the open nightly QA issues as "not planned", labelled `paused-2026-10`, after the
+merge.** This covers every open issue labelled `nightly-qa` or `nightly-qa-triage-report`, each
+with one comment saying it was closed to cut noise while nightly QA is paused, not because it was
+fixed. The bots' own weekly issues are all closed already.
 
-The close waits for the merge. Until then the scheduled night still runs, and it would comment
-on and reopen what was just closed. *(my call)*
+No `wontfix` or `by-design` label: `filing.ts` treats those as settled. But a plain close is not
+enough to bring an issue back either. A restarted night only *comments* on a closed issue that
+reproduces (`file.ts` never reopens), and triage and calibration read open issues only
+(`targets.ts`). Real bugs among them (`triage:real-bug` #55, #61, #77, #104) would stay parked for
+good. So the close adds the label `paused-2026-10`, which is not in `SETTLED`, and the restart
+reopens everything carrying it, before the first night. The reopen command is in the
+`nightly-qa.yml` header, beside the `schedule:` lines it goes with. *(my call; the label came out
+of the final review)*
+
+The close waits for the merge. Until then the scheduled night still runs. It would comment
+"reproduced after close" on what was just closed, and file new issues after the cleanup.
+*(my call)*
 
 ## Left to the builder
 

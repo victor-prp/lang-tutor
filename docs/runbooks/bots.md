@@ -2,7 +2,7 @@
 
 Six simulated learners (phase 35, spec D13–D22) play the app against production, one simulated
 day per hourly run of `.github/workflows/bots.yml`, which an EventBridge rule starts at :17 (*The
-hourly trigger*). Paused since 2026-10-16: see *Stop* and *Start again*. What each bot really knows lives on the
+hourly trigger*). Paused on 2026-10-16, once both switches in *Stop* are off; *Start again* undoes it. What each bot really knows lives on the
 orphan branch `bots-state`, one directory per bot (`state.json`, `log.jsonl`), never on the
 server. Every simulated week has a GitHub issue, label `bots`, titled "Bots — simulated week N".
 
@@ -95,8 +95,8 @@ The next run at :17 plays day 1 and opens the week 1 issue. Week 1 closes about 
 
 ## Stop
 
-Paused since 2026-10-16 (`docs/superpowers/specs/2026-10-16-lang-tutor-pause-qa-and-bots-design.md`):
-both switches below are off. Two switches, in this order:
+Paused on 2026-10-16 (`docs/superpowers/specs/2026-10-16-lang-tutor-pause-qa-and-bots-design.md`)
+with both switches below. Two switches, in this order:
 
 ```bash
 gh variable set BOTS_ENABLED --body false     # or: gh variable delete BOTS_ENABLED

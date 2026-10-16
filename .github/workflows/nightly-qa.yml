@@ -7,7 +7,11 @@ name: Nightly QA
 #
 # Paused on 2026-10-16 (docs/superpowers/specs/2026-10-16-lang-tutor-pause-qa-and-bots-design.md):
 # no schedule, so no night runs on its own. `gh workflow run nightly-qa.yml` still
-# runs one by hand. To resume, put back under `on:`
+# runs one by hand. To resume, reopen the issues closed for the pause first, so
+# that triage and the agent see them as open again:
+#   gh issue list --label paused-2026-10 --state closed --limit 200 --json number \
+#     --jq '.[].number' | xargs -n1 gh issue reopen
+# then put back under `on:`
 #   schedule:
 #     - cron: '0 1 * * *'
 on:
