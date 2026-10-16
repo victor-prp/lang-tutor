@@ -17,6 +17,7 @@ import {
 import { testRng } from '../../tests/support/testRng';
 import { PREPARE_SESSION, STOCK_SESSION } from '../domain/jobs';
 import type { SessionSummary } from '../domain/session';
+import type { QuestionType } from '@lang-tutor/core/domain';
 import { NoSavedWords, SessionNotFound, SessionNotReady, SessionOpen, TargetClosed } from '../errors';
 import type { DictRepo } from '../repo/dictionary';
 import type { EnrollmentRepo } from '../repo/enrollments';
@@ -24,6 +25,7 @@ import type { GlossFamiliesRepo } from '../repo/glossFamilies';
 import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
 import type { SessionRepo } from '../repo/sessions';
+import type { TargetSkillRepo } from '../repo/targetSkills';
 import type { UserRepo } from '../repo/users';
 import type { VocabularyRepo } from '../repo/vocabulary';
 import { createSessionService, type SessionService } from './sessions';
@@ -287,8 +289,9 @@ describe('currentSession (spec D6, D8)', () => {
 });
 
 // Phase 57 (spec D1, D2, D10, ADR 0014). Every session belongs to a path: the main path, which
-// asks saved words in no active target, or a target's. The target paths' own choice, its stale
-// check and its records are tests/integration/services/sessions.targets.test.ts'.
+// asks saved words in no active target, or a target's. A target path's stale check is below, each
+// branch on its own; the choice it reads and its records in the database are
+// tests/integration/services/sessions.targets.test.ts'.
 
 const YESTERDAY = '2026-10-11';
 const NO_DEVICES = { listening: false, speaking: false };
@@ -442,5 +445,314 @@ describe("a target's path (spec D1, D2, D10)", () => {
     const { service, locked } = world(nothingOpen, { target: createFakeTargetRepo({ findTarget: async () => target('t_exam', YESTERDAY, ['g_b']) }) });
     await expect(service.createNextSession('u1', E, NO_DEVICES, 't_exam')).rejects.toBeInstanceOf(TargetClosed);
     expect(locked).toEqual([]);
+  });
+});
+
+// Phase 53 (spec D12, ruling R-D12), per path since phase 57 (spec D2, final review C1). A target
+// path's stock is checked where home learns of it, the home read and create: one chosen on an
+// earlier learner day, and one chosen as practice more on any day (a miss in the session it was
+// chosen beside can leave work owed that it does not serve). It is replaced, for the devices it
+// was built for, when today's choice of its target differs in the cap or the owed words it
+// recorded; never at start, never while its path has a session started.
+describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", () => {
+  /** Five days left on TODAY: the cap is 7 half-points. Made on 2026-10-01 with both words, so
+   *  past its halfway point: both are owed a start today (spec D6). */
+  const exam = target('t_exam', '2026-10-17', ['g_a', 'g_b']);
+  /** What today's choice of the exam is, with nothing started. */
+  const OWED_TODAY = { capHalves: 7, owedGlossIds: ['g_a', 'g_b'] };
+  /** A practice-more stock's record: nothing owed. */
+  const PRACTICE_MORE = { capHalves: 7, owedGlossIds: [] };
+  const STOCK_DEVICES = { listening: true, speaking: false };
+
+  /** Both words started two days ago, every skill at the cap: the day is done, so today's choice
+   *  is practice more. */
+  const atCap = stub<TargetSkillRepo>({
+    findRows: async () =>
+      exam.glossIds.flatMap((glossId) =>
+        (['written_receptive', 'written_productive', 'spoken_receptive', 'spelling'] as const).map((dimension) => ({
+          targetId: 't_exam',
+          glossId,
+          dimension,
+          halves: 7,
+          sessionId: null,
+          day: '2026-10-10',
+        })),
+      ),
+  });
+
+  /** A learner whose exam's stock s_stock recorded `recorded`; `paths` are the next-session locks
+   *  taken, by path. */
+  function examWorld(
+    session: Partial<SessionRepo>,
+    recorded: { capHalves: number; owedGlossIds: string[] } | undefined,
+    extra: Partial<Repos> & { startedOn?: string | null } = {},
+  ) {
+    const { startedOn = null, ...repos } = extra;
+    const paths: string[] = [];
+    const targets = createFakeTargetRepo({
+      findTarget: async () => exam,
+      listWordIds: async () => [...exam.glossIds],
+      listWords: async () => exam.glossIds.map((glossId) => ({ glossId, addedAt: exam.createdAt, startedOn })),
+      findSessionTarget: async (sessionId) => (sessionId === 's_stock' ? recorded : undefined),
+    });
+    const made = world(
+      {
+        lockNextSession: async (_enrollmentId, path) => {
+          paths.push(path ?? 'main');
+        },
+        ...session,
+      },
+      {
+        target: targets,
+        targetSkills: stub<TargetSkillRepo>({ findRows: async () => [] }),
+        vocabulary: stub<VocabularyRepo>({
+          listSavedGlosses: async () => SAVED,
+          countEntries: async () => SAVED.length,
+          findSavedWords: async ({ glossIds }) =>
+            SAVED.filter((gloss) => glossIds.includes(gloss.glossId)).map(({ glossId, key, form }) => ({ glossId, key, form })),
+        }),
+        ...repos,
+      },
+    );
+    return { ...made, targets, paths };
+  }
+
+  it('is replaced on the home read when it was chosen today as practice more and today owes work (final review C1)', async () => {
+    const { service, logger, inserted, retired, paths, targets } = examWorld(stockChosenOn(TODAY), PRACTICE_MORE);
+    expect((await service.currentSession('u1', E, 't_exam')).current).toEqual({
+      id: 's_new',
+      status: 'preparing',
+      source: 'list',
+      answered: 0,
+      total: 0,
+    });
+    expect(paths).toEqual(['t_exam']);
+    expect(retired).toEqual(['s_stock']);
+    expect(inserted).toEqual([['u1', E, STOCK_DEVICES, TODAY, 't_exam']]);
+    expect(writes(targets, 'insertSessionTarget')).toEqual([['s_new', expect.objectContaining({ targetId: 't_exam', ...OWED_TODAY })]]);
+    expect(eventsOf(logger, 'session_retired')).toEqual([{ event: 'session_retired', enrollment_id: E, session_id: 's_stock', reason: 'stale_target' }]);
+    expect(eventsOf(logger, 'session_stocked')).toEqual([
+      { event: 'session_stocked', enrollment_id: E, session_id: 's_new', reason: 'stale_target', target_id: 't_exam' },
+    ]);
+  });
+
+  it('is replaced by create too, before it is answered (final review C1)', async () => {
+    const { service, retired, inserted, paths } = examWorld(stockChosenOn(TODAY), PRACTICE_MORE);
+    expect(await service.createNextSession('u1', E, NO_DEVICES, 't_exam')).toEqual({
+      sessionId: 's_new',
+      status: 'preparing',
+      source: 'list',
+      created: true,
+    });
+    expect(paths).toEqual(['t_exam']);
+    expect(retired).toEqual(['s_stock']);
+    // Built for the devices the stock was built for, not the ones create names.
+    expect(inserted).toEqual([['u1', E, STOCK_DEVICES, TODAY, 't_exam']]);
+  });
+
+  it('keeps a practice-more stock chosen today while practice more is still the choice: no churn', async () => {
+    const { service, retired, inserted, paths } = examWorld(stockChosenOn(TODAY), PRACTICE_MORE, {
+      startedOn: '2026-10-10',
+      targetSkills: atCap,
+    });
+    expect((await service.currentSession('u1', E, 't_exam')).current?.id).toBe('s_stock');
+    expect(await service.createNextSession('u1', E, NO_DEVICES, 't_exam')).toEqual({
+      sessionId: 's_stock',
+      status: 'ready',
+      source: 'list',
+      created: false,
+    });
+    expect(paths).toEqual(['t_exam', 't_exam']);
+    expect(retired).toEqual([]);
+    expect(inserted).toEqual([]);
+  });
+
+  it("is replaced on the home read when it was chosen on an earlier day and today's cap is another", async () => {
+    const { service, retired, inserted, paths } = examWorld(stockChosenOn(YESTERDAY), { ...OWED_TODAY, capHalves: 6 });
+    expect((await service.currentSession('u1', E, 't_exam')).current?.id).toBe('s_new');
+    expect(paths).toEqual(['t_exam']);
+    expect(retired).toEqual(['s_stock']);
+    expect(inserted).toEqual([['u1', E, STOCK_DEVICES, TODAY, 't_exam']]);
+  });
+
+  it('is played as it is when it was chosen on an earlier day with the cap and owed words of today (phase 43 R5)', async () => {
+    const { service, retired, inserted, paths } = examWorld(stockChosenOn(YESTERDAY), OWED_TODAY);
+    expect((await service.currentSession('u1', E, 't_exam')).current?.id).toBe('s_stock');
+    expect(await service.createNextSession('u1', E, NO_DEVICES, 't_exam')).toMatchObject({ sessionId: 's_stock', created: false });
+    expect(paths).toEqual(['t_exam', 't_exam']);
+    expect(retired).toEqual([]);
+    expect(inserted).toEqual([]);
+  });
+
+  // Every stock here would be replaced if checked: only the case named keeps it unchecked.
+  it.each<[string, Partial<SessionRepo>, { capHalves: number; owedGlossIds: string[] } | undefined, string]>([
+    ['it was chosen today for owed work', stockChosenOn(TODAY), { ...OWED_TODAY, owedGlossIds: ['g_a'] }, 's_stock'],
+    [
+      'a session is started on its path: home shows it, and the stock beside it waits',
+      { ...stockChosenOn(YESTERDAY), findOpen: async () => ({ started: summary('s_started', 'ready'), stock: summary('s_stock', 'ready') }) },
+      PRACTICE_MORE,
+      's_started',
+    ],
+    ['it is the seed', { ...stockChosenOn(YESTERDAY), findOpen: async () => ({ stock: summary('s_stock', 'ready', 'seed') }) }, PRACTICE_MORE, 's_stock'],
+    ['its day was not recorded', stockChosenOn(null), PRACTICE_MORE, 's_stock'],
+  ])('is never checked when %s: no lock, nothing replaced', async (_, session, recorded, current) => {
+    const { service, retired, inserted, paths } = examWorld(session, recorded);
+    expect((await service.currentSession('u1', E, 't_exam')).current?.id).toBe(current);
+    expect(paths).toEqual([]);
+    expect(retired).toEqual([]);
+    expect(inserted).toEqual([]);
+  });
+
+  it("reads the stock's choice and its record once on the home read: under the lock, the same stock's are not read again", async () => {
+    const asked: string[] = [];
+    const { service, targets } = examWorld(
+      {
+        ...stockChosenOn(TODAY),
+        findStockChoice: async (sessionId) => {
+          asked.push(`findStockChoice ${sessionId}`);
+          return { chosenOn: TODAY, listening: true, speaking: false };
+        },
+      },
+      PRACTICE_MORE,
+    );
+    const findSessionTarget = targets.findSessionTarget;
+    targets.findSessionTarget = async (sessionId, targetId) => {
+      asked.push(`findSessionTarget ${sessionId}`);
+      return findSessionTarget(sessionId, targetId);
+    };
+    expect((await service.currentSession('u1', E, 't_exam')).current?.id).toBe('s_new');
+    expect(asked).toEqual(['findStockChoice s_stock', 'findSessionTarget s_stock']);
+  });
+
+  it('is played as it is when its replacement cannot be built: no word chosen today has a rendering', async () => {
+    const dict = stub<DictRepo>({ findLexemeForms: async () => [], findGlossRenderings: async () => [] });
+    const { service, logger, retired, inserted, paths } = examWorld(stockChosenOn(TODAY), PRACTICE_MORE, { dict });
+    expect((await service.currentSession('u1', E, 't_exam')).current?.id).toBe('s_stock');
+    expect(paths).toEqual(['t_exam']);
+    expect(retired).toEqual([]);
+    expect(inserted).toEqual([]);
+    expect(eventsOf(logger, 'session_retired')).toEqual([]);
+  });
+
+  it('builds nothing when a start took the stock first', async () => {
+    const { service, logger, retired, inserted } = examWorld({ ...stockChosenOn(TODAY), retireStock: async () => false }, PRACTICE_MORE);
+    await service.currentSession('u1', E, 't_exam');
+    await expect(service.createNextSession('u1', E, NO_DEVICES, 't_exam')).resolves.toMatchObject({ sessionId: 's_stock', created: false });
+    expect(retired).toEqual([]);
+    expect(inserted).toEqual([]);
+    expect(eventsOf(logger, 'session_retired')).toEqual([]);
+  });
+});
+
+// Phase 57 (spec D2, D7, D8; rulings T3-j, T3-m, T3-n). What a target path's choice reads beside
+// the session in flight on its path, as the stock job builds it: the in-flight cards it credits
+// (a ladder's intro stage graded nothing), practice more when they cover every owed word, and the
+// day's room for new words, less every path's first meetings today and the in-flight session's.
+describe("a target path's choice beside its session in flight (rulings T3-j, T3-m, T3-n)", () => {
+  const G_C = { ...SAVED[1], glossId: 'g_c', key: 'סוס', variantId: 'v_c', lexemeId: 'l_c', lemma: 'horse', form: 'horse' };
+  const ALL = [...SAVED, G_C];
+  const LIVE = ['written_receptive', 'written_productive', 'spelling'] as const;
+
+  /** A learner with no device (live: the written three) whose target `found` holds `words`, each
+   *  started on its day or not; `skills` its values in half-points; `cards` the cards of the
+   *  session started on its path; `introduced` every path's first meetings today. */
+  function pathWorld(input: {
+    found: ReturnType<typeof target>;
+    words: Record<string, string | null>;
+    skills?: Record<string, number>;
+    cards: { glossId: string; type: QuestionType; intro: boolean }[];
+    introduced?: string[];
+  }) {
+    const targets = createFakeTargetRepo({
+      findTarget: async () => input.found,
+      listWords: async () => Object.entries(input.words).map(([glossId, startedOn]) => ({ glossId, addedAt: input.found.createdAt, startedOn })),
+    });
+    const made = world(
+      {
+        ...nothingOpen,
+        findOpen: async () => ({ started: summary('s_started', 'ready') }),
+        findSessionCards: async (sessionId) => (sessionId === 's_started' ? input.cards : []),
+        findIntroducedOn: async () => input.introduced ?? [],
+      },
+      {
+        target: targets,
+        targetSkills: stub<TargetSkillRepo>({
+          findRows: async () =>
+            Object.entries(input.skills ?? {}).flatMap(([glossId, halves]) =>
+              LIVE.map((dimension) => ({ targetId: input.found.id, glossId, dimension, halves, sessionId: null, day: '2026-10-11' })),
+            ),
+        }),
+        vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => ALL, countEntries: async () => ALL.length }),
+        dict: stub<DictRepo>({
+          findLexemeForms: async () => [],
+          findGlossRenderings: async () =>
+            ALL.map((gloss, i) => ({ glossId: gloss.glossId, senseId: `s${i}`, variantId: gloss.variantId, form: gloss.form, gloss: gloss.key, rank: 0 })),
+        }),
+      },
+    );
+    return { ...made, targets };
+  }
+  const picksOf = (jobs: FakeJobRepo) =>
+    (jobs.enqueued.find((job) => job.name === PREPARE_SESSION)?.data as { picks: { gloss_id: string; ladder: boolean; dimension: string }[] }).picks.map(
+      (pick) => [pick.gloss_id, pick.ladder ? 'ladder' : pick.dimension],
+    );
+  const build = (service: SessionService, targetId: string) => service.stockSession({ enrollment_id: E, reason: 'start', target_id: targetId });
+
+  it("credits none of a ladder's intro stage (ruling T3-j): a word met there is still owed its start", async () => {
+    // Five days left, past the halfway point: both words owed a start today.
+    const { service, jobs } = pathWorld({
+      found: target('t_exam', '2026-10-17', ['g_a', 'g_b']),
+      words: { g_a: null, g_b: null },
+      cards: [
+        { glossId: 'g_a', type: 'meet', intro: true },
+        { glossId: 'g_a', type: 'letter_tiles', intro: true },
+      ],
+    });
+    await build(service, 't_exam');
+    expect(picksOf(jobs)).toEqual([
+      ['g_a', 'ladder'],
+      ['g_b', 'ladder'],
+    ]);
+  });
+
+  it('chooses practice more, recording no owed word, when the session in flight covers every owed word (ruling T3-m)', async () => {
+    // Both words started yesterday at 4 of 7: below the cap, and owed their next-day checks. A
+    // typed translation of each in flight takes every live skill to the cap and answers the checks.
+    const { service, jobs, targets, logger } = pathWorld({
+      found: target('t_exam', '2026-10-17', ['g_a', 'g_b']),
+      words: { g_a: YESTERDAY, g_b: YESTERDAY },
+      skills: { g_a: 4, g_b: 4 },
+      cards: [
+        { glossId: 'g_a', type: 'typed_translation', intro: false },
+        { glossId: 'g_b', type: 'typed_translation', intro: false },
+      ],
+    });
+    await build(service, 't_exam');
+    expect(writes(targets, 'insertSessionTarget')).toEqual([['s_new', expect.objectContaining({ capHalves: 7, owedGlossIds: [] })]]);
+    // The hardest cards: one rung-2 card per word in a productive skill.
+    expect(picksOf(jobs)).toEqual([
+      ['g_a', 'written_productive'],
+      ['g_b', 'written_productive'],
+    ]);
+    expect(eventsOf(logger, 'session_stocked')).toHaveLength(1);
+  });
+
+  it("leaves practice more only the day's room for new words, less the in-flight session's first meetings (ruling T3-n)", async () => {
+    // Forty days left, made today: one word of three planned today (g_a, started and at the far
+    // cap, so the day is done) and two later. Fourteen first meetings today, g_a's among them,
+    // and the in-flight session meets g_b early: the day's fifteenth. g_c waits for tomorrow.
+    const { service, jobs } = pathWorld({
+      found: { ...target('t_exam', '2026-11-21', ['g_a', 'g_b', 'g_c']), createdAt: new Date('2026-10-12T09:00:00Z') },
+      words: { g_a: TODAY, g_b: null, g_c: null },
+      skills: { g_a: 2 },
+      cards: [
+        { glossId: 'g_b', type: 'meet', intro: true },
+        { glossId: 'g_b', type: 'multiple_choice', intro: false },
+        { glossId: 'g_b', type: 'typed_translation', intro: false },
+      ],
+      introduced: ['g_a', ...Array.from({ length: 13 }, (_, i) => `x${i}`)],
+    });
+    await build(service, 't_exam');
+    expect(picksOf(jobs)).toEqual([['g_a', 'written_productive']]);
   });
 });

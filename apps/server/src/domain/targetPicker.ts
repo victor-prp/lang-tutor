@@ -63,6 +63,33 @@ export function owedWords(day: TargetDay, mode: TargetMode): string[] {
     .sort();
 }
 
+/** What a target path's stock recorded of its day (session_targets), as its stale check reads it. */
+export type StockChoice = { capHalves: number; owedGlossIds: readonly string[] };
+
+/**
+ * Phase 53 (ruling R-D12), per path since phase 57 (spec D2, final review C1). Whether a target
+ * path's stock is checked against today's choice before it is played: one chosen on an earlier
+ * learner day, and one chosen as practice more (it records no owed word) on any day. A practice
+ * more stock is chosen beside the session in flight when that session's credit covers every
+ * owed word (ruling T3-m); a miss there leaves work owed that practice more does not serve
+ * (anti-goal 1). A stock chosen today for owed work still serves it: the session it was chosen
+ * beside was credited as all right, and a miss only adds work. While the covering session is in
+ * flight its credit applies again, so the check finds the same choice and keeps the stock.
+ */
+export function stockToCheck(stock: { chosenOn: string } & Pick<StockChoice, 'owedGlossIds'>, today: string): boolean {
+  return stock.chosenOn < today || stock.owedGlossIds.length === 0;
+}
+
+/** Phase 53 (ruling R-D12), phase 57 (spec D2). A checked stock is played as it is when today's
+ *  choice has the cap and the owed words it recorded; one that recorded nothing is replaced. */
+export function stockServes(recorded: StockChoice | undefined, today: StockChoice): boolean {
+  return (
+    recorded !== undefined &&
+    recorded.capHalves === today.capHalves &&
+    recorded.owedGlossIds.join(' ') === today.owedGlossIds.join(' ')
+  );
+}
+
 const SPEAKING: Dimension = 'spoken_productive';
 
 /** Spec D7. The productive skills the hardest cards ask. */

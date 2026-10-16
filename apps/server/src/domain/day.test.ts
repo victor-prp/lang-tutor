@@ -18,7 +18,16 @@ import { applySession, type MemoryRow } from './memoryUpdate';
 import { RUNGS, planCards } from './plan';
 import { daysBetween, evaluateSession, type AnsweredQuestion, type ProgressRow } from './progress';
 import { targetDay, type TargetDay } from './targetDay';
-import { chooseTargetPicks, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
+import {
+  chooseTargetPicks,
+  owedWords,
+  stockServes,
+  stockToCheck,
+  targetMode,
+  type StockChoice,
+  type TargetMode,
+  type TargetPickInput,
+} from './targetPicker';
 import { activeOn, readinessOf, recallOnDue, type TargetKind } from './targets';
 import { capHalves, targetSessionWrite, type TargetSkillEvent, type TargetSkillRow } from './targetSkills';
 import { dayState, type DayAnswer } from './today';
@@ -897,8 +906,16 @@ function pathAnswer(glossId: string, type: QuestionType, verdict: Verdict): Answ
  * is chooseWords over the saved words in no active target, its families over every saved word
  * (T5-k), its new words counting every path's first meetings today (D8). Every session writes FSRS
  * memory and levels as before (Done 1), and the target skills of every active target holding a word
- * it asked through targetSessionWrite (D4). Sessions run one after another, so none is in flight
- * when the next is chosen: the stock lag of D2 is the service's.
+ * it asked through targetSessionWrite (D4). Sessions run one after another.
+ *
+ * `stockLag` (spec D2, final review C1): a target's session is the stock its path's previous
+ * session chose at its start, crediting that session's graded cards as right (ruling T3-j), its
+ * room for new words less that session's first meetings (T3-n), as the stock job builds it
+ * beside a started session; the first of a path is built by create, with nothing in flight.
+ * Before it is played, a stock that stockToCheck holds (chosen on an earlier day, or as practice
+ * more) is replaced by today's choice when stockServes says it no longer serves it, as create
+ * does (services/sessions.ts replaceIfStale). Without it, every target session is chosen when it
+ * is played, with nothing in flight.
  */
 function runPaths(
   list: DayList,
@@ -906,6 +923,7 @@ function runPaths(
   sessionsADay: SessionsOn | ((day: number) => SessionsOn),
   targets: readonly SimTarget[] | ((day: number) => readonly SimTarget[]),
   learner: PathLearner = PHASE_37_LEARNER,
+  { stockLag = false }: { stockLag?: boolean } = {},
 ): PathRun {
   const targetsOn = typeof targets === 'function' ? targets : () => targets;
   const sessionsOn = typeof sessionsADay === 'function' ? sessionsADay : () => sessionsADay;
@@ -926,6 +944,10 @@ function runPaths(
   const record: PathDay[] = [];
   const { missEvery, phase = 0, forgets = new Set<string>(), scripted } = learner;
   let cards = phase;
+  /** A target choice: its picks and mode, and what its stock records of the day (session_targets). */
+  type Choice = { picks: ChosenPick[]; mode: TargetMode; chosenOn: string; recorded: StockChoice };
+  /** Each target path's stock, with stockLag: chosen at its previous session's start. */
+  const stocks = new Map<string, Choice>();
 
   for (let day = 0; day < days; day++) {
     const date = dayAfter(list.today, day);
@@ -957,6 +979,38 @@ function runPaths(
         answeredToday: today.some((answer) => pathOf.get(answer.sessionId) === target.id),
       });
     const homeNow = () => new Map(active.map((target) => [target.id, dayOf(target)]));
+    /** services/sessions.ts readTarget: the target's choice beside its path's session in flight,
+     *  whose graded cards it credits, practice more when owed work returns no pick (T3-m). */
+    const chooseFor = (target: SimTarget, inFlight: readonly { glossId: string; type: QuestionType; intro: boolean }[]): Choice => {
+      const day = dayOf(target);
+      const own = new Set(wordsOf(target).map((word) => word.glossId));
+      const meeting = new Set(inFlight.map((card) => card.glossId).filter((glossId) => own.has(glossId) && !met.has(glossId)));
+      const pickInput: TargetPickInput = {
+        day,
+        mode: targetMode(day),
+        levels: new Map([...progress.values()].map((row) => [`${row.glossId}|${row.dimension}`, row.level])),
+        known: new Set([...memory.values()].map((row) => row.glossId)),
+        keys: new Map(saved.map((gloss) => [gloss.glossId, gloss.key])),
+        inFlight: inFlight.filter((card) => !card.intro),
+        newRoom: Math.max(0, DAY_NEW_CAP - introduced.size - meeting.size),
+      };
+      let mode = pickInput.mode;
+      let picks = chooseTargetPicks(pickInput);
+      if (picks.length === 0 && mode === 'owed') {
+        mode = 'more';
+        picks = chooseTargetPicks({ ...pickInput, mode });
+      }
+      return { picks, mode, chosenOn: date, recorded: { capHalves: day.capHalves, owedGlossIds: owedWords(day, mode) } };
+    };
+    /** services/sessions.ts createNextSession: the path's stock, replaced when stale; else built. */
+    const nextOf = (target: SimTarget): Choice => {
+      const stock = stockLag ? stocks.get(target.id) : undefined;
+      stocks.delete(target.id);
+      if (!stock) return chooseFor(target, []);
+      if (!stockToCheck({ chosenOn: stock.chosenOn, owedGlossIds: stock.recorded.owedGlossIds }, date)) return stock;
+      const fresh = chooseFor(target, []);
+      return stockServes(stock.recorded, fresh.recorded) || fresh.picks.length === 0 ? stock : fresh;
+    };
     const start = homeNow();
     const memoryAtStart = [...memory.values()];
     const plan = sessionsOn(day);
@@ -978,21 +1032,7 @@ function runPaths(
       let input: ChoiceInput | null = null;
       let families: Families | null = null;
       if (target) {
-        const pickInput: TargetPickInput = {
-          day: home.get(target.id)!,
-          mode: targetMode(home.get(target.id)!),
-          levels: new Map([...progress.values()].map((row) => [`${row.glossId}|${row.dimension}`, row.level])),
-          known: new Set(rows.map((row) => row.glossId)),
-          keys: new Map(saved.map((gloss) => [gloss.glossId, gloss.key])),
-          inFlight: [],
-          newRoom: Math.max(0, DAY_NEW_CAP - introduced.size),
-        };
-        mode = pickInput.mode;
-        picks = chooseTargetPicks(pickInput);
-        if (picks.length === 0 && mode === 'owed') {
-          mode = 'more';
-          picks = chooseTargetPicks({ ...pickInput, mode });
-        }
+        ({ picks, mode } = nextOf(target));
       } else {
         families = glossFamilies({
           saved: saved.map((gloss) => ({ ...gloss, knownAt: knownIn.has(gloss.glossId) ? `session ${knownIn.get(gloss.glossId)}` : null })),
@@ -1035,6 +1075,15 @@ function runPaths(
         ladder: pick.ladder,
       }));
       const cardPlan = planCards(planned, { listening: true, speaking: true, target: target !== undefined });
+      // Spec D2: the start asks for the path's next stock, built beside this session in flight.
+      if (target && stockLag) {
+        const inFlight = cardPlan.order.map((index, position) => ({
+          glossId: picks[index].glossId,
+          type: cardPlan.types[position],
+          intro: cardPlan.intro[position],
+        }));
+        stocks.set(target.id, chooseFor(target, inFlight));
+      }
 
       const given: AnsweredQuestion[] = cardPlan.order.map((index, position) => {
         const pick = picks[index];
@@ -1284,6 +1333,16 @@ describe.each<[TargetKind]>([['exam'], ['homework']])(
       for (const one of runs) expect(expectOnlyOwedWork(one)).toBeGreaterThan(0);
     });
 
+    // Final review C1. The same learner, each target session the stock its previous one chose at
+    // its start (spec D2's stock lag, as the service plays it). The marks above are measured as
+    // before, one session after another; this run checks anti-goal 1 under the lag, and reports
+    // what FSRS ready-on-due measures there, ungated (ruling F-C1-d).
+    const lagged = EVERY_PHASE.map((learner) => runPaths(withList(20), 16, SESSIONS_A_DAY, [target], learner, { stockLag: true }));
+    const laggedShares = lagged.map((one) => fsrsReadyShare(one, target).toFixed(2)).join(' ');
+    it(`with the stock lag, never asks a target card that serves no owed work while work is owed, at any phase (anti-goal 1; FSRS ready-on-due measures ${laggedShares})`, () => {
+      for (const one of lagged) expect(expectOnlyOwedWork(one)).toBeGreaterThan(0);
+    });
+
     itKeepsThePaths(run, [target]);
   },
 );
@@ -1311,7 +1370,8 @@ const REPLAY_LEARNER: PathLearner = {
 
 describe('the 2026-10-16 replay: homework due tomorrow, six words, the same misses, played until done (phase 57, spec Done 7, ruling P3)', () => {
   const homework = targetOf('homework', 1, REPLAY);
-  const run = runPaths(REPLAY_LIST, 1, { untilDone: 25 }, [homework], REPLAY_LEARNER);
+  // Spec D2, final review C1: each session the stock its previous one chose at its start.
+  const run = runPaths(REPLAY_LIST, 1, { untilDone: 25 }, [homework], REPLAY_LEARNER, { stockLag: true });
   const end = targetOn(run, 'homework', dueIn(0), 'end')!;
   const { played } = run.days[0];
 
@@ -1351,7 +1411,8 @@ describe('the 2026-10-16 replay: homework due tomorrow, six words, the same miss
 
 describe("an exam in 3 days, ten words, phase 37's learner practising until each day is done (phase 57, spec Done 6)", () => {
   const exam = targetOf('exam', 3, listIds(1, 10));
-  const runs = EVERY_PHASE.map((learner) => runPaths(withList(10), 4, { untilDone: 25 }, [exam], learner));
+  // Spec D2, final review C1: each target session the stock its previous one chose at its start.
+  const runs = EVERY_PHASE.map((learner) => runPaths(withList(10), 4, { untilDone: 25 }, [exam], learner, { stockLag: true }));
   const [run] = runs;
   /** Per phase, each practice day's sessions and readiness at its end. */
   const days = runs.map((one) => one.days.slice(0, 3).map(({ played, end }) => `${played}:${end.get('exam')!.readinessPct}%`).join(' '));
@@ -1367,13 +1428,17 @@ describe("an exam in 3 days, ten words, phase 37's learner practising until each
     }
   });
 
+  it('never asks a target card that serves no owed work while work is owed, at any phase (anti-goal 1)', () => {
+    for (const one of runs) expect(expectOnlyOwedWork(one)).toBeGreaterThan(0);
+  });
+
   itKeepsTheTargetPaths(run, [exam]);
 });
 
 describe('an exam in 20 days, twenty words, a learner who never misses practising until each day is done (phase 57, spec Done 6, D5, D6)', () => {
   const exam = targetOf('exam', 20, listIds(1, 20));
   const learner: Learner = { missEvery: NEVER_MISSES };
-  const run = runPaths(withList(20), 21, { untilDone: 25 }, [exam], learner);
+  const run = runPaths(withList(20), 21, { untilDone: 25 }, [exam], learner, { stockLag: true });
   const evenings = practiceDaysOf(run, 'exam');
   const summary = evenings.map((date) => `${daysBetween(date, exam.dueOn)}:${run.days[dayIndex(date)].played}`).join(' ');
 
@@ -1389,7 +1454,7 @@ describe('an exam in 20 days, twenty words, a learner who never misses practisin
   // Spec D6: unfinished planned work carries over. Days left 9 is a practice day with no next-day
   // check after it, so the day after it rests unless the practice day is skipped.
   const skipped = dayIndex(dueIn(11));
-  const skipping = runPaths(withList(20), 21, (day) => (day === skipped ? 0 : { untilDone: 25 }), [exam], learner);
+  const skipping = runPaths(withList(20), 21, (day) => (day === skipped ? 0 : { untilDone: 25 }), [exam], learner, { stockLag: true });
 
   it('owes a skipped practice day the next day, and gets it done then', () => {
     expect(targetOn(run, 'exam', dueIn(12), 'start')!.state).toBe('rest');

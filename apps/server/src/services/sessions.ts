@@ -104,7 +104,7 @@ import { MAX_AVOID } from '../domain/sentences';
 import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
-import { chooseTargetPicks, owedWords, targetMode, type TargetPickInput } from '../domain/targetPicker';
+import { chooseTargetPicks, owedWords, stockServes, stockToCheck, targetMode, type StockChoice, type TargetPickInput } from '../domain/targetPicker';
 import { activeOn, readinessOf, recallOnDue } from '../domain/targets';
 import { targetSessionWrite } from '../domain/targetSkills';
 import { tileEligible, tilesFor } from '../domain/tiles';
@@ -188,8 +188,9 @@ type Stocked = { sessionId: string; path: Path; endedOnDate: string[]; endedStoc
 type Replaced = Stocked & { retired: string };
 
 /** Phase 53 (ruling R-D12). What the cheap half of the stale check read of one stock: the
- *  learner's today and the devices the stock was built for. */
-type MaybeStale = { stockId: string; today: string; devices: Devices };
+ *  learner's today, the devices the stock was built for, and (phase 57) what it recorded of its
+ *  target's day, which a check compares with today's. */
+type MaybeStale = { stockId: string; today: string; devices: Devices; recorded: StockChoice | undefined };
 
 /**
  * Phase 20. Runs the progress rule over an ended session's answers, inside the
@@ -664,31 +665,36 @@ export function createSessionService({
   }
 
   /**
-   * Phase 53 (ruling R-D12), per path since phase 57 (spec D2). The cheap half of the stale
-   * check: a target path's list stock whose words were chosen on an earlier learner day than
-   * today. A seed, a stock from before phase 53 (no chosen_on), today's, and any of the main
-   * path's never are: the main path plays a stock as it is (phase 43 R5), without reading
-   * anything. Answers what it read, or null. `stock` is unstarted: findOpen's.
+   * Phase 53 (ruling R-D12), per path since phase 57 (spec D2, final review C1). The cheap half
+   * of the stale check: a target path's list stock that stockToCheck says may no longer serve
+   * its target's day: chosen on an earlier learner day than today, or chosen as practice more
+   * (it recorded no owed word), which a miss in the session it was chosen beside turns stale the
+   * same day. A seed, a stock from before phase 53 (no chosen_on), one chosen today for owed
+   * work, and any of the main path's never are: the main path plays a stock as it is (phase 43
+   * R5), without reading anything. Answers what it read, or null. `stock` is unstarted:
+   * findOpen's.
    */
   async function mayBeStale(repos: Repos, enrolled: Enrollment, stock: SessionSummary, path: Path): Promise<MaybeStale | null> {
     if (path === null || stock.source !== 'list') return null;
     const choice = await repos.session.findStockChoice(stock.id);
     if (!choice || choice.chosenOn === null) return null;
     const today = await learnerDay(repos, enrolled.user_id, now());
-    if (choice.chosenOn >= today) return null;
-    return { stockId: stock.id, today, devices: { listening: choice.listening, speaking: choice.speaking } };
+    const recorded = await repos.target.findSessionTarget(stock.id, path);
+    if (!stockToCheck({ chosenOn: choice.chosenOn, owedGlossIds: recorded?.owedGlossIds ?? [] }, today)) return null;
+    return { stockId: stock.id, today, devices: { listening: choice.listening, speaking: choice.speaking }, recorded };
   }
 
   /**
-   * Phase 53 (spec D12, ruling R-D12), per path since phase 57 (spec D2). A target path's
-   * stock chosen on an earlier learner day is played as it is (phase 43 R5) unless today's
-   * day of its target differs from the one it recorded, in its cap or in its owed words: then
-   * it is retired and the next is built in its place, for the devices it was built for. A
-   * target no longer active, a choice with nothing to ask or no rendering, leave the stock as
-   * it is, and so does a start that took it first. The caller holds the path's next-session
-   * lock and read `stock` under it. `checked` is mayBeStale's answer from before the lock: a
-   * stock's day is written with it and never changes, so for the same stock it is not read
-   * again. Answers the stock built, or null.
+   * Phase 53 (spec D12, ruling R-D12), per path since phase 57 (spec D2, final review C1). A
+   * target path's stock that mayBeStale holds (chosen on an earlier learner day, or as practice
+   * more) is played as it is (phase 43 R5) unless today's choice of its target differs from the
+   * one it recorded, in its cap or in its owed words (stockServes): then it is retired and the
+   * next is built in its place, for the devices it was built for. A target no longer active, a
+   * choice with nothing to ask or no rendering, leave the stock as it is, and so does a start
+   * that took it first. The caller holds the path's next-session lock and read `stock` under
+   * it. `checked` is mayBeStale's answer from before the lock: a stock's day and record are
+   * written with it and never change, so for the same stock they are not read again. Answers
+   * the stock built, or null.
    */
   async function replaceIfStale(
     repos: Repos,
@@ -701,9 +707,7 @@ export function createSessionService({
     if (!stale || path === null) return null;
     const read = await readChoice(repos, enrolled, stale.devices, path);
     if (!read || read.path === null) return null;
-    const recorded = await repos.target.findSessionTarget(stock.id, path);
-    const same = recorded?.capHalves === read.row.capHalves && recorded.owedGlossIds.join(' ') === read.row.owedGlossIds.join(' ');
-    if (same) return null;
+    if (stockServes(stale.recorded, read.row)) return null;
     const picks = await choosePicks(repos, enrolled, read);
     if (!picks || !(await repos.session.retireStock(stock.id))) return null;
     return { retired: stock.id, ...(await writeStock(repos, enrolled, stale.devices, read, picks)) };
@@ -777,7 +781,8 @@ export function createSessionService({
      * main path's, ready at once, and every later one is built here from the path's words,
      * preparing. The indexes (repo -> SessionOpen) are what hold under a race. Phase 53
      * (ruling R-D12): a target's stock chosen on an earlier day whose day is stale is replaced
-     * first, and the new one answered. A target that is not the enrollment's is
+     * first, and the new one answered; since phase 57 (final review C1) a practice-more stock
+     * too, the same day, once today owes work it does not serve. A target that is not the enrollment's is
      * TargetNotFound (another learner's, AccessDenied), and one no longer active TargetClosed.
      */
     createNextSession: async (actorUserId: string, enrollmentId: string, options: Devices, path: Path = null): Promise<NextSession> => {
@@ -866,8 +871,9 @@ export function createSessionService({
      *  often a learner found it ready. Phase 53 (ruling R-D12): home learns of the stock
      *  here, so a target's stock chosen on an earlier day is checked here, and offered
      *  replaced when its day is stale. The path's lock is taken only when the cheap half
-     *  holds (a target's stock chosen on an earlier day), and the stock is read again under
-     *  it. Phase 57 (spec D11): and how many of the path's words wait (waitingOn). */
+     *  holds (a target's stock chosen on an earlier day, or as practice more: final review
+     *  C1), and the stock is read again under it. Phase 57 (spec D11): and how many of the
+     *  path's words wait (waitingOn). */
     currentSession: async (
       actorUserId: string,
       enrollmentId: string,
@@ -878,8 +884,8 @@ export function createSessionService({
         const target = path === null ? null : await pathTarget(repos, actorUserId, enrolled, path);
         let open = await repos.session.findOpen(enrollmentId, path);
         let replaced: Replaced | null = null;
-        // Phase 53 (ruling R-D12). The lock only for a stock chosen on an earlier day that its
-        // target's day can have made stale; what that read is not read again for the same stock.
+        // Phase 53 (ruling R-D12). The lock only for a stock that its target's day can have made
+        // stale (mayBeStale); what that read is not read again for the same stock.
         const checked = !open.started && open.stock ? await mayBeStale(repos, enrolled, open.stock, path) : null;
         if (checked) {
           await repos.session.lockNextSession(enrollmentId, path);

@@ -465,6 +465,73 @@ describe("a target's stock chosen on an earlier day (spec D2, phase 53 R4 per pa
   });
 });
 
+// Final review C1 (spec D2's stock lag, anti-goal 1). A target's stock is chosen at its session's
+// start, crediting that session's cards as right; when they cover every owed word, it is practice
+// more. A miss in that session leaves work owed that practice more does not serve, so the next
+// create replaces it, the same day; with every answer right the day is done and it is played.
+describe("a target's practice-more stock chosen beside the session that covered the day (final review C1)", () => {
+  /** The exam's one word, started yesterday at 4 of 7 in its written skills: owed its cap and
+   *  its next-day checks, all of which one typed translation in flight covers. S1 is that card,
+   *  started; its start asks for the path's stock, built here beside it. */
+  async function coveredDay() {
+    const words = await savedWords();
+    const [word] = words;
+    const exam = await addTarget('exam', '2030-01-13', [word.glossId]);
+    await setTargetWord(t.db, { targetId: exam, glossId: word.glossId, startedOn: '2030-01-07', halves: Object.fromEntries(LIVE.map((d) => [d, 4])) });
+    const s1 = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [word], types: ['typed_translation'], targetId: exam });
+    await service.startSession('u_1', s1.sessionId, NO_DEVICES);
+    const [job] = await stockJobs();
+    await service.stockSession(job.data);
+    const { stock } = (await readOpen(exam))!;
+    expect(await readSessionTargets(t.db, stock)).toMatchObject([{ capHalves: 7, owedGlossIds: [] }]);
+    return { word, exam, s1, stock };
+  }
+  const readOpen = async (exam: string) => {
+    const [stock] = ((await jobPayloads(t.db, PREPARE_SESSION)) as PrepareSessionPayload[]).filter((payload) => payload.target);
+    return stock && (await readStockRow(t.db, stock.session_id)).targetId === exam ? { stock: stock.session_id } : undefined;
+  };
+
+  it('is replaced by the next create once that session ends with a miss: the target owes work again', async () => {
+    const { word, exam, s1, stock } = await coveredDay();
+
+    await service.submitAnswer('u_1', s1.sessionId, s1.questions[0].id, { text: 'zzzz' });
+
+    const next = await service.createNextSession('u_1', E, NO_DEVICES, exam);
+    expect(next).toMatchObject({ status: 'preparing', source: 'list', created: true });
+    expect(next.sessionId).not.toBe(stock);
+    expect((await readStockRow(t.db, stock)).status).toBe('skipped');
+    expect(await readSessionTargets(t.db, next.sessionId)).toMatchObject([{ capHalves: 7, owedGlossIds: [word.glossId] }]);
+    // Owed work only: the word's skills the miss took below the cap (anti-goal 1).
+    expect([...new Set(await picksOf(next.sessionId))]).toEqual([word.glossId]);
+    expect(logged('session_retired')).toEqual([{ event: 'session_retired', enrollment_id: E, session_id: stock, reason: 'stale_target' }]);
+    // Chosen today for owed work, the new stock is the one home offers next, with the word owed.
+    expect(await service.currentSession('u_1', E, exam)).toMatchObject({ current: { id: next.sessionId }, dueCount: 1 });
+  });
+
+  it('is replaced on the home read too, which is where home learns of it', async () => {
+    const { exam, s1, stock } = await coveredDay();
+
+    await service.submitAnswer('u_1', s1.sessionId, s1.questions[0].id, { text: 'zzzz' });
+
+    const { current, dueCount } = await service.currentSession('u_1', E, exam);
+    expect(dueCount).toBe(1);
+    expect(current?.id).not.toBe(stock);
+    expect((await readStockRow(t.db, stock)).status).toBe('skipped');
+    expect(await service.createNextSession('u_1', E, NO_DEVICES, exam)).toMatchObject({ sessionId: current?.id, created: false });
+  });
+
+  it('is played as it is once that session ends with every answer right: the day is done', async () => {
+    const { word, exam, s1, stock } = await coveredDay();
+
+    await service.submitAnswer('u_1', s1.sessionId, s1.questions[0].id, { text: word.form });
+    expect((await service.currentSession('u_1', E, exam)).dueCount).toBe(0);
+
+    expect(await service.createNextSession('u_1', E, NO_DEVICES, exam)).toMatchObject({ sessionId: stock, created: false });
+    expect((await service.currentSession('u_1', E, exam)).current?.id).toBe(stock);
+    expect(logged('session_retired')).toEqual([]);
+  });
+});
+
 describe('the home read of a path (spec D11)', () => {
   it("answers the main path as before without a target, with its words due, and a target's with its words owed", async () => {
     const words = await savedWords();

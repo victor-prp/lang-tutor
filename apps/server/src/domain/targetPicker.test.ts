@@ -5,7 +5,7 @@ import { SESSION_LENGTH, type Dimension, type QuestionType } from '@lang-tutor/c
 import type { ChosenPick } from './choose';
 import { LADDER_SLOTS, NEW_PER_SESSION, TARGET_SPEAKING_PER_SESSION } from './chooseConstants';
 import { targetDay, type TargetDay, type WordDay } from './targetDay';
-import { chooseTargetPicks, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
+import { chooseTargetPicks, stockServes, stockToCheck, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
 import type { TargetSkillRow } from './targetSkills';
 
 const WR: Dimension = 'written_receptive';
@@ -392,5 +392,35 @@ describe('chooseTargetPicks, last review', () => {
   it('starts a word never started, so the morning can still reach ready', () => {
     const day = dayOf(20, [{ id: 'g0', toStart: true }], 'due_today');
     expect(pick(day).map((p) => [p.glossId, p.ladder])).toEqual([['g0', true]]);
+  });
+});
+
+// Phase 53 (ruling R-D12), phase 57 (spec D2, final review C1). A target path's stock is checked
+// against today's choice before it is played when it was chosen on an earlier day, or chosen as
+// practice more: the session it was chosen beside can end with a miss and leave work owed.
+describe('stockToCheck', () => {
+  it.each<[string, { chosenOn: string; owedGlossIds: string[] }, boolean]>([
+    ['chosen on an earlier day', { chosenOn: '2026-10-15', owedGlossIds: ['g0'] }, true],
+    ['chosen today as practice more, owing nothing', { chosenOn: '2026-10-16', owedGlossIds: [] }, true],
+    ['chosen today for owed work', { chosenOn: '2026-10-16', owedGlossIds: ['g0'] }, false],
+  ])('a stock %s: %s', (_, stock, checked) => {
+    expect(stockToCheck(stock, '2026-10-16')).toBe(checked);
+  });
+});
+
+describe('stockServes', () => {
+  const today = { capHalves: 10, owedGlossIds: ['g0', 'g1'] };
+  it.each<[string, { capHalves: number; owedGlossIds: string[] } | undefined, boolean]>([
+    ['the same cap and owed words', { capHalves: 10, owedGlossIds: ['g0', 'g1'] }, true],
+    ['another cap', { capHalves: 8, owedGlossIds: ['g0', 'g1'] }, false],
+    ['other owed words', { capHalves: 10, owedGlossIds: ['g0'] }, false],
+    ['no owed word: practice more, while work is owed again', { capHalves: 10, owedGlossIds: [] }, false],
+    ['nothing recorded', undefined, false],
+  ])('a stock that recorded %s: %s', (_, recorded, serves) => {
+    expect(stockServes(recorded, today)).toBe(serves);
+  });
+
+  it('keeps a practice-more stock while practice more is still the choice', () => {
+    expect(stockServes({ capHalves: 10, owedGlossIds: [] }, { capHalves: 10, owedGlossIds: [] })).toBe(true);
   });
 });

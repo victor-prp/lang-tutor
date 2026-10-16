@@ -112,6 +112,10 @@ phase 53's slot split, which caused part of the loop (R5's refill re-asked done 
 - **Stock lag** (one-pager evidence, cause 3): a target stock chosen while that path's previous
   session is still being played treats that session's target picks as answered right (each card
   credits its `dimensionsTested`), so it asks the next skill rather than the same one again.
+  (Final review C1.) When that credit covers every owed word, the stock is practice more; it
+  records no owed word, so it is checked like a stock of an earlier day on any day, and replaced
+  once a miss in that session leaves work owed. The target's button and its reminder go through
+  create, where the check runs, before they enter a stock.
 - **Reminders** (phase 52) open the path whose card is first on home (D11). The tick, which counts
   completed sessions of any path, is unchanged.
 
