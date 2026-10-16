@@ -30,7 +30,7 @@ variable "alert_email" {
 }
 
 variable "bots_schedule_enabled" {
-  description = "Whether the bots' hourly rule starts bots.yml. Off since 2026-10-16, while the bots are paused (docs/superpowers/specs/2026-10-16-lang-tutor-pause-qa-and-bots-design.md); docs/runbooks/bots.md, Start again, turns it back on."
+  description = "Whether the bots' hourly rule starts bots.yml. Off since 2026-10-16, while the bots are paused (docs/superpowers/specs/2026-10-16-lang-tutor-pause-qa-and-bots-design.md). To resume, change this default to true, not a -var: docs/runbooks/bots.md, Start again."
   type        = bool
   default     = false
 }

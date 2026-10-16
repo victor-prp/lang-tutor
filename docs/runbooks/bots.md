@@ -2,7 +2,7 @@
 
 Six simulated learners (phase 35, spec D13–D22) play the app against production, one simulated
 day per hourly run of `.github/workflows/bots.yml`, which an EventBridge rule starts at :17 (*The
-hourly trigger*). What each bot really knows lives on the
+hourly trigger*). Paused since 2026-10-16: see *Stop* and *Start again*. What each bot really knows lives on the
 orphan branch `bots-state`, one directory per bot (`state.json`, `log.jsonl`), never on the
 server. Every simulated week has a GitHub issue, label `bots`, titled "Bots — simulated week N".
 
@@ -95,15 +95,47 @@ The next run at :17 plays day 1 and opens the week 1 issue. Week 1 closes about 
 
 ## Stop
 
+Paused since 2026-10-16 (`docs/superpowers/specs/2026-10-16-lang-tutor-pause-qa-and-bots-design.md`):
+both switches below are off. Two switches, in this order:
+
 ```bash
 gh variable set BOTS_ENABLED --body false     # or: gh variable delete BOTS_ENABLED
 ```
 
-Every later run is skipped at once. A run already playing finishes its day. To start again,
-set it back to `true`: the bots resume at the day after the last one they finished.
+Every later run is skipped at once. A run already playing finishes its day. Then turn the hourly
+rule off, so that no run is started at all, not even a skipped one. That is a `bootstrap` apply
+with `bots_schedule_enabled` false, its default:
 
-The EventBridge rule keeps starting a run every hour; the job's condition skips each one at once,
-at no cost. Nothing changes in AWS.
+```bash
+export TF_STATE_BUCKET="$(gh variable get TF_STATE_BUCKET)"
+TF_VAR_state_bucket="$TF_STATE_BUCKET" TF_VAR_alert_email="$(gh variable get ALERT_EMAIL)" \
+  ./scripts/infra.sh bootstrap apply
+```
+
+The plan shows `aws_cloudwatch_event_rule.bots_hourly` changing to `state = "DISABLED"`.
+The connection, its token, the role and the alerts stay. A disabled rule makes no call, so the
+failed-call alarm stays quiet. `aws events disable-rule` alone does not last: the next apply
+turns the rule back on.
+
+## Start again
+
+The reverse, in this order. First set `bots_schedule_enabled`'s default to `true` in
+`terraform/bootstrap/variables.tf` and merge it. A `-var` on the command line would last only
+until the next `bootstrap` apply, which would quietly turn the rule off again. Then, from master:
+
+```bash
+export TF_STATE_BUCKET="$(gh variable get TF_STATE_BUCKET)"
+TF_VAR_state_bucket="$TF_STATE_BUCKET" TF_VAR_alert_email="$(gh variable get ALERT_EMAIL)" \
+  ./scripts/infra.sh bootstrap apply
+gh variable set BOTS_ENABLED --body true
+```
+
+Then the *Is it working?* checks under *The hourly trigger*. A token that expired during the pause
+shows as `"DEAUTHORIZED"` there; replace it as that section says. The bots resume at the day after
+the last one they finished, from `bots-state`.
+
+Nightly QA was paused the same day. Its header comment in `.github/workflows/nightly-qa.yml`
+gives the `schedule:` lines to put back.
 
 ## The hourly trigger
 
