@@ -13,13 +13,12 @@ import {
   actionFailureMessage,
   dateHasCome,
   dueDayLabel,
-  groupTitle,
   readinessColor,
   readinessName,
+  screenGroups,
   targetCardState,
   targetTitle,
   withoutWord,
-  wordGroups,
   wordTodayLine,
 } from '@/targets';
 import type { WizardMode } from '@/targetWizard';
@@ -208,12 +207,12 @@ export default function TargetScreen() {
               {strings.targetEmpty}
             </Text>
           ) : null}
-          {wordGroups(target.words).map((group) => (
-            <View key={group.today} testID={`target-group-${group.today}`} style={styles.group}>
-              <Text style={styles.groupTitle}>{groupTitle(group.today)}</Text>
+          {screenGroups(target).map((group) => (
+            <View key={group.key} testID={`target-group-${group.key}`} style={styles.group}>
+              {group.title !== null ? <Text style={styles.groupTitle}>{group.title}</Text> : null}
               {group.words.map((word) => {
                 const busy = removals.has(word.gloss_id);
-                const line = group.today === 'owed' || !dateHasCome(target) ? wordTodayLine(word) : null;
+                const line = group.lines ? wordTodayLine(word) : null;
                 const showing = opened.has(word.gloss_id);
                 return (
                   <View key={word.gloss_id} style={styles.wordBox}>

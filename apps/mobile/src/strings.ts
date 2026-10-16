@@ -99,6 +99,10 @@ export const strings = {
   skipConfirmTitle: 'לדלג על התרגול?',
   skipConfirmMessage: 'התרגול יסתיים, והתשובות שנתת בו לא ייספרו.',
   saveWordsFirst: 'כדי לתרגל, שמרו קודם מילים במסך התרגום.',
+  // Final review M2. My words when every saved word is in an active target, which practises it:
+  // the kinds that hold them, the exam's first.
+  allWordsInTargets: (kinds: readonly TargetKind[]): string =>
+    `כל המילים שלך כבר בהכנה ${(['exam', 'homework'] as const).filter((kind) => kinds.includes(kind)).map((kind) => TARGET_FOR[kind]).join(' ו')}.`,
   homeLoadFailed: 'טעינת התרגול נכשלה. אפשר לנסות שוב.',
   preparationFailed: 'יצירת השאלות נכשלה. אפשר לנסות שוב.',
   homeSavedLabel: (count: number, language: string) => `${count} משמעויות שמורות ב${language}`,
@@ -424,8 +428,8 @@ export const strings = {
   homePhotoSeveral: (count: number) => `${isolateLtr(String(count))} רשימות מתמונות מחכות לסקירה`,
   // Phase 53 (spec D10, D11). Preparing for homework or a test.
   targetKindName: (kind: TargetKind): string => TARGET_KIND_NAMES[kind],
-  // Phase 57 (spec D9). A word's readiness is a percent.
-  targetReadinessName: (readinessPct: number): string => isolateLtr(`${readinessPct}%`),
+  // Phase 57 (spec D9, D12). A word's readiness is a percent, and "ready" at 100%.
+  targetReadinessName: (readinessPct: number): string => (readinessPct >= 100 ? 'מוכנה' : isolateLtr(`${readinessPct}%`)),
   targetTomorrow: 'מחר',
   targetInDays: (days: number) => `בעוד ${isolateLtr(String(days))} ימים`,
   // A target read after its date has come is no longer counted down to.

@@ -57,14 +57,17 @@ export function TargetCard({
         </Text>
         <Bar parts={[{ share: target.readiness_pct / 100, color: readinessColor(target.readiness_pct) }]} />
       </Pressable>
-      <PracticeButton
-        testID={`target-practice-${id}`}
-        action={targetSessionAction(target)}
-        label={card.button}
-        filled={filled}
-        busy={busy}
-        onPress={onPractice}
-      />
+      {/* Final review M3. A target with no word has nothing to practise: no button. */}
+      {card.button !== null ? (
+        <PracticeButton
+          testID={`target-practice-${id}`}
+          action={targetSessionAction(target)}
+          label={card.button}
+          filled={filled}
+          busy={busy}
+          onPress={onPractice}
+        />
+      ) : null}
     </View>
   );
 }

@@ -164,6 +164,15 @@ describe('targets (phase 53 D10, D11)', () => {
     expect(strings.targetKindName('homework')).toBe('שיעורי בית');
     expect(strings.targetKindName('exam')).toBe('בוחן');
     expect(strings.targetReadinessName(40)).toBe(ltr('40%'));
+    // Spec D9, D12: a word at 100% is ready.
+    expect(strings.targetReadinessName(100)).toBe('מוכנה');
+  });
+
+  // Final review M2. My words with nothing of its own while targets hold every saved word.
+  it('says every word is in the targets, by their kinds', () => {
+    expect(strings.allWordsInTargets(['exam'])).toBe('כל המילים שלך כבר בהכנה לבוחן.');
+    expect(strings.allWordsInTargets(['homework'])).toBe('כל המילים שלך כבר בהכנה לשיעורי הבית.');
+    expect(strings.allWordsInTargets(['homework', 'exam'])).toBe('כל המילים שלך כבר בהכנה לבוחן ולשיעורי הבית.');
   });
 
   it('says how soon a target is, isolating the number', () => {

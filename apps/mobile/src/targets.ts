@@ -152,7 +152,8 @@ const byDate = (a: TargetSummary, b: TargetSummary) =>
  *
  *  `first` is the card whose button is filled, and the path a reminder opens: the first in
  *  that order, past a target on its date already at 100%, whose last review is outlined
- *  (D10). My words is always a candidate, so there is always one. */
+ *  (D10), and past a target with no word, which has no button (final review M3). My words is
+ *  always a candidate, so there is always one. */
 export function homeOrder(targets: readonly TargetSummary[]): { first: HomeCard; order: HomeCard[] } {
   const sorted = [...targets].sort(byDate);
   const ids = (states: TargetSummary['today']['state'][]) =>
@@ -160,7 +161,7 @@ export function homeOrder(targets: readonly TargetSummary[]): { first: HomeCard;
   const order = [...ids(['due_today']), ...ids(['owed']), 'main', ...ids(['done', 'rest'])];
   const outlined = new Set(
     sorted
-      .filter((target) => target.today.state === 'due_today' && target.readiness_pct >= 100)
+      .filter((target) => (target.today.state === 'due_today' && target.readiness_pct >= 100) || target.word_count === 0)
       .map((target) => target.id),
   );
   const first = order.find((card) => !outlined.has(card)) ?? 'main';
@@ -177,10 +178,16 @@ export type TargetCardState = {
   /** Today's words: none on a rest day or on the date. `check` once all planned are done. */
   today: { text: string; check: boolean; extra: string | null } | null;
   readiness: string;
-  button: string;
+  /** Null for a target with no word (final review M3): its path has nothing to ask. */
+  button: string | null;
 };
 
 export function targetCardState(target: TargetSummary): TargetCardState {
+  const card = cardOfDay(target);
+  return target.word_count === 0 ? { ...card, button: null } : card;
+}
+
+function cardOfDay(target: TargetSummary): TargetCardState & { button: string } {
   const { kind, today } = target;
   const title = strings.targetCountdown(kind, target.days_left);
   const readiness = strings.targetReadinessPct(kind, target.readiness_pct);
@@ -270,6 +277,17 @@ export function wordGroups(words: readonly TargetWord[]): WordGroup[] {
 
 export function groupTitle(today: TargetWord['today']): string {
   return strings.targetGroupTitle[today];
+}
+
+/** Final review M1. The target screen's word list: before the date, the day's groups (spec
+ *  D12), each titled and each row with its line for today; on the date, when nothing is owed
+ *  (D10), and after it, the words alone, with no title and no line. */
+export type ScreenGroup = { key: TargetWord['today'] | 'all'; title: string | null; lines: boolean; words: TargetWord[] };
+
+export function screenGroups(target: Pick<Target, 'days_left' | 'words'>): ScreenGroup[] {
+  if (target.words.length === 0) return [];
+  if (dateHasCome(target)) return [{ key: 'all', title: null, lines: false, words: [...target.words] }];
+  return wordGroups(target.words).map((group) => ({ key: group.today, title: groupTitle(group.today), lines: true, words: group.words }));
 }
 
 /** A word's line for today under its row: what it still owes, that it is done, a bonus,

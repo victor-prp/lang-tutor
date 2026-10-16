@@ -22,6 +22,7 @@ import {
   todayBar,
   withoutWord,
   wizardTitle,
+  screenGroups,
   wordGroups,
   wordTodayLine,
   groupTitle,
@@ -137,7 +138,12 @@ describe('readinessName', () => {
   it('writes the percent, its digits isolated', () => {
     expect(readinessName(0)).toBe('\u20660%\u2069');
     expect(readinessName(85)).toBe('\u206685%\u2069');
-    expect(readinessName(100)).toBe('\u2066100%\u2069');
+    expect(readinessName(99)).toBe('\u206699%\u2069');
+  });
+
+  // Spec D9, D12: "מוכנה" stays for 100%.
+  it('says ready at 100%', () => {
+    expect(readinessName(100)).toBe('מוכנה');
   });
 });
 
@@ -351,6 +357,13 @@ describe('homeOrder', () => {
     expect(homeOrder(targets)).toEqual({ first: 'today', order: ['today', 'owed', 'main'] });
   });
 
+  // Final review M3. A target left with no word has no button, so it never takes the filled one.
+  it('never fills a target with no word', () => {
+    const empty = summary('empty', 'owed', '2026-10-17', { word_count: 0 });
+    expect(homeOrder([empty])).toEqual({ first: 'main', order: ['empty', 'main'] });
+    expect(homeOrder([empty, summary('owed', 'owed', '2026-10-20')])).toEqual({ first: 'owed', order: ['empty', 'owed', 'main'] });
+  });
+
   // Its last review is outlined at 100%: the next card down has the filled button.
   it('fills the next card when the target on its date is already ready', () => {
     const ready = summary('today', 'due_today', '2026-10-16', { days_left: 0, readiness_pct: 100 });
@@ -415,6 +428,13 @@ describe('targetCardState', () => {
       readiness: `מוכנות לשיעורי הבית: ${ltr('100%')}`,
       button: 'חזרה אחרונה',
     });
+  });
+
+  // Final review M3. A create for a target with no word answers 409: no button to send it.
+  it('offers no button when the target has no word, whatever its day', () => {
+    for (const state of ['owed', 'done', 'rest', 'due_today'] as const) {
+      expect(targetCardState(summary('t', state, '2026-10-21', { word_count: 0 })).button).toBeNull();
+    }
   });
 
   it('says tomorrow for one day left', () => {
@@ -519,5 +539,46 @@ describe('wordGroups', () => {
     expect(wordTodayLine(word('a', 'later', { starts_in: 1 }))).toBe('נתחיל מחר');
     expect(wordTodayLine(word('a', 'later', { starts_in: 3 }))).toBe(`נתחיל בעוד ${ltr('3')} ימים`);
     expect(wordTodayLine(word('a', 'later'))).toBeNull();
+  });
+});
+
+// Final review M1. The target screen's word list: the groups of the day, each titled and each row
+// with its line for today; on the date (spec D10: nothing owed) and after it, the words alone,
+// with no title and no line.
+describe('screenGroups', () => {
+  const word = (gloss_id: string, today: TargetWord['today'], over: Partial<TargetWord> = {}): TargetWord => ({
+    gloss_id,
+    form: gloss_id,
+    meaning: 'm',
+    readiness_pct: 0,
+    today,
+    owed: ['spelling'],
+    starts_in: null,
+    skills: [],
+    ...over,
+  });
+  const target = (days_left: number, state: TargetSummary['today']['state'], words: TargetWord[]): Target => ({
+    ...summary('t', state, '2026-10-21', { days_left }),
+    words,
+  });
+
+  it('titles the groups of the day and gives each row its line', () => {
+    const groups = screenGroups(target(5, 'owed', [word('a', 'owed'), word('b', 'later', { starts_in: 2 })]));
+    expect(groups).toEqual([
+      { key: 'owed', title: 'נשאר להיום', lines: true, words: [expect.objectContaining({ gloss_id: 'a' })] },
+      { key: 'later', title: 'בהמשך', lines: true, words: [expect.objectContaining({ gloss_id: 'b' })] },
+    ]);
+  });
+
+  it('lists the words alone on the date: nothing is owed, so no title and no line', () => {
+    const words = [word('a', 'owed'), word('b', 'done')];
+    expect(screenGroups(target(0, 'due_today', words))).toEqual([{ key: 'all', title: null, lines: false, words }]);
+    // Read after its date, as an ended target's screen is.
+    expect(screenGroups(target(-2, 'due_today', words))).toEqual([{ key: 'all', title: null, lines: false, words }]);
+  });
+
+  it('lists nothing for a target with no word', () => {
+    expect(screenGroups(target(0, 'due_today', []))).toEqual([]);
+    expect(screenGroups(target(5, 'owed', []))).toEqual([]);
   });
 });
