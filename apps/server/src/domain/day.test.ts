@@ -957,8 +957,15 @@ function runPaths(
   const record: PathDay[] = [];
   const { missEvery, phase = 0, forgets = new Set<string>(), scripted } = learner;
   let cards = phase;
-  /** A target choice: its picks and mode, and what its stock records of the day (session_targets). */
-  type Choice = { picks: ChosenPick[]; mode: TargetMode; chosenOn: string; recorded: StockChoice };
+  /** A target choice: its picks and mode, and what its stock records of the day (session_targets);
+   *  `meanings`, the known meanings choosePicks gives a family's new meaning it starts (phase 60). */
+  type Choice = {
+    picks: ChosenPick[];
+    mode: TargetMode;
+    chosenOn: string;
+    recorded: StockChoice;
+    meanings: ReadonlyMap<string, readonly string[]>;
+  };
   /** Each target path's stock, with stockLag: chosen at its previous session's start. */
   const stocks = new Map<string, Choice>();
 
@@ -992,17 +999,27 @@ function runPaths(
         answeredToday: today.some((answer) => pathOf.get(answer.sessionId) === target.id),
       });
     const homeNow = () => new Map(active.map((target) => [target.id, dayOf(target)]));
+    /** Phase 39: every saved gloss's families, the known stamps as My words left them. */
+    const familiesNow = () =>
+      glossFamilies({
+        saved: saved.map((gloss) => ({ ...gloss, knownAt: knownIn.has(gloss.glossId) ? `session ${knownIn.get(gloss.glossId)}` : null })),
+        memory: [...memory.values()],
+        live: LIVE,
+      });
     /** services/sessions.ts readTarget: the target's choice beside its path's session in flight,
-     *  whose graded cards it credits, practice more when owed work returns no pick (T3-m). */
+     *  whose graded cards it credits, practice more when owed work returns no pick (T3-m); a
+     *  family's new meaning started with its known meanings, no ladder (phase 60, spec D1). */
     const chooseFor = (target: SimTarget, inFlight: readonly { glossId: string; type: QuestionType; intro: boolean }[]): Choice => {
       const day = dayOf(target);
       const own = new Set(wordsOf(target).map((word) => word.glossId));
       const meeting = new Set(inFlight.map((card) => card.glossId).filter((glossId) => own.has(glossId) && !met.has(glossId)));
+      const families = familiesNow();
       const pickInput: TargetPickInput = {
         day,
         mode: targetMode(day),
         levels: new Map([...progress.values()].map((row) => [`${row.glossId}|${row.dimension}`, row.level])),
         known: new Set([...memory.values()].map((row) => row.glossId)),
+        newMeanings: families.newMeanings,
         keys: new Map(saved.map((gloss) => [gloss.glossId, gloss.key])),
         inFlight: inFlight.filter((card) => !card.intro),
         newRoom: Math.max(0, DAY_NEW_CAP - introduced.size - meeting.size),
@@ -1013,7 +1030,13 @@ function runPaths(
         mode = 'more';
         picks = chooseTargetPicks({ ...pickInput, mode });
       }
-      return { picks, mode, chosenOn: date, recorded: { capHalves: day.capHalves, owedGlossIds: owedWords(day, mode) } };
+      const meanings = new Map(
+        picks.flatMap((pick) => {
+          const known = pick.cls === 'NEW' && !pick.ladder ? families.introductions.get(pick.glossId) : undefined;
+          return known ? [[pick.glossId, known] as const] : [];
+        }),
+      );
+      return { picks, mode, chosenOn: date, recorded: { capHalves: day.capHalves, owedGlossIds: owedWords(day, mode) }, meanings };
     };
     /** services/sessions.ts createNextSession: the path's stock, replaced when stale; else built. */
     const nextOf = (target: SimTarget): Choice => {
@@ -1044,14 +1067,11 @@ function runPaths(
       let mode: TargetMode | null = null;
       let input: ChoiceInput | null = null;
       let families: Families | null = null;
+      let meanings: ReadonlyMap<string, readonly string[]> = new Map();
       if (target) {
-        ({ picks, mode } = nextOf(target));
+        ({ picks, mode, meanings } = nextOf(target));
       } else {
-        families = glossFamilies({
-          saved: saved.map((gloss) => ({ ...gloss, knownAt: knownIn.has(gloss.glossId) ? `session ${knownIn.get(gloss.glossId)}` : null })),
-          memory: rows,
-          live: LIVE,
-        });
+        families = familiesNow();
         for (const glossId of families.newlyKnown) knownIn.set(glossId, at);
         const waiting = new Set([...families.state].filter(([, state]) => state === 'waiting').map(([glossId]) => glossId));
         const held = new Set(active.flatMap((one) => wordsOf(one).map((word) => word.glossId)));
@@ -1084,7 +1104,7 @@ function runPaths(
         level: pick.level,
         r: pick.r,
         step: pick.cls === 'STEP',
-        knownMeanings: families?.introductions.get(pick.glossId),
+        knownMeanings: families ? families.introductions.get(pick.glossId) : meanings.get(pick.glossId),
         ladder: pick.ladder,
       }));
       const cardPlan = planCards(planned, { listening: true, speaking: true, target: target !== undefined });
@@ -1446,6 +1466,51 @@ describe("an exam in 3 days, ten words, phase 37's learner practising until each
   });
 
   itKeepsTheTargetPaths(run, [exam]);
+});
+
+/** Phase 60 (spec D1, "targets too"). Two meanings of one word saved on the lists' first day: the
+ *  first known (every live skill well past KNOWN_STABILITY), the second never asked. */
+const MEANINGS = ['meaning-0', 'meaning-1'] as const;
+const MEANINGS_LIST: DayList = {
+  ...withList(4),
+  saved: [
+    ...withList(4).saved,
+    ...MEANINGS.map((glossId, i) => ({ ...listWord(90 + i, 0, glossId), lexemeId: 'x-meaning', lemma: 'x-meaning', forms: ['f-meaning'], order: [0, i] as const })),
+  ],
+  memory: [
+    ...withList(4).memory,
+    ...LIVE.map((dimension) => ({
+      glossId: MEANINGS[0],
+      dimension,
+      state: { stability: 30, difficulty: 5, lastDay: dayAfter(LANE0_DAY.today, -1), reps: 4, lapses: 0, params: 'fsrs6-default' },
+    })),
+  ],
+};
+
+describe("a known word's new meaning in homework due in 3 days, phase 37's learner practising until each day is done (phase 60, spec D1, on a target path)", () => {
+  const homework = targetOf('homework', 3, [...listIds(1, 4), MEANINGS[1]]);
+  const play = (learner: PathLearner) => runPaths(MEANINGS_LIST, 4, { untilDone: 25 }, [homework], learner, { stockLag: true });
+  const runs = EVERY_PHASE.map((learner) => play(learner));
+  // The new meaning always missed, at each place of the rhythm: a miss leaves it unlearned.
+  const missed = EVERY_PHASE.map((learner) => play({ ...learner, forgets: new Set([MEANINGS[1]]) }));
+
+  it('starts the new meaning on its path with one new_meaning card listing the known one, whichever card of five the learner misses', () => {
+    runs.forEach((run, phase) => {
+      const first = run.log.find((card) => card.glossId === MEANINGS[1]);
+      expect({ phase, ...first }).toMatchObject({ phase, type: 'new_meaning', knownMeanings: ['list-90'], path: 'homework' });
+    });
+  });
+
+  it('never meets the new meaning, nor gives it an intro stage, though the learner misses every card of it', () => {
+    for (const run of [...runs, ...missed]) {
+      const asked = run.log.filter((card) => card.glossId === MEANINGS[1]);
+      expect(asked.filter((card) => card.type === 'meet' || card.intro)).toEqual([]);
+    }
+    // The check can fire: the missed new meaning is asked again after its new_meaning card.
+    for (const run of missed) expect(run.log.filter((card) => card.glossId === MEANINGS[1]).length).toBeGreaterThan(1);
+  });
+
+  itKeepsTheTargetPaths(runs[0], [homework]);
 });
 
 describe('an exam in 20 days, twenty words, a learner who never misses practising until each day is done (phase 57, spec Done 6, D5, D6)', () => {

@@ -33,6 +33,10 @@ export type TargetPickInput = {
   levels: ReadonlyMap<string, number>;
   /** Spec D6. Glosses with main-path memory: they start with a recall card, no ladder. */
   known: ReadonlySet<string>;
+  /** Phase 60 (spec D1, "targets too"). glossFamilies' current meaning of every family with a
+   *  known one: a new meaning of a known word, which starts with its new_meaning card, one
+   *  slot, never a ladder. Once practised it is in `known`. */
+  newMeanings: ReadonlySet<string>;
   /** Gloss → its key: a session asks one gloss per key (phase 31 D18), as chooseWords does. */
   keys: ReadonlyMap<string, string>;
   /** The cards of the path's session in flight, credited as answered right before choosing, so a
@@ -130,8 +134,9 @@ const byId = (a: Word, b: Word) => (a.glossId < b.glossId ? -1 : a.glossId > b.g
  * starts, then each word's first below-cap pick, then the second ones (so a word's two cards sit
  * apart), then the checks, then the hardest cards. A pick is `TARGET` with `r: 1`, so the job's
  * card choice reads the rung (a written receptive pick with no R would be multiple choice); a
- * ladder is `NEW` with `r: null`, as chooseWords makes one. At most SESSION_LENGTH slots, a
- * ladder LADDER_SLOTS of them; a target with fewer picks makes a shorter session.
+ * ladder is `NEW` with `r: null`, as chooseWords makes one, and so is a family's new meaning,
+ * with no ladder (phase 60), which the caller gives its known meanings. At most SESSION_LENGTH
+ * slots, a ladder LADDER_SLOTS of them; a target with fewer picks makes a shorter session.
  */
 export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
   const { day, mode } = input;
@@ -188,18 +193,22 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
     word.picked.length < PICKS_PER_WORD &&
     (keys.get(word.key) ?? word.glossId) === word.glossId;
 
-  const add = (word: Word, dimension: Dimension, rung: 1 | 2, ladder: boolean) => {
+  /** `start`: a new word's ladder, or a family's new meaning (phase 60), both `NEW` with no R;
+   *  absent, a `TARGET` card at `rung`. */
+  const add = (word: Word, dimension: Dimension, rung: 1 | 2, start?: 'ladder' | 'meaning') => {
     const level = levelOf(word.glossId, dimension);
     picks.push(
-      ladder
-        ? { glossId: word.glossId, dimension, rung: 1, level, r: null, cls: 'NEW', ladder: true }
+      start
+        ? { glossId: word.glossId, dimension, rung: 1, level, r: null, cls: 'NEW', ladder: start === 'ladder' }
         : { glossId: word.glossId, dimension, rung, level, r: 1, cls: 'TARGET', ladder: false },
     );
-    slots += ladder ? LADDER_SLOTS : 1;
+    slots += start === 'ladder' ? LADDER_SLOTS : 1;
     keys.set(word.key, word.glossId);
     word.picked.push(dimension);
-    for (const moved of ladder ? word.halves.keys() : dimensionsTested(cardOf(dimension, rung))) word.moved.add(moved);
-    if (ladder) ladders++;
+    const moves =
+      start === 'ladder' ? word.halves.keys() : dimensionsTested(start === 'meaning' ? 'new_meaning' : cardOf(dimension, rung));
+    for (const moved of moves) word.moved.add(moved);
+    if (start === 'ladder') ladders++;
     if (dimension === SPEAKING) spoken++;
   };
 
@@ -221,6 +230,7 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
 
   /** Spec D6, D7 step 1, ruling T3-a. In the plan's order: a new word's ladder, NEW_PER_SESSION
    *  a session at most; a known word's one recall card on its skill furthest below the cap.
+   *  Phase 60 (spec D1): a family's new meaning, its one new_meaning card, no ladder.
    *  Ruling T3-n: an early start (`early`) is a new word of the day's only while it has room. */
   const start = (pool: readonly Word[], early: boolean) => {
     for (const word of pool) {
@@ -228,9 +238,13 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
         if (!open(word, 1)) continue;
         const all = [...word.halves].filter(([, halves]) => halves < cap).map(([d]) => d);
         const dimension = skillOf(word, all, all);
-        if (dimension) add(word, dimension, 2, false);
+        if (dimension) add(word, dimension, 2);
+      } else if (input.newMeanings.has(word.glossId)) {
+        if ((early && newRoom <= 0) || !open(word, 1)) continue;
+        add(word, 'written_receptive', 1, 'meaning');
+        if (early) newRoom -= 1;
       } else if (ladders < NEW_PER_SESSION && (!early || newRoom > 0) && open(word, LADDER_SLOTS)) {
-        add(word, 'written_receptive', 1, true);
+        add(word, 'written_receptive', 1, 'ladder');
         if (early) newRoom -= 1;
       }
     }
@@ -246,7 +260,7 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
         if (word.picked.length !== round || !open(word, 1)) continue;
         const owed = belowCap(word);
         const dimension = skillOf(word, owed, owed);
-        if (dimension) add(word, dimension, dimension === SPEAKING || word.halves.get(dimension)! > 0 ? 2 : 1, false);
+        if (dimension) add(word, dimension, dimension === SPEAKING || word.halves.get(dimension)! > 0 ? 2 : 1);
       }
     }
   };
@@ -259,7 +273,7 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
         const left = word.checks.filter((d) => !word.moved.has(d));
         const dimension = skillOf(word, left, left);
         if (!dimension) break;
-        add(word, dimension, 2, false);
+        add(word, dimension, 2);
       }
     }
   };
@@ -276,7 +290,7 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
       if (!open(word, 1)) continue;
       const hard = HARD.filter((d) => word.halves.has(d));
       const dimension = skillOf(word, hard, hard);
-      if (dimension) add(word, dimension, 2, false);
+      if (dimension) add(word, dimension, 2);
     }
   };
 

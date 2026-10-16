@@ -133,6 +133,32 @@ describe('a path per target (spec D1, D2)', () => {
     ]);
   });
 
+  it("starts a known word's new meaning with its new_meaning card, no ladder (phase 60, spec D1)", async () => {
+    await savedWords();
+    const [lift, collect] = (await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'pick up', translations: ['להרים', 'לאסוף'] })).glossIds;
+    // Lift known in every live skill: collect is the family's new meaning, never asked.
+    await insertGlossMemory(
+      t.db,
+      LIVE.map((dimension) => ({
+        enrollmentId: E,
+        glossId: lift,
+        dimension,
+        stability: 8,
+        difficulty: 5,
+        lastDay: '2030-01-05',
+        reps: 2,
+        lapses: 0,
+        params: 'fsrs6-default',
+      })),
+    );
+    const exam = await addTarget('exam', '2030-01-13', [collect]);
+
+    const own = await service.createNextSession('u_1', E, NO_DEVICES, exam);
+    expect((await prepareOf(own.sessionId)).picks).toEqual([
+      expect.objectContaining({ gloss_id: collect, ladder: false, known_meanings: ['להרים'] }),
+    ]);
+  });
+
   it('starts one session per path: session_open only within a path', async () => {
     const words = await savedWords();
     const exam = await addTarget('exam', '2030-01-13', ids(words.slice(0, 3)));

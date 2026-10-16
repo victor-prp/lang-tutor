@@ -56,6 +56,7 @@ const at = (halves: number, over: Partial<Record<Dimension, number>> = {}) => ({
 const base: Omit<TargetPickInput, 'day' | 'mode'> = {
   levels: new Map(),
   known: new Set(),
+  newMeanings: new Set(),
   keys: new Map(),
   inFlight: [],
 };
@@ -210,6 +211,42 @@ describe('chooseTargetPicks, owed', () => {
   it('a known word starts with a recall card, no ladder', () => {
     const picks = pick(dayOf(20, [{ id: 'g0', toStart: true }]), { known: new Set(['g0']) });
     expect(picks).toEqual([{ glossId: 'g0', dimension: WP, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false }]);
+  });
+
+  it("a family's new meaning starts with one NEW pick, no ladder, its new_meaning card (phase 60, spec D1)", () => {
+    const day = dayOf(20, [
+      { id: 'g0', toStart: true },
+      { id: 'g1', toStart: true },
+    ]);
+    const picks = pick(day, { newMeanings: new Set(['g0']) });
+    expect(picks).toEqual([
+      { glossId: 'g0', dimension: WR, rung: 1, level: 1, r: null, cls: 'NEW', ladder: false },
+      { glossId: 'g1', dimension: WR, rung: 1, level: 1, r: null, cls: 'NEW', ladder: true },
+    ]);
+    expect(slotsOf(picks)).toBe(1 + LADDER_SLOTS);
+    // Practised (a missed new_meaning leaves an Again row), it is known: a recall card.
+    expect(pick(day, { newMeanings: new Set(['g0']), known: new Set(['g0']) })[0]).toEqual({
+      glossId: 'g0',
+      dimension: WP,
+      rung: 2,
+      level: 1,
+      r: 1,
+      cls: 'TARGET',
+      ladder: false,
+    });
+  });
+
+  it(`starts a family's new meaning past the session's ${NEW_PER_SESSION} ladders, and early only while the day has room (phase 60)`, () => {
+    const owed = dayOf(20, [{ id: 'g0', toStart: true }, { id: 'g1', toStart: true }, { id: 'g2', toStart: true }]);
+    const picks = pick(owed, { newMeanings: new Set(['g2']) });
+    expect(picks.map((p) => [p.glossId, p.ladder])).toEqual([
+      ['g0', true],
+      ['g1', true],
+      ['g2', false],
+    ]);
+    const rest = dayOf(12, [{ id: 'g0', state: 'later' }], 'rest');
+    expect(short(pick(rest, { newMeanings: new Set(['g0']) }))).toEqual([['g0', WR, 1]]);
+    expect(pick(rest, { newMeanings: new Set(['g0']), newRoom: 0 })).toEqual([]);
   });
 
   it('next-day checks come after below-cap work, at rung 2, as few cards as cover them', () => {

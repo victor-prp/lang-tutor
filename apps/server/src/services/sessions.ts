@@ -340,13 +340,42 @@ export function createSessionService({
   }
 
   /**
+   * Phase 39 (spec D4, D5). The families of every saved gloss, derived from the dictionary and
+   * `memory` (every saved gloss's) with the session's live skills. Phase 46 (spec D3): known_at
+   * is the gloss's own, family or not. Phase 57 (ruling T5-k): the same for every path; only a
+   * main-path stock records what changed.
+   */
+  async function readFamilies(
+    repos: Repos,
+    all: readonly SavedGloss[],
+    memory: Parameters<typeof glossFamilies>[0]['memory'],
+    devices: Devices,
+  ) {
+    const forms = await repos.dict.findLexemeForms({ lexemeIds: [...new Set(all.map((gloss) => gloss.lexemeId))] });
+    const formsOf = new Map<string, string[]>();
+    for (const row of forms) formsOf.set(row.lexemeId, [...(formsOf.get(row.lexemeId) ?? []), row.form]);
+    const members = all.map((gloss) => ({
+      glossId: gloss.glossId,
+      lexemeId: gloss.lexemeId,
+      lemma: gloss.lemma,
+      key: gloss.key,
+      savedAt: gloss.savedAt,
+      forms: formsOf.get(gloss.lexemeId) ?? [],
+      order: gloss.order,
+      speakable: speakable(gloss.form),
+      knownAt: gloss.knownAt,
+    }));
+    return glossFamilies({ saved: members, memory, live: liveDimensions(devices.listening, devices.speaking) });
+  }
+
+  /**
    * Phase 35, 43, 53; phase 57 (spec D1): the main path's choice, read on the owner's learner
    * day: the picker's input over the saved glosses in no target active that day, and the
    * families the choice refreshes, which are every saved gloss's. Null when the path has no
    * word, before anything else is read.
    */
   async function readMain(repos: Repos, enrolled: Enrollment, devices: Devices) {
-    const { session, vocabulary, dict } = repos;
+    const { session, vocabulary } = repos;
     const enrollmentId = enrolled.id;
     const all = await vocabulary.listSavedGlosses(enrollmentId);
     if (all.length === 0) return null;
@@ -363,25 +392,9 @@ export function createSessionService({
     const glossIds = all.map((gloss) => gloss.glossId);
     const memory = await repos.memory.findRows({ enrollmentId, glossIds });
     const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
-    // Phase 39 (spec D4, D5). The families, derived from the dictionary and
-    // memory with the session's live skills. Phase 46 (spec D3): known_at is the
-    // gloss's own, family or not.
-    const forms = await dict.findLexemeForms({ lexemeIds: [...new Set(all.map((gloss) => gloss.lexemeId))] });
-    const formsOf = new Map<string, string[]>();
-    for (const row of forms) formsOf.set(row.lexemeId, [...(formsOf.get(row.lexemeId) ?? []), row.form]);
+    // Phase 39 (spec D4, D5). The families, and what was recorded of them.
     const stored = await repos.glossFamilies.load(enrollmentId);
-    const members = all.map((gloss) => ({
-      glossId: gloss.glossId,
-      lexemeId: gloss.lexemeId,
-      lemma: gloss.lemma,
-      key: gloss.key,
-      savedAt: gloss.savedAt,
-      forms: formsOf.get(gloss.lexemeId) ?? [],
-      order: gloss.order,
-      speakable: speakable(gloss.form),
-      knownAt: gloss.knownAt,
-    }));
-    const families = glossFamilies({ saved: members, memory, live: liveDimensions(devices.listening, devices.speaking) });
+    const families = await readFamilies(repos, all, memory, devices);
     const waiting = new Set([...families.state].filter(([, state]) => state === 'waiting').map(([glossId]) => glossId));
     // Phase 37 (spec D1, D7). Today's answers leave the returns owed and the
     // words done for the day.
@@ -433,7 +446,10 @@ export function createSessionService({
     const read = await readTargetDay(repos, enrolled, target, devices, today, saved);
     if (!read) return null;
     const { day, glossIds, live, canSay } = read;
-    const memory = await repos.memory.findRows({ enrollmentId, glossIds });
+    // Phase 60 (spec D1, "targets too"). The families, over every saved gloss as the main path
+    // reads them: a family's new meaning starts with its new_meaning card, never a ladder.
+    const memory = await repos.memory.findRows({ enrollmentId, glossIds: saved.map((gloss) => gloss.glossId) });
+    const families = await readFamilies(repos, saved, memory, devices);
     const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
     const { started } = await repos.session.findOpen(enrollmentId, target.id);
     const cards = started ? await repos.session.findSessionCards(started.id) : [];
@@ -447,6 +463,7 @@ export function createSessionService({
       mode: targetMode(day),
       levels: new Map(levels.map((row) => [`${row.glossId}|${row.dimension}`, row.level])),
       known: new Set(memory.map((row) => row.glossId)),
+      newMeanings: families.newMeanings,
       keys: new Map(saved.map((gloss) => [gloss.glossId, gloss.key])),
       // Ruling T3-j: a ladder's intro stage grades nothing.
       inFlight: cards.filter((card) => !card.intro),
@@ -474,7 +491,7 @@ export function createSessionService({
       fsrsReadyCount: fsrsReady.length,
       owedGlossIds: owedWords(day, mode),
     };
-    return { path: target.id, at, today, saved: saved.filter((gloss) => glossIds.includes(gloss.glossId)), picks, row };
+    return { path: target.id, at, today, saved: saved.filter((gloss) => glossIds.includes(gloss.glossId)), families, picks, row };
   }
   type MainRead = NonNullable<Awaited<ReturnType<typeof readMain>>>;
   type TargetRead = NonNullable<Awaited<ReturnType<typeof readTarget>>>;
@@ -502,14 +519,16 @@ export function createSessionService({
       userLanguageCode: enrolled.source_language,
     });
     const savedById = new Map<string, SavedGloss>(read.saved.map((gloss) => [gloss.glossId, gloss]));
-    const introductions = read.path === null ? read.families.introductions : null;
+    const { introductions } = read.families;
     const picks = chosen.flatMap((choice) => {
       const rendering = pickRendering(askableRenderings(savedById.get(choice.glossId)!, renderings), rng);
       if (!rendering) return [];
       const { dimension, rung, level, r, ladder } = choice;
       const step = choice.cls === 'STEP';
       // Phase 39 (spec D6). A family's next meaning, never asked, is introduced with the known ones.
-      const knownMeanings = introductions?.get(choice.glossId);
+      // Phase 60 (spec D1) on a target path: the picker's start of it, NEW and no ladder.
+      const knownMeanings =
+        read.path === null || (choice.cls === 'NEW' && !ladder) ? introductions.get(choice.glossId) : undefined;
       return [
         {
           gloss_id: choice.glossId,
