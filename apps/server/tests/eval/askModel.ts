@@ -26,6 +26,7 @@ import {
   buildDistractorPrompt,
   parseLlmDistractors,
   type DistractorItem,
+  type LearnerWord,
 } from '../../src/domain/distractors';
 import {
   buildFitJudgePrompt,
@@ -154,7 +155,7 @@ export async function askRendering(
  *  records it as a failed call. */
 export async function askDistractors(
   llm: LlmClient,
-  input: { from: LanguageCode; to: LanguageCode; items: DistractorItem[] },
+  input: { from: LanguageCode; to: LanguageCode; items: DistractorItem[]; learnerWords?: LearnerWord[] },
 ): Promise<LlmDistractors> {
   const raw = await llm({ ...buildDistractorPrompt({ ...input, others: [] }), record: { kind: 'session_generation' } });
   const answer = raw === '' ? null : parseLlmDistractors(raw);
