@@ -20,8 +20,9 @@ const SYNONYM = 'מילה';
 
 /** Phase 39 (spec D5). Each word's two senses are a gloss family, and a session
  *  asks one gloss of a family. Phase 54: прочитала is a new word, so its card is
- *  a ladder (met, then asked three ways), and лук's due meaning is one card: five. */
-const CARDS = 5;
+ *  a ladder (met, then asked three ways; phase 55: built from tiles once met),
+ *  and лук's due meaning is one card: six. */
+const CARDS = 6;
 
 /** Past the seed, four saved senses of two words, and the session on its
  *  meaning card, every card before it answered right. Phase 35 (spec D5, D6):

@@ -75,10 +75,11 @@ export function askedForm(question: Question): string {
 }
 
 /**
- * Answers a new word's four cards right over the API, as the app does: the
- * meet card is seen (phase 54), the choices take their right option and the
- * typed translation its word. Returns the last response, which completes a
- * session of nothing else.
+ * Answers a new word's ladder right over the API, as the app does: the meet
+ * card is seen (phase 54), the choices take their right option, and the tiles
+ * and the typed translation the word, with no help (phase 55, spec D6). A
+ * session made over the API says nothing of speaking, so its ladder has no read
+ * aloud. Returns the last response, which completes a session of nothing else.
  */
 export async function answerLadderRight(
   request: APIRequestContext,
@@ -90,7 +91,7 @@ export async function answerLadderRight(
     let data: object;
     if (question.type === 'meet') data = { question_id: question.id, seen: true };
     else if (question.type === 'multiple_choice' || question.type === 'reverse_choice') data = { question_id: question.id, option_index: question.correct_option };
-    else if (question.type === 'typed_translation') data = { question_id: question.id, text: question.answer };
+    else if (question.type === 'letter_tiles' || question.type === 'typed_translation') data = { question_id: question.id, text: question.answer, helped: false };
     else throw new Error(`a new word's ladder asked a ${question.type} card`);
     const res = await request.post(`${API_URL}/api/sessions/${sessionId}/next-step`, { data });
     expect(res.ok(), await res.text()).toBe(true);

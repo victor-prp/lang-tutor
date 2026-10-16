@@ -1,7 +1,7 @@
-import { SESSION_LENGTH } from '@lang-tutor/core/domain';
+import { tileLetters } from '@lang-tutor/core/domain';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
-import { expectGeminiByTask } from './mockServer';
+import { MOST_CARDS, expectGeminiByTask } from './mockServer';
 import { continueMeet } from './sessions';
 import { stripIsolates } from './text';
 
@@ -101,7 +101,7 @@ export function generationStub(alternatives: string[] = [], gapAlternatives: str
 /** Registers the generation stub: every position's item answered by its task,
  *  for as many positions as a list session holds. */
 export async function expectGeneration(request: APIRequestContext, alternatives: string[] = [], gapAlternatives: string[] = []): Promise<void> {
-  await expectGeminiByTask(request, generationStub(alternatives, gapAlternatives), SESSION_LENGTH);
+  await expectGeminiByTask(request, generationStub(alternatives, gapAlternatives), MOST_CARDS);
 }
 
 /** Whether an option is one of the stub's wrong words. Case-blind: a gap's wrong
@@ -124,20 +124,74 @@ export async function answerChoice(page: Page, card: Card, right: boolean) {
  * Phase 54. Plays the card on screen to its end, for a spec about what comes
  * after it: a meet card is tapped through; a choice of meanings, of words or of
  * a new meaning is answered right; a typed card is shown its answer. Then it
- * moves on.
+ * moves on. Phase 55 (spec D7): so is a tiles card; a typed translation shown
+ * its answer is typed again, from the answer it shows, before its banner.
  */
 export async function playOut(page: Page, card: Card) {
   if (card.kind === 'meet') return continueMeet(page);
   if (card.kind === 'choice' || card.kind === 'reverse' || card.kind === 'new-meaning') await answerChoice(page, card, true);
-  else if (card.kind === 'typed' || card.kind === 'meaning') await page.getByTestId('typed-show-answer').click();
-  else throw new Error(`no way to play a ${card.kind} card out`);
+  else if (card.kind === 'tiles') await page.getByTestId('tiles-show-answer').click();
+  else if (card.kind === 'typed' || card.kind === 'meaning') {
+    await page.getByTestId('typed-show-answer').click();
+    // A typed meaning has no retype, nor a say-the-translation typed with speaking off.
+    const retype = page.getByTestId('retype');
+    await expect(retype.or(page.getByTestId('continue-button'))).toBeVisible();
+    if (await retype.isVisible()) await retypeShown(page);
+  } else throw new Error(`no way to play a ${card.kind} card out`);
   await page.getByTestId('continue-button').click();
 }
 
-/** Types an answer on a typed card and checks it. */
+/** Types an answer on a typed card and checks it. Phase 55 (spec D7): in a
+ *  retype, the same input and button check the word typed again. */
 export async function answerTyped(page: Page, text: string) {
   await page.getByTestId('typed-input').fill(text);
   await page.getByTestId('typed-submit').click();
+}
+
+/** Phase 55 (spec D7). Ends an open retype right: types the answer it shows,
+ *  and waits for the banner, which says נכון!. */
+export async function retypeShown(page: Page) {
+  const answer = stripIsolates(await page.getByTestId('retype-answer').textContent());
+  await answerTyped(page, answer);
+  await expect(page.getByTestId('feedback-correct')).toBeVisible();
+}
+
+/** Phase 55 (spec D7). Ends an open retype wrong: two wrong words, then the
+ *  banner, which names the right answer. */
+export async function retypeWrong(page: Page, wrong: string) {
+  await expect(page.getByTestId('retype-notice')).toHaveText('הקלידו את המילה שוב');
+  await answerTyped(page, wrong);
+  await expect(page.getByTestId('retype-notice')).toHaveText('נסו שוב');
+  await expect(page.getByTestId('typed-input')).toHaveValue('');
+  await answerTyped(page, wrong);
+  await expect(page.getByTestId('feedback-wrong')).toBeVisible();
+}
+
+/** Phase 55. The letters of a tiles card's pool, in tile order. */
+export async function tilesOnScreen(page: Page): Promise<string[]> {
+  const count = await page.getByTestId(/^tile-\d+$/).count();
+  return Promise.all(Array.from({ length: count }, async (_, i) => stripIsolates(await page.getByTestId(`tile-${i}`).textContent())));
+}
+
+/**
+ * Phase 55 (spec D7). Builds `word` on the tiles card on screen: taps the tile
+ * for each letter not placed yet, and waits for the card to answer itself once
+ * the last is placed. Each letter takes the first unused tile with it, as the
+ * card's help does, so a letter help placed is skipped like any other.
+ */
+export async function buildTiles(page: Page, word: string) {
+  const letters = tileLetters(word);
+  expect(letters, `${word} takes no tiles`).not.toBeNull();
+  const pool = await tilesOnScreen(page);
+  const placed = await page.getByTestId(/^tile-slot-\d+$/).count();
+  const used = new Set<number>();
+  for (const [slot, letter] of letters!.entries()) {
+    const index = pool.findIndex((tile, i) => tile === letter && !used.has(i));
+    expect(index, `a tile for ${letter}`).toBeGreaterThanOrEqual(0);
+    used.add(index);
+    if (slot >= placed) await page.getByTestId(`tile-${index}`).click();
+  }
+  await expect(page.getByTestId('continue-button')).toBeVisible();
 }
 
 /** The right option's text: the word on a reversed card, the meaning on today's. */

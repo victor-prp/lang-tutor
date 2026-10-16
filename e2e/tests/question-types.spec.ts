@@ -1,13 +1,12 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerChoice, answerMeaning, answerTyped, expectGeneration, nearMiss, readCard, rightOption, type CardKind } from './support/cards';
+import { answerChoice, answerMeaning, answerTyped, expectGeneration, nearMiss, readCard, retypeShown, rightOption, type CardKind } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { SINGLE_WORDS } from './support/lexemes';
 import { seedMemory, type MemorySeed } from './support/memory';
 import { clearGemini, expectJudge } from './support/mockServer';
-import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
@@ -100,11 +99,15 @@ test('a list session mixes card types, and a typed near miss counts', async ({ p
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
     } else if (card.kind === 'typed') {
       // Typed, with two letters swapped: a near miss, correct, spelling shown.
+      // Phase 55 (spec D7): shown in the retype, which asks for the word again
+      // before any banner; typed right, the banner says so.
       typedMeaning = card.prompt;
       await answerTyped(page, nearMiss(FORM_OF[typedMeaning]));
-      await expect(page.getByTestId('feedback-correct')).toBeVisible();
-      await expect(page.getByTestId('feedback-title')).toHaveText('כמעט! כך כותבים:');
-      expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(FORM_OF[typedMeaning]);
+      await expect(page.getByTestId('retype-title')).toHaveText('כמעט! כך כותבים:');
+      await expect(page.getByTestId('retype-answer')).toHaveText(FORM_OF[typedMeaning]);
+      await expect(page.getByTestId('continue-button')).toHaveCount(0);
+      await retypeShown(page);
+      await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
       await expect(page.getByTestId('typed-input')).not.toBeEditable();
     } else {
       // A meaning card: a synonym is the judge's.
@@ -144,7 +147,7 @@ test('a list session mixes card types, and a typed near miss counts', async ({ p
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
 
-test('"show the answer" on a typed card is wrong, and the word is missed', async ({ page, request }) => {
+test('"show the answer" on a typed card is wrong, typed again or not, and the word is missed', async ({ page, request }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
   page.on('dialog', (dialog) => void dialog.accept());
@@ -157,8 +160,12 @@ test('"show the answer" on a typed card is wrong, and the word is missed', async
     if (card.kind === 'typed') {
       shown = card.prompt;
       await page.getByTestId('typed-show-answer').click();
-      await expect(page.getByTestId('feedback-wrong')).toBeVisible();
-      expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(FORM_OF[shown]);
+      // Phase 55 (spec D7): the answer, in the retype; the word typed right
+      // there is never sent, so the card stays wrong.
+      await expect(page.getByTestId('retype-title')).toHaveText('התשובה הנכונה:');
+      await expect(page.getByTestId('retype-answer')).toHaveText(FORM_OF[shown]);
+      await expect(page.getByTestId('continue-button')).toHaveCount(0);
+      await retypeShown(page);
     } else if (card.kind === 'meaning') {
       // Answered by a synonym the judge accepts.
       await expectJudge(request, 'right');

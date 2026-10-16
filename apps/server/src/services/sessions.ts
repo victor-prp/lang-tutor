@@ -13,6 +13,7 @@ import {
   speakable,
   spokenTarget,
   spokenVerdict,
+  takesHelp,
   type AnswerInput,
   type JudgedQuestion,
   type QuestionType,
@@ -34,6 +35,7 @@ import {
   type CheckItem,
 } from '../domain/check';
 import { liveDimensions } from '../domain/choose';
+import { NEW_PER_SESSION } from '../domain/chooseConstants';
 import { findGap } from '../domain/cloze';
 import {
   buildContextPrompt,
@@ -809,7 +811,10 @@ export function createSessionService({
         } else {
           const recorded = outcome.record.answers[loaded.answers.length];
           // Phase 38 (spec D4): only the card that has a hint records whether it was opened.
-          const hinted = loaded.questions[loaded.answers.length].type === 'cloze_typed' ? { hintOpened: hintOpened ?? null } : {};
+          const askedType = loaded.questions[loaded.answers.length].type;
+          const hinted = askedType === 'cloze_typed' ? { hintOpened: hintOpened ?? null } : {};
+          // Phase 55 (spec D6): only a card that takes help, tiles or typed, records whether it was helped.
+          const helps = takesHelp(askedType) ? { helped: 'helped' in answer ? answer.helped ?? null : null } : {};
           await repos.session.insertAnswer(
             sessionId,
             loaded.answers.length,
@@ -821,6 +826,7 @@ export function createSessionService({
                   verdict: recorded.verdict!,
                   ...(recorded.retry_state === 'pending' ? { pending: true as const } : {}),
                   ...hinted,
+                  ...helps,
                 },
           );
         }
@@ -989,7 +995,7 @@ export function createSessionService({
     answerText: async (
       actorUserId: string,
       sessionId: string,
-      input: { questionId: string; text: string; hintOpened?: boolean; checkFit?: boolean; retry?: boolean },
+      input: { questionId: string; text: string; hintOpened?: boolean; helped?: boolean; checkFit?: boolean; retry?: boolean },
     ): Promise<SessionResult> => {
       const retry = input.retry ?? false;
       const card =
@@ -1026,7 +1032,10 @@ export function createSessionService({
           });
         }
       }
-      return service.submitAnswer(actorUserId, sessionId, input.questionId, { text: input.text }, { retry, hintOpened: input.hintOpened, fits });
+      // Phase 55 (spec D6). `helped` travels with the text, so `step` grades a helped
+      // tiles or typed answer wrong, first try or second.
+      const answer = input.helped === undefined ? { text: input.text } : { text: input.text, helped: input.helped };
+      return service.submitAnswer(actorUserId, sessionId, input.questionId, answer, { retry, hintOpened: input.hintOpened, fits });
     },
 
     /**
@@ -1146,6 +1155,14 @@ export function createSessionService({
     prepareSession: async (data: unknown, job: { attempt?: number } = {}): Promise<void> => {
       const payload = PrepareSessionPayloadSchema.parse(data);
       const sessionId = payload.session_id;
+      // Phase 55 (spec D4, ruled). A payload the code before this deploy chose may hold three
+      // ladders (phase 54's three slots each). Planned in the new shape, its forms without tiles
+      // each add an intro typed card, and it could ask the model more items than the batch
+      // takes (LlmDistractorsSchema, ten), failing the session. The first NEW_PER_SESSION ladder
+      // picks are kept, in pick order, and the rest dropped: asked as a plain pick, a word never
+      // met would be asked cold.
+      let ladders = 0;
+      const picks = payload.picks.filter((pick) => !pick.ladder || ++ladders <= NEW_PER_SESSION);
 
       const read = await transaction(async ({ session, enrollment, question, gloss, dict, jobs }) => {
         const state = await session.findState(sessionId);
@@ -1155,12 +1172,12 @@ export function createSessionService({
         if (!enrolled) return undefined;
         // Phase 31 (spec D14). A pick made before a merge names the survivor now,
         // and a gloss of another learner language is refused.
-        const resolved = await gloss.resolveGlosses(payload.picks.map((pick) => pick.gloss_id));
-        const foreign = payload.picks.find(
+        const resolved = await gloss.resolveGlosses(picks.map((pick) => pick.gloss_id));
+        const foreign = picks.find(
           (pick) => (resolved.get(pick.gloss_id)?.userLanguageCode ?? enrolled.source_language) !== enrolled.source_language,
         );
         if (foreign) throw new GlossLanguageMismatch(foreign.gloss_id);
-        const asked = payload.picks.map((pick) => ({
+        const asked = picks.map((pick) => ({
           glossId: resolved.get(pick.gloss_id)?.id ?? pick.gloss_id,
           senseId: pick.sense_id,
           variantId: pick.variant_id,
@@ -1726,6 +1743,9 @@ export function createSessionService({
             ...contextColumns(generatedAs(type), context, sentence),
             // Phase 39 (spec D6): what a new_meaning lists as known, from its pick.
             knownMeanings: type === 'new_meaning' ? (read.picked[plan.order[index]].known_meanings ?? null) : null,
+            // Phase 55 (spec D2, as ruled): a card of a ladder's intro stage, by its plan index, which
+            // goes with the card past a dropped one; its answer writes no memory and no progress.
+            intro: plan.intro[index],
           })),
         });
         // Each choice shuffled on its own, a board's words once together; the

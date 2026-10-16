@@ -9,8 +9,10 @@ import type { QuestionType } from './quiz';
  */
 export type GradedPiece = { dimension: Dimension; grade: Grade };
 
-/** A choice card carries `correct`; a text card, speaking included, its verdict. */
-export type GradableAnswer = { type: QuestionType; correct?: boolean; verdict?: AnswerVerdict };
+/** A choice card carries `correct`; a text card, speaking included, its verdict.
+ *  Phase 55 (spec D2, as ruled): `intro`, a card of a ladder's intro stage; absent
+ *  is false. */
+export type GradableAnswer = { type: QuestionType; correct?: boolean; verdict?: AnswerVerdict; intro?: boolean };
 
 const AGAIN = 1;
 const HARD = 2;
@@ -35,6 +37,10 @@ function typedGrades(verdict: AnswerVerdict | undefined): GradedPiece[] {
 }
 
 export function gradesFor(answer: GradableAnswer): GradedPiece[] {
+  // Phase 55 (spec D2, as ruled). A ladder's intro stage is for encoding, not evidence: its
+  // write-it card and its read aloud grade nothing, as its meet card, so a new word's first
+  // memory is its practice cards'.
+  if (answer.intro) return [];
   switch (answer.type) {
     case 'multiple_choice':
     case 'new_meaning':

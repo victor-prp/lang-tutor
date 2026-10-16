@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import type {
+  ClozeTypedQuestion,
   DictationQuestion,
   LetterTilesQuestion,
   ListenChoiceQuestion,
@@ -10,6 +11,7 @@ import type {
   Question,
   ReadAloudQuestion,
   SayTranslationQuestion,
+  TypedTranslationQuestion,
 } from '../api/types';
 import { seededRng } from '../utils/rng';
 import {
@@ -28,7 +30,9 @@ import {
   shuffleOptions,
   shuffleSession,
   spokenVerdict,
+  takesHelp,
   verdictCorrect,
+  type QuestionType,
 } from './quiz';
 
 function makeQuestion(n: number): MultipleChoiceQuestion {
@@ -641,5 +645,45 @@ describe('missed, a ladder (phase 54)', () => {
       evaluate(typed, { text: 'porta' }),
     ];
     expect(missed([...ladder, other], answers).map((item) => item.question.id)).toEqual(['c1', 'q2']);
+  });
+});
+
+describe('phase 55: helped', () => {
+  it('records a helped tiles or typed answer wrong, whatever its text', () => {
+    expect(evaluate(tiles, { text: tiles.answer, helped: true })).toMatchObject({ is_correct: false, verdict: 'wrong', answer_string: tiles.answer });
+    expect(evaluate(typed, { text: (typed as TypedTranslationQuestion).answer, helped: true })).toMatchObject({ is_correct: false, verdict: 'wrong' });
+  });
+  it('grades an unhelped answer as today', () => {
+    expect(evaluate(tiles, { text: tiles.answer, helped: false }).verdict).toBe('exact');
+    expect(evaluate(typed, { text: (typed as TypedTranslationQuestion).answer }).verdict).toBe('exact');
+  });
+  it('ignores helped on any other type', () => {
+    expect(evaluate(dictation, { text: 'parlo', helped: true }).verdict).toBe('exact');
+    expect(evaluate(CLOZE_TYPED, { text: (CLOZE_TYPED as ClozeTypedQuestion).answer, helped: true }).verdict).toBe('exact');
+  });
+  it('records a helped second try wrong', () => {
+    expect(evaluateRetry(typed, { text: (typed as TypedTranslationQuestion).answer, helped: true }).verdict).toBe('wrong');
+  });
+  // Review M8. The one list of the cards that take help, which the server stores `helped` by:
+  // every type named, so a new one must say whether it takes help.
+  it('takes help on tiles and typed translation cards and nowhere else', () => {
+    const TAKES_HELP: Record<QuestionType, boolean> = {
+      multiple_choice: false,
+      new_meaning: false,
+      reverse_choice: false,
+      typed_translation: true,
+      listen_choice: false,
+      dictation: false,
+      matching: false,
+      letter_tiles: true,
+      read_aloud: false,
+      meet: false,
+      say_translation: false,
+      typed_meaning: false,
+      cloze_choice: false,
+      cloze_typed: false,
+      sentence_translation: false,
+    };
+    for (const [type, takes] of Object.entries(TAKES_HELP)) expect([type, takesHelp(type as QuestionType)]).toEqual([type, takes]);
   });
 });

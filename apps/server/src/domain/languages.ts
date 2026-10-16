@@ -5,15 +5,18 @@
  * this table, so adding a language is one entry here.
  *
  * Pure data under ADR 0001 R3. `LanguageCode` is declared here rather than
- * imported from packages/core so this module has no dependency at all; the
- * wire's `LanguageCodeSchema` names the same codes, and
- * services/translations.ts is where the two meet and the compiler checks them.
+ * imported from packages/core; the wire's `LanguageCodeSchema` names the same
+ * codes, and services/translations.ts is where the two meet and the compiler
+ * checks them. The one thing taken from core is `stripStress`, re-exported
+ * below for the callers that read it from here (phase 55, spec D7).
  *
  * Every rule string here goes into the prompt's system instruction, which is
  * part of the request body MockServer matches against. None may contain the
  * unquoted substrings `see` or `saw` — see the comment in `buildPrompt`, and
  * the test that enforces it.
  */
+export { stripStress } from '@lang-tutor/core/domain';
+
 export type LanguageCode = 'he' | 'en' | 'ru' | 'it';
 
 export type Language = {
@@ -156,16 +159,4 @@ export function guardScript(text: string, from: LanguageCode, to: LanguageCode):
 /** Every letter is in `code`'s script. Vacuously true with no letters. */
 export function isInScript(text: string, code: LanguageCode): boolean {
   return lettersOf(text).every((letter) => LANGUAGES[code].letters.test(letter));
-}
-
-/**
- * Removes U+0301 (combining acute) after a Cyrillic letter: `молоко́` and
- * `молоко` are one dictionary key. Stress is a reading aid, not spelling, and
- * native text never writes it. Deliberately narrow: a Latin accent (`café`,
- * decomposed) and Hebrew points are spelling and survive, and `ё` is a letter,
- * not a stress mark — `елка` is a misspelling of `ёлка`, handled by phase 13's
- * correction path rather than folded here.
- */
-export function stripStress(text: string): string {
-  return text.replace(/(\p{Script=Cyrillic})\u0301/gu, '$1');
 }

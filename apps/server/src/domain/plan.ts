@@ -24,8 +24,9 @@ import { READ_ALOUD_MAX_LEVEL } from './progress';
  *  word and the word's homographs; none when absent. `knownMeanings`: phase 39
  *  (spec D6), the meanings already learned of a word whose new gloss this is.
  *  `ladder`: phase 54 (spec D3), a new word's first session: the pick is asked
- *  as the four cards of LADDER_TYPES, whatever its rung, R, level and flags
- *  say; absent is false. */
+ *  as the cards of ladderCards, whatever its rung, R, level and flags say
+ *  (phase 55, spec D2: its tiles and speakable still choose the intro's
+ *  cards); absent is false. */
 export type PlanPick = {
   form: string;
   translation: string;
@@ -47,8 +48,12 @@ export type PlanPick = {
 export type PlanInput = { listening: boolean; speaking: boolean };
 
 /** `order[i]` is the index into the picks asked at position `i`, `types[i]`
- *  its type. A board takes positions `start` to `start + 3`. */
-export type SessionPlan = { order: number[]; types: QuestionType[]; board: { start: number } | null };
+ *  its type. A board takes positions `start` to `start + 3`. Phase 55 (spec D2,
+ *  as ruled): `intro[i]`, whether the card is one of a ladder's intro stage (the
+ *  meet card, the read aloud, the card that writes the word), which is for
+ *  encoding, not evidence: it counts in the score, and writes no memory, no
+ *  progress and opens no return. */
+export type SessionPlan = { order: number[]; types: QuestionType[]; intro: boolean[]; board: { start: number } | null };
 
 /** Spec D6. Per dimension, the types of rung 1 (recognition) and rung 2 (recall),
  *  in the order a tie falls to. Matching is never chosen for a pick: the board
@@ -64,10 +69,22 @@ export const RUNGS: Readonly<Record<Dimension, readonly [readonly QuestionType[]
   spoken_productive: [['read_aloud'], ['say_translation']],
 };
 
-/** Phase 54 (spec D3). A ladder's cards, always in this order: the meet card,
- *  then the practice a new word is asked in its first session. All three
- *  practice types are always eligible, so every ladder has all four. */
-export const LADDER_TYPES: readonly QuestionType[] = ['meet', 'multiple_choice', 'reverse_choice', 'typed_translation'];
+/** Phase 55 (spec D2). A ladder's cards: the intro stage, then the three practice
+ *  cards a new word is asked in its first session, in this order. The intro is
+ *  the meet card; the read aloud, when the session can speak and the form can be
+ *  said; and the card that has the learner write the word, letter tiles or, when
+ *  the form takes none, typed. `speaking` is the session's, not the plan's
+ *  one-word rule: a session of one ladder still says its word. All three
+ *  practice types are always eligible. */
+export function ladderCards(
+  pick: Pick<PlanPick, 'tiles' | 'speakable'>,
+  speaking: boolean,
+): { intro: QuestionType[]; practice: QuestionType[] } {
+  return {
+    intro: ['meet', ...(speaking && pick.speakable ? (['read_aloud'] as const) : []), pick.tiles ? 'letter_tiles' : 'typed_translation'],
+    practice: ['multiple_choice', 'reverse_choice', 'typed_translation'],
+  };
+}
 
 /** Spec D6: no type is chosen more than this many times in one session. A new
  *  word's multiple choice, and the last resort's, are not chosen and do not
@@ -190,8 +207,10 @@ function cardFor(pick: PlanPick, used: ReadonlyMap<QuestionType, number>, listen
   return card ? { ...card, chosen: true } : multipleChoice;
 }
 
-/** What the order places: one pick, or the board's four together. */
-type Unit = { indices: number[]; type: QuestionType; p: number; step: boolean };
+/** What the order places: one pick, or the board's four together, or (phase 55,
+ *  spec D3) a ladder's intro stage, whose cards are `types`, one per index, and
+ *  (spec D2, as ruled) `intro`. */
+type Unit = { indices: number[]; type: QuestionType; types?: QuestionType[]; intro?: true; p: number; step: boolean };
 
 /** Whether `counts`, the types still to place, can follow `last` with no type
  *  twice in a row: no type more than half of what is left, rounded up, or
@@ -239,7 +258,7 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
   // "can't speak now" could pass, leaving nothing to score.
   const speaking = input.speaking && picks.length > 1;
 
-  // Phase 54 (spec D3). A ladder pick has no card of its own: its four are
+  // Phase 54 (spec D3). A ladder pick has no card of its own: its cards are
   // fixed, and it touches no type's count.
   const used = new Map<QuestionType, number>();
   const cards = picks.map((pick): Card | null => {
@@ -264,10 +283,23 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
   );
   if (board) units.push({ indices: board, type: 'matching', p: Math.max(...board.map((index) => cards[index]!.p)), step: false });
 
-  // Phase 54 (spec D5). The ladder stream, stage by stage: every meet card, then
-  // every first practice card, and so on, each stage in pick order.
+  // Phase 55 (spec D3). A word's intro stage is one unit, so nothing is merged inside it;
+  // then every ladder's first practice card, its second, its third, each stage in pick order.
+  // The ladder's own speaking is the session's (input.speaking), not the one-word rule's.
   const ladders = picks.flatMap((pick, index) => (pick.ladder ? [index] : []));
-  const stream: Unit[] = LADDER_TYPES.flatMap((type) => ladders.map((index) => ({ indices: [index], type, p: 1, step: false })));
+  const cardsOf = ladders.map((index) => ladderCards(picks[index], input.speaking));
+  const intro: Unit[] = ladders.map((index, k) => ({
+    indices: cardsOf[k].intro.map(() => index),
+    type: 'meet',
+    types: cardsOf[k].intro,
+    intro: true,
+    p: 1,
+    step: false,
+  }));
+  const practice: Unit[] = [0, 1, 2].flatMap((stage) =>
+    ladders.map((index, k) => ({ indices: [index], type: cardsOf[k].practice[stage], p: 1, step: false })),
+  );
+  const stream: Unit[] = [...intro, ...practice];
 
   // Phase 37 (spec D6): the returns after every other card, so each is at least
   // the rest of the session away from the answer that owed it. Phase 54 (spec D5,
@@ -279,9 +311,9 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
   const returns = ordered(units.filter((unit) => unit.step), first.last);
   const others = [...first.out, ...returns.out];
 
-  // Merged evenly with the other cards: the stream places its next card when its
+  // Merged evenly with the other cards: the stream places its next unit when its
   // share of the stream placed is no more than the other cards' share. A ladder
-  // card never follows its own word while another card is left to put between
+  // unit never follows its own word while another card is left to put between
   // them.
   const merged: Unit[] = [];
   let a = 0;
@@ -297,13 +329,15 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
 
   const order: number[] = [];
   const types: QuestionType[] = [];
+  const inIntro: boolean[] = [];
   let start: number | null = null;
   for (const unit of merged) {
     if (unit.type === 'matching') start = order.length;
-    for (const index of unit.indices) {
+    unit.indices.forEach((index, k) => {
       order.push(index);
-      types.push(unit.type);
-    }
+      types.push(unit.types?.[k] ?? unit.type);
+      inIntro.push(unit.intro ?? false);
+    });
   }
-  return { order, types, board: start === null ? null : { start } };
+  return { order, types, intro: inIntro, board: start === null ? null : { start } };
 }

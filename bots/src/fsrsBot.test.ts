@@ -40,3 +40,16 @@ test('a meet card teaches nothing: the grades table gives an ungraded card no gr
   assert.deepEqual(m.state, {});
   assert.equal(m.recall('cat', 'written_receptive'), 0);
 });
+
+test("a ladder's intro card teaches the control bot nothing, as the server grades it nothing", () => {
+  // Phase 55 (spec D2, as ruled). The meet card, the read aloud and the write-it card of a ladder.
+  const m = new FsrsMemory();
+  m.setTime({ day: '2026-01-01', hour: 8 });
+  m.learn('cat', { type: 'read_aloud', verdict: 'understood', intro: true });
+  m.learn('cat', { type: 'letter_tiles', verdict: 'exact', intro: true });
+  m.learn('cat', { type: 'typed_translation', verdict: 'wrong', intro: true });
+  assert.deepEqual(m.state, {});
+  // The same tiles card outside an intro grades as before.
+  m.learn('cat', { type: 'letter_tiles', verdict: 'exact' });
+  assert.deepEqual(Object.keys(m.state).sort(), ['cat|written_productive', 'cat|written_receptive']);
+});

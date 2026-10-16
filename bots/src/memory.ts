@@ -6,11 +6,14 @@ import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
  */
 export type When = { day: string; hour: number };
 
-/** What a card showed and how it came out: the input of the grades table. */
+/** What a card showed and how it came out: the input of the grades table. Phase 55 (spec D2,
+ *  as ruled): `intro`, a card of a ladder's intro stage, which the server grades nothing; the
+ *  control bot, which forgets as the picker assumes, learns nothing from it either. */
 export type LearnEvent = {
   type: QuestionType;
   correct?: boolean;
   verdict?: 'exact' | 'near_miss' | 'wrong' | 'gave_up' | 'understood' | 'skipped' | 'alternative' | 'seen';
+  intro?: boolean;
 };
 
 /** What `decide` needs of a bot's memory, whichever way it forgets. */

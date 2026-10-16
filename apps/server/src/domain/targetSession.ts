@@ -26,9 +26,9 @@ export type TargetSessionInput = {
 };
 
 /** Spec D8. What one session gave one target. `picked` counts its pool's picks over every
- *  pass, so it passes `slots` when the main path leaves slots unused; a gloss in two
- *  targets counts for the one served first. Phase 54 (spec D4): picks, not slots, so a
- *  ladder, three slots, counts one. */
+ *  pass, so it passes `slots` when the main path or an earlier target leaves slots unused; a
+ *  gloss in two targets counts for the one served first. Phase 54 (spec D4): picks, not slots,
+ *  so a ladder, LADDER_SLOTS slots, counts one. */
 export type TargetSplit = {
   targetId: string;
   wish: number;
@@ -95,12 +95,13 @@ export function splitChanged(recorded: readonly TargetSplit[], today: readonly T
 }
 
 /**
- * One session: the targets' pools, then the main path with the slots they left, in one
- * call of the picker. A target fills its slots with its own words, those answered today
- * included, before passing any on; slots the main path cannot use go back to the targets;
- * the main path's words answered today come only after every pool's other words. The picks
- * come in pool order; the split in the same order, each target's `picked` filled in. With
- * no target, exactly chooseWords(choice).
+ * One session: the targets' pools, then the main path with its share, in one call of the
+ * picker. A target fills its slots with its own words, those answered today included, before
+ * passing any on; slots the main path cannot use go back to the targets; the main path's words
+ * answered today come only after every pool's other words. Phase 55 (spec D5): the slots a
+ * target leaves pass to the later targets, never to the main path, so the session ends shorter;
+ * an empty target's pass to the main path. The picks come in pool order; the split in the same
+ * order, each target's `picked` filled in. With no target, exactly chooseWords(choice).
  */
 export function chooseWithTargets(input: TargetSessionInput): { picks: ChosenPick[]; split: TargetSplit[] } {
   const planned = plan(input);

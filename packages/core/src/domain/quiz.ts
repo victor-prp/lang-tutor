@@ -32,7 +32,10 @@ export type QuestionType = Question['type'];
  *  it judged, or by a pass (spec D5). */
 export type AnswerInput =
   | { option_index: number }
-  | { text: string }
+  // Phase 55 (spec D6). `helped`: the learner used help, or placed a wrong tile,
+  // on a letter_tiles or typed_translation card. The app sends it; no other card
+  // reads it.
+  | { text: string; helped?: boolean }
   | { heard: string }
   // Phase 50 (spec D5). A transcript the server scored as sounding like the
   // card's form, which it names. Only the server builds it: the next-step
@@ -187,6 +190,18 @@ function verdictFor(question: TextQuestion | SayTranslationQuestion, text: strin
   }
 }
 
+/**
+ * Phase 55 (spec D6). The cards on which help, or a wrong tile, grades the
+ * answer wrong whatever its text. On any other type `helped` is ignored.
+ */
+const HELPED: ReadonlySet<QuestionType> = new Set(['letter_tiles', 'typed_translation']);
+
+/** Phase 55 (spec D6; review M8). Whether a card takes help: `evaluate` grades
+ *  `helped` on it, and the server stores it. The one list of them. */
+export function takesHelp(type: QuestionType): boolean {
+  return HELPED.has(type);
+}
+
 // answers_typed_text_length: a transcript is stored as the text of its answer.
 const MAX_ANSWER_TEXT = 100;
 
@@ -249,7 +264,8 @@ export function evaluate(question: Question, answer: AnswerInput): AnswerRecord 
     });
   }
   if (!isChoice(question) && !isJudged(question) && question.type !== 'read_aloud' && question.type !== 'meet' && 'text' in answer && !('judged' in answer)) {
-    const verdict = verdictFor(question, answer.text);
+    // Phase 55 (spec D6). A helped answer is wrong whatever its text.
+    const verdict = 'helped' in answer && answer.helped && takesHelp(question.type) ? 'wrong' : verdictFor(question, answer.text);
     return recorded(question, { question_id: question.id, is_correct: verdictCorrect(verdict), answer_string: answer.text, verdict });
   }
   throw new Error(`the answer does not fit a ${question.type} question`);

@@ -43,10 +43,10 @@ async function savedFamily() {
   const seed = await service.createNextSession('u_1', E, { listening: false, speaking: false });
   await service.skipSession('u_1', seed.sessionId);
   const pickUp = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'pick up', translations: ['להרים', 'לאסוף'] });
-  await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'apple', translations: ['תפוח'] });
+  const apple = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'apple', translations: ['תפוח'] });
   await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'bread', translations: ['לחם'] });
   const [lift, collect] = pickUp.glossIds;
-  return { lift, collect };
+  return { lift, collect, apple: apple.glossIds[0] };
 }
 
 
@@ -101,7 +101,9 @@ describe('createNextSession records the gloss families (phase 39 D4, D5)', () =>
   });
 
   it('never picks a waiting gloss', async () => {
-    const { lift, collect } = await savedFamily();
+    const { lift, collect, apple } = await savedFamily();
+    // Phase 55 (spec D4): a session holds two ladders; apple known, lift is one of them.
+    await known(apple);
     const { picks } = await nextSession();
     const ids = picks.map((pick) => pick.gloss_id);
     expect(ids).toContain(lift);

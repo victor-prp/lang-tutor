@@ -21,12 +21,14 @@ export const RECOGNITION_EXPONENT = 0.5;
 
 /** Research's choice. New words a session introduces before anything else fills it,
  *  when the due words leave room (phase 37 D3). Phase 54 (spec D4): also the most ladders a
- *  session holds, across every pool and pass, the pass past the daily cap included. */
-export const NEW_PER_SESSION = 3;
+ *  session holds, across every pool and pass, the pass past the daily cap included. Phase 55
+ *  (spec D4): two, where it was three. */
+export const NEW_PER_SESSION = 2;
 
-/** Phase 54 (spec D4). Slots of SESSION_LENGTH a new word's first session takes: its three
- *  practice cards; the meet card is free. */
-export const LADDER_SLOTS = 3;
+/** Phase 54 (spec D4). Slots of SESSION_LENGTH a new word's first session takes. Phase 55
+ *  (spec D4): its four graded cards, the intro stage's write-it card and the three practice
+ *  cards, tiles or typed alike; the meet and read-aloud cards are free. */
+export const LADDER_SLOTS = 4;
 
 /** Phase 37 (spec D3, D5). New words a session introduces however many words are due,
  *  while the daily cap allows: a fixed reserve outgrows a learner's sessions. */

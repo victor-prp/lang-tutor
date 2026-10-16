@@ -2116,9 +2116,11 @@ describe('prepareSession, phase 48 (spec D3, D4, D6): a refused card is dropped,
   });
 });
 
-// Phase 54 (spec D3, D7). A new word's first session: its pick is asked as four
-// cards, the meet card first, which asks the models nothing.
-describe('prepareSession, a ladder (phase 54, spec D3, D7)', () => {
+// Phase 54 (spec D3, D7); phase 55 (spec D2). A new word's first session: its pick is
+// asked as its intro stage (the meet card, a read aloud when the session speaks, the
+// letter tiles or a typed translation) and three practice cards. The intro's meet,
+// read aloud and tiles cards ask the models nothing.
+describe('prepareSession, a ladder (phase 54, spec D3, D7; phase 55, spec D2)', () => {
   type Item = { key: string; task: string; word: string; correct: string };
   type Inserted = {
     type: string; glossId: string; form: string; prompt: string | null; options: { text: string }[] | null;
@@ -2141,25 +2143,57 @@ describe('prepareSession, a ladder (phase 54, spec D3, D7)', () => {
     });
   const LADDER = { ...PAYLOAD, picks: [{ ...PAYLOAD.picks[0], ladder: true }, PAYLOAD.picks[1]] };
 
-  it('writes the meet card, then a multiple choice, a reverse choice and a typed translation, the meet card asking nothing', async () => {
+  it('writes the meet card, the letter tiles, then a multiple choice, a reverse choice and a typed translation, the first two asking nothing', async () => {
     const { service, calls, llm, contextLlm, checkerLlm, logger } = world({ reply: answering() });
     await service.prepareSession(LADDER);
     expect(calls.transitions).toEqual(['preparing→ready']);
     const inserted = insertedOf(calls);
-    expect(inserted).toHaveLength(5);
-    expect(inserted.filter((q) => q.glossId === 'g-s1').map((q) => q.type)).toEqual(['meet', 'multiple_choice', 'reverse_choice', 'typed_translation']);
+    expect(inserted).toHaveLength(6);
+    expect(inserted.filter((q) => q.glossId === 'g-s1').map((q) => q.type)).toEqual([
+      'meet', 'letter_tiles', 'multiple_choice', 'reverse_choice', 'typed_translation',
+    ]);
     // The meet card: the form, and the rendering's translation as its meaning, nothing generated.
     const at = inserted.findIndex((q) => q.type === 'meet');
     expect(inserted[at]).toMatchObject({ form: 'прочитала', prompt: 'קראה', options: null, alternatives: null, tiles: null, context: null });
     expect(calls.sessionQuestions[0][at]).toEqual({ id: `g${at}`, vocab_term_id: 'l1', type: 'meet', question: 'прочитала', meaning: 'קראה' });
-    // No batch item, context sentence or check is asked for its position; the
+    // The tiles card builds the form the card asks for (phase 55, spec D2).
+    const tilesAt = inserted.findIndex((q) => q.type === 'letter_tiles');
+    expect(tilesAt).toBe(at + 1);
+    expect(inserted[tilesAt]).toMatchObject({ glossId: 'g-s1', form: 'прочитала', prompt: 'קראה', options: null });
+    expect(inserted[tilesAt].tiles).toHaveLength([...'прочитала'].length + 2);
+    // No batch item, context sentence or check is asked for their positions; the
     // batch asks the word once per practice card, and never lists it as another
     // word of the session.
-    for (const client of [llm, contextLlm, checkerLlm]) expect(keysAsked(client)).not.toContain(`q${at + 1}`);
+    for (const client of [llm, contextLlm, checkerLlm]) {
+      expect(keysAsked(client)).not.toContain(`q${at + 1}`);
+      expect(keysAsked(client)).not.toContain(`q${tilesAt + 1}`);
+    }
     expect(itemsOf(llm.calls[0]).filter((item) => item.word === 'прочитала').map((item) => item.task)).toEqual(['meaning', 'word', 'typed']);
     expect(JSON.parse(llm.calls[0].user)).not.toHaveProperty('also_in_session');
     expect(events(logger, 'card_dropped')).toEqual([]);
-    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 5, planned_count: 5 }));
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 6, planned_count: 6 }));
+  });
+
+  it('writes a read aloud between the meet card and the tiles when the session speaks, with the meaning as its prompt', async () => {
+    const { service, calls, llm, logger } = world({ reply: answering() });
+    await service.prepareSession({ ...LADDER, speaking: true });
+    const inserted = insertedOf(calls);
+    expect(inserted.filter((q) => q.glossId === 'g-s1').map((q) => q.type)).toEqual([
+      'meet', 'read_aloud', 'letter_tiles', 'multiple_choice', 'reverse_choice', 'typed_translation',
+    ]);
+    expect(inserted.slice(0, 3).map((q) => q.type)).toEqual(['meet', 'read_aloud', 'letter_tiles']);
+    expect(inserted[1]).toMatchObject({ glossId: 'g-s1', form: 'прочитала', prompt: 'קראה', options: null, alternatives: null, tiles: null });
+    expect(keysAsked(llm)).not.toContain('q2');
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 7, planned_count: 7 }));
+  });
+
+  it('types the word in place of tiles when the form cannot take them', async () => {
+    const long = CONTEXT.map((row) => (row.glossId === 'g-s1' ? { ...row, form: 'прочитывавшими', lemma: 'прочитывать' } : row));
+    const { service, calls } = world({ context: long, reply: answering() });
+    await service.prepareSession(LADDER);
+    expect(insertedOf(calls).filter((q) => q.glossId === 'g-s1').map((q) => q.type)).toEqual([
+      'meet', 'typed_translation', 'multiple_choice', 'reverse_choice', 'typed_translation',
+    ]);
   });
 
   it('asks a pick with no ladder flag as before: one card, and no meet card', async () => {
@@ -2173,31 +2207,71 @@ describe('prepareSession, a ladder (phase 54, spec D3, D7)', () => {
 
   // Phase 48's refusals drop a ladder's choice cards as any others. A typed
   // translation is never refused (phase 48, spec D1), so the ladder keeps its
-  // third practice card and its meet card with it: dropLoneMeets (keepCards.test.ts)
-  // is the guard for a meet card whose practice cards were all dropped.
+  // third practice card and its meet card and tiles card with it: dropLoneMeets
+  // (keepCards.test.ts) is the guard for a meet card whose practice cards were all dropped.
   it('drops the ladder’s refused choice cards, and keeps its meet card with its typed card', async () => {
     const context: GenerationContext[] = [
       ...CONTEXT,
       { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
       { glossId: 'g-s4', senseId: 's4', variantId: 'v4', lexemeId: 'l4', form: 'дом', lemma: 'дом', partOfSpeech: 'noun', translation: 'בית', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
-      { glossId: 'g-s5', senseId: 's5', variantId: 'v5', lexemeId: 'l5', form: 'кот', lemma: 'кот', partOfSpeech: 'noun', translation: 'חתול', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
     ];
-    // The ladder's four cards and four others: six pass, the floor of six, so the two refused are dropped.
+    // The ladder's five cards and three others: six pass, the floor of six, so the two refused are dropped.
     const picks = [
       { gloss_id: 'g-s1', sense_id: 's1', variant_id: 'v1', ladder: true },
       { gloss_id: 'g-s2', sense_id: 's2', variant_id: 'v2', ...PICK_FORM },
       { gloss_id: 'g-s3', sense_id: 's3', variant_id: 'v3', ...PICK_FORM },
       { gloss_id: 'g-s4', sense_id: 's4', variant_id: 'v4', ...RECOGNISE },
-      { gloss_id: 'g-s5', sense_id: 's5', variant_id: 'v5', ...RECOGNISE },
     ];
     const { service, calls, logger } = world({ context, reply: answering('прочитала') });
     await service.prepareSession({ ...PAYLOAD, picks });
     expect(calls.transitions).toEqual(['preparing→ready']);
     const inserted = insertedOf(calls);
     expect(inserted).toHaveLength(6);
-    expect(inserted.filter((q) => q.glossId === 'g-s1').map((q) => q.type)).toEqual(['meet', 'typed_translation']);
+    expect(inserted.filter((q) => q.glossId === 'g-s1').map((q) => q.type)).toEqual(['meet', 'letter_tiles', 'typed_translation']);
     expect(events(logger, 'card_dropped').map((e) => (e as { type?: string }).type)).toEqual(['multiple_choice', 'reverse_choice']);
     expect(events(logger, 'card_dropped')).toEqual([expect.objectContaining({ stage: 'validation' }), expect.objectContaining({ stage: 'validation' })]);
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 6, planned_count: 8, dropped_count: 2 }));
+  });
+
+  // Phase 55 (spec D2, as ruled). Each question of the intro stage is written with its mark,
+  // which goes with the card: a card dropped before it closes the positions up, and the mark
+  // stays on the meet card and the tiles.
+  describe('the intro mark', () => {
+    const row = (n: number, form: string, translation: string): GenerationContext => ({
+      glossId: `g-s${n}`, senseId: `s${n}`, variantId: `v${n}`, lexemeId: `l${n}`, form, lemma: form, partOfSpeech: 'noun', translation,
+      example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null,
+    });
+    const context = [...CONTEXT, row(3, 'быстро', 'מהר'), row(4, 'дом', 'בית'), row(5, 'окно', 'חלון'), row(6, 'стол', 'שולחן')];
+    // The ladder (g-s1) and five others, which outnumber its four units: the merge places an
+    // other first. In plan order: лук's multiple choice; the ladder's meet card and tiles; быстро's
+    // tiles; the ladder's multiple choice; стол's typed card; the ladder's reverse choice; дом's;
+    // the ladder's typed card; окно's.
+    const picks = [
+      { gloss_id: 'g-s1', sense_id: 's1', variant_id: 'v1', ladder: true },
+      { gloss_id: 'g-s2', sense_id: 's2', variant_id: 'v2', ...RECOGNISE },
+      { gloss_id: 'g-s3', sense_id: 's3', variant_id: 'v3', ...BUILD_FORM },
+      { gloss_id: 'g-s4', sense_id: 's4', variant_id: 'v4', ...PICK_FORM },
+      { gloss_id: 'g-s5', sense_id: 's5', variant_id: 'v5', ...produce(0.7) },
+      { gloss_id: 'g-s6', sense_id: 's6', variant_id: 'v6', ...produce(0.88) },
+    ];
+    const marks = (calls: { generated: unknown[] }) => (calls.generated[0] as { questions: { intro?: boolean }[] }).questions.map((q) => q.intro);
+
+    it('marks the meet card and the tiles of the ladder, and no other question', async () => {
+      const { service, calls } = world({ context, reply: answering() });
+      await service.prepareSession({ ...PAYLOAD, picks });
+      expect(insertedOf(calls).map((q) => `${q.type}:${q.glossId}`)).toEqual([
+        'multiple_choice:g-s2', 'meet:g-s1', 'letter_tiles:g-s1', 'letter_tiles:g-s3', 'multiple_choice:g-s1',
+        'typed_translation:g-s6', 'reverse_choice:g-s1', 'reverse_choice:g-s4', 'typed_translation:g-s1', 'typed_translation:g-s5',
+      ]);
+      expect(marks(calls)).toEqual([false, true, true, false, false, false, false, false, false, false]);
+    });
+
+    it('keeps the mark on its card when a card before it is dropped', async () => {
+      const { service, calls, logger } = world({ context, reply: answering('лук') });
+      await service.prepareSession({ ...PAYLOAD, picks });
+      expect(events(logger, 'card_dropped')).toEqual([expect.objectContaining({ key: 'q1', type: 'multiple_choice', stage: 'validation' })]);
+      expect(insertedOf(calls).slice(0, 3).map((q) => `${q.type}:${q.glossId}`)).toEqual(['meet:g-s1', 'letter_tiles:g-s1', 'letter_tiles:g-s3']);
+      expect(marks(calls)).toEqual([true, true, false, false, false, false, false, false, false]);
+    });
   });
 });

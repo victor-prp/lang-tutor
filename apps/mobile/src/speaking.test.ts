@@ -60,3 +60,15 @@ describe('hasBanner (phase 54 D1)', () => {
     expect(hasBanner({ heard: 'gatto', verdict: 'understood' })).toBe(true);
   });
 });
+
+// Phase 55 (spec D7). The retype holds the banner back until it ends.
+describe('hasBanner with a retype (phase 55 D7)', () => {
+  it('shows none while the retype is open, and one once it ends', () => {
+    expect(hasBanner({ text: 'gatto' }, null)).toBe(true);
+    expect(hasBanner({ text: 'gatto' }, { attempt: 1, showing: true, outcome: null })).toBe(false);
+    expect(hasBanner({ text: 'gatto' }, { attempt: 2, showing: false, outcome: null })).toBe(false);
+    expect(hasBanner({ text: 'gatto' }, { attempt: 1, showing: false, outcome: 'right' })).toBe(true);
+    expect(hasBanner({ text: 'gatto' }, { attempt: 2, showing: false, outcome: 'failed' })).toBe(true);
+    expect(hasBanner({ pass: 'skip' }, { attempt: 2, showing: false, outcome: 'failed' })).toBe(false);
+  });
+});

@@ -839,6 +839,10 @@ export const questions = pgTable(
     // Phase 39 (spec D6). The meanings a new_meaning card listed as known, in family
     // order; set on that type and null on every other (questions_known_meanings_valid).
     knownMeanings: text('known_meanings').array(),
+    // Phase 55 (spec D2, as ruled). A card of a ladder's intro stage: the meet card, the
+    // read aloud and the card that writes the word. It counts in the score, and its answer
+    // writes no memory and no progress and opens no return. False on every other card.
+    intro: boolean('intro').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -1123,6 +1127,11 @@ export const answers = pgTable(
     // before its first answer. Null on every other card, from an older app, and
     // never changed by a retry.
     hintOpened: boolean('hint_opened'),
+    // Phase 55 (spec D6). Whether the learner used help, or placed a wrong tile, on
+    // a letter_tiles or typed_translation card before its first answer: a helped
+    // answer is stored wrong. Null on every other card, from an older app, and
+    // never changed by a retry.
+    helped: boolean('helped'),
     answeredAt: timestamp('answered_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -1153,6 +1162,8 @@ export const answers = pgTable(
     check('answers_typed_text_length', sql`length(${t.typedText}) <= 300`),
     // Phase 38 (spec D4). A hint is opened before a typed answer, never a choice.
     check('answers_hint_opened_typed', sql`${t.hintOpened} is null or ${t.typedText} is not null`),
+    // Phase 55 (spec D6). Help is given on a typed answer, never a choice.
+    check('answers_helped_text', sql`${t.helped} is null or ${t.typedText} is not null`),
     // Phase 34 (spec D9). A retry exists only after an `alternative` verdict, so a
     // choice answer, whose verdict is null, never has one: `is true` and not a bare
     // `=`, because a CHECK passes on null. Its text and verdict are set exactly when

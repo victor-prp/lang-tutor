@@ -2,7 +2,27 @@ import { describe, expect, it } from '@jest/globals';
 import type { NextStepResponse, PendingRetry, Question, SessionView } from '@lang-tutor/core/api';
 
 import type { CardAnswer } from './feedback';
-import { answerRoute, applyQueued, holds, landed, metHold, nextStepRequest, passFor, queuedFrom, resumed, retried, seenState, settle, type QuizState, type Sent } from './quiz';
+import {
+  answeredState,
+  answerRoute,
+  applyQueued,
+  continued,
+  enteredState,
+  holds,
+  landed,
+  metHold,
+  nextStepRequest,
+  passFor,
+  queuedFrom,
+  resumed,
+  retried,
+  retypeCheckedState,
+  retypeTypingState,
+  seenState,
+  settle,
+  type QuizState,
+  type Sent,
+} from './quiz';
 import { IDLE_ATTEMPT } from './speaking';
 
 const BASE: QuizState = {
@@ -21,6 +41,7 @@ const BASE: QuizState = {
   speakingOff: 'chosen',
   judging: 'failed',
   retry: null,
+  retype: null,
 };
 
 describe('applyQueued (spec D9, Review Focus 3)', () => {
@@ -311,5 +332,137 @@ describe('the meet card (phase 54 D1, D6)', () => {
     };
     const moved = applyQueued(seenState(ON_MEET), queuedFrom(next));
     expect(moved).toMatchObject({ question: CHOICE, position: 2, answer: null, advanceRequested: false, retry: null });
+  });
+});
+
+// Phase 55 (spec D6). Help, or a wrong tile, goes with the answer it led to.
+describe('helped (phase 55 D6)', () => {
+  const PENDING = { answer: 'vetrata', wording: 'word' } as const;
+
+  it('goes in the body of a first text answer', () => {
+    expect(nextStepRequest('t1', { text: 'finestra', helped: true }, null)).toEqual({ question_id: 't1', text: 'finestra', helped: true });
+    expect(nextStepRequest('t1', { text: '', helped: false }, null)).toEqual({ question_id: 't1', text: '', helped: false });
+  });
+
+  it('goes with a second try too', () => {
+    expect(nextStepRequest('t1', { text: 'finestra', helped: true }, PENDING)).toEqual({ question_id: 't1', text: 'finestra', helped: true, retry: true });
+    expect(nextStepRequest('t1', { text: 'finestra', helped: false }, PENDING)).toEqual({ question_id: 't1', text: 'finestra', helped: false, retry: true });
+  });
+
+  it('is left out when the card does not say', () => {
+    expect(nextStepRequest('t1', { text: 'finestra' }, null)).toStrictEqual({ question_id: 't1', text: 'finestra' });
+    expect(nextStepRequest('t1', { text: 'finestra', helped: undefined }, null)).toStrictEqual({ question_id: 't1', text: 'finestra' });
+    expect(nextStepRequest('c1', { text: 'spent', helped: undefined }, null, true)).toStrictEqual({ question_id: 'c1', text: 'spent', hint_opened: true });
+  });
+});
+
+// Phase 55 (spec D7). A wrong or nearly right first typed answer opens the
+// retype, which holds back the banner and Continue until it ends.
+describe('the retype in the session (phase 55 D7)', () => {
+  const TYPED: Question = {
+    id: 't1',
+    type: 'typed_translation',
+    vocab_term_id: 'l',
+    question: 'עיר',
+    part_of_speech: 'noun',
+    answer: 'città',
+    lemma: 'città',
+    alternatives: ['metropoli'],
+    context: null,
+  };
+  const TILES: Question = {
+    id: 'lt',
+    type: 'letter_tiles',
+    vocab_term_id: 'l',
+    question: 'עיר',
+    part_of_speech: 'noun',
+    answer: 'città',
+    tiles: ['c', 'i', 't', 't', 'à', 'o', 'e'],
+  };
+  const NEXT: Question = { ...TYPED, id: 't2', question: 'דלת', answer: 'porta', lemma: 'porta', alternatives: [] };
+  const QUEUED = { complete: false, question: NEXT, position: 4, retry: null } as const;
+  const ON_CARD: QuizState = { ...BASE, question: TYPED, position: 3, answer: null, advanceRequested: false, speakingOff: null, judging: 'idle' };
+  const response = (question: Question, pending: PendingRetry | null): NextStepResponse => ({
+    session_id: 's',
+    question,
+    position: { position: 4, total: 10 },
+    complete: false,
+    pending_retry: pending,
+  });
+
+  it('opens on a wrong first answer, a near miss and show the answer', () => {
+    for (const text of ['paese', 'citta', '']) {
+      expect(answeredState(ON_CARD, { text, helped: false })).toMatchObject({ answer: { text }, retype: { attempt: 1, showing: true, outcome: null } });
+    }
+    // Help does not change the text's own verdict.
+    expect(answeredState(ON_CARD, { text: 'citta', helped: true }).retype).toEqual({ attempt: 1, showing: true, outcome: null });
+  });
+
+  it('does not open on the word, another accepted word, a second try or another card', () => {
+    expect(answeredState(ON_CARD, { text: 'città', helped: false }).retype).toBeNull();
+    expect(answeredState(ON_CARD, { text: 'città', helped: true }).retype).toBeNull();
+    expect(answeredState(ON_CARD, { text: 'metropoli', helped: false }).retype).toBeNull();
+    expect(answeredState({ ...ON_CARD, retry: { answer: 'metropoli', wording: 'word' } }, { text: 'paese', helped: false }).retype).toBeNull();
+    expect(answeredState({ ...ON_CARD, question: TILES }, { text: '', helped: false }).retype).toBeNull();
+  });
+
+  it('opens when a first answer lands from the server, but not on a second try it resolved', () => {
+    expect(landed({ ...ON_CARD, judging: 'checking' }, { text: 'paese' }, response(NEXT, null), null).retype).toEqual({ attempt: 1, showing: true, outcome: null });
+    expect(landed({ ...ON_CARD, judging: 'checking' }, { text: '' }, response(NEXT, null), { answer: 'metropoli', wording: 'word' }).retype).toBeNull();
+  });
+
+  it('holds Continue while it is open, and the response stays queued', () => {
+    const open = { ...answeredState(ON_CARD, { text: 'paese', helped: false }), queued: QUEUED };
+    expect(continued(open)).toEqual(open);
+    expect(continued({ ...open, queued: null })).toEqual({ ...open, queued: null });
+  });
+
+  it('typing hides the answer; checking it moves the attempt on', () => {
+    const open = answeredState(ON_CARD, { text: 'paese', helped: false });
+    expect(retypeTypingState(open).retype).toEqual({ attempt: 1, showing: false, outcome: null });
+    expect(retypeCheckedState(open, 'citta').retype).toEqual({ attempt: 2, showing: true, outcome: null });
+    // The first answer stays the card's answer: retypes are never sent.
+    expect(retypeCheckedState(open, 'città')).toMatchObject({ answer: { text: 'paese' }, retype: { outcome: 'right' } });
+  });
+
+  it('lets Continue through once it has ended, right or failed', () => {
+    const open = { ...answeredState(ON_CARD, { text: 'paese', helped: false }), queued: QUEUED };
+    const right = retypeCheckedState(open, 'città');
+    expect(continued(right)).toMatchObject({ question: NEXT, answer: null, retype: null });
+    const failed = retypeCheckedState(retypeCheckedState(open, 'paese'), 'citta');
+    expect(failed.retype?.outcome).toBe('failed');
+    expect(continued({ ...failed, queued: null })).toMatchObject({ question: TYPED, advanceRequested: true });
+  });
+
+  it('a card with no retype continues as before', () => {
+    const right = answeredState(ON_CARD, { text: 'città', helped: false });
+    expect(continued({ ...right, queued: QUEUED })).toMatchObject({ question: NEXT, retype: null });
+    expect(continued(right)).toMatchObject({ question: TYPED, advanceRequested: true });
+  });
+
+  it('checking or typing does nothing on a card with no retype open', () => {
+    expect(retypeTypingState(ON_CARD)).toBe(ON_CARD);
+    expect(retypeCheckedState(ON_CARD, 'città')).toBe(ON_CARD);
+  });
+
+  it('the next card has none', () => {
+    const open = answeredState(ON_CARD, { text: 'paese', helped: false });
+    expect(applyQueued(open, QUEUED).retype).toBeNull();
+    expect(applyQueued(open, { complete: true, score: { correct: 0, total: 1 }, missedQuestions: [], progress: [] }).retype).toBeNull();
+  });
+
+  it('a session entered, or loaded mid-retype, starts with none', () => {
+    const entered = enteredState('s9');
+    expect(entered).toMatchObject({ sessionId: 's9', question: undefined, answer: null, retry: null, retype: null });
+    const view: SessionView = {
+      session_id: 's9',
+      status: 'ready',
+      source: 'list',
+      position: { position: 4, total: 10 },
+      question: NEXT,
+      pending_retry: null,
+      progress: [],
+    };
+    expect(resumed(entered, view)).toMatchObject({ question: NEXT, retype: null });
   });
 });

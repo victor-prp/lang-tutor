@@ -63,8 +63,8 @@ export type ChoiceClass = 'STEP' | 'NEW' | 'DUE' | 'EXPAND' | 'NOT_DUE' | 'DONE'
 
 /** `level` and `r` are the chosen dimension's, for the job's card choice; `r` is
  *  null for a dimension with no memory yet. Phase 54 (spec D2, D3): `ladder`, a NEW pick
- *  but a family's introduction, is a new word's first session: a meet card and three
- *  practice cards, LADDER_SLOTS of the session's slots. */
+ *  but a family's introduction, is a new word's first session, LADDER_SLOTS of the session's
+ *  slots. Phase 55 (spec D2, D4): an intro stage and three practice cards. */
 export type ChosenPick = {
   glossId: string;
   dimension: Dimension;
@@ -162,7 +162,9 @@ export type Pool = {
   glossIds: ReadonlySet<string> | null;
   /** Slots this pool aims to fill in the first pass: a pick takes one, a ladder LADDER_SLOTS
    *  (phase 54, spec D4). What it leaves unused passes to the next pool; what is still unused
-   *  after the last goes back to the pools, in order. A pool that lists its glosses (a
+   *  after the last goes back to the pools, in order. Phase 55 (spec D5): what a target leaves
+   *  passes to the later targets and back to the targets, never to the main path; the main
+   *  path's own, and an empty target's, to any pool. A pool that lists its glosses (a
    *  target's) fills its slots with its own words answered today before passing any on; the
    *  main path's words answered today come last of all. */
   slots: number;
@@ -190,6 +192,10 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
  * the families the returns claimed, the per-dimension and hard counts, the new words, the
  * ladders and the speaking pick. Phase 54 (spec D4): what passes is slots, not picks; a
  * ladder takes LADDER_SLOTS of them, and a session holds NEW_PER_SESSION ladders at most.
+ * Phase 55 (spec D5): a target's unused slots go forward to the later targets and back to the
+ * targets, never to the main path, so a session with a target that cannot fill its slots ends
+ * shorter; the main path's own go back to the targets, and an empty target's go on to every
+ * pool, the main path included. The pass past the daily cap offers every pool all that is left.
  */
 export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenPick[][] {
   const live = liveDimensions(input.listening, input.speaking);
@@ -485,23 +491,45 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
   // gloss's return claimed still counts in the groups, room and the reserve, as it always
   // has; the claim applies only when a word is picked.
   //
-  // Phase 54 (spec D4): what passes from run to run is slots, which a ladder takes three of.
-  // The first pass: each pool aims for its slots and what the pools before it left unused.
+  // Phase 54 (spec D4): what passes from run to run is slots, which a ladder takes
+  // LADDER_SLOTS of.
+  //
+  // Phase 55 (spec D5), amending phase 53 R7 and phase 54 R2, where every slot unused passed
+  // on to every later pool. Two counts now: `unused`, slots any pool may take (the main path's
+  // own, and an empty target's, which has nothing of its own to ask), and `targetsOnly`, a
+  // target's, which go forward to the later targets and back to the targets but never reach
+  // the main path: the session ends shorter instead. A target spends `targetsOnly` first, so
+  // what it leaves of `unused` is still the main path's to take.
   let unused = 0;
+  let targetsOnly = 0;
+  const offered = (pool: Pool) => (pool.glossIds === null ? unused : targetsOnly + unused);
+  const spend = (pool: Pool, used: number) => {
+    const fromTargets = pool.glossIds === null ? 0 : Math.min(used, targetsOnly);
+    targetsOnly -= fromTargets;
+    unused -= used - fromTargets;
+  };
+  // The first pass: each pool aims for its slots and what the pools before it left it.
   pools.forEach((pool, index) => {
-    unused += pool.slots - run(index, pool.slots + unused, 'steps');
+    if (pool.glossIds === null || pool.glossIds.size === 0) unused += pool.slots;
+    else targetsOnly += pool.slots;
+    spend(pool, run(index, offered(pool), 'steps'));
   });
-  // Each later pass offers the slots still unused to the pools, each as many as remain.
+  // Each later pass offers the slots still unused to the pools, each as many as it may take.
   const pass = (part: 'steps' | 'done' | 'pastTheCap', only: (pool: Pool) => boolean = () => true) =>
     pools.forEach((pool, index) => {
-      if (unused > 0 && only(pool)) unused -= run(index, unused, part);
+      if (offered(pool) > 0 && only(pool)) spend(pool, run(index, offered(pool), part));
     });
   // The second: steps 1–8 again (and a target's words answered today), so a learner whose
   // saved words are all one ready target still gets a full session.
   pass('steps');
   // The third: the main path's words answered today, once no pool has another word.
   pass('done', (pool) => pool.glossIds === null);
-  // Ruling 15: a session still empty goes past the daily cap, the pools in order.
-  if (taken.size === 0) pass('pastTheCap');
+  // Ruling 15: a session still empty goes past the daily cap, the pools in order. Phase 55
+  // (spec D5): unchanged, every slot still unused offered to every pool, the main path included.
+  if (taken.size === 0) {
+    unused += targetsOnly;
+    targetsOnly = 0;
+    pass('pastTheCap');
+  }
   return chosen;
 }

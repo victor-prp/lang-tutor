@@ -8,9 +8,11 @@ import type {
   SessionProgressItem,
   SessionView,
 } from '@lang-tutor/core/api';
+import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import { checksFit, opensRetry, type CardAnswer } from '@/feedback';
 import type { JudgeAttempt } from '@/judging';
+import { opensRetype, retypeChecked, retypeTyping, startRetype, type Retype } from '@/retype';
 import { IDLE_ATTEMPT, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 
 // What the background next-step call resolved to, waiting to be applied when
@@ -46,7 +48,34 @@ export type QuizState = {
   /** Phase 34 (spec D9). The card on screen is held for its second try: the
    *  first answer, and which line to show. Null on every other card. */
   retry: PendingRetry | null;
+  /** Phase 55 (spec D7). The card's retype after a wrong or nearly right first
+   *  typed answer: open, it holds back the banner and Continue. Null on every
+   *  other card, and on a session entered or resumed, since it is never sent. */
+  retype: Retype | null;
 };
+
+/** Phase 19. What a session starts as before its first card is read: starting
+ *  and resuming are the same call. */
+export function enteredState(sessionId: string): QuizState {
+  return {
+    sessionId,
+    question: undefined,
+    position: 0,
+    total: SESSION_LENGTH,
+    answer: null,
+    complete: false,
+    correctCount: 0,
+    missedQuestions: [],
+    progress: [],
+    queued: null,
+    advanceRequested: false,
+    speech: IDLE_ATTEMPT,
+    speakingOff: null,
+    judging: 'idle',
+    retry: null,
+    retype: null,
+  };
+}
 
 export function queuedFrom(response: NextStepResponse): Queued {
   return response.complete
@@ -77,6 +106,7 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
       speech: IDLE_ATTEMPT,
       judging: 'idle',
       retry: null,
+      retype: null,
     };
   }
   return {
@@ -89,6 +119,7 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
     speech: IDLE_ATTEMPT,
     judging: 'idle',
     retry: queued.retry,
+    retype: null,
   };
 }
 
@@ -120,21 +151,64 @@ export function passFor(kind: 'skip' | 'show_answer', retry: PendingRetry | null
 /** Phase 34 (spec D9). The next-step request for an answer to the card on
  *  screen: on a second try it carries `retry: true`, and a pass is the give-up.
  *  Phase 38 (spec D4): a first text answer carries `hint_opened` when the card
- *  has a hint; a retry never does, as the hint it opened is the app's doing. */
+ *  has a hint; a retry never does, as the hint it opened is the app's doing.
+ *  Phase 55 (spec D6): a text answer carries `helped` when the card said, a
+ *  second try included, since help on the card so far counts. */
 export function nextStepRequest(
   questionId: string,
-  input: { option_index: number } | { text: string } | { pass: 'skip' | 'show_answer' } | { seen: true },
+  input: { option_index: number } | { text: string; helped?: boolean } | { pass: 'skip' | 'show_answer' } | { seen: true },
   retry: PendingRetry | null,
   hintOpened?: boolean,
   checkFit = false,
 ): NextStepRequest {
   // Phase 54 (spec D6). A meet card is tapped through once: it is never held for a second try.
   if ('seen' in input) return { question_id: questionId, seen: true };
-  const request = 'pass' in input ? { question_id: questionId, pass: passFor(input.pass, retry) } : { question_id: questionId, ...input };
+  const request =
+    'pass' in input
+      ? { question_id: questionId, pass: passFor(input.pass, retry) }
+      : 'text' in input
+        ? { question_id: questionId, text: input.text, ...(input.helped === undefined ? {} : { helped: input.helped }) }
+        : { question_id: questionId, ...input };
   const hinted = 'text' in input && retry === null && hintOpened !== undefined ? { ...request, hint_opened: hintOpened } : request;
   // Phase 41 (spec D3): only a first answer is checked against the gap.
   const checked = 'text' in input && retry === null && checkFit ? { ...hinted, check_fit: true } : hinted;
   return retried(checked, retry);
+}
+
+/** Phase 55 (spec D7). The retype a card's answer opens: a first answer to a
+ *  typed translation whose text is wrong or nearly right, show the answer
+ *  included. Not a second try (phase 34), which has its own banners. */
+function retypeFor(question: Question | undefined, answer: CardAnswer, retry: PendingRetry | null): Retype | null {
+  if (question === undefined || retry !== null || !('text' in answer) || 'judged' in answer) return null;
+  return opensRetype(question, answer.text) ? startRetype() : null;
+}
+
+/** Phase 23. The card answered by the phone's own judge: its banner shows at
+ *  once, its response is queued. Phase 55 (spec D7): or its retype opens first. */
+export function answeredState(current: QuizState, answer: CardAnswer): QuizState {
+  return { ...current, answer, retype: retypeFor(current.question, answer, current.retry) };
+}
+
+/** Continue: the next card, once its response is in, or as soon as it lands.
+ *  Phase 55 (spec D7): an open retype ignores it, with no banner to continue from. */
+export function continued(current: QuizState): QuizState {
+  if (current.retype !== null && current.retype.outcome === null) return current;
+  return current.queued ? applyQueued(current, current.queued) : { ...current, advanceRequested: true };
+}
+
+/** Phase 55 (spec D7). The first character of a retype hides the right answer. */
+export function retypeTypingState(current: QuizState): QuizState {
+  if (current.retype === null) return current;
+  const retype = retypeTyping(current.retype);
+  return retype === current.retype ? current : { ...current, retype };
+}
+
+/** Phase 55 (spec D7). A retype checked on the phone; the card's answer stays
+ *  the first one, which is what was sent. */
+export function retypeCheckedState(current: QuizState, text: string): QuizState {
+  if (current.retype === null || current.question?.type !== 'typed_translation') return current;
+  const retype = retypeChecked(current.retype, current.question, text);
+  return retype === current.retype ? current : { ...current, retype };
 }
 
 /** Phase 54 (spec D1, D6). The meet card tapped through: answered with `seen`,
@@ -211,5 +285,7 @@ export async function settle(
 export function landed(current: QuizState, answer: CardAnswer, next: NextStepResponse, met: PendingRetry | null): QuizState {
   const queued = queuedFrom(next);
   if (holds(queued)) return applyQueued(current, queued);
-  return { ...current, judging: 'idle', speech: IDLE_ATTEMPT, answer, queued, retry: met ?? current.retry };
+  const retry = met ?? current.retry;
+  // Phase 55 (spec D7): a first typed answer sent after a failed check may open the retype too.
+  return { ...current, judging: 'idle', speech: IDLE_ATTEMPT, answer, queued, retry, retype: retypeFor(current.question, answer, retry) };
 }

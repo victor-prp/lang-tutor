@@ -207,6 +207,42 @@ describe('evaluateSession', () => {
   it('does not count a seen meet card as practised (phase 54, spec D1)', () => {
     expect(evaluateSession(fiveRows('s1'), [{ glossId: 's1', type: 'meet', verdict: 'seen' }], D)).toEqual({ changed: [], snapshot: [] });
   });
+
+  // Phase 55 (spec D2, as ruled). A ladder's intro cards write no progress, right or wrong.
+  describe('a ladder intro (phase 55, spec D2, as ruled)', () => {
+    /** The intro stage, flagged as the prepare job stores it, or as a card outside one. */
+    const introStage = (flag: { intro?: boolean }): AnsweredQuestion[] => [
+      { glossId: 's1', type: 'meet', verdict: 'seen', ...flag },
+      { glossId: 's1', type: 'read_aloud', verdict: 'understood', ...flag },
+      // Wrong, or helped, which is stored wrong (spec D6).
+      { glossId: 's1', type: 'letter_tiles', verdict: 'wrong', ...flag },
+    ];
+    const intro = introStage({ intro: true });
+    const practice: AnsweredQuestion[] = [
+      { glossId: 's1', type: 'multiple_choice', correct: true },
+      { glossId: 's1', type: 'reverse_choice', correct: true },
+      { glossId: 's1', type: 'typed_translation', verdict: 'exact' },
+    ];
+    const levelOf = (rows: ProgressRow[], dimension: Dimension) => rows.find((r) => r.dimension === dimension);
+
+    it('lets the practice cards step written productive past a wrong intro tiles card, and leaves spoken production', () => {
+      const { changed } = evaluateSession(fiveRows('s1'), [...intro, ...practice], D);
+      expect(levelOf(changed, 'written_productive')).toEqual(row({ dimension: 'written_productive', level: 2, lastStepOn: D }));
+      expect(levelOf(changed, 'spoken_productive')).toBeUndefined();
+    });
+
+    it('records the same tiles card wrong, and the read aloud said, without the flag, as before', () => {
+      for (const flag of [{}, { intro: false }]) {
+        const { changed } = evaluateSession(fiveRows('s1'), [...introStage(flag), ...practice], D);
+        expect(levelOf(changed, 'written_productive')).toEqual(row({ dimension: 'written_productive', lastWrongOn: D }));
+        expect(levelOf(changed, 'spoken_productive')).toEqual(row({ dimension: 'spoken_productive', level: 2, lastStepOn: D }));
+      }
+    });
+
+    it('does not count an intro stage alone as practised: a session skipped after it writes no snapshot', () => {
+      expect(evaluateSession(fiveRows('s1'), intro, D)).toEqual({ changed: [], snapshot: [] });
+    });
+  });
 });
 
 describe('evaluateSession, reverse choice only', () => {
@@ -322,6 +358,22 @@ describe('phase 25 evidence (spec D10)', () => {
   // Phase 54 (spec D6). A meet card asks nothing: it is evidence of nothing.
   it('gives a meet card no evidence', () => {
     expect(evidenceFor({ glossId: s, type: 'meet', verdict: 'seen' })).toEqual([]);
+  });
+
+  // Phase 55 (spec D2, as ruled). A ladder's intro stage is for encoding, not evidence. A helped
+  // answer is stored `wrong` (spec D6), so `wrong` is it too.
+  it('gives a ladder intro card no evidence, right, wrong or helped, and the same card outside one its evidence', () => {
+    for (const type of ['letter_tiles', 'typed_translation'] as const) {
+      for (const verdict of ['exact', 'near_miss', 'wrong'] as const) {
+        expect(evidenceFor({ glossId: s, type, verdict, intro: true })).toEqual([]);
+        expect(evidenceFor({ glossId: s, type, verdict, intro: false })).toEqual(evidenceFor({ glossId: s, type, verdict }));
+      }
+    }
+    expect(evidenceFor({ glossId: s, type: 'letter_tiles', verdict: 'wrong' })).toEqual([
+      { dimension: 'written_productive', correct: false, cap: 3 },
+    ]);
+    expect(evidenceFor({ glossId: s, type: 'read_aloud', verdict: 'understood', intro: true })).toEqual([]);
+    expect(evidenceFor({ glossId: s, type: 'meet', verdict: 'seen', intro: true })).toEqual([]);
   });
 
   it('says the translation as spoken_productive, credited down to spoken_receptive', () => {

@@ -225,9 +225,10 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
   const WORDS: Record<string, string> = { tome: 'ספר', sprint: 'ריצה', lantern: 'פנס' };
 
   /** Past the seed (skipped), three saved words, `lantern` already stamped with
-   *  an empty list, and a list session requested. Three new words are three
-   *  ladders (phase 54, spec D3); `typedTome` makes tome due on writing at R 0.85
-   *  and level 3, so it is asked as a typed translation. */
+   *  an empty list, and a list session requested. New words are ladders (phase 54,
+   *  spec D3), two a session (phase 55, spec D4): the newest, sprint and lantern;
+   *  `typedTome` makes tome due on writing at R 0.85 and level 3, so it is asked as a
+   *  typed translation. */
   async function requestListSession(opts: { typedTome?: boolean } = {}) {
     const seed = await deps().sessions.createNextSession('u_1', E, { listening: false, speaking: false });
     await deps().sessions.skipSession('u_1', seed.sessionId);
@@ -258,7 +259,8 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
   it('asks once per picked rendering the job never ran for, through every attempt, and nothing for a stamped one with an empty list', async () => {
     const { sessionId, saved } = await requestListSession();
     const payload = ((await jobPayloads(t.db, PREPARE_SESSION)) as PrepareSessionPayload[]).find((job) => job.session_id === sessionId)!;
-    const expected = [jobOf(saved.tome), jobOf(saved.sprint)].sort((a, b) => a.singleton_key.localeCompare(b.singleton_key));
+    // Phase 55 (spec D4): two ladders, sprint's and lantern's; lantern is stamped.
+    const expected = [jobOf(saved.sprint)];
 
     // A first attempt whose generation fails: its read has committed, and asked.
     await expectGeminiStatus(ns, 500);
@@ -267,8 +269,9 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
 
     // The retry reads again, and the queue keeps one job per rendering.
     await clearNamespace(ns);
-    // Phase 54 (spec D5): three ladders, stage by stage, their meet cards asking nothing.
-    await expectDistractors(ns, { tasks: [null, null, null, 'meaning', 'meaning', 'meaning', 'word', 'word', 'word', 'typed', 'typed', 'typed'] });
+    // Phase 54 (spec D5), phase 55 (spec D3, D4): two ladders, their intro stages (a meet card and
+    // tiles each, q1-q4) asking nothing, then the practice cards stage by stage.
+    await expectDistractors(ns, { tasks: [null, null, null, null, 'meaning', 'meaning', 'word', 'word', 'typed', 'typed'] });
     await expectCheck(ns);
     await deps().sessions.prepareSession(payload);
     expect(await acceptJobs()).toEqual(expected);
@@ -277,9 +280,9 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
 
   it("never writes a session's own typed alternatives into the dictionary", async () => {
     await expectAccept(ns, { answers: ['codex'], answer_form: null });
-    // Phase 54 (spec D5): the two new words' ladders, stage by stage, merged with
-    // tome's typed translation (q5): their meet cards q1-q2 ask nothing.
-    await expectDistractors(ns, { tasks: [null, null, 'meaning', 'meaning', 'typed', 'word', 'word', 'typed', 'typed'] });
+    // Phase 54 (spec D5), phase 55 (spec D3): the two new words' ladders, stage by stage, merged
+    // with tome's typed translation (q7): their intro stages q1-q4 ask nothing.
+    await expectDistractors(ns, { tasks: [null, null, null, null, 'meaning', 'meaning', 'typed', 'word', 'word', 'typed', 'typed'] });
     await expectCheck(ns);
     await registerWorkers(boss, deps(), { pollingIntervalSeconds: 0.5 });
     const { sessionId, saved } = await requestListSession({ typedTome: true });

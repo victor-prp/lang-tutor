@@ -1,13 +1,14 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerChoice, answerMeaning, answerTyped, expectGeneration, readCard, speak, type Card, type CardKind } from './support/cards';
+import { answerChoice, answerMeaning, answerTyped, buildTiles, expectGeneration, readCard, speak, type Card, type CardKind } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
 import { seedMemory, seededR, type MemorySeed } from './support/memory';
 import { clearGemini, expectGeminiMatching, expectSoundAlike, expectTranscription, userText } from './support/mockServer';
 import { continueMeet } from './support/sessions';
+import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
@@ -25,9 +26,10 @@ const WORDS = BOARD_WORDS.slice(0, 4);
 const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.translation, w.form]));
 const MEANING_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.form, w.translation]));
 
-// Phase 54. Two cards for the two seeded words, and a ladder of four for each of the
-// two new ones.
-const CARDS = 10;
+// Phase 54. Two cards for the two seeded words, and a ladder for each of the two new
+// ones. Phase 55 (spec D2): this session can speak, so a ladder is six: met, read
+// aloud and built from tiles, then asked three ways.
+const CARDS = 14;
 
 /** Past a skipped seed, with the four words looked up and saved through the API. */
 async function saveFourWords(request: APIRequestContext): Promise<void> {
@@ -67,6 +69,8 @@ async function saveFourWords(request: APIRequestContext): Promise<void> {
  * - черепаха: SK at R 0.85 (S 10, 19 days), level 3: say the translation.
  * - подушка, зонтик: no memory, new words: a ladder each (phase 54), met first and
  *   then asked as a choice of meanings, a choice of words and a typed translation.
+ *   Phase 55 (spec D2, D3): each read aloud and built from tiles once met, those
+ *   three back to back.
  */
 const FIRST: MemorySeed[] = [
   { gloss: 'מרגנית', dimension: 'spoken_productive', stability: 1, daysAgo: 90, level: 1 },
@@ -81,7 +85,9 @@ const FIRST: MemorySeed[] = [
  *   a read aloud, p = √0.74 = 0.86.
  * - черепаха: SK at R 0.79 (S 10, 38 days), level 4: say the translation, p = 0.79.
  * - подушка, зонтик: no memory, new words: a ladder each (phase 54), whose cards
- *   the plan spreads through the session (spec D5).
+ *   the plan spreads through the session (spec D5). Phase 55 (spec D3): each
+ *   opens met, read aloud and built from tiles, so the session's first read
+ *   aloud is the first ladder's, right after its meet card.
  */
 const CANT_SPEAK: MemorySeed[] = [
   { gloss: 'מרגנית', dimension: 'spoken_productive', stability: 10, daysAgo: 62, level: 1 },
@@ -89,15 +95,36 @@ const CANT_SPEAK: MemorySeed[] = [
 ];
 
 /** Gets past a card this spec is not about: a meet card tapped through, a typed
- *  meaning by the saved meaning, which is judged by rule, a typed translation by
- *  its word, and a choice answered right. */
+ *  meaning by the saved meaning, which is judged by rule, a typed translation and
+ *  a tiles card by its word, and a choice answered right. */
 async function pass(page: Page, card: Card) {
   if (card.kind === 'meet') return continueMeet(page);
   if (card.kind === 'meaning') await answerMeaning(page, MEANING_OF[card.prompt]);
   else if (card.kind === 'typed') await answerTyped(page, FORM_OF[card.prompt]);
+  else if (card.kind === 'tiles') await buildTiles(page, FORM_OF[card.prompt]);
   else await answerChoice(page, card, true);
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await page.getByTestId('continue-button').click();
+}
+
+/** Phase 55. The next card on screen after `after`. With speaking off a read
+ *  aloud is passed unseen (phase 25 D8), and a ladder's read aloud follows its
+ *  meet card (spec D3), so the counter can step over a position, which the
+ *  caller checks (review M4). */
+async function nextShown(page: Page, after: number): Promise<{ position: number; card: Card }> {
+  const label = page.getByTestId('progress-label');
+  const at = async () => Number(/(\d+)\s*\/\s*\d+/.exec(stripIsolates(await label.textContent()))?.[1]);
+  let position = 0;
+  await expect(async () => {
+    const now = await at();
+    expect(now).toBeGreaterThan(after);
+    // A card passed unseen shows nothing: the card on screen is the one at the
+    // same position before and after the check.
+    await expect(page.getByTestId('question-prompt')).toBeVisible({ timeout: 1_000 });
+    expect(await at()).toBe(now);
+    position = now;
+  }, `no card shown after position ${after}`).toPass({ timeout: 30_000 });
+  return { position, card: await readCard(page, position, CARDS) };
 }
 
 test('speaking: read aloud and say the translation', async ({ page, request }) => {
@@ -118,11 +145,18 @@ test('speaking: read aloud and say the translation', async ({ page, request }) =
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 
-  const kinds: CardKind[] = [];
+  const cards: Card[] = [];
   for (let position = 1; position <= CARDS; position++) {
     const card = await readCard(page, position, CARDS);
-    kinds.push(card.kind);
-    if (card.kind === 'read') {
+    cards.push(card);
+    if (card.kind === 'read' && card.prompt !== 'ромашка') {
+      // Phase 55 (spec D2): a new word's read aloud, heard as its word at once.
+      expect(Object.keys(MEANING_OF)).toContain(card.prompt);
+      await expectTranscription(request, card.prompt);
+      await speak(page);
+      await expect(page.getByTestId('feedback-correct')).toBeVisible();
+      await page.getByTestId('continue-button').click();
+    } else if (card.kind === 'read') {
       // Read aloud: first not understood, then understood. Phase 50: the second
       // is heard as рамашка, which is how ромашка is said (its unstressed о is
       // an а), so it is understood by sound and the banner shows what was heard.
@@ -150,7 +184,17 @@ test('speaking: read aloud and say the translation', async ({ page, request }) =
       await pass(page, card);
     }
   }
-  expect(kinds.sort()).toEqual(['choice', 'choice', 'meet', 'meet', 'read', 'reverse', 'reverse', 'say', 'typed', 'typed']);
+  const kinds: CardKind[] = cards.map((card) => card.kind);
+  expect([...kinds].sort()).toEqual([
+    'choice', 'choice', 'meet', 'meet', 'read', 'read', 'read', 'reverse', 'reverse', 'say', 'tiles', 'tiles', 'typed', 'typed',
+  ]);
+  // Phase 55 (spec D3): each new word's intro stage back to back, its meet card,
+  // its read aloud and its tiles.
+  for (const [index, card] of cards.entries()) {
+    if (card.kind !== 'meet') continue;
+    expect(cards[index + 1], kinds.join(', ')).toEqual(expect.objectContaining({ kind: 'read', prompt: card.prompt }));
+    expect(cards[index + 2], kinds.join(', ')).toEqual(expect.objectContaining({ kind: 'tiles', prompt: MEANING_OF[card.prompt] }));
+  }
 
   await expect(page.getByText(/דיבור/).first(), report()).toBeVisible();
   expect(diagnostics.pageErrors, report()).toEqual([]);
@@ -169,6 +213,21 @@ test("speaking: can't speak now passes the read aloud, and say the translation t
   await saveFourWords(page.request);
   await seedMemory('e2e_speak_cant_ru', CANT_SPEAK);
 
+  // Review M4. Each card the server sends, by position: what a position the counter
+  // stepped over held. Read once the session is played.
+  const served: Promise<[number, string] | null>[] = [];
+  page.on('response', (response) => {
+    if (response.request().method() !== 'POST' || !/\/next-step$/.test(response.url())) return;
+    served.push(
+      response
+        .json()
+        .then((body: { question?: { type: string }; position?: { position: number } }) =>
+          body.question && body.position ? ([body.position.position, body.question.type] as [number, string]) : null,
+        )
+        .catch(() => null),
+    );
+  });
+
   await clearGemini(request);
   await expectGeneration(request);
   // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
@@ -185,27 +244,40 @@ test("speaking: can't speak now passes the read aloud, and say the translation t
     await pass(page, card);
   }
   // "Can't speak now" passes the card unseen (spec D8 of phase 25): the next
-  // card is up, and no banner or Continue came between.
+  // card is up, and no banner or Continue came between. Phase 55: whichever
+  // read aloud it is, a new word's or ромашка's, speaking is off from here.
   await page.getByTestId('speak-cant-speak').click();
-  await readCard(page, position + 1, CARDS);
+  let shown = await nextShown(page, position);
+  // Review M4: the card it passed is the one gone, and the next is up: none stepped over.
+  // The first read aloud is the first ladder's, so the next card is its tiles.
+  expect(shown.position, 'the card after the one passed').toBe(position + 1);
   await expect(page.getByTestId('feedback-title')).toHaveCount(0);
   await expect(page.getByTestId('continue-button')).toHaveCount(0);
 
   // Say the translation renders as the typed card from now on: черепаха's card
-  // is the one typed card that is not a new word's translation (phase 54).
-  for (position += 1; ; position++) {
-    expect(position, 'the session asked no say the translation after the read aloud').toBeLessThanOrEqual(CARDS);
-    const card = await readCard(page, position, CARDS);
-    expect(card.kind, `position ${position}`).not.toBe('say');
+  // is the one typed card that is not a new word's translation (phase 54). Every
+  // read aloud left is passed unseen, so none shows.
+  const stepped: number[] = [];
+  for (;;) {
+    const { card } = shown;
+    expect(card.kind, `position ${shown.position}`).not.toBe('say');
+    expect(card.kind, `position ${shown.position}`).not.toBe('read');
     if (card.kind === 'typed' && card.prompt === 'צב') {
-      expect(card.prompt).toBe('צב');
       await answerTyped(page, FORM_OF[card.prompt]);
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
       await page.getByTestId('continue-button').click();
       break;
     }
     await pass(page, card);
+    const before = shown.position;
+    shown = await nextShown(page, before);
+    for (let at = before + 1; at < shown.position; at++) stepped.push(at);
   }
+  // Review M4. Exactly the read alouds left before черепаха's card were stepped over,
+  // passed unseen: the second ladder's and ромашка's. A real card skipped would be one more.
+  const types = new Map((await Promise.all(served)).filter((entry) => entry !== null));
+  expect(stepped.map((at) => types.get(at)), `stepped over ${stepped.join(', ')}`).toEqual(['read_aloud', 'read_aloud']);
+  position = shown.position;
   // The last card ends on the results; an earlier one is skipped back home. The results
   // keep home's start button mounted behind them, so each ending is checked on its own.
   if (position < CARDS) {

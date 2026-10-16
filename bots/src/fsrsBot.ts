@@ -5,6 +5,8 @@ import type { BotMemory, LearnEvent, When } from './memory.ts';
 /**
  * Spec D14, the control bot. It forgets exactly as the picker assumes: FSRS-6 with the default
  * parameters, one state per word and dimension, updated by the same grades table the server uses.
+ * Phase 55 (spec D2, as ruled): a ladder's intro card, which the event marks, as the server does,
+ * moves no state: the table grades it nothing.
  */
 export type FsrsState = Record<string, MemoryState>;
 

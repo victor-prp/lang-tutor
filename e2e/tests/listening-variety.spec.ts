@@ -1,7 +1,7 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerTyped, boardWords, expectGeneration, readCard, type Card, type CardKind } from './support/cards';
+import { answerTyped, boardWords, buildTiles, expectGeneration, readCard, type CardKind } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
@@ -40,20 +40,6 @@ async function saveTenWords(request: APIRequestContext): Promise<void> {
     });
     expect(saved.ok(), await saved.text()).toBe(true);
   }
-}
-
-/** Builds the word on a tiles card from its tiles. */
-async function buildFromTiles(page: Page, card: Card) {
-  const count = await page.getByTestId(/^tile-\d+$/).count();
-  const tiles = await Promise.all(Array.from({ length: count }, async (_, i) => (await page.getByTestId(`tile-${i}`).textContent()) ?? ''));
-  const used = new Set<number>();
-  for (const letter of FORM_OF[card.prompt]) {
-    const index = tiles.findIndex((tile, i) => tile === letter && !used.has(i));
-    expect(index, `tile for ${letter}`).toBeGreaterThanOrEqual(0);
-    used.add(index);
-    await page.getByTestId(`tile-${index}`).click();
-  }
-  await page.getByTestId('tiles-submit').click();
 }
 
 /**
@@ -123,8 +109,8 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
     } else if (card.kind === 'tiles') {
       // Silent until checked: hearing the word would give it away.
       expect(await said()).toEqual([]);
-      // Build the word from its tiles.
-      await buildFromTiles(page, card);
+      // Build the word from its tiles: the last one answers the card (phase 55, spec D7).
+      await buildTiles(page, FORM_OF[card.prompt]);
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
       // Then it says the word just built.
       await expect.poll(said).toEqual([{ text: FORM_OF[card.prompt], lang: 'ru-RU' }]);

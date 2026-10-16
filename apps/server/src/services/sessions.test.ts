@@ -396,7 +396,8 @@ describe('repos', () => {
     });
 
     const result = await service.submitAnswer('u1', 's1', 't1', { text: 'finestar' });
-    expect(inserted).toEqual([['s1', 0, 't1', { text: 'finestar', verdict: 'near_miss' }]]);
+    // Phase 55 (spec D6): a typed card records whether it was helped, null from an app that sent none.
+    expect(inserted).toEqual([['s1', 0, 't1', { text: 'finestar', verdict: 'near_miss', helped: null }]]);
     expect(result.answers[0]).toMatchObject({ is_correct: true, verdict: 'near_miss' });
     // Phase 43 (spec D2, D3). A first answer that started the session asks for the next in stock.
     expect(jobs.enqueued).toEqual([

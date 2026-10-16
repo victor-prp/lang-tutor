@@ -80,11 +80,14 @@ describe('a stock for a learner with a target (spec D6, D8)', () => {
 
     expect(status).toBe('preparing');
     expect(await readStockRow(t.db, sessionId)).toEqual({ status: 'preparing', practiceDay: null, chosenOn: DAY });
-    // Five days off, no word of it met: the exam asks for every slot.
+    // Five days off, no word of it met: the exam asks for every slot. Phase 55 (spec D4, D5): two
+    // ladders, the session's ceiling, and the two slots they leave stay off the main path.
     expect(await readSessionSplit(t.db, sessionId)).toEqual([
-      { targetId: exam, wish: 10, slots: 10, picked: 3, reason: 'not_ready', daysLeft: 5, readyCount: 0, wordCount: 3 },
+      { targetId: exam, wish: 10, slots: 10, picked: 2, reason: 'not_ready', daysLeft: 5, readyCount: 0, wordCount: 3 },
     ]);
-    expect((await picksOf(sessionId)).slice(0, 3).sort()).toEqual(words.slice(0, 3).sort());
+    const picks = await picksOf(sessionId);
+    expect(picks).toHaveLength(2);
+    expect(words.slice(0, 3)).toEqual(expect.arrayContaining(picks));
   });
 });
 
@@ -107,7 +110,11 @@ describe('a stock chosen on an earlier day (spec D12, ruling R-D12)', () => {
     expect(await readStockRow(t.db, stale)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY });
     expect(await readStockRow(t.db, fresh)).toEqual({ status: 'preparing', practiceDay: null, chosenOn: NEXT_DAY });
     expect(await slotsOf(fresh)).toEqual({ [exam]: 10, [homework]: 0 });
-    expect((await picksOf(fresh)).slice(0, 3).sort()).toEqual(words.slice(0, 3).sort());
+    // Phase 55 (spec D4, D5): the exam's two ladders, and nothing else: the two slots they leave
+    // fit no homework ladder and stay off the main path.
+    const picks = await picksOf(fresh);
+    expect(picks).toHaveLength(2);
+    expect(words.slice(0, 3)).toEqual(expect.arrayContaining(picks));
     expect(logged('session_retired')).toEqual([{ event: 'session_retired', enrollment_id: E, session_id: stale, reason: 'stale_split' }]);
     // Chosen today, the new stock is the one the next home read offers.
     expect((await service.currentSession('u_1', E)).current?.id).toBe(fresh);

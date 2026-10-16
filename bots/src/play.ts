@@ -10,7 +10,7 @@ import {
 } from '@lang-tutor/core/domain';
 
 import { ActrMemory, type ActrState } from './actr.ts';
-import { WEAK_P, liveDimensions } from './analysis.ts';
+import { WEAK_P, introReader, liveDimensions } from './analysis.ts';
 import { decide, type Decision } from './answer.ts';
 import { ApiError, type BotApi } from './api.ts';
 import { FsrsMemory, type FsrsState } from './fsrsBot.ts';
@@ -241,12 +241,15 @@ async function playSession(deps: PlayDeps, memory: BotMemory, rng: Rng, enrollme
   const sessionId = await openSession(deps, enrollmentId);
   let question = await firstQuestion(deps, sessionId);
   countList(deps, memory, startHour);
+  // Phase 55 (spec D2, as ruled). Which cards are a ladder's intro, from the session's cards so
+  // far: those the log already holds, when a session left open is resumed, and each one played.
+  const intro = introReader(deps.state.log.filter((entry) => entry.session === sessionId));
   let hour = startHour;
   let cards = 0;
   while (question) {
     if (++cards > MAX_CARDS) throw failure(`/sessions/${sessionId}`, `no end after ${MAX_CARDS} cards`);
     memory.setTime({ day: deps.line.date, hour });
-    const next = await answerCard(deps, memory, rng, sessionId, question, hour);
+    const next = await answerCard(deps, memory, rng, sessionId, question, hour, intro);
     question = next.complete ? null : next.question;
     hour += CARD_HOURS;
   }
@@ -278,10 +281,12 @@ async function answerCard(
   sessionId: string,
   card: Question,
   hour: number,
+  intro: (card: { type: Question['type']; word: string | null }) => boolean,
 ): Promise<NextStepResponse> {
   const { profile, state, line } = deps;
   const decision = decide(card, memory, state.saved, rng, profile);
   const { detail } = decision;
+  const isIntro = intro({ type: card.type, word: detail.word });
 
   // The truth before the card, in every live dimension and every one it tests: what analysis
   // compares the picker with (D21 a, b).
@@ -308,8 +313,11 @@ async function answerCard(
     sent = { ...first, next: second.next, ...(verdict ? { verdict } : {}), heard: second.heard ?? first.heard };
   }
 
-  // Ruling 24: the bot learns what the server judged, not what it meant to do.
-  if (detail.word) memory.learn(detail.word, { type: card.type, correct: sent.correct, verdict: sent.verdict });
+  // Ruling 24: the bot learns what the server judged, not what it meant to do. Phase 55 (spec D2,
+  // as ruled): and whether the server grades it, which a ladder's intro card it does not.
+  if (detail.word) {
+    memory.learn(detail.word, { type: card.type, correct: sent.correct, verdict: sent.verdict, ...(isIntro ? { intro: true } : {}) });
+  }
 
   // Phase 54 (spec D8). A meet card asks nothing: like the server's score, the day's count leaves it
   // out (the log keeps it), so a new word's meet card is neither a card right nor one missed.
