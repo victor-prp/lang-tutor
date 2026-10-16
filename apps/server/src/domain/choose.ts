@@ -58,8 +58,10 @@ export type ChoiceInput = {
 };
 
 /** Phase 37 (spec D3). `SPEAK` is a gloss the speaking pick moved to spoken
- *  production (D4); a return or a due word it takes keeps its class. */
-export type ChoiceClass = 'STEP' | 'NEW' | 'DUE' | 'EXPAND' | 'NOT_DUE' | 'DONE' | 'SPEAK';
+ *  production (D4); a return or a due word it takes keeps its class. Phase 57 (spec D7):
+ *  `TARGET`, a target session's pick chosen from target skills (targetPicker.ts), whose
+ *  ladders are `NEW`. */
+export type ChoiceClass = 'STEP' | 'NEW' | 'DUE' | 'EXPAND' | 'NOT_DUE' | 'DONE' | 'SPEAK' | 'TARGET';
 
 /** `level` and `r` are the chosen dimension's, for the job's card choice; `r` is
  *  null for a dimension with no memory yet. Phase 54 (spec D2, D3): `ladder`, a NEW pick
