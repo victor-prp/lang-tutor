@@ -11,7 +11,7 @@ import { withVoices } from './support/voices';
 
 test.setTimeout(180_000);
 
-// The saved form of each meaning, for reversed and typed cards (phase 23).
+// The saved form of each meaning, for reversed, typed and tiles cards (phase 23).
 const FORM_OF: Record<string, string> = { קראה: 'прочитала', הקריאה: 'прочитала', בצל: 'лук', קשת: 'лук' };
 
 test('past the seed, a session is built from the saved words', async ({ page, request }) => {
@@ -50,19 +50,19 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   // 5. Every card asks one of the saved words, whichever way round it asks.
   // Phase 39 (spec D5): each word's two senses are a gloss family, and a
   // session asks one gloss of a family, so one word each. Phase 54: both are new
-  // words, so each is a ladder (met, then asked three ways): eight cards, four
-  // of each word.
+  // words, so each is a ladder (met, then asked three ways); phase 55: built
+  // from tiles once met. Ten cards, five of each word.
   await tapUntil(page, 'start-button', 'progress-label');
   const words: string[] = [];
-  for (let position = 1; position <= 8; position++) {
+  for (let position = 1; position <= 10; position++) {
     // Whatever type each card is: this test is about the words, not the types.
-    const card = await readCard(page, position, 8);
+    const card = await readCard(page, position, 10);
     if (card.kind === 'meet' || card.kind === 'choice' || card.kind === 'meaning') words.push(card.prompt);
     else if (card.kind === 'reverse') words.push(rightOption(card));
     else words.push(FORM_OF[card.prompt]);
     await playOut(page, card);
   }
-  expect([...words].sort(), words.join(', ')).toEqual([...Array(4).fill('лук'), ...Array(4).fill('прочитала')]);
+  expect([...words].sort(), words.join(', ')).toEqual([...Array(5).fill('лук'), ...Array(5).fill('прочитала')]);
 
   // 6. Results lead home, to the next session: built in stock while this one
   // was played (phase 43, spec D2, D3), so home offers start, not create.

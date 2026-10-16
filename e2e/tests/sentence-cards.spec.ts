@@ -8,6 +8,7 @@ import {
   STUB_SENTENCE_HEBREW,
   answerChoice,
   answerTyped,
+  buildTiles,
   expectGeneration,
   readCard,
   rightOption,
@@ -50,8 +51,9 @@ const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.m
 const FORMS = WORDS.map((w) => w.form);
 /** Phase 34 (spec D8). STUB_GAP's word in STUB_SENTENCE_HEBREW, which a sentence card marks. */
 const MARKED = 'קראה';
-/** Five picks of one card each and a new word's ladder of four. */
-const CARDS = 9;
+/** Five picks of one card each and a new word's ladder of five (phase 55: its
+ *  tiles after the meet card). */
+const CARDS = 10;
 
 /** Past a skipped seed, the six words looked up and saved through the API. */
 async function saveSixWords(request: APIRequestContext): Promise<string> {
@@ -93,10 +95,11 @@ async function saveSixWords(request: APIRequestContext): Promise<string> {
  *   the type used least takes each tie, so the three get one each. Five picks
  *   on one dimension pass the cap of four, so the last waits, and still fills
  *   the session: six saved words make six cards.
- * - כפפה: no memory, a new word: a ladder (phase 54), its meet card and then
- *   a choice of meanings, a choice of words and a typed translation.
+ * - כפפה: no memory, a new word: a ladder (phase 54), its meet card and its
+ *   tiles (phase 55), then a choice of meanings, a choice of words and a typed
+ *   translation.
  * Six picks, so no board. The five other cards come in the order of their p, the
- * ladder's four among them (spec D5): nine in all.
+ * ladder's five among them (spec D5): ten in all.
  */
 const MEMORY: MemorySeed[] = [
   { gloss: 'פרפר', dimension: 'written_productive', stability: 1, daysAgo: 90, level: 1 },
@@ -136,12 +139,13 @@ const nextStepSent = (page: Page) =>
   page.waitForRequest((sent) => sent.method() === 'POST' && sent.url().endsWith('/next-step'));
 
 /** Gets past a card this spec is not about: a meet card tapped through, a choice
- *  answered right, a typed card by its saved form, and a sentence to translate
- *  by showing the answer. */
+ *  answered right, a typed card and a tiles card by the saved form, and a
+ *  sentence to translate by showing the answer. */
 async function pass(page: Page, card: Card) {
   if (card.kind === 'meet') return continueMeet(page);
   if (card.kind === 'choice' || card.kind === 'reverse' || card.kind === 'cloze-choice') await answerChoice(page, card, true);
   else if (card.kind === 'typed') await answerTyped(page, FORM_OF[card.prompt]);
+  else if (card.kind === 'tiles') await buildTiles(page, FORM_OF[card.prompt]);
   else await page.getByTestId('typed-show-answer').click();
   await page.getByTestId('continue-button').click();
 }
@@ -214,7 +218,7 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       await pass(page, card);
     }
   }
-  expect(kinds.sort()).toEqual(['choice', 'cloze-choice', 'cloze-typed', 'meet', 'reverse', 'reverse', 'translate', 'typed', 'typed']);
+  expect(kinds.sort()).toEqual(['choice', 'cloze-choice', 'cloze-typed', 'meet', 'reverse', 'reverse', 'tiles', 'translate', 'typed', 'typed']);
 
   await expect(page.getByTestId('results-score')).toBeVisible();
   expect(diagnostics.pageErrors, report()).toEqual([]);

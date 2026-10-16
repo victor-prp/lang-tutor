@@ -4,7 +4,7 @@ import { API_URL } from '../urls';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
-import { answerChoice, answerTyped, expectGeneration, readCard } from './support/cards';
+import { answerChoice, answerTyped, expectGeneration, readCard, retypeWrong } from './support/cards';
 import { knownSeeds, seedMemory, type MemorySeed } from './support/memory';
 import { clearGemini } from './support/mockServer';
 import { continueMeet } from './support/sessions';
@@ -58,18 +58,19 @@ test('a session moves the words it practised up the ladder, and the list filters
   await seedMemory('e2e_progress_ru', MEMORY);
 
   // 2. A list session: лук answered right, прочитала wrong. Phase 54: прочитала
-  // is a new word, so it is a ladder, met first and then asked three ways; лук is
-  // one card, so five in all. Where each falls is the plan's (spec D5), so each
-  // card is answered by its kind. Home makes the session on the way back (phase
-  // 43, spec D7), so the memory and the generation are in place before.
+  // is a new word, so it is a ladder, met first and then asked three ways; phase
+  // 55: built from tiles right after it is met. лук is one card, so six in all.
+  // Where each falls is the plan's (spec D5), so each card is answered by its
+  // kind. Home makes the session on the way back (phase 43, spec D7), so the
+  // memory and the generation are in place before.
   await clearGemini(request);
   await expectGeneration(request);
   await page.getByTestId('translate-back').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
   const kinds: string[] = [];
-  for (let position = 1; position <= 5; position++) {
-    const card = await readCard(page, position, 5);
+  for (let position = 1; position <= 6; position++) {
+    const card = await readCard(page, position, 6);
     kinds.push(card.kind);
     if (card.kind === 'meet') {
       expect(card.prompt).toBe('прочитала');
@@ -79,16 +80,21 @@ test('a session moves the words it practised up the ladder, and the list filters
     if (card.kind === 'new-meaning') {
       expect(card.prompt).toBe('лук');
       await answerChoice(page, card, true);
+    } else if (card.kind === 'tiles') {
+      await page.getByTestId('tiles-show-answer').click();
+      await expect(page.getByTestId('feedback-wrong')).toBeVisible();
     } else if (card.kind === 'typed') {
+      // Phase 55 (spec D7): a wrong word is typed again, wrong twice more here, before its banner.
       await answerTyped(page, 'неверно');
+      await retypeWrong(page, 'неверно');
     } else {
       expect(['choice', 'reverse'], `position ${position}`).toContain(card.kind);
       await answerChoice(page, card, false);
     }
     await page.getByTestId('continue-button').click();
   }
-  // The ladder's three, in order, and the new meaning once.
-  expect(kinds.filter((kind) => kind !== 'new-meaning'), kinds.join(', ')).toEqual(['meet', 'choice', 'reverse', 'typed']);
+  // The ladder's cards, in order, and the new meaning once.
+  expect(kinds.filter((kind) => kind !== 'new-meaning'), kinds.join(', ')).toEqual(['meet', 'tiles', 'choice', 'reverse', 'typed']);
   expect(kinds.filter((kind) => kind === 'new-meaning')).toHaveLength(1);
 
   // 3. Results: two practised words. The new meaning moved קשת's recognition

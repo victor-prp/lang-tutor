@@ -1,5 +1,7 @@
+import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import type { APIRequestContext } from '@playwright/test';
 
+import { NEW_PER_SESSION } from '../../../apps/server/src/domain/chooseConstants';
 import { MOCKSERVER_URL, requireEnv } from '../../urls';
 import { STUB_SENTENCE } from './cards';
 
@@ -15,6 +17,11 @@ import { STUB_SENTENCE } from './cards';
 export const E2E_MOCK_NAMESPACE = requireEnv('E2E_MOCK_NAMESPACE');
 
 const path = `/${E2E_MOCK_NAMESPACE}/v1beta/models/.*:generateContent`;
+
+/** Phase 55 (spec D4). The most cards a list session holds, so the positions a
+ *  preparation stub answers: SESSION_LENGTH graded cards, and each ladder's meet
+ *  and read aloud, which are free. */
+export const MOST_CARDS = SESSION_LENGTH + 2 * NEW_PER_SESSION;
 
 function envelope(payload: unknown) {
   return JSON.stringify({
@@ -104,13 +111,14 @@ export async function expectContext(
 }
 
 /**
- * Phase 34 (spec D5). The checker's answer for q1 to q10: each of the three
- * wrong options the batch stubs write (cards.ts) is wrong, as an option and in
- * a gap, and a sentence card's Hebrew translates naturally as STUB_SENTENCE,
- * which uses STUB_GAP, so the card is kept. It reads no context sentence, so
- * one the context call wrote is dropped: `overrides` says how the checker
- * reads one (`q3c`: `{ context_words }` for a Hebrew sentence,
- * `{ context_meaning }` for a target-language one). Ranks above the default.
+ * Phase 34 (spec D5). The checker's answer for q1 to q10, to MOST_CARDS since
+ * phase 55: each of the three wrong options the batch stubs write (cards.ts) is
+ * wrong, as an option and in a gap, and a sentence card's Hebrew translates
+ * naturally as STUB_SENTENCE, which uses STUB_GAP, so the card is kept. It
+ * reads no context sentence, so one the context call wrote is dropped:
+ * `overrides` says how the checker reads one (`q3c`: `{ context_words }` for a
+ * Hebrew sentence, `{ context_meaning }` for a target-language one). Ranks
+ * above the default.
  */
 export async function expectCheck(
   request: APIRequestContext,
@@ -118,10 +126,11 @@ export async function expectCheck(
   priority = OVERRIDE_PRIORITY,
 ): Promise<void> {
   const wrong = [false, false, false];
+  const keys = Array.from({ length: MOST_CARDS }, (_, i) => `q${i + 1}`);
   const items = [
-    ...Array.from({ length: 10 }, (_, i) => ({ key: `q${i + 1}`, options: wrong, gap_fits: wrong, natural_translation: STUB_SENTENCE })),
+    ...keys.map((key) => ({ key, options: wrong, gap_fits: wrong, natural_translation: STUB_SENTENCE })),
     ...Object.keys(overrides)
-      .filter((key) => !/^q([1-9]|10)$/.test(key))
+      .filter((key) => !keys.includes(key))
       .map((key) => ({ key })),
   ].map((item) => ({ ...item, ...overrides[item.key] }));
   await expectMarked(request, CHECK_MARKER, { items }, priority);
