@@ -1,7 +1,7 @@
 import type { LlmContext } from '@lang-tutor/core/api';
 import { normaliseHebrew } from '@lang-tutor/core/domain';
 
-import { contextItemFor, markFor, resolveContext, type ContextItem } from '../../src/domain/context';
+import { contextItemFor, markFor, resolveContext, wordMapFor, type ContextItem } from '../../src/domain/context';
 import { comparable } from '../../src/domain/distractors';
 import { isInScript } from '../../src/domain/languages';
 import type { ContextCase } from './cases';
@@ -66,7 +66,18 @@ export function contextTier2(kase: ContextCase, answer: LlmContext): Check[] {
   if (item.task === 'mark') {
     const mark = markFor(item, got);
     const marked = mark ? item.sentence.slice(mark.start, mark.end) : null;
-    return [{ name: `${kase.sentence!.marked} is marked`, ok: marked !== null && comparable(marked) === comparable(kase.sentence!.marked), detail: marked ?? `${got?.sentence_word ?? '(none)'} not found` }];
+    const checks: Check[] = [{ name: `${kase.sentence!.marked} is marked`, ok: marked !== null && comparable(marked) === comparable(kase.sentence!.marked), detail: marked ?? `${got?.sentence_word ?? '(none)'} not found` }];
+    // Phase 59: each expected run is tappable, with the reference's words for it.
+    const map = wordMapFor(item, got, mark, [], 'g-c') ?? [];
+    for (const run of kase.mapped ?? []) {
+      const found = map.find((word) => comparable(item.sentence.slice(word.start, word.end)) === comparable(run.hebrew));
+      checks.push({
+        name: `${run.hebrew} is tappable as ${run.translation}`,
+        ok: found !== undefined && comparable(found.text) === comparable(run.translation),
+        detail: JSON.stringify(got?.sentence_words ?? null),
+      });
+    }
+    return checks;
   }
   const outcome = resolveContext(item, got, { target: kase.target, explanation: 'he' });
   const word = comparable(got?.context_word ?? '');
