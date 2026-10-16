@@ -80,3 +80,32 @@ export const HOMEWORK_LAST_DAY_SLOTS = 7;
  *  every slot, ready or not; with one day left it also takes every slot from the other
  *  targets and the main path (exclusive). A starting value, named here to tune. */
 export const EXAM_RUN_UP_DAYS = 2;
+
+/** Phase 57 (spec D5, ruled in half-points). A target's cap on a skill's value by days left,
+ *  in half-points (20 = 10 points). Keys are the practice days, descending: a day between
+ *  entries takes the entry of the smallest table day at or above it, past the last day the
+ *  value below, and the due date (days left 0 or less) takes the top. A starting value,
+ *  named here to tune in the day simulation. */
+export const TARGET_CAP_HALVES: readonly (readonly [daysLeft: number, cap: number])[] = [
+  [27, 3],
+  [20, 4],
+  [14, 5],
+  [9, 6],
+  [5, 7],
+  [4, 8],
+  [3, 10],
+  [2, 16],
+  [1, 20],
+];
+
+/** Phase 57 (spec D5). The cap past the table's longest day, and on the due date. */
+export const TARGET_CAP_FAR_HALVES = 2;
+export const TARGET_CAP_DUE_HALVES = 20;
+
+/** Phase 57 (spec D4). Half-points a session moves a target skill by: a recall card gives
+ *  +4, a recognition card +2, an Again costs 4. A starting value, named here to tune. */
+export const TARGET_POINTS_HALVES = { recall: 4, recognition: 2, miss: 4 } as const;
+
+/** Phase 57. Speaking cards in a target-only session; the main path keeps
+ *  SPEAKING_PER_SESSION. */
+export const TARGET_SPEAKING_PER_SESSION = 3;
