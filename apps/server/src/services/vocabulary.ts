@@ -213,9 +213,10 @@ export function createVocabularyService({
      *
      * Phase 58b (R2): or every word of the list, whatever its level.
      *
-     * Phase 57 (ADR 0014, ruling M1): as unsave, by path. The main path's stock goes, and
-     * the stock of each active target that held a removed word; the locks in lockPaths'
-     * order, the stocks retired before the progress lock and asked for only after it (R4).
+     * Phase 57 (ADR 0014, rulings M1, M2): as unsave, by path, whichever the scope. The main
+     * path's stock goes, and the stock of each active target that held a removed word; the
+     * locks in lockPaths' order, the stocks retired before the progress lock and asked for
+     * only after it (R4).
      */
     removeWords: async (
       actorUserId: string,

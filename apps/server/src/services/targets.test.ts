@@ -179,6 +179,8 @@ function world(
       if (saved.includes(glossId)) saved.splice(saved.indexOf(glossId), 1);
     },
     findGlossIdsAtLevel: async () => (setup.atLevel ?? []).map((glossId) => ({ lemma: WORDS[glossId].lemma, glossId })),
+    // Phase 58b (R2). Every saved gloss, as removing every word reads them.
+    findAllSavedGlossIds: async () => saved.map((glossId) => ({ lemma: WORDS[glossId].lemma, glossId })),
     deleteEntries: async ({ glossIds }) => {
       calls.push(`deleteEntries ${glossIds.join(' ')}`);
       for (const glossId of glossIds) if (saved.includes(glossId)) saved.splice(saved.indexOf(glossId), 1);
@@ -1008,7 +1010,7 @@ describe('vocabulary.unsave (spec D1, Review Focus 2)', () => {
 // Phase 58 meets phase 57 (ruling M1). Removing a level is an unsave of every word at it, by
 // path: the main path's stock and the stock of each active target that held a removed word are
 // retired before the progress lock and asked for again after it (ADR 0014 R4).
-describe('vocabulary.removeLevel (phase 58, ruling M1)', () => {
+describe('vocabulary.removeWords (phase 58, ruling M1; 58b, ruling M2)', () => {
   const wordsRemoved = (job: { name: string; data: object; options: object }) => ({ ...job, data: { ...job.data, reason: 'words_removed' } });
 
   it('locks the main path and the active targets holding a removed word, retires their stocks, and asks for them after the progress lock', async () => {
@@ -1089,6 +1091,60 @@ describe('vocabulary.removeLevel (phase 58, ruling M1)', () => {
     const { vocabularyService, calls, retired, jobs } = world({ saved: ['g_casa'], targets: [target()], open: { stock: listStock() } });
 
     expect(await vocabularyService.removeWords(OWNER, 'e1', { level: 3 })).toEqual({ removed_words: 0, removed_glosses: 0 });
+
+    expect(calls).toEqual(['lockNextSession main']);
+    expect(retired).toEqual([]);
+    expect(jobs.enqueued).toEqual([]);
+  });
+
+  // Phase 58b (ruling M2). Every word is the same removal, whatever the level: each active
+  // target holding a word goes by its path. One holding none can only be empty, which has no
+  // stock (NoSavedWords): it is neither locked nor retired nor restocked.
+  it('removes every saved word on all, by path in the same order', async () => {
+    const { vocabularyService, calls, retired, jobs, events, stored, saved } = world({
+      saved: ['g_casa', 'g_gatto', 'g_cane'],
+      targets: [target({ words: ['g_casa'] }), target({ id: 't2', words: [] }), target({ id: 't3', words: ['g_cane', 'g_gatto'] })],
+      open: { stock: listStock() },
+      openOn: { t1: { stock: listStock('s_t1') }, t3: { stock: listStock('s_t3') } },
+    });
+
+    expect(await vocabularyService.removeWords(OWNER, 'e1', { all: true })).toEqual({ removed_words: 3, removed_glosses: 3 });
+
+    expect(saved).toEqual([]);
+    expect([...stored.values()].map((row) => [row.id, row.words])).toEqual([
+      ['t1', []],
+      ['t2', []],
+      ['t3', []],
+    ]);
+    expect(events.map((event) => [event.targetId, event.before])).toEqual([
+      ['t1', { gloss_ids: ['g_casa'] }],
+      ['t3', { gloss_ids: ['g_cane', 'g_gatto'] }],
+    ]);
+    expect(retired).toEqual(['s_stock', 's_t1', 's_t3']);
+    expect(jobs.enqueued).toEqual([wordsRemoved(MAIN_STOCK), wordsRemoved(targetStock('t1')), wordsRemoved(targetStock('t3'))]);
+    expect(calls).toEqual([
+      'lockNextSession main',
+      'lockNextSession main',
+      'lockNextSession t1',
+      'lockNextSession t3',
+      'retireStock',
+      'retireStock',
+      'retireStock',
+      'lockEnrollment',
+      'deleteEntries g_casa g_gatto g_cane',
+      'removeGlossesFromTargets g_casa g_gatto g_cane',
+      'insertEvent words_removed',
+      'insertEvent words_removed',
+      'enqueue e1',
+      'enqueue e1:t1',
+      'enqueue e1:t3',
+    ]);
+  });
+
+  it('takes no lock past the main path and touches no stock when the list is empty', async () => {
+    const { vocabularyService, calls, retired, jobs } = world({ saved: [], targets: [target({ words: [] })], open: { stock: listStock() } });
+
+    expect(await vocabularyService.removeWords(OWNER, 'e1', { all: true })).toEqual({ removed_words: 0, removed_glosses: 0 });
 
     expect(calls).toEqual(['lockNextSession main']);
     expect(retired).toEqual([]);

@@ -74,7 +74,8 @@ export async function requestStocks(
   repos: Pick<Repos, 'jobs'>,
   enrollmentId: string,
   targetIds: readonly string[],
-  // Phase 58 (final review I1): removing a level's words restocks too, whether or not a target held them.
+  // Phase 58 (final review I1): removing a level's words, or (58b) every word, restocks too,
+  // whether or not a target held them.
   reason: 'target' | 'words_removed' = 'target',
 ): Promise<void> {
   for (const path of changedPaths(targetIds)) {
@@ -85,11 +86,11 @@ export async function requestStocks(
 /**
  * Phase 53 (ruling R-D12b), phase 57 (spec D2). A change to targets: its stocks retired, then
  * the next of each asked for (retireStocks, requestStocks). Shared by the target changes that
- * take no progress lock. A removal (a word out of a target, an unsave, a level's removal)
- * takes the two steps apart around that lock (ADR 0014 R4): it retires before it, since a skip
- * holds its stock's row and then the lock, and it asks after it, since a session end holds the
- * lock and then enqueues its path's stock under the same singleton key, whose uncommitted row a
- * stately insert waits on.
+ * take no progress lock. A removal (a word out of a target, an unsave, a level's words or every
+ * word) takes the two steps apart around that lock (ADR 0014 R4): it retires before it, since a
+ * skip holds its stock's row and then the lock, and it asks after it, since a session end holds
+ * the lock and then enqueues its path's stock under the same singleton key, whose uncommitted row
+ * a stately insert waits on.
  */
 export async function restockAfterTargetChange(
   repos: Pick<Repos, 'session' | 'jobs'>,
