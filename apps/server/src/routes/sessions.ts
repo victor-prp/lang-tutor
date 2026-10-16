@@ -378,7 +378,14 @@ export function createSessionsRouter(sessions: SessionService) {
               id,
               body.question_id,
               // Phase 54 (spec D6). A meet card's `seen` has no second try.
-              'seen' in body ? { seen: true } : 'pass' in body ? { pass: body.pass } : { option_index: body.option_index },
+              // Phase 56 (spec D5): a pass after help is recorded helped.
+              'seen' in body
+                ? { seen: true }
+                : 'pass' in body
+                  ? body.helped === undefined
+                    ? { pass: body.pass }
+                    : { pass: body.pass, helped: body.helped }
+                  : { option_index: body.option_index },
               { retry: 'seen' in body ? false : body.retry ?? false },
             );
       return c.json(buildNextStepResponse(id, record), 200);

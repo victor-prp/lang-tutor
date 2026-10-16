@@ -440,6 +440,9 @@ export const NextStepRequestSchema = z.union([
     question_id: z.string().min(1),
     pass: z.enum(['skip', 'show_answer']),
     retry: z.boolean().optional(),
+    // Phase 56 (spec D5). Say the translation given up after help: recorded,
+    // not graded (a pass is a give-up or a skip either way).
+    helped: z.boolean().optional(),
   }),
   // Phase 54 (spec D6). A meet card, tapped through.
   z.object({

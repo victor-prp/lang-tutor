@@ -155,6 +155,13 @@ describe('NextStepRequestSchema', () => {
     expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'casa', helped: 'yes' }).success).toBe(false);
   });
 
+  // Phase 56 (spec D5, final review). A spoken card given up after help says so.
+  it('keeps helped on a pass, and takes one without it', () => {
+    expect(NextStepRequestSchema.parse({ question_id: 'q1', pass: 'show_answer', helped: true })).toEqual({ question_id: 'q1', pass: 'show_answer', helped: true });
+    expect(NextStepRequestSchema.parse({ question_id: 'q1', pass: 'skip' })).not.toHaveProperty('helped');
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q1', pass: 'skip', helped: 'yes' }).success).toBe(false);
+  });
+
   // Phase 56 (spec D3). Help on a spoken or a judged card travels with its request.
   it('keeps helped on a spoken and a judged answer, takes them without it, and refuses one that is not a boolean', () => {
     const spoken = { question_id: 'q1', mime_type: 'audio/aac', audio: 'AAAA' } as const;

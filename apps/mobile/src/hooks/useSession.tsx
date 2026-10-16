@@ -367,11 +367,14 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       setState((current) =>
         current ? { ...current, answer: { pass: kind }, speech: IDLE_ATTEMPT, advanceRequested: kind === 'skip' } : current,
       );
+      // Phase 56 (spec D5): given up after help, the pass says so.
+      const helped = helpedFor(question, state.help);
+      const passed = helped === undefined ? { pass: kind } : { pass: kind, helped };
       // Phase 34 (spec D9): on a second try, a skip is sent as the give-up.
       queueResponse(
         sessionId,
         settle(question, retry, (as) =>
-          api.nextStep(sessionId, nextStepRequest(question.id, { pass: kind }, as)).then((next) => ({ answer: { pass: kind }, next })),
+          api.nextStep(sessionId, nextStepRequest(question.id, passed, as)).then((next) => ({ answer: { pass: kind }, next })),
         ),
       );
     },

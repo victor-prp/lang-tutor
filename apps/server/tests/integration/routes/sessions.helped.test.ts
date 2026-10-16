@@ -216,6 +216,14 @@ describe('help on more cards (phase 56 D2–D4)', () => {
     expect(spoken).toMatchObject({ reps: 1, lapses: 1 });
   });
 
+  // Final review. Given up after help: a give-up as ever, and the help recorded.
+  it('records a spoken give-up after help as given up, with helped', async () => {
+    const { sessionId, questions, next } = await start(['say_translation']);
+    await next({ question_id: questions[0].id, pass: 'show_answer', helped: true });
+    expect(await readStoredAnswers(t.db, sessionId)).toMatchObject([{ verdict: 'gave_up', answer_string: '', is_correct: false }]);
+    expect(await readHelped(t.db, sessionId)).toEqual([true]);
+  });
+
   it('records a spoken answer sent without help as understood, with helped false', async () => {
     const { sessionId, questions, ns, post } = await start(['say_translation']);
     await expectTranscription(ns, 'tome');

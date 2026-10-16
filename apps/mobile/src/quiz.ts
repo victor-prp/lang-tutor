@@ -175,10 +175,11 @@ export function passFor(kind: 'skip' | 'show_answer', retry: PendingRetry | null
  *  Phase 38 (spec D4): a first text answer carries `hint_opened` when the card
  *  has a hint; a retry never does, as the hint it opened is the app's doing.
  *  Phase 55 (spec D6): a text answer carries `helped` when the card said, a
- *  second try included, since help on the card so far counts. */
+ *  second try included, since help on the card so far counts. Phase 56 (spec
+ *  D5): so does a pass, a spoken card given up after help. */
 export function nextStepRequest(
   questionId: string,
-  input: { option_index: number } | { text: string; helped?: boolean } | { pass: 'skip' | 'show_answer' } | { seen: true },
+  input: { option_index: number } | { text: string; helped?: boolean } | { pass: 'skip' | 'show_answer'; helped?: boolean } | { seen: true },
   retry: PendingRetry | null,
   hintOpened?: boolean,
   checkFit = false,
@@ -187,7 +188,7 @@ export function nextStepRequest(
   if ('seen' in input) return { question_id: questionId, seen: true };
   const request =
     'pass' in input
-      ? { question_id: questionId, pass: passFor(input.pass, retry) }
+      ? { question_id: questionId, pass: passFor(input.pass, retry), ...(input.helped === undefined ? {} : { helped: input.helped }) }
       : 'text' in input
         ? { question_id: questionId, text: input.text, ...(input.helped === undefined ? {} : { helped: input.helped }) }
         : { question_id: questionId, ...input };

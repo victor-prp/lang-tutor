@@ -41,7 +41,8 @@ export type AnswerInput =
   // card's form, which it names. Only the server builds it: the next-step
   // schema has no `sounds_like` field.
   | { heard: string; sounds_like: string; helped?: boolean }
-  | { pass: 'skip' | 'show_answer' }
+  // Phase 56 (spec D5): `helped`, a spoken card given up after help; it changes no verdict.
+  | { pass: 'skip' | 'show_answer'; helped?: boolean }
   // Phase 27 (spec D3). A text the server judged, by rule or by a model call.
   // Only the server builds it: the next-step schema has no `judged` field.
   | { text: string; judged: TypedVerdict; helped?: boolean }

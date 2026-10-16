@@ -500,6 +500,14 @@ describe('help on more cards (phase 56 D5, D7)', () => {
     expect(applyQueued(helped, { complete: true, score: { correct: 0, total: 1 }, missedQuestions: [], progress: [] }).help).toBe(0);
   });
 
+  // Final review (spec D5). A spoken card passed after help says so; a pass without one does not.
+  it('a pass says whether the card was helped', () => {
+    expect(nextStepRequest('s1', { pass: 'show_answer', helped: true }, null)).toEqual({ question_id: 's1', pass: 'show_answer', helped: true });
+    expect(nextStepRequest('s1', { pass: 'skip', helped: false }, null)).toEqual({ question_id: 's1', pass: 'skip', helped: false });
+    expect(nextStepRequest('s1', { pass: 'skip', helped: true }, { answer: 'dico', wording: 'word' })).toEqual({ question_id: 's1', pass: 'show_answer', helped: true, retry: true });
+    expect(nextStepRequest('r1', { pass: 'skip' }, null)).toStrictEqual({ question_id: 'r1', pass: 'skip' });
+  });
+
   it('a helped judged answer never opened the hold its response carries: it met one', () => {
     const held = response(MEANING, { answer: 'לומר', wording: 'meaning' });
     expect(metHold(MEANING, { text: 'לדבר', judged: 'exact', helped: true }, null, held)).toEqual({ answer: 'לומר', wording: 'meaning' });
