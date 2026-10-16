@@ -22,21 +22,20 @@ done.
 
 ## Where go-live stands
 
-Last updated 2026-10-15.
+Last updated 2026-10-16.
 
 - [ ] **1. Xcode and the simulators.** Not started. Blocked on a macOS update: the App Store's
       Xcode needs macOS 26.6 or later and this Mac is on 26.5.2, so run Software Update first
       (26.7.1 is enough). Nothing automated needs Xcode, only the simulator check by hand, so
       this can wait for a real iPhone or iPad from TestFlight after step 6.
-- [x] **2. Apple Developer Program.** Enrolled 2026-10-15. **Pending Apple's processing**: the
-      account has no team until Apple's welcome email arrives, usually within 48 hours.
-      [developer.apple.com/account](https://developer.apple.com/account) shows *Membership
-      details* with a Team ID once it is active.
-- [ ] **3. Signing and submission credentials in EAS.** Tried 2026-10-15; failed with
-      `You have no team associated with your Apple account` because step 2 is still pending.
-      **Resume here** once the membership is active: rerun the command and the Apple sign-in
-      goes through. EAS login and the bundle id in `app.json` are already in place.
-- [ ] **4. The app in App Store Connect, and its id in `eas.json`.** Waits for step 3.
+- [x] **2. Apple Developer Program.** Active 2026-10-16: team Victor Perepelitsky
+      (6883G8TLZV), as an individual.
+- [x] **3. Signing and submission credentials in EAS.** Done 2026-10-16. The bundle id
+      `ai.wordspal.app` is registered with Push Notifications enabled; EAS holds the
+      distribution certificate, the provisioning profile, and an App Store Connect API key with
+      the App Manager role. No push key: reminders are Android-only.
+- [x] **4. The app in App Store Connect, and its id in `eas.json`.** Done 2026-10-16: Apple ID
+      `6823711479`, in `submit.production.ios.ascAppId`.
 - [ ] **5. TestFlight's external group.** Waits for step 4.
 - [ ] **6. The first release.** Waits for steps 3–5. `IOS_RELEASE` is not set yet, so releases
       until then skip iOS.
