@@ -196,6 +196,12 @@ function verdictFor(question: TextQuestion | SayTranslationQuestion, text: strin
  */
 const HELPED: ReadonlySet<QuestionType> = new Set(['letter_tiles', 'typed_translation']);
 
+/** Phase 55 (spec D6; review M8). Whether a card takes help: `evaluate` grades
+ *  `helped` on it, and the server stores it. The one list of them. */
+export function takesHelp(type: QuestionType): boolean {
+  return HELPED.has(type);
+}
+
 // answers_typed_text_length: a transcript is stored as the text of its answer.
 const MAX_ANSWER_TEXT = 100;
 
@@ -259,7 +265,7 @@ export function evaluate(question: Question, answer: AnswerInput): AnswerRecord 
   }
   if (!isChoice(question) && !isJudged(question) && question.type !== 'read_aloud' && question.type !== 'meet' && 'text' in answer && !('judged' in answer)) {
     // Phase 55 (spec D6). A helped answer is wrong whatever its text.
-    const verdict = 'helped' in answer && answer.helped && HELPED.has(question.type) ? 'wrong' : verdictFor(question, answer.text);
+    const verdict = 'helped' in answer && answer.helped && takesHelp(question.type) ? 'wrong' : verdictFor(question, answer.text);
     return recorded(question, { question_id: question.id, is_correct: verdictCorrect(verdict), answer_string: answer.text, verdict });
   }
   throw new Error(`the answer does not fit a ${question.type} question`);

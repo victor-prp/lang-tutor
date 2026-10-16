@@ -16,7 +16,7 @@ export const TILE_MAX_LETTERS = 10;
  * correction path rather than folded here.
  */
 export function stripStress(text: string): string {
-  return text.replace(/(\p{Script=Cyrillic})́/gu, '$1');
+  return text.replace(/(\p{Script=Cyrillic})\u0301/gu, '$1');
 }
 
 /** Phase 24 (spec D11). The word's letters, lowercased and unstressed, one per

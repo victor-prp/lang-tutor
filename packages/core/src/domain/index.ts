@@ -17,6 +17,7 @@ export {
   shuffleSession,
   spokenTarget,
   spokenVerdict,
+  takesHelp,
   verdictCorrect,
 } from './quiz';
 export type { AnswerInput, ChoiceQuestion, JudgedQuestion, QuestionType, SpeakingQuestion } from './quiz';

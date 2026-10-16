@@ -30,7 +30,9 @@ import {
   shuffleOptions,
   shuffleSession,
   spokenVerdict,
+  takesHelp,
   verdictCorrect,
+  type QuestionType,
 } from './quiz';
 
 function makeQuestion(n: number): MultipleChoiceQuestion {
@@ -661,5 +663,27 @@ describe('phase 55: helped', () => {
   });
   it('records a helped second try wrong', () => {
     expect(evaluateRetry(typed, { text: (typed as TypedTranslationQuestion).answer, helped: true }).verdict).toBe('wrong');
+  });
+  // Review M8. The one list of the cards that take help, which the server stores `helped` by:
+  // every type named, so a new one must say whether it takes help.
+  it('takes help on tiles and typed translation cards and nowhere else', () => {
+    const TAKES_HELP: Record<QuestionType, boolean> = {
+      multiple_choice: false,
+      new_meaning: false,
+      reverse_choice: false,
+      typed_translation: true,
+      listen_choice: false,
+      dictation: false,
+      matching: false,
+      letter_tiles: true,
+      read_aloud: false,
+      meet: false,
+      say_translation: false,
+      typed_meaning: false,
+      cloze_choice: false,
+      cloze_typed: false,
+      sentence_translation: false,
+    };
+    for (const [type, takes] of Object.entries(TAKES_HELP)) expect([type, takesHelp(type as QuestionType)]).toEqual([type, takes]);
   });
 });
