@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerMeaning, expectGeneration, playOut, readCard } from './support/cards';
+import { answerMeaning, answerTyped, expectGeneration, playOut, readCard, retypeWrong } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
@@ -118,11 +118,49 @@ test('a meaning card: a failed check keeps the text, and trying again can still 
   const EDITED = 'לשריין מקום';
   await page.getByTestId('typed-input').fill(EDITED);
   await expectJudge(request, 'wrong');
+  const judged = page.waitForRequest((sent) => sent.method() === 'POST' && sent.url().endsWith('/judged-answer'));
   await page.getByTestId('judge-try-again').click();
-  await expect(page.getByTestId('typed-input')).toHaveValue(EDITED);
-  await expect(page.getByTestId('feedback-wrong')).toBeVisible();
+  expect((await judged).postDataJSON()).toMatchObject({ text: EDITED, helped: false });
+  // Phase 56 (spec D7): the judge's wrong opens the retype, the saved meaning to type again.
+  await expect(page.getByTestId('retype')).toBeVisible();
+  await expect(page.getByTestId('retype-title')).toHaveText('התשובה הנכונה:');
+  const meaning = stripIsolates(await page.getByTestId('retype-answer').textContent());
+  expect(MEANINGS_OF[card.prompt]).toContain(meaning);
+  await expect(page.getByTestId('typed-input')).toHaveValue('');
+  await retypeWrong(page, 'דלת');
   await expect(page.getByTestId('feedback-title')).toHaveText('התשובה הנכונה:');
-  expect(MEANINGS_OF[card.prompt]).toContain(stripIsolates(await page.getByTestId('feedback-line').textContent()));
+  expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(meaning);
+
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 56 (spec D1, D5, D8). Help on a meaning card: the saved meaning, a letter a
+// press, right to left; the meaning then typed is right with help, and the judged
+// answer says it was helped.
+test('a meaning card: help reveals the saved meaning, and the meaning typed after it is right with help', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const { card } = await reachMeaningCard(page, request, 'e2e_meaning_help_ru', report);
+
+  await expect(page.getByTestId('typed-hint')).toHaveCount(0);
+  await expect(page.getByTestId('typed-help')).toHaveText('עזרה');
+  await page.getByTestId('typed-help').click();
+  await page.getByTestId('typed-help').click();
+  const hint = page.getByTestId('typed-hint');
+  await expect(hint).toHaveCSS('direction', 'rtl');
+  const shown = stripIsolates(await hint.textContent());
+  // Two letters of one of the word's saved meanings, and the ellipsis.
+  const meaning = MEANINGS_OF[card.prompt].find((m) => shown === `${[...m].slice(0, 2).join('')}…`);
+  expect(meaning, shown).toBeDefined();
+  await expect(page.getByTestId('typed-input')).toHaveValue('');
+
+  // The saved meaning is judged by rule, with no model call.
+  const judged = page.waitForRequest((sent) => sent.method() === 'POST' && sent.url().endsWith('/judged-answer'));
+  await answerTyped(page, meaning!);
+  expect((await judged).postDataJSON()).toMatchObject({ text: meaning, helped: true });
+  await expect(page.getByTestId('feedback-other')).toBeVisible();
+  await expect(page.getByTestId('feedback-title')).toHaveText('נכון, עם עזרה');
+  await expect(page.getByTestId('retype')).toHaveCount(0);
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

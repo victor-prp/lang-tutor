@@ -8,6 +8,8 @@ import {
   applyQueued,
   continued,
   enteredState,
+  helpedFor,
+  helpPressedState,
   holds,
   landed,
   metHold,
@@ -42,6 +44,7 @@ const BASE: QuizState = {
   judging: 'failed',
   retry: null,
   retype: null,
+  help: 0,
 };
 
 describe('applyQueued (spec D9, Review Focus 3)', () => {
@@ -464,5 +467,82 @@ describe('the retype in the session (phase 55 D7)', () => {
       progress: [],
     };
     expect(resumed(entered, view)).toMatchObject({ question: NEXT, retype: null });
+  });
+});
+
+// Phase 56 (spec D5, D7). One help count a card, kept through its second try and
+// through "can't speak now"; the retype on four more cards.
+describe('help on more cards (phase 56 D5, D7)', () => {
+  const SAY: Question = { id: 's1', type: 'say_translation', vocab_term_id: 'l', question: 'מדבר', part_of_speech: 'verb', answer: 'parlo', lemma: 'parlare', alternatives: ['dico'], context: null };
+  const DICTATION: Question = { id: 'd1', type: 'dictation', vocab_term_id: 'l', question: 'parlo', meaning: 'מדבר' };
+  const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l', question: 'parlare', part_of_speech: 'verb', meaning: 'לדבר', context: null };
+  const TRANSLATE: Question = { id: 'st', type: 'sentence_translation', vocab_term_id: 'l', question: 'בואו נשלב כוחות.', meaning: 'לשלב', sentence: 'Uniamo le forze.', gap: { start: 0, end: 6 }, answer: 'Uniamo', mark: null };
+  const TILES: Question = { id: 'lt', type: 'letter_tiles', vocab_term_id: 'l', question: 'עיר', part_of_speech: 'noun', answer: 'città', tiles: ['c', 'i', 't', 't', 'à', 'o', 'e'] };
+  const CHOICE: Question = { id: 'q1', type: 'multiple_choice', vocab_term_id: 'l', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, context: null };
+  const ON = (question: Question): QuizState => ({ ...BASE, question, position: 3, answer: null, advanceRequested: false, speakingOff: null, judging: 'idle' });
+  const response = (question: Question, pending: PendingRetry | null): NextStepResponse => ({
+    session_id: 's',
+    question,
+    position: { position: 4, total: 10 },
+    complete: false,
+    pending_retry: pending,
+  });
+
+  it('counts presses on the card, from none on a session entered', () => {
+    expect(enteredState('s9').help).toBe(0);
+    expect(helpPressedState(helpPressedState(ON(SAY))).help).toBe(2);
+  });
+
+  it('starts a new card at none, and keeps the count when the same card comes back for its second try', () => {
+    const helped = { ...ON(SAY), help: 3 };
+    expect(applyQueued(helped, { complete: false, question: DICTATION, position: 4, retry: null }).help).toBe(0);
+    expect(applyQueued(helped, { complete: false, question: SAY, position: 3, retry: { answer: 'dico', wording: 'word' } }).help).toBe(3);
+    expect(applyQueued(helped, { complete: true, score: { correct: 0, total: 1 }, missedQuestions: [], progress: [] }).help).toBe(0);
+  });
+
+  // Final review (spec D5). A spoken card passed after help says so; a pass without one does not.
+  it('a pass says whether the card was helped', () => {
+    expect(nextStepRequest('s1', { pass: 'show_answer', helped: true }, null)).toEqual({ question_id: 's1', pass: 'show_answer', helped: true });
+    expect(nextStepRequest('s1', { pass: 'skip', helped: false }, null)).toEqual({ question_id: 's1', pass: 'skip', helped: false });
+    expect(nextStepRequest('s1', { pass: 'skip', helped: true }, { answer: 'dico', wording: 'word' })).toEqual({ question_id: 's1', pass: 'show_answer', helped: true, retry: true });
+    expect(nextStepRequest('r1', { pass: 'skip' }, null)).toStrictEqual({ question_id: 'r1', pass: 'skip' });
+  });
+
+  it('a helped judged answer never opened the hold its response carries: it met one', () => {
+    const held = response(MEANING, { answer: 'לומר', wording: 'meaning' });
+    expect(metHold(MEANING, { text: 'לדבר', judged: 'exact', helped: true }, null, held)).toEqual({ answer: 'לומר', wording: 'meaning' });
+    expect(metHold(MEANING, { text: 'לדבר', judged: 'exact', helped: false }, null, held)).toBeNull();
+  });
+
+  it('says a card that takes help was helped once help was pressed; tiles say it themselves', () => {
+    expect(helpedFor(SAY, 0)).toBe(false);
+    expect(helpedFor(SAY, 1)).toBe(true);
+    expect(helpedFor(MEANING, 2)).toBe(true);
+    expect(helpedFor(TRANSLATE, 0)).toBe(false);
+    expect(helpedFor(TILES, 0, { helped: true })).toBe(true);
+    expect(helpedFor(TILES, 4, { helped: false })).toBe(false);
+    expect(helpedFor(CHOICE, 2)).toBeUndefined();
+  });
+
+  it('opens the retype on a wrong dictation and a wrong typed say the translation', () => {
+    expect(answeredState(ON(DICTATION), { text: 'casa', helped: false }).retype).toEqual({ attempt: 1, showing: true, outcome: null });
+    expect(answeredState({ ...ON(SAY), speakingOff: 'chosen' }, { text: '', helped: true }).retype).toEqual({ attempt: 1, showing: true, outcome: null });
+    expect(answeredState(ON(DICTATION), { text: 'parlo', helped: false }).retype).toBeNull();
+  });
+
+  it('opens the retype when a typed meaning the judge called wrong lands, not a right one or a translation', () => {
+    const checking = (question: Question): QuizState => ({ ...ON(question), judging: 'checking' });
+    expect(landed(checking(MEANING), { text: 'לאכול', judged: 'wrong' }, response(DICTATION, null), null).retype).toEqual({ attempt: 1, showing: true, outcome: null });
+    expect(landed(checking(MEANING), { text: 'לדבר', judged: 'exact' }, response(DICTATION, null), null).retype).toBeNull();
+    expect(landed(checking(TRANSLATE), { text: 'Andiamo.', judged: 'wrong' }, response(DICTATION, null), null).retype).toBeNull();
+    // A second try has its own banners.
+    expect(landed(checking(MEANING), { text: '', judged: 'wrong' }, response(DICTATION, null), { answer: 'לומר', wording: 'meaning' }).retype).toBeNull();
+  });
+
+  it('checks a retype on a typed meaning and a dictation', () => {
+    const meaning = landed({ ...ON(MEANING), judging: 'checking' }, { text: 'לאכול', judged: 'wrong' }, response(DICTATION, null), null);
+    expect(retypeCheckedState(meaning, 'לדבר').retype).toMatchObject({ outcome: 'right' });
+    const dictation = answeredState(ON(DICTATION), { text: 'casa', helped: false });
+    expect(retypeCheckedState(dictation, 'parla').retype).toEqual({ attempt: 2, showing: true, outcome: null });
   });
 });

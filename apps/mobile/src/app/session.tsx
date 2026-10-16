@@ -81,8 +81,32 @@ function translatePrompt(question: SentenceTranslationQuestion, answered: boolea
   );
 }
 
+// Phase 56 (spec D5, D6). Help on a card, the count the session keeps for it.
+function helpOf(session: SessionValue) {
+  return { presses: session.help, onPress: session.pressHelp };
+}
+
+// Phase 55 (spec D7). A typed card's verdict, for its input's border: a retype
+// that ended tells how it ended. Phase 56 (spec D7): every typed card has one or none.
+function verdictOf(question: Question, session: SessionValue) {
+  return session.answer ? feedbackFor(question, session.answer, session.retry, session.retype).verdict : null;
+}
+
+// Phase 55 (spec D7). The retype after a wrong or nearly right first answer, under
+// that answer's title. Phase 56 (spec D7): on a typed meaning, dictation, typed gap
+// and typed say the translation too; the session opens it only where it applies.
+function retypeOf(question: Question, session: SessionValue) {
+  return {
+    retype: session.retype,
+    retypeTitle: session.answer ? feedbackFor(question, session.answer, session.retry).title : undefined,
+    onRetypeTyping: session.retypeTyping,
+    onRetype: session.retypeChecked,
+  };
+}
+
 // Phase 38 (spec D1, D4). The typed gap card holds whether its hint is open, and
 // sends it with the first answer. Keyed by question id, so a new card starts closed.
+// Phase 56 (spec D1): letter help beside the hint, which stays recorded and ungraded.
 function ClozeTypedCard({ question, session, language, answerLanguage }: { question: ClozeTypedQuestion; session: SessionValue; language: string; answerLanguage: LanguageCode | null }) {
   const [hintOpen, setHintOpen] = useState(false);
   return (
@@ -92,7 +116,7 @@ function ClozeTypedCard({ question, session, language, answerLanguage }: { quest
       answerLanguage={answerLanguage}
       language={language}
       answered={session.answered}
-      verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
+      verdict={verdictOf(question, session)}
       onSubmit={(text) => session.submitText(text, { hintOpened: hintOpen })}
       direction="ltr"
       checking={session.judging === 'checking'}
@@ -103,6 +127,8 @@ function ClozeTypedCard({ question, session, language, answerLanguage }: { quest
         retrying: session.retry !== null,
         onOpen: () => setHintOpen(true),
       })}
+      help={helpOf(session)}
+      {...retypeOf(question, session)}
     />
   );
 }
@@ -161,17 +187,14 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer, session.retry, session.retype).verdict : null}
-          onSubmit={(text, helped) => session.submitText(text, { helped })}
+          verdict={verdictOf(question, session)}
+          onSubmit={(text) => session.submitText(text)}
           direction="ltr"
           checking={session.judging === 'checking'}
           failed={session.judging === 'failed'}
           retry={session.retry}
-          help
-          retype={session.retype}
-          retypeTitle={session.answer ? feedbackFor(question, session.answer, session.retry).title : undefined}
-          onRetypeTyping={session.retypeTyping}
-          onRetype={session.retypeChecked}
+          help={helpOf(session)}
+          {...retypeOf(question, session)}
         />
       );
     case 'cloze_choice':
@@ -189,36 +212,44 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       // Judged on the phone against the gap's word, as a typed translation is.
       return <ClozeTypedCard key={question.id} question={question} session={session} language={language} answerLanguage={answerLanguage} />;
     case 'sentence_translation':
+      // Phase 56 (spec D1): help reveals the practised word, never the reference; no retype.
       return (
         <TypedAnswerView
+          key={question.id}
           question={question}
           instruction={strings.questionInstructionTranslate(language)}
           answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
+          verdict={verdictOf(question, session)}
           direction="ltr"
           checking={session.judging === 'checking'}
           failed={session.judging === 'failed'}
           onSubmit={session.submitJudged}
           retry={session.retry}
           prompt={translatePrompt(question, session.answered, language)}
+          help={helpOf(session)}
         />
       );
     case 'typed_meaning':
+      // Phase 56 (spec D1, D7): help reveals the stored meaning, right to left; the
+      // retype opens on the judge's wrong.
       return (
         <TypedAnswerView
+          key={question.id}
           question={question}
           instruction={strings.questionInstructionMeaning(learner)}
           answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
+          verdict={verdictOf(question, session)}
           direction="rtl"
           checking={session.judging === 'checking'}
           failed={session.judging === 'failed'}
           onSubmit={session.submitJudged}
           retry={session.retry}
+          help={helpOf(session)}
+          {...retypeOf(question, session)}
         />
       );
     case 'listen_choice':
@@ -232,19 +263,23 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         />
       );
     case 'dictation':
+      // Phase 56 (spec D1, D7): help reveals the heard form; a wrong one is typed again.
       return (
         <TypedAnswerView
+          key={question.id}
           question={question}
           instruction={strings.questionInstructionDictation(language)}
           answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
+          verdict={verdictOf(question, session)}
           onSubmit={(text) => session.submitText(text)}
           direction="ltr"
           checking={false}
           failed={false}
           retry={null}
+          help={helpOf(session)}
+          {...retypeOf(question, session)}
         />
       );
     case 'letter_tiles':
@@ -295,21 +330,26 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       return <MeetCardView key={question.id} question={question} language={language} answered={session.answered} onSeen={session.seen} />;
     case 'say_translation':
       // Spec D8: with speaking off, the same card is typed.
+      // Phase 56 (spec D5): one help count for the card, so letters shown while
+      // speaking stay shown once it is typed.
       if (session.speakingOff !== null) {
         return (
           <View style={styles.typedForm}>
             <TypedAnswerView
+              key={question.id}
               question={question}
               instruction={strings.questionInstructionTyped(language)}
               answerLanguage={answerLanguage}
               language={language}
               answered={session.answered}
-              verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
+              verdict={verdictOf(question, session)}
               onSubmit={(text) => session.submitText(text)}
               direction="ltr"
               checking={session.judging === 'checking'}
               failed={session.judging === 'failed'}
               retry={session.retry}
+              help={helpOf(session)}
+              {...retypeOf(question, session)}
             />
           </View>
         );
@@ -328,6 +368,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           onCantSpeak={session.stopSpeaking}
           onRecordFailed={session.markSpeechFailed}
           retry={session.retry}
+          help={helpOf(session)}
         />
       );
     default: {

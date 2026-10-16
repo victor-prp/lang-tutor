@@ -1130,7 +1130,9 @@ export const answers = pgTable(
     // Phase 55 (spec D6). Whether the learner used help, or placed a wrong tile, on
     // a letter_tiles or typed_translation card before its first answer: a helped
     // answer is stored wrong. Null on every other card, from an older app, and
-    // never changed by a retry.
+    // never changed by a retry. Phase 56 (spec D4): also on say the translation,
+    // typed meaning, sentence translation, dictation and typed cloze; a helped
+    // spoken answer is stored gave_up, with its transcript.
     helped: boolean('helped'),
     answeredAt: timestamp('answered_at', { withTimezone: true }).notNull().defaultNow(),
   },

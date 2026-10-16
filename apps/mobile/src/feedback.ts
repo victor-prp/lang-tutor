@@ -20,7 +20,8 @@ export type Feedback = {
 export type CardAnswer =
   | Exclude<AnswerInput, { heard: string }>
   | { board: number[] }
-  | { heard: string; verdict: 'understood' | 'alternative' };
+  // Phase 56 (spec D8): `helped`, said with help, which the server records given up.
+  | { heard: string; verdict: 'understood' | 'alternative'; helped?: boolean };
 
 /**
  * Phase 23. The banner after an answer. It runs the same `evaluate` the server
@@ -61,9 +62,13 @@ export function feedbackFor(question: Question, answer: CardAnswer, retry: Pendi
 }
 
 /** Phase 55 (spec D6). The answer as its text alone: `helped` changes how it
- *  is recorded, not what its text is. */
+ *  is recorded, not what its text is. Phase 56 (spec D8): a judged or heard
+ *  answer keeps its verdict. */
 function unhelped(answer: CardAnswer): CardAnswer {
-  return 'text' in answer && 'helped' in answer ? { text: answer.text } : answer;
+  if (!('helped' in answer)) return answer;
+  if ('judged' in answer) return { text: answer.text, judged: answer.judged };
+  if ('heard' in answer) return { heard: answer.heard, verdict: answer.verdict };
+  return 'text' in answer ? { text: answer.text } : answer;
 }
 
 function helped(answer: CardAnswer): boolean {
@@ -75,7 +80,12 @@ function helped(answer: CardAnswer): boolean {
  *  and no retype follows a second try. A first try's near miss keeps its banner,
  *  whose title its retype shows. */
 function helpedOr(answer: CardAnswer, feedback: Feedback, secondTry: boolean): Feedback {
-  const right = feedback.verdict === 'exact' || feedback.verdict === 'alternative' || (secondTry && feedback.verdict === 'near_miss');
+  // Phase 56 (spec D8): a spoken answer understood is the word, said.
+  const right =
+    feedback.verdict === 'exact' ||
+    feedback.verdict === 'alternative' ||
+    feedback.verdict === 'understood' ||
+    (secondTry && feedback.verdict === 'near_miss');
   if (!helped(answer) || !right) return feedback;
   return { tone: 'other', title: strings.feedbackHelped, line: null, verdict: null };
 }
@@ -184,6 +194,8 @@ export function retryText(type: Question['type'], pending: PendingRetry | null):
  *  server is asked whether it fills the gap, so its banner waits for the answer. */
 export function checksFit(question: Question, answer: CardAnswer): boolean {
   if (question.type !== 'cloze_typed' || !('text' in answer) || 'judged' in answer || answer.text.trim() === '') return false;
+  // Phase 56 (spec D4): a helped answer is a miss whatever the model says.
+  if ('helped' in answer && answer.helped === true) return false;
   return evaluate(question, answer).verdict === 'wrong';
 }
 

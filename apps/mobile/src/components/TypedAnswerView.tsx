@@ -9,7 +9,7 @@ import type {
   TypedMeaningQuestion,
   TypedTranslationQuestion,
 } from '@lang-tutor/core/api';
-import { MAX_JUDGED_TEXT } from '@lang-tutor/core/domain';
+import { MAX_JUDGED_TEXT, rightAnswer } from '@lang-tutor/core/domain';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type TextStyle } from 'react-native';
 
@@ -20,7 +20,7 @@ import { contextLanguage } from '@/context';
 import { retryText } from '@/feedback';
 import type { Retype } from '@/retype';
 import { strings, type Instruction } from '@/strings';
-import { allRevealed, revealed } from '@/typedHelp';
+import { allRevealed, helpText, revealed } from '@/typedHelp';
 import { typedSubmit } from '@/typedSubmit';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
@@ -58,8 +58,8 @@ type Props = {
   answered: boolean;
   /** How the answer was judged, for the input's border. Null until answered. */
   verdict: AnswerVerdict | null;
-  /** Phase 55 (spec D6): `helped` once help was pressed on the card, first try or second. */
-  onSubmit: (text: string, helped: boolean) => void;
+  /** Phase 56 (spec D5): the session knows whether help was pressed, and says so. */
+  onSubmit: (text: string) => void;
   /** Phase 27 (spec D13). The answer's language: a target word is left to
    *  right, a Hebrew meaning right to left. */
   direction: 'ltr' | 'rtl';
@@ -71,10 +71,12 @@ type Props = {
    *  input starts again (a translation keeps its first sentence). */
   retry: PendingRetry | null;
   /** Phase 55 (spec D7). Help: each press reveals one more character of the
-   *  answer, in a line apart from the input. A typed translation's only. */
-  help?: boolean;
+   *  answer, in a line apart from the input. Phase 56 (spec D5, D6): on every
+   *  card here, the count the session keeps for the card. */
+  help?: { presses: number; onPress: () => void } | null;
   /** Phase 55 (spec D7). The retype after a wrong or nearly right first answer,
-   *  under that answer's banner title: the card asks for the word again. */
+   *  under that answer's banner title: the card asks for the word again. Phase
+   *  56 (spec D7): on a typed meaning, dictation, typed gap and typed say too. */
   retype?: Retype | null;
   retypeTitle?: string;
   /** The first character typed in a retype: the right answer hides. */
@@ -102,7 +104,7 @@ export function TypedAnswerView({
   failed,
   prompt,
   retry,
-  help = false,
+  help = null,
   retype = null,
   retypeTitle,
   onRetypeTyping,
@@ -112,11 +114,6 @@ export function TypedAnswerView({
   // Phase 39 (spec D8): the last send was in the wrong alphabet, or one word
   // for a whole sentence; the text stays.
   const [refused, setRefused] = useState<'wrong_script' | 'word_only' | null>(null);
-  // Phase 55 (spec D7): how many characters help has revealed on this card. It
-  // counts for the whole card, its second try included (spec D6); a typed
-  // translation, the one card with help, is keyed by question id, so a new card
-  // starts at none on its first render (review M2).
-  const [presses, setPresses] = useState(0);
   const input = useRef<TextInput>(null);
   // Phase 55 (spec D7): the retype open, which unlocks the answered card for
   // the word again; once it ends, the card is answered as any other.
@@ -139,9 +136,12 @@ export function TypedAnswerView({
 
   const partOfSpeech = 'part_of_speech' in question ? strings.partOfSpeech(question.part_of_speech) : undefined;
   const empty = text.trim() === '';
-  const answer = 'answer' in question ? question.answer : '';
+  // Phase 56 (spec D1): what help reveals on this card, and the presses so far
+  // (spec D5: the session's count, kept through a second try).
+  const hinted = helpText(question) ?? '';
+  const presses = help?.presses ?? 0;
   // No help in a retype: it asks for the word just shown.
-  const helps = help && retype === null && answer !== '';
+  const helps = help !== null && retype === null && hinted !== '';
 
   function submit(value: string) {
     if (locked) return;
@@ -153,7 +153,7 @@ export function TypedAnswerView({
     // The keyboard would cover the feedback banner.
     Keyboard.dismiss();
     if (retyping) onRetype?.(value);
-    else onSubmit(value, presses > 0);
+    else onSubmit(value);
   }
 
   // Phase 55 (spec D7): the input is plain while a retype is open.
@@ -197,8 +197,9 @@ export function TypedAnswerView({
               <Text style={styles.retypeTitle} testID="retype-title">
                 {retypeTitle}
               </Text>
-              <Text style={styles.retypeAnswer} testID="retype-answer">
-                {answer}
+              {/* Phase 56 (spec D7): the card's own answer, in its direction (a meaning right to left). */}
+              <Text style={[styles.retypeAnswer, { writingDirection: direction }]} testID="retype-answer">
+                {rightAnswer(question)}
               </Text>
             </>
           ) : null}
@@ -208,8 +209,8 @@ export function TypedAnswerView({
         </View>
       ) : null}
       {helps && presses > 0 ? (
-        <Text style={styles.hint} testID="typed-hint">
-          {`${revealed(answer, presses)}…`}
+        <Text style={[styles.hint, { writingDirection: direction }]} testID="typed-hint">
+          {`${revealed(hinted, presses)}…`}
         </Text>
       ) : null}
       <TextInput
@@ -262,14 +263,14 @@ export function TypedAnswerView({
             <Text style={answerStyles.checkLabel}>{checking ? strings.checking : strings.typedCheck}</Text>
           </Pressable>
           {/* Phase 55 (spec D7): help reveals; it never changes the input. */}
-          {helps && !checking ? (
+          {help !== null && helps && !checking ? (
             <Pressable
               accessibilityRole="button"
               testID="typed-help"
-              disabled={allRevealed(answer, presses)}
+              disabled={allRevealed(hinted, presses)}
               hitSlop={8}
-              onPress={() => setPresses((count) => count + 1)}
-              style={allRevealed(answer, presses) && answerStyles.checkDisabled}
+              onPress={help.onPress}
+              style={allRevealed(hinted, presses) && answerStyles.checkDisabled}
             >
               <Text style={answerStyles.help}>{strings.help}</Text>
             </Pressable>
@@ -394,7 +395,8 @@ const styles = StyleSheet.create({
   inputCorrect: { borderColor: colors.correct, backgroundColor: colors.correctSurface },
   inputWrong: { borderColor: colors.wrong, backgroundColor: colors.wrongSurface },
   // Phase 55 (spec D7). The help's letters are the target word: left to right,
-  // centred, so the RTL screen leaves them and their ellipsis in place.
+  // centred, so the RTL screen leaves them and their ellipsis in place. Phase 56
+  // (spec D6): a Hebrew meaning's read right to left, set where it is drawn.
   hint: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.text, textAlign: 'center', writingDirection: 'ltr' },
   // Phase 55 (spec D7). The retype: the first answer's title and the word, as the banner words them.
   retype: { gap: spacing.xs, alignItems: 'center' },

@@ -658,32 +658,73 @@ describe('phase 55: helped', () => {
     expect(evaluate(typed, { text: (typed as TypedTranslationQuestion).answer }).verdict).toBe('exact');
   });
   it('ignores helped on any other type', () => {
-    expect(evaluate(dictation, { text: 'parlo', helped: true }).verdict).toBe('exact');
-    expect(evaluate(CLOZE_TYPED, { text: (CLOZE_TYPED as ClozeTypedQuestion).answer, helped: true }).verdict).toBe('exact');
+    // Phase 56: dictation and cloze typed take help now; a read aloud never does.
+    expect(evaluate(READ, { heard: 'gatto', helped: true })).toMatchObject({ is_correct: true, verdict: 'understood' });
   });
   it('records a helped second try wrong', () => {
     expect(evaluateRetry(typed, { text: (typed as TypedTranslationQuestion).answer, helped: true }).verdict).toBe('wrong');
   });
   // Review M8. The one list of the cards that take help, which the server stores `helped` by:
   // every type named, so a new one must say whether it takes help.
-  it('takes help on tiles and typed translation cards and nowhere else', () => {
+  it('takes help on the cards where the learner produces the answer, and nowhere else', () => {
     const TAKES_HELP: Record<QuestionType, boolean> = {
       multiple_choice: false,
       new_meaning: false,
       reverse_choice: false,
       typed_translation: true,
       listen_choice: false,
-      dictation: false,
+      dictation: true,
       matching: false,
       letter_tiles: true,
       read_aloud: false,
       meet: false,
-      say_translation: false,
-      typed_meaning: false,
+      say_translation: true,
+      typed_meaning: true,
       cloze_choice: false,
-      cloze_typed: false,
-      sentence_translation: false,
+      cloze_typed: true,
+      sentence_translation: true,
     };
     for (const [type, takes] of Object.entries(TAKES_HELP)) expect([type, takesHelp(type as QuestionType)]).toEqual([type, takes]);
+  });
+});
+
+// Phase 56 (spec D2). Help on the five other cards where the learner produces
+// the answer: a helped text or judged text is wrong, a helped spoken answer is
+// given up, whatever was typed or said.
+describe('phase 56: help on more cards', () => {
+  it('records a helped dictation, cloze typed or typed say-the-translation answer wrong', () => {
+    expect(evaluate(dictation, { text: 'parlo', helped: true })).toMatchObject({ is_correct: false, verdict: 'wrong', answer_string: 'parlo' });
+    expect(evaluate(CLOZE_TYPED, { text: 'parlavamo', helped: true })).toMatchObject({ is_correct: false, verdict: 'wrong' });
+    expect(evaluate(SAY, { text: 'parlo', helped: true })).toMatchObject({ is_correct: false, verdict: 'wrong' });
+  });
+  it('records a helped judged answer wrong, whatever the judge said', () => {
+    expect(evaluate(MEANING, { text: 'לדבר', judged: 'exact', helped: true })).toMatchObject({ is_correct: false, verdict: 'wrong', answer_string: 'לדבר' });
+    expect(evaluate(TRANSLATION, { text: 'Voglio prenotare un tavolo.', judged: 'exact', helped: true })).toMatchObject({ is_correct: false, verdict: 'wrong' });
+  });
+  it('records a helped spoken answer given up, with its transcript', () => {
+    expect(evaluate(SAY, { heard: 'parlo', helped: true })).toEqual({
+      question_id: 's1',
+      is_correct: false,
+      answer_string: 'parlo',
+      verdict: 'gave_up',
+      ...NO_RETRY,
+    });
+    expect(evaluate(SAY, { heard: 'parla', sounds_like: 'parlo', helped: true })).toMatchObject({ is_correct: false, verdict: 'gave_up', answer_string: 'parla' });
+  });
+  it('opens no second try for a helped alternative, spoken, judged or typed', () => {
+    expect(evaluate(SAY, { heard: 'dico', helped: true })).toMatchObject({ verdict: 'gave_up', retry_state: null });
+    expect(evaluate(MEANING, { text: 'לומר', judged: 'alternative', helped: true })).toMatchObject({ verdict: 'wrong', retry_state: null });
+    expect(evaluate(CLOZE_TYPED, { text: 'chiacchieravamo', helped: true })).toMatchObject({ verdict: 'wrong', retry_state: null });
+  });
+  it('grades the same answers unhelped as today', () => {
+    expect(evaluate(SAY, { heard: 'parlo', helped: false }).verdict).toBe('understood');
+    expect(evaluate(SAY, { heard: 'dico' })).toMatchObject({ verdict: 'alternative', retry_state: 'pending' });
+    expect(evaluate(MEANING, { text: 'לדבר', judged: 'exact', helped: false })).toMatchObject({ is_correct: true, verdict: 'exact' });
+    expect(evaluate(dictation, { text: 'parlo', helped: false }).verdict).toBe('exact');
+  });
+  it('resolves a helped second try wrong, or given up when spoken', () => {
+    expect(evaluateRetry(SAY, { heard: 'parlo', helped: true }).verdict).toBe('gave_up');
+    expect(evaluateRetry(MEANING, { text: 'לדבר', judged: 'exact', helped: true }).verdict).toBe('wrong');
+    expect(evaluateRetry(CLOZE_TYPED, { text: 'parlavamo', helped: true }).verdict).toBe('wrong');
   });
 });

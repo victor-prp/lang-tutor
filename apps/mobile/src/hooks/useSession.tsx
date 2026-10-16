@@ -23,6 +23,8 @@ import {
   applyQueued,
   continued,
   enteredState,
+  helpedFor,
+  helpPressedState,
   landed,
   nextStepRequest,
   queuedFrom,
@@ -63,8 +65,14 @@ export type SessionValue = {
   select: (optionIndex: number) => void;
   /** Phase 23. Answers a typed card. An empty text is "show me the answer".
    *  Phase 38 (spec D4): a typed gap says whether its hint was opened. Phase 55
-   *  (spec D6): a tiles or typed translation card says whether it was helped. */
+   *  (spec D6): the tiles card says whether it was helped; phase 56 (spec D5):
+   *  every other card that takes help is helped by the count below. */
   submitText: (text: string, card?: { hintOpened?: boolean; helped?: boolean }) => void;
+  /** Phase 56 (spec D5). How many characters help has revealed on the card on
+   *  screen, its second try and "can't speak now" included; 0 on a new card. */
+  help: number;
+  /** Help pressed: one more character. Every answer to the card then says it was helped. */
+  pressHelp: () => void;
   /** Phase 24. Answers a board: each word's first-tried meaning, in board order. */
   submitBoard: (firstAttempts: number[]) => void;
   /** Phase 25. The speaking card's attempt that has recorded nothing yet. */
@@ -225,9 +233,12 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   // Phase 23: one path for a chosen option and a typed text. The guard on
   // `state.answer` is what makes a second tap, or Return then Check, a no-op.
   const answerWith = useCallback(
-    (input: { option_index: number } | { text: string; helped?: boolean }, hintOpened?: boolean) => {
+    (given: { option_index: number } | { text: string; helped?: boolean }, hintOpened?: boolean) => {
       if (!state || state.answer !== null || !state.question || state.judging === 'checking') return;
       const { sessionId, question, retry } = state;
+      // Phase 56 (spec D5): a text answer says whether the card was helped.
+      const helped = 'text' in given ? helpedFor(question, state.help, given) : undefined;
+      const input = 'text' in given ? (helped === undefined ? { text: given.text } : { text: given.text, helped }) : given;
       // Phase 34 (spec D9): the second try at a held card carries retry: true,
       // and an answer meeting a hold it could not have opened goes again as one.
       const call = settle(question, retry, (as) =>
@@ -292,6 +303,9 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     (clip: Clip) => {
       if (!state || state.answer !== null || !state.question || state.speech.phase === 'checking') return;
       const { sessionId, question, retry } = state;
+      // Phase 56 (spec D5): a say the translation said with help says so.
+      const helped = helpedFor(question, state.help);
+      const helps = helped === undefined ? {} : { helped };
       // Only an attempt still being checked on this card may land: a card
       // answered meanwhile (show the answer, can't speak now) keeps its answer.
       const mine = (latest: QuizState | null) =>
@@ -302,7 +316,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         latest.speech.phase === 'checking';
       setState((current) => (current ? { ...current, speech: { phase: 'checking' } } : current));
       void api
-        .answerBySpeech(sessionId, retried({ question_id: question.id, mime_type: clip.mimeType, audio: clip.audio }, retry))
+        .answerBySpeech(sessionId, retried({ question_id: question.id, mime_type: clip.mimeType, audio: clip.audio, ...helps }, retry))
         .then((response) => {
           setState((latest) => {
             if (!latest || !mine(latest)) return latest;
@@ -311,7 +325,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
             }
             // Phase 34 (spec D9): another right word holds the card, and the
             // microphone is offered again.
-            return landed(latest, { heard: response.heard, verdict: response.verdict }, response.next, null);
+            return landed(latest, { heard: response.heard, verdict: response.verdict, ...helps }, response.next, null);
           });
         })
         .catch(() => {
@@ -328,13 +342,16 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     (text: string) => {
       if (!state || !state.question || !canJudge(state.judging, state.answer !== null)) return;
       const { sessionId, question, retry } = state;
+      // Phase 56 (spec D5): a judged card says whether it was helped.
+      const helped = helpedFor(question, state.help);
+      const helps = helped === undefined ? {} : { helped };
       checkWith(
         sessionId,
         question.id,
         settle(question, retry, (as) =>
           api
-            .judgeAnswer(sessionId, retried({ question_id: question.id, text }, as))
-            .then((response) => ({ answer: judgedAnswer(text, response), next: response.next })),
+            .judgeAnswer(sessionId, retried({ question_id: question.id, text, ...helps }, as))
+            .then((response) => ({ answer: judgedAnswer(text, response, helped), next: response.next })),
         ),
       );
     },
@@ -350,11 +367,14 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       setState((current) =>
         current ? { ...current, answer: { pass: kind }, speech: IDLE_ATTEMPT, advanceRequested: kind === 'skip' } : current,
       );
+      // Phase 56 (spec D5): given up after help, the pass says so.
+      const helped = helpedFor(question, state.help);
+      const passed = helped === undefined ? { pass: kind } : { pass: kind, helped };
       // Phase 34 (spec D9): on a second try, a skip is sent as the give-up.
       queueResponse(
         sessionId,
         settle(question, retry, (as) =>
-          api.nextStep(sessionId, nextStepRequest(question.id, { pass: kind }, as)).then((next) => ({ answer: { pass: kind }, next })),
+          api.nextStep(sessionId, nextStepRequest(question.id, passed, as)).then((next) => ({ answer: { pass: kind }, next })),
         ),
       );
     },
@@ -409,6 +429,11 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     setState((current) => (current ? retypeCheckedState(current, text) : current));
   }, []);
 
+  // Phase 56 (spec D5). The phone's alone until the answer says it.
+  const pressHelp = useCallback(() => {
+    setState((current) => (current ? helpPressedState(current) : current));
+  }, []);
+
   const value = useMemo<SessionValue>(() => {
     if (!state) {
       return {
@@ -427,6 +452,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         enter,
         select,
         submitText,
+        help: 0,
+        pressHelp,
         submitBoard,
         speech: IDLE_ATTEMPT,
         speakingOff: null,
@@ -461,6 +488,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       enter,
       select,
       submitText,
+      help: state.help,
+      pressHelp,
       submitBoard,
       speech: state.speech,
       speakingOff: state.speakingOff,
@@ -478,7 +507,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       retypeChecked,
       next,
     };
-  }, [state, enter, select, submitText, submitBoard, submitSpeech, pass, seen, retrySpeech, markSpeechFailed, stopSpeaking, submitJudged, retypeTyping, retypeChecked, next]);
+  }, [state, enter, select, submitText, pressHelp, submitBoard, submitSpeech, pass, seen, retrySpeech, markSpeechFailed, stopSpeaking, submitJudged, retypeTyping, retypeChecked, next]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

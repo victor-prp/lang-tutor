@@ -378,7 +378,14 @@ export function createSessionsRouter(sessions: SessionService) {
               id,
               body.question_id,
               // Phase 54 (spec D6). A meet card's `seen` has no second try.
-              'seen' in body ? { seen: true } : 'pass' in body ? { pass: body.pass } : { option_index: body.option_index },
+              // Phase 56 (spec D5): a pass after help is recorded helped.
+              'seen' in body
+                ? { seen: true }
+                : 'pass' in body
+                  ? body.helped === undefined
+                    ? { pass: body.pass }
+                    : { pass: body.pass, helped: body.helped }
+                  : { option_index: body.option_index },
               { retry: 'seen' in body ? false : body.retry ?? false },
             );
       return c.json(buildNextStepResponse(id, record), 200);
@@ -417,6 +424,7 @@ export function createSessionsRouter(sessions: SessionService) {
         audio: body.audio,
         mimeType: body.mime_type,
         retry: body.retry ?? false,
+        helped: body.helped,
       });
       return c.json(
         {
@@ -445,7 +453,12 @@ export function createSessionsRouter(sessions: SessionService) {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
     try {
-      const result = await sessions.answerJudged(c.var.actor, id, { questionId: body.question_id, text: body.text, retry: body.retry ?? false });
+      const result = await sessions.answerJudged(c.var.actor, id, {
+        questionId: body.question_id,
+        text: body.text,
+        retry: body.retry ?? false,
+        helped: body.helped,
+      });
       return c.json({ verdict: result.verdict, next: buildNextStepResponse(id, result.session) }, 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
