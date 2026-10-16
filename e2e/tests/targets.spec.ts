@@ -16,7 +16,7 @@ import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
 import { clearGemini, expectGeminiMatching, userText } from './support/mockServer';
-import { answerSessionRight, enrollmentIdOf, readyPathSession, skipSeed } from './support/sessions';
+import { answerSessionRight, enrollmentIdOf, readCurrent, readyPathSession, skipSeed } from './support/sessions';
 import {
   EVERY_WORD,
   FILLED,
@@ -407,6 +407,11 @@ test('leaving the wizard by the browser’s back, not its Cancel, discards the p
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
 
+/** Final review C1. The creates the app sent: a target's button goes through one before it
+ *  enters an unstarted stock, so the server can replace a stock that no longer serves the day. */
+const createsSent = (diagnostics: { apiRequests: string[] }) =>
+  diagnostics.apiRequests.filter((sent) => /^POST \S+\/api\/sessions$/.test(sent)).length;
+
 /** Results lead home, where every card is read again. */
 async function backHome(page: Page) {
   await page.getByTestId('results-next-session').click();
@@ -420,7 +425,7 @@ test('a new homework comes first with practice now, which asks its words alone; 
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
   const { enrollmentId, target } = await homework(page, request, 'e2e_paths_practise');
-  await readyPathSession(page.request, enrollmentId, target.id);
+  const stock = await readyPathSession(page.request, enrollmentId, target.id);
   await openApp(page, `target-card-${target.id}`);
 
   // 1. Work is owed today: the homework's card is first, its button filled, My words' outlined.
@@ -435,9 +440,13 @@ test('a new homework comes first with practice now, which asks its words alone; 
   await expect(page.getByTestId('start-button'), report()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('start-button')).toHaveCSS('background-color', OUTLINED);
 
-  // 2. Practice now enters the homework's own session: it asks the two words owed today,
-  // each a new word's ladder, and no word of the learner's own list.
+  // 2. Practice now enters the homework's own session, through create (final review C1), which
+  // answers the stock as it is: it asks the two words owed today, each a new word's ladder, and
+  // no word of the learner's own list.
+  const before = createsSent(diagnostics);
   await tapUntil(page, `target-practice-${target.id}`, 'progress-label');
+  expect(createsSent(diagnostics), report()).toBeGreaterThan(before);
+  expect((await readCurrent(page.request, enrollmentId, target.id)).current?.session_id).toBe(stock);
   const asked = await playSessionRight(page, request, EVERY_WORD);
   expect([...new Set(asked)].sort(), asked.join(', ')).toEqual(formsOf(target, 'owed'));
 
@@ -470,15 +479,18 @@ test('practice more starts the next words early, and the target screen groups th
   await answerSessionRight(page.request, await readyPathSession(page.request, enrollmentId, target.id));
   const before = await readTarget(page.request, target.id);
   expect(before.today).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 0 });
-  await readyPathSession(page.request, enrollmentId, target.id);
+  const more = await readyPathSession(page.request, enrollmentId, target.id);
   await openApp(page, `target-card-${target.id}`);
 
   // 1. Done for today: the card is below My words, and its button starts another session of
-  // the homework, which starts later words early and asks only the homework's words.
+  // the homework, which starts later words early and asks only the homework's words. It goes
+  // through create, which keeps the practice-more stock: the day owes nothing it would serve.
   const practice = page.getByTestId(`target-practice-${target.id}`);
   await expect.poll(() => homeOrder(page), { message: report() }).toEqual(['main', target.id]);
   await expectLabel(practice, 'לתרגל עוד');
   await tapUntil(page, `target-practice-${target.id}`, 'progress-label');
+  expect(createsSent(diagnostics), report()).toBeGreaterThan(0);
+  expect((await readCurrent(page.request, enrollmentId, target.id)).current?.session_id).toBe(more);
   const asked = await playSessionRight(page, request, EVERY_WORD);
   const homeworkForms = HOMEWORK_WORDS.map((word) => word.form);
   for (const form of asked) expect(homeworkForms, asked.join(', ')).toContain(form);
@@ -602,10 +614,16 @@ test('home orders its paths: the exam due today first with good luck, then work 
   await expect(page.getByTestId(`target-today-${resting.id}`)).toHaveCount(0);
   await expectLabel(practice(resting.id), 'לתרגל עוד');
 
-  // 4. The exam's screen says the same, and offers no change: the date has come.
+  // 4. The exam's screen says the same, and offers no change: the date has come. Nothing is
+  // owed on it (final review M1): its word is listed with no group title and no line for today.
   await page.getByTestId(`target-row-${exam.id}`).click();
   await expectLabel(page.getByTestId('target-countdown'), 'הבוחן היום');
   await expect(page.getByTestId('target-today')).toHaveCount(0);
+  const [examOnly] = exam.words;
+  await expect(page.getByTestId('target-group-all').getByTestId(`target-word-${examOnly.gloss_id}`), report()).toBeVisible();
+  await expect(page.getByTestId('target-group-owed')).toHaveCount(0);
+  await expect(page.getByText('נשאר להיום')).toHaveCount(0);
+  await expect(page.getByTestId(`target-word-today-${examOnly.gloss_id}`)).toHaveCount(0);
   await expect(page.getByTestId('target-change-date')).toHaveCount(0);
   await expect(page.getByTestId('target-end')).toHaveCount(0);
   expect(diagnostics.pageErrors, report()).toEqual([]);

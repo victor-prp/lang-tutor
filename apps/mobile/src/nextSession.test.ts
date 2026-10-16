@@ -7,10 +7,12 @@ import {
   homeActionOf,
   homeReminderStartOf,
   loadFailedFor,
+  mainEmptyNote,
   myWordsLine,
   reminderStartOf,
   shouldAutoCreate,
   shouldPoll,
+  targetPress,
   targetSessionAction,
 } from './nextSession';
 
@@ -205,8 +207,26 @@ describe('targetSessionAction', () => {
   });
 });
 
-// Phase 57 (spec D2, D11). A reminder opens the path of home's first card: a target's, once
-// the targets read after the tap is in, else the main path's as phase 52 does.
+// Phase 57 (spec D1, final review C1). A target's button: a started session is resumed as it
+// is; an unstarted one, none, or a failed one goes through create, which answers the path's stock
+// (replaced when it no longer serves the day) or builds one; a preparing one does nothing.
+describe('targetPress', () => {
+  it.each([
+    ['resumes a started session as it is', session('ready', 3), { kind: 'enter', sessionId: 'ts1', fresh: false }],
+    // The stock is answered or replaced for the devices it was built for: no wait on the voices.
+    ['sends an unstarted stock through create', session('ready', 0), { kind: 'create', waitForVoices: false }],
+    ['creates with no session, for this device', null, { kind: 'create', waitForVoices: true }],
+    ['creates again after a failure, for this device', session('failed'), { kind: 'create', waitForVoices: true }],
+    ['does nothing while one prepares', session('preparing'), { kind: 'none' }],
+  ])('%s', (_label, current, press) => {
+    expect(targetPress(targetSessionAction(targetWith(current)))).toEqual(press);
+  });
+});
+
+// Phase 57 (spec D2, D11). A reminder opens the path of home's first card, judged on the targets
+// read made after the tap, held as it landed (final review CI-1): never on a list home rendered
+// before it. A target first goes through create, as its button does (final review C1), and is
+// waited for while it prepares; it never falls to My words. My words first follows phase 52.
 describe('homeReminderStartOf', () => {
   const fresh = { failed: false, read: true };
   const stale = { failed: false, read: false };
@@ -215,6 +235,7 @@ describe('homeReminderStartOf', () => {
     { ...targetWith(current), today: { state: 'done', done: 8, planned: 8, extra: 0, next_practice_in: null } },
   ];
   const mainReady = { kind: 'start', sessionId: 'm1' } as const;
+  const answered = (status: 'ready' | 'preparing', sessionId = 'ts2') => ({ kind: 'answered', sessionId, status }) as const;
 
   it('waits for the targets read made after the tap, whatever the main path holds', () => {
     expect(homeReminderStartOf('reading', mainReady, fresh)).toEqual({ kind: 'wait' });
@@ -224,23 +245,54 @@ describe('homeReminderStartOf', () => {
     expect(homeReminderStartOf('failed', mainReady, fresh)).toEqual({ kind: 'clear' });
   });
 
-  it("enters the first target's session when it is ready, as its card's button does", () => {
-    expect(homeReminderStartOf(owed(session('ready', 0)), mainReady, stale)).toEqual({
+  it("sends create for the first target's unstarted session, preparing one or none, as its button does", () => {
+    for (const current of [session('ready', 0), session('preparing')]) {
+      expect(homeReminderStartOf(owed(current), mainReady, fresh)).toEqual({ kind: 'create', targetId: 't1', waitForVoices: false });
+    }
+    expect(homeReminderStartOf(owed(null), mainReady, fresh)).toEqual({ kind: 'create', targetId: 't1', waitForVoices: true });
+  });
+
+  // CI run 38964276019: home's list from before the read landed showed no target, and the
+  // reminder entered My words while the homework owed work.
+  it('judges on the held read, never on the list home shows: a target first is never left for My words', () => {
+    expect(homeReminderStartOf(owed(session('ready', 0)), mainReady, fresh, { kind: 'none' }, [])).toEqual({
+      kind: 'create',
+      targetId: 't1',
+      waitForVoices: false,
+    });
+    expect(homeReminderStartOf(owed(session('ready', 0)), mainReady, fresh, answered('preparing'), [])).toEqual({ kind: 'wait' });
+  });
+
+  it('waits while its create is out, and enters what create answers ready', () => {
+    expect(homeReminderStartOf(owed(session('ready', 0)), mainReady, fresh, { kind: 'sending' })).toEqual({ kind: 'wait' });
+    expect(homeReminderStartOf(owed(session('ready', 0)), mainReady, fresh, answered('ready', 'ts1'))).toEqual({
       kind: 'enter',
       sessionId: 'ts1',
       fresh: true,
     });
-    expect(homeReminderStartOf(owed(session('ready', 2)), null, stale)).toEqual({
-      kind: 'enter',
-      sessionId: 'ts1',
-      fresh: false,
-    });
   });
 
-  it('clears when the first target has nothing ready to enter', () => {
-    expect(homeReminderStartOf(owed(null), mainReady, fresh)).toEqual({ kind: 'clear' });
-    expect(homeReminderStartOf(owed(session('preparing')), mainReady, fresh)).toEqual({ kind: 'clear' });
+  it('waits while the session create answered prepares, and enters it once a later read shows it ready', () => {
+    const replaced = (status: 'preparing' | 'ready' | 'failed', sessionId = 'ts2') => [targetWith({ ...session(status), session_id: sessionId })];
+    const held = owed(session('ready', 0));
+    expect(homeReminderStartOf(held, mainReady, fresh, answered('preparing'), replaced('preparing'))).toEqual({ kind: 'wait' });
+    expect(homeReminderStartOf(held, mainReady, fresh, answered('preparing'), replaced('ready'))).toEqual({
+      kind: 'enter',
+      sessionId: 'ts2',
+      fresh: true,
+    });
+    // A render from before create's read still shows the stock it replaced: wait, never clear.
+    expect(homeReminderStartOf(held, mainReady, fresh, answered('preparing'), replaced('ready', 'ts1'))).toEqual({ kind: 'wait' });
+    expect(homeReminderStartOf(held, mainReady, fresh, answered('preparing'), replaced('failed'))).toEqual({ kind: 'clear' });
+  });
+
+  it("resumes the first target's started session as it is, with no create", () => {
+    expect(homeReminderStartOf(owed(session('ready', 2)), null, stale)).toEqual({ kind: 'enter', sessionId: 'ts1', fresh: false });
+  });
+
+  it('clears when the first target failed, or its create did', () => {
     expect(homeReminderStartOf(owed(session('failed')), mainReady, fresh)).toEqual({ kind: 'clear' });
+    expect(homeReminderStartOf(owed(null), mainReady, fresh, { kind: 'failed' })).toEqual({ kind: 'clear' });
   });
 
   it("follows the main path's phase 52 rules when My words is first", () => {
@@ -253,6 +305,24 @@ describe('homeReminderStartOf', () => {
       sessionId: 'm1',
       fresh: true,
     });
+  });
+});
+
+// Final review M2. My words with nothing of its own: every saved word is in an active target,
+// which practises it; or nothing is saved at all.
+describe('mainEmptyNote', () => {
+  const summary = (kind: 'exam' | 'homework', word_count: number): TargetSummary => ({ ...targetWith(null), kind, word_count });
+
+  it('asks to save words first when no target holds a word', () => {
+    expect(mainEmptyNote(null)).toEqual({ kind: 'save-words-first', text: 'כדי לתרגל, שמרו קודם מילים במסך התרגום.' });
+    expect(mainEmptyNote([])).toEqual({ kind: 'save-words-first', text: 'כדי לתרגל, שמרו קודם מילים במסך התרגום.' });
+    expect(mainEmptyNote([summary('exam', 0)]).kind).toBe('save-words-first');
+  });
+
+  it('says the words are all in the targets, by their kinds', () => {
+    expect(mainEmptyNote([summary('exam', 3)])).toEqual({ kind: 'all-in-targets', text: 'כל המילים שלך כבר בהכנה לבוחן.' });
+    expect(mainEmptyNote([summary('homework', 3), summary('homework', 2)]).text).toBe('כל המילים שלך כבר בהכנה לשיעורי הבית.');
+    expect(mainEmptyNote([summary('homework', 3), summary('exam', 1)]).text).toBe('כל המילים שלך כבר בהכנה לבוחן ולשיעורי הבית.');
   });
 });
 

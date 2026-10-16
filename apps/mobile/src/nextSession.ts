@@ -1,4 +1,4 @@
-import type { CurrentSessionResponse, TargetSummary } from '@lang-tutor/core/api';
+import type { CurrentSessionResponse, SessionStatus, TargetSummary } from '@lang-tutor/core/api';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import { strings } from '@/strings';
@@ -54,6 +54,42 @@ export function targetSessionAction(target: Pick<TargetSummary, 'session'>): Hom
   }
 }
 
+/** Phase 57 (spec D1, final review C1). What a target's button does with its card's action:
+ *  a started session is resumed as it is; an unstarted one, none, or a failed one goes through
+ *  create (POST /sessions with the target), which answers the path's stock, replaced first when
+ *  it no longer serves the target's day, or builds one: entered when create answers it ready,
+ *  else the card shows it preparing. A preparing one is not pressable.
+ *
+ *  `waitForVoices`: only a create that builds the session waits for this device's voices. One
+ *  that answers the stock, or replaces it, uses the devices the stock was built for, so the
+ *  tap does not wait on voices that may never load. */
+export function targetPress(
+  action: HomeAction,
+): { kind: 'enter'; sessionId: string; fresh: boolean } | { kind: 'create'; waitForVoices: boolean } | { kind: 'none' } {
+  switch (action.kind) {
+    case 'resume':
+      return { kind: 'enter', sessionId: action.sessionId, fresh: false };
+    case 'start':
+      return { kind: 'create', waitForVoices: false };
+    case 'create':
+    case 'failed':
+      return { kind: 'create', waitForVoices: true };
+    default:
+      return { kind: 'none' };
+  }
+}
+
+/** Final review M2. What My words says when it has nothing of its own to practise: that every
+ *  saved word is in the targets, which practise them, when one holds a word; otherwise, to save
+ *  words first. `targets` is home's read of them, null until it lands. */
+export function mainEmptyNote(
+  targets: readonly Pick<TargetSummary, 'kind' | 'word_count'>[] | null,
+): { kind: 'save-words-first' | 'all-in-targets'; text: string } {
+  const holding = (targets ?? []).filter((target) => target.word_count > 0);
+  if (holding.length === 0) return { kind: 'save-words-first', text: strings.saveWordsFirst };
+  return { kind: 'all-in-targets', text: strings.allWordsInTargets(holding.map((target) => target.kind)) };
+}
+
 /** Phase 57 (spec D11). The line under My words' title: the seed's words before the first
  *  session, else how many words wait for review, else (none waiting) the meanings saved. */
 export function myWordsLine(state: CurrentSessionResponse, language: string): string {
@@ -86,7 +122,18 @@ export function createLook(failedFor: string | null, activeId: string): 'prepari
 export type ReminderStart =
   | { kind: 'enter'; sessionId: string; fresh: boolean }
   | { kind: 'wait' }
-  | { kind: 'clear' };
+  | { kind: 'clear' }
+  /** Phase 57 (final review C1). Send create for this target's path, then decide again; it
+   *  waits for the voices only when it builds the session (targetPress). */
+  | { kind: 'create'; targetId: string; waitForVoices: boolean };
+
+/** Phase 57 (final review C1). Where the create a reminder sent for a target's path stands: not
+ *  sent, out, failed, or answered with the session it names and that session's status. */
+export type TargetCreate =
+  | { kind: 'none' }
+  | { kind: 'sending' }
+  | { kind: 'failed' }
+  | { kind: 'answered'; sessionId: string; status: SessionStatus };
 
 export function reminderStartOf(
   action: HomeAction | null,
@@ -111,29 +158,48 @@ export function reminderStartOf(
 }
 
 /** Phase 57 (spec D2, D11). A reminder opens the path of home's first card (homeOrder's
- *  `first`). `targets` is the targets read made after the tap: 'reading' until it is in,
- *  'failed' if it failed, since then home cannot tell which card is first. A target first
- *  is entered when its session is ready, as its card's button enters it, and the param is
- *  cleared otherwise: the reminder never creates a session. My words first follows phase
- *  52's rules over the main path's action. */
+ *  `first`), judged on `held`: the targets read made after the tap, as it landed ('reading'
+ *  until it is in, 'failed' if it failed, since then home cannot tell which card is first).
+ *  Never on the list a render of home holds, which can be from before that read (final review
+ *  CI-1: the homework owed work, home's older list had no target yet, and My words was entered).
+ *
+ *  A target first is never left for My words. Its started session is resumed as it is; a failed
+ *  one is left alone, as phase 52 leaves a failed session; otherwise the reminder goes through
+ *  create, as the card's button does (final review C1: create answers the stock, replaced when it
+ *  no longer serves the day), enters what create answers ready, and waits while it prepares
+ *  until `latest`, home's newest list, shows that session ready. A list showing another session
+ *  or none is waited out, never cleared on: a render from before create's own read shows the
+ *  stock create replaced. My words first follows phase 52's rules over the main path's action. */
 export function homeReminderStartOf(
-  targets: 'reading' | 'failed' | readonly TargetSummary[],
+  held: 'reading' | 'failed' | readonly TargetSummary[],
   main: HomeAction | null,
   flags: { failed: boolean; read: boolean },
+  created: TargetCreate = { kind: 'none' },
+  latest: readonly TargetSummary[] = [],
 ): ReminderStart {
-  if (targets === 'reading') return { kind: 'wait' };
-  if (targets === 'failed') return { kind: 'clear' };
-  const { first } = homeOrder(targets);
-  const target = targets.find((candidate) => candidate.id === first);
+  if (held === 'reading') return { kind: 'wait' };
+  if (held === 'failed') return { kind: 'clear' };
+  const { first } = homeOrder(held);
+  const target = held.find((candidate) => candidate.id === first);
   if (!target) return reminderStartOf(main, flags);
   const action = targetSessionAction(target);
-  switch (action.kind) {
-    case 'start':
-      return { kind: 'enter', sessionId: action.sessionId, fresh: true };
-    case 'resume':
-      return { kind: 'enter', sessionId: action.sessionId, fresh: false };
-    default:
+  if (action.kind === 'resume') return { kind: 'enter', sessionId: action.sessionId, fresh: false };
+  if (action.kind === 'failed') return { kind: 'clear' };
+  switch (created.kind) {
+    case 'none':
+      return { kind: 'create', targetId: target.id, waitForVoices: action.kind === 'create' };
+    case 'sending':
+      return { kind: 'wait' };
+    case 'failed':
       return { kind: 'clear' };
+    case 'answered': {
+      if (created.status === 'ready') return { kind: 'enter', sessionId: created.sessionId, fresh: true };
+      if (created.status !== 'preparing') return { kind: 'clear' };
+      const now = latest.find((candidate) => candidate.id === target.id)?.session;
+      if (now?.session_id !== created.sessionId) return { kind: 'wait' };
+      if (now.status === 'ready') return { kind: 'enter', sessionId: created.sessionId, fresh: true };
+      return now.status === 'preparing' ? { kind: 'wait' } : { kind: 'clear' };
+    }
   }
 }
 

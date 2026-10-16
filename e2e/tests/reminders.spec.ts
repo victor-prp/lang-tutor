@@ -99,9 +99,12 @@ test('a reminder opens the path of home’s first card: the homework owing work,
     return firstForm(page);
   };
 
-  // The homework owes work: its card is first, and the reminder enters its session.
+  // The homework owes work: its card is first, and the reminder enters its session, through
+  // create (final review C1), judged on the targets read made after the tap (CI-1).
+  const creates = () => diagnostics.apiRequests.filter((sent) => /^POST \S+\/api\/sessions$/.test(sent)).length;
   expect(formsOf(target, 'owed'), report()).toContain(await remind());
   expect((await readCurrent(page.request, enrollmentId, target.id)).current?.session_id).toBe(targetSession);
+  expect(creates(), report()).toBe(1);
 
   // Done for today (that session answered over the API): My words is first, and opened.
   await answerSessionRight(page.request, targetSession);

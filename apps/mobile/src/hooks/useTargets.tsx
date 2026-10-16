@@ -14,13 +14,16 @@ export type TargetsContext = {
   /** The active targets, nearest date first, with the learner's today (the date step
    *  offers the days after it). Null until a read for the active enrollment lands. */
   list: TargetList | null;
-  /** Reads the list again. Never rejects: a read that fails leaves the list as it was, and
-   *  answers false (a reminder must know whether the list it acts on is fresh). */
-  reload(): Promise<boolean>;
+  /** Reads the list again. Never rejects: answers the list this read brought, and null when
+   *  it failed, which leaves the list as it was. A reminder judges on the list itself, never on
+   *  a render's (final review CI-1). */
+  reload(): Promise<TargetList | null>;
   /** Phase 57 (spec D1). Creates the next session of a target's own path, built for this
-   *  device, then reads the list again (its card shows it preparing). Throws as the api does:
+   *  device, or answers its stock (final review C1: replaced first when it no longer serves the
+   *  day), then reads the list again (its card shows it preparing). `waitForVoices: false` when
+   *  the path has a stock, whose devices create uses (targetPress). Throws as the api does:
    *  `target closed` once the target has ended. */
-  create(targetId: string): Promise<CreateSessionResponse>;
+  create(targetId: string, options?: { waitForVoices?: boolean }): Promise<CreateSessionResponse>;
 };
 
 const TargetsValueContext = createContext<TargetsContext | null>(null);
@@ -41,31 +44,32 @@ export function TargetsProvider({ api, children }: { api: ApiClient; children: R
 
   // A stable identity while the enrollment holds: home hands it to useFocusEffect, and a
   // new function on every render would read again on every state change.
-  const reload = useCallback(async () => {
-    if (!active) return false;
+  const reload = useCallback(async (): Promise<TargetList | null> => {
+    if (!active) return null;
     const enrollmentId = active.id;
     const mine = ++started.current;
     try {
       const read = await api.listTargets(enrollmentId);
-      // A newer read is already shown: the list is as fresh as this one.
-      if (mine < applied.current) return true;
-      applied.current = mine;
-      setStored({ enrollmentId, list: read });
-      return true;
+      // A newer read is already shown; this one is still the list as this call found it.
+      if (mine >= applied.current) {
+        applied.current = mine;
+        setStored({ enrollmentId, list: read });
+      }
+      return read;
     } catch {
       // Home keeps the list it has, and the next focus reads again.
-      return false;
+      return null;
     }
   }, [api, active]);
 
   const create = useCallback(
-    async (targetId: string) => {
+    async (targetId: string, options?: { waitForVoices?: boolean }) => {
       if (!active) throw new Error('cannot create a session with no active enrollment');
       try {
         return await api.createSession({
           enrollment_id: active.id,
           target_id: targetId,
-          ...(await devices(active.target_language)),
+          ...(await devices(active.target_language, options?.waitForVoices ?? true)),
         });
       } finally {
         // Awaited, so the card's button stays busy until it shows the session preparing:

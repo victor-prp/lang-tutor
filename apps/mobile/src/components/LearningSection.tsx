@@ -16,11 +16,14 @@ import {
   createLook,
   homeActionOf,
   homeReminderStartOf,
+  mainEmptyNote,
   myWordsLine,
   shouldAutoCreate,
   shouldPoll,
+  targetPress,
   targetSessionAction,
   type HomeAction,
+  type TargetCreate,
 } from '@/nextSession';
 import { homePhotoCard, isWorking, type HomePhotoCard } from '@/photoImports';
 import { strings } from '@/strings';
@@ -39,6 +42,15 @@ function photoCardLabel(card: NonNullable<HomePhotoCard>): string {
       return strings.homePhotoSeveral(card.count);
   }
 }
+
+/** Phase 52 (spec D8), phase 57. What home holds of a tapped reminder: the main path's read it
+ *  first saw, the targets read made after the tap (its list), and the create a target first
+ *  goes through. */
+type ReminderHeld = {
+  read: CurrentSessionResponse | null;
+  targets: 'reading' | 'failed' | readonly TargetSummary[];
+  created: TargetCreate;
+};
 
 export function LearningSection({ active }: { active: Enrollment }) {
   const { enter } = useSession();
@@ -69,12 +81,11 @@ export function LearningSection({ active }: { active: Enrollment }) {
   // The read home held when it first saw the param. It may be about a session
   // finished since, so home reads again and acts on the first read that differs
   // (every successful read stores a new object). Phase 57 (spec D2): the targets are
-  // read again too, since the first card's path is the one opened, and `targets` is
-  // how that read went; the tick re-renders home when it is in.
-  const reminderHeld = useRef<{
-    read: CurrentSessionResponse | null;
-    targets: 'reading' | 'read' | 'failed';
-  } | null>(null);
+  // read again too, since the first card's path is the one opened, and `targets` holds
+  // that read's list itself (final review CI-1: a render's list can be older than the
+  // read); `created` is the create a target first goes through (C1). The tick
+  // re-renders home when either lands.
+  const reminderHeld = useRef<ReminderHeld | null>(null);
   const [, setReminderTick] = useState(0);
 
   // Fresh on every focus: back from a session, from translate, after a switch.
@@ -185,26 +196,19 @@ export function LearningSection({ active }: { active: Enrollment }) {
       attemptedFor.current = null;
     });
 
-  // Phase 57 (spec D1). A target's button acts on its own path's session as the start
-  // button acts on the main path's: enter a ready one; otherwise create one with the
-  // target's id, which the card then shows preparing (home polls the targets meanwhile).
-  // A preparing one is not pressable.
+  // Phase 57 (spec D1). A target's button acts on its own path's session: a started one is
+  // resumed; otherwise it goes through create with the target's id (final review C1: create
+  // answers the path's stock, replaced first when it no longer serves the target's day, or
+  // builds one), and the session create answers is entered when ready, else the card shows
+  // it preparing (home polls the targets meanwhile). A preparing one is not pressable.
   const practiceTarget = (target: TargetSummary) => {
-    const targetAction = targetSessionAction(target);
-    switch (targetAction.kind) {
-      case 'start':
-      case 'resume':
-        enterSession(targetAction.sessionId, targetAction.kind === 'start');
-        return;
-      case 'create':
-      case 'failed':
-        void run(async () => {
-          await createTargetSession(target.id);
-        });
-        return;
-      default:
-        return;
-    }
+    const press = targetPress(targetSessionAction(target));
+    if (press.kind === 'enter') enterSession(press.sessionId, press.fresh);
+    if (press.kind !== 'create') return;
+    void run(async () => {
+      const created = await createTargetSession(target.id, { waitForVoices: press.waitForVoices });
+      if (created.status === 'ready') enterSession(created.session_id, true);
+    });
   };
 
   // Phase 43 (spec D7). A missing session is made, not offered as a button.
@@ -222,7 +226,9 @@ export function LearningSection({ active }: { active: Enrollment }) {
   // start again. With nothing to start the param is just cleared; until then it
   // waits. After every render, like the guard above, and only while home is focused.
   // Phase 57 (spec D2): it opens the first card's path, so the targets are read again
-  // as well, and a target first is entered as its card's button would enter it.
+  // as well, and that read's own list decides which card is first (final review CI-1). A
+  // target first goes through create, as its card's button does (C1), and is waited for
+  // while it prepares.
   useEffect(() => {
     if (start !== 'reminder') {
       reminderHandled.current = false;
@@ -231,21 +237,40 @@ export function LearningSection({ active }: { active: Enrollment }) {
     }
     if (!focused || reminderHandled.current || inFlight.current) return;
     if (reminderHeld.current === null) {
-      const held = { read: next.current, targets: 'reading' as 'reading' | 'read' | 'failed' };
-      reminderHeld.current = held;
+      const fresh: ReminderHeld = { read: next.current, targets: 'reading', created: { kind: 'none' } };
+      reminderHeld.current = fresh;
       reload();
-      void reloadTargets().then((ok) => {
-        if (reminderHeld.current !== held) return;
-        held.targets = ok ? 'read' : 'failed';
+      void reloadTargets().then((list) => {
+        if (reminderHeld.current !== fresh) return;
+        fresh.targets = list ? list.targets : 'failed';
         setReminderTick((tick) => tick + 1);
       });
     }
     const held = reminderHeld.current;
-    const step = homeReminderStartOf(held.targets === 'read' ? targets : held.targets, action, {
-      failed: next.loadFailed || createLook(makeFailedFor, active.id) === 'retry',
-      read: next.current !== held.read,
-    });
+    const step = homeReminderStartOf(
+      held.targets,
+      action,
+      {
+        failed: next.loadFailed || createLook(makeFailedFor, active.id) === 'retry',
+        read: next.current !== held.read,
+      },
+      held.created,
+      targets,
+    );
     if (step.kind === 'wait') return;
+    if (step.kind === 'create') {
+      held.created = { kind: 'sending' };
+      const landed = (created: TargetCreate) => {
+        if (reminderHeld.current !== held) return;
+        held.created = created;
+        setReminderTick((tick) => tick + 1);
+      };
+      void createTargetSession(step.targetId, { waitForVoices: step.waitForVoices }).then(
+        (created) => landed({ kind: 'answered', sessionId: created.session_id, status: created.status }),
+        () => landed({ kind: 'failed' }),
+      );
+      return;
+    }
     reminderHandled.current = true;
     navigation.setParams({ start: undefined });
     if (step.kind === 'enter') enterSession(step.sessionId, step.fresh);
@@ -316,6 +341,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
               ) : null}
               <SessionAction
                 action={action}
+                emptyNote={mainEmptyNote(targetList?.targets ?? null)}
                 filled={first === 'main'}
                 loadFailed={next.loadFailed}
                 busy={busy}
@@ -405,6 +431,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
 
 function SessionAction({
   action,
+  emptyNote,
   filled,
   loadFailed,
   busy,
@@ -416,6 +443,9 @@ function SessionAction({
   onSkip,
 }: {
   action: HomeAction | null;
+  /** Final review M2. What My words says with nothing of its own: save words first, or that
+   *  every saved word is in the targets. */
+  emptyNote: ReturnType<typeof mainEmptyNote>;
   /** Phase 57 (spec D11). My words is home's first card: its button is filled, else outlined. */
   filled: boolean;
   loadFailed: boolean;
@@ -495,8 +525,8 @@ function SessionAction({
       return makeFailed ? retry : preparingLabel;
     case 'save-words-first':
       return (
-        <Text testID="save-words-first" style={styles.notice}>
-          {strings.saveWordsFirst}
+        <Text testID={emptyNote.kind === 'all-in-targets' ? 'all-words-in-targets' : 'save-words-first'} style={styles.notice}>
+          {emptyNote.text}
         </Text>
       );
     case 'preparing':
