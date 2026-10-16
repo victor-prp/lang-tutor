@@ -1,6 +1,7 @@
 import type { Question } from '@lang-tutor/core/api';
 
 import type { CardAnswer } from '@/feedback';
+import type { Retype } from '@/retype';
 import { strings } from '@/strings';
 
 /** Phase 25 (spec D7). A speaking card's attempt that recorded nothing yet:
@@ -34,7 +35,8 @@ export function isSkip(answer: CardAnswer): boolean {
 
 /** Phase 54 (spec D1). Whether an answer shows the feedback banner. A skip does
  *  not, and nor does a meet card tapped through: it asked nothing, so it has
- *  nothing to say, and the next card follows at once. */
-export function hasBanner(answer: CardAnswer): boolean {
-  return !isSkip(answer) && !('seen' in answer);
+ *  nothing to say, and the next card follows at once. Phase 55 (spec D7): nor
+ *  does an answer whose retype is still open, until the retype ends. */
+export function hasBanner(answer: CardAnswer, retype: Retype | null = null): boolean {
+  return !isSkip(answer) && !('seen' in answer) && (retype === null || retype.outcome !== null);
 }

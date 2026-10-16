@@ -93,7 +93,7 @@ function ClozeTypedCard({ question, session, language, answerLanguage }: { quest
       language={language}
       answered={session.answered}
       verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
-      onSubmit={(text) => session.submitText(text, hintOpen)}
+      onSubmit={(text) => session.submitText(text, { hintOpened: hintOpen })}
       direction="ltr"
       checking={session.judging === 'checking'}
       failed={session.judging === 'failed'}
@@ -149,7 +149,9 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       );
     case 'typed_translation':
       // Phase 34 (spec D9): another accepted word waits for the server to hold
-      // the card, so it checks and fails as a judged card does.
+      // the card, so it checks and fails as a judged card does. Phase 55 (spec
+      // D7): help, said with the answer, and the retype after a wrong or nearly
+      // right first answer, under that answer's title.
       return (
         <TypedAnswerView
           question={question}
@@ -157,12 +159,17 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
-          onSubmit={session.submitText}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry, session.retype).verdict : null}
+          onSubmit={(text, helped) => session.submitText(text, { helped })}
           direction="ltr"
           checking={session.judging === 'checking'}
           failed={session.judging === 'failed'}
           retry={session.retry}
+          help
+          retype={session.retype}
+          retypeTitle={session.answer ? feedbackFor(question, session.answer, session.retry).title : undefined}
+          onRetypeTyping={session.retypeTyping}
+          onRetype={session.retypeChecked}
         />
       );
     case 'cloze_choice':
@@ -231,7 +238,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           language={language}
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
-          onSubmit={session.submitText}
+          onSubmit={(text) => session.submitText(text)}
           direction="ltr"
           checking={false}
           failed={false}
@@ -239,13 +246,15 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         />
       );
     case 'letter_tiles':
+      // Phase 55 (spec D7): each tile checked as placed; the card answers itself, saying whether it was helped.
       return (
         <LetterTilesView
+          key={question.id}
           question={question}
           instruction={strings.questionInstructionTiles(language)}
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
-          onSubmit={session.submitText}
+          onSubmit={(text, helped) => session.submitText(text, { helped })}
         />
       );
     case 'matching':
@@ -280,7 +289,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       );
     case 'meet':
       // Phase 54 (spec D1): a new word, met before it is asked. Ungraded, and
-      // independent of speaking: it asks the learner to say it, and records nothing.
+      // independent of speaking. Phase 55 (spec D1): saying it is the read-aloud card's.
       return <MeetCardView key={question.id} question={question} language={language} answered={session.answered} onSeen={session.seen} />;
     case 'say_translation':
       // Spec D8: with speaking off, the same card is typed.
@@ -294,7 +303,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
               language={language}
               answered={session.answered}
               verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
-              onSubmit={session.submitText}
+              onSubmit={(text) => session.submitText(text)}
               direction="ltr"
               checking={session.judging === 'checking'}
               failed={session.judging === 'failed'}
@@ -335,7 +344,9 @@ export default function SessionScreen() {
   // A session is always entered from home, which needs an active enrollment;
   // an empty language only drops the name from the instruction.
   const language = active?.target_language ?? '';
-  // Phase 44 (spec D2): the card reads itself aloud.
+  // Phase 44 (spec D2): the card reads itself aloud. Phase 55 (spec D7): a
+  // retype opens showing the answer, so the word is said then, as for a banner,
+  // and not again when its banner follows: the cue reads the answer, not the retype.
   useCardVoice(session.question ?? null, {
     language,
     banner: session.answer !== null && hasBanner(session.answer),
@@ -421,8 +432,9 @@ export default function SessionScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {session.answer && hasBanner(session.answer) ? (
-        <FeedbackBanner feedback={feedbackFor(question, session.answer, session.retry)} onContinue={session.next} />
+      {/* Phase 55 (spec D7): none while a retype is open; then how it ended. */}
+      {session.answer && hasBanner(session.answer, session.retype) ? (
+        <FeedbackBanner feedback={feedbackFor(question, session.answer, session.retry, session.retype)} onContinue={session.next} />
       ) : null}
     </SafeAreaView>
   );

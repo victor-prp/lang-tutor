@@ -133,7 +133,12 @@ export const strings = {
   translationReference: 'תרגום לדוגמה:',
   // Phase 54 (spec D1). The meet card: a new word, shown before it is asked.
   meetTitle: 'מילה חדשה',
-  meetSayAloud: 'אמרו את המילה בקול',
+  // Phase 55 (spec D7). Help on the tiles and typed cards, a tile that is not
+  // the next letter, and the retype after a wrong typed answer (whose second
+  // attempt says tryAgain).
+  help: 'עזרה',
+  tilesWrong: 'לא האות הזאת',
+  retypeNotice: 'הקלידו את המילה שוב',
   // Phase 25 (spec D7).
   questionInstructionReadAloud: 'קראו בקול',
   questionInstructionSay: (language: string) => `אמרו ב${languageName(language)}`,
@@ -157,6 +162,8 @@ export const strings = {
   // Phase 23. Both count as correct (spec D9).
   feedbackNearMiss: 'כמעט! כך כותבים:',
   feedbackAlternative: 'נכון! המילה שתרגלנו:',
+  // Phase 55 (spec D7). Right, with help: recorded wrong, so not green.
+  feedbackHelped: 'נכון, עם עזרה',
   // Phase 45 (spec D1). Another accepted word again, on the second try: not "right".
   feedbackStillOther: 'עדיין לא המילה שתרגלנו:',
   feedbackStillOtherSense: 'עדיין לא הפירוש שתרגלנו:',

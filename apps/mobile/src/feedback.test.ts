@@ -424,3 +424,61 @@ describe('a second try (phase 34 D9)', () => {
   });
 
 });
+
+// Phase 55 (spec D6, D7). Help, or a wrong tile, makes a right answer a helped one.
+describe('a helped answer (phase 55 D6, D7)', () => {
+  const TILES: Question = {
+    id: 'lt',
+    type: 'letter_tiles',
+    vocab_term_id: 'l',
+    question: 'בית',
+    part_of_speech: 'noun',
+    answer: 'casa',
+    tiles: ['c', 'a', 's', 'a', 'o', 'e'],
+  };
+  const HELPED = { tone: 'other', title: 'נכון, עם עזרה', line: null, verdict: null };
+
+  it('right with help is right with help, on tiles and typed, with no line', () => {
+    expect(feedbackFor(TILES, { text: 'casa', helped: true }, null)).toEqual(HELPED);
+    expect(feedbackFor(typed, { text: 'finestra', helped: true }, null)).toEqual(HELPED);
+    expect(feedbackFor(typed, { text: 'vetrata', helped: true }, null)).toEqual(HELPED);
+    expect(strings.feedbackHelped).toBe('נכון, עם עזרה');
+  });
+
+  it('without help it is told as today', () => {
+    expect(feedbackFor(TILES, { text: 'casa', helped: false }, null)).toEqual({ tone: 'correct', title: 'נכון!', line: null, verdict: 'exact' });
+    expect(feedbackFor(typed, { text: 'finestra', helped: false }, null)).toEqual({ tone: 'correct', title: 'נכון!', line: null, verdict: 'exact' });
+  });
+
+  it('wrong with help is wrong, with the answer', () => {
+    expect(feedbackFor(TILES, { text: '', helped: true }, null)).toEqual({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'casa', verdict: 'wrong' });
+    expect(feedbackFor(typed, { text: 'porta', helped: true }, null)).toEqual({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'finestra', verdict: 'wrong' });
+  });
+
+  it('on a second try, the word with help is helped, and anything else is told as today', () => {
+    const PENDING = { answer: 'vetrata', wording: 'word' } as const;
+    expect(feedbackFor(typed, { text: 'finestra', helped: true }, PENDING)).toEqual(HELPED);
+    expect(feedbackFor(typed, { text: 'vetri', helped: true }, { answer: 'vetrata', wording: 'word' })).toMatchObject({ tone: 'wrong' });
+    expect(feedbackFor(typed, { text: '', helped: true }, PENDING)).toEqual({ tone: 'correct', title: strings.feedbackAlternative, line: 'finestra', verdict: 'alternative' });
+    expect(feedbackFor(typed, { text: 'vetrata', helped: true }, { answer: 'vetri', wording: 'word' })).toMatchObject({ tone: 'other', title: strings.feedbackStillOther });
+  });
+
+  it('a retype that is open leaves the first answer’s banner; one that ended tells how', () => {
+    expect(feedbackFor(typed, { text: 'finestar', helped: false }, null, { attempt: 1, showing: true, outcome: null })).toMatchObject({
+      title: 'כמעט! כך כותבים:',
+      line: 'finestra',
+    });
+    expect(feedbackFor(typed, { text: 'porta', helped: false }, null, { attempt: 2, showing: false, outcome: 'right' })).toEqual({
+      tone: 'correct',
+      title: 'נכון!',
+      line: null,
+      verdict: 'exact',
+    });
+    expect(feedbackFor(typed, { text: 'finestar', helped: true }, null, { attempt: 2, showing: false, outcome: 'failed' })).toEqual({
+      tone: 'wrong',
+      title: 'התשובה הנכונה:',
+      line: 'finestra',
+      verdict: 'wrong',
+    });
+  });
+});

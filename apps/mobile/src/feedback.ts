@@ -1,6 +1,7 @@
 import type { AnswerVerdict, PendingRetry, Question } from '@lang-tutor/core/api';
 import { evaluate, normaliseHebrew, normaliseTyped, rightAnswer, type AnswerInput } from '@lang-tutor/core/domain';
 
+import type { Retype } from '@/retype';
 import { strings } from '@/strings';
 
 /** What the banner says after an answer. `tone` picks its colours; a near miss
@@ -35,10 +36,19 @@ export type CardAnswer =
  * accepted. Given up is a blank text or a pass, since a judged card's give-up
  * comes back `wrong` (phase 34 ruling R15). Phase 45: the first answer sent again,
  * and another accepted word again, are "still not the word", neither green nor red.
+ *
+ * Phase 55 (spec D6, D7). The text is told by its own verdict, without `helped`:
+ * the server records a helped tiles or typed answer `wrong`, and its banner is
+ * "right, with help" when the text was the word or another accepted one, with
+ * no line and its input not coloured; a helped wrong text is a wrong one. A
+ * retype that has ended tells how it ended, whatever the first answer was; one
+ * still open leaves the first answer's banner, whose title the retype shows.
  */
-export function feedbackFor(question: Question, answer: CardAnswer, retry: PendingRetry | null): Feedback {
-  const feedback = answerFeedback(question, answer);
-  if (retry === null) return feedback;
+export function feedbackFor(question: Question, answer: CardAnswer, retry: PendingRetry | null, retype: Retype | null = null): Feedback {
+  if (retype?.outcome === 'right') return { tone: 'correct', title: strings.feedbackCorrect, line: null, verdict: 'exact' };
+  if (retype?.outcome === 'failed') return { tone: 'wrong', title: strings.feedbackWrong, line: rightAnswer(question), verdict: 'wrong' };
+  const feedback = answerFeedback(question, unhelped(answer));
+  if (retry === null) return helpedOr(answer, feedback);
   if (feedback.tone === 'wrong' && gaveUp(answer)) return alternativeFeedback(question);
   // Phase 45 (spec D1, review I1). Another accepted word again, or the first answer
   // sent again: the second try asked for the practised word, so it is not "right";
@@ -46,7 +56,23 @@ export function feedbackFor(question: Question, answer: CardAnswer, retry: Pendi
   if (feedback.verdict === 'alternative' || (feedback.tone === 'wrong' && repeats(question, answer, retry))) {
     return stillOtherFeedback(question);
   }
-  return feedback;
+  return helpedOr(answer, feedback);
+}
+
+/** Phase 55 (spec D6). The answer as its text alone: `helped` changes how it
+ *  is recorded, not what its text is. */
+function unhelped(answer: CardAnswer): CardAnswer {
+  return 'text' in answer && 'helped' in answer ? { text: answer.text } : answer;
+}
+
+function helped(answer: CardAnswer): boolean {
+  return 'helped' in answer && answer.helped === true;
+}
+
+/** Phase 55 (spec D7). A right text found with help: neither green nor red. */
+function helpedOr(answer: CardAnswer, feedback: Feedback): Feedback {
+  if (!helped(answer) || (feedback.verdict !== 'exact' && feedback.verdict !== 'alternative')) return feedback;
+  return { tone: 'other', title: strings.feedbackHelped, line: null, verdict: null };
 }
 
 function stillOtherFeedback(question: Question): Feedback {

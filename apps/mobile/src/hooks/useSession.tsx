@@ -17,7 +17,25 @@ import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { checksFit, type CardAnswer } from '@/feedback';
 import type { Clip } from '@/recording';
-import { answerRoute, applyQueued, landed, nextStepRequest, queuedFrom, resumed, retried, seenState, settle, type QuizState, type Settled } from '@/quiz';
+import {
+  answeredState,
+  answerRoute,
+  applyQueued,
+  continued,
+  enteredState,
+  landed,
+  nextStepRequest,
+  queuedFrom,
+  resumed,
+  retried,
+  retypeCheckedState,
+  retypeTypingState,
+  seenState,
+  settle,
+  type QuizState,
+  type Settled,
+} from '@/quiz';
+import type { Retype } from '@/retype';
 import { canJudge, judgedAnswer, type JudgeAttempt } from '@/judging';
 import { IDLE_ATTEMPT, passesUnseen, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 import { strings } from '@/strings';
@@ -44,8 +62,9 @@ export type SessionValue = {
   enter: (sessionId: string) => void;
   select: (optionIndex: number) => void;
   /** Phase 23. Answers a typed card. An empty text is "show me the answer".
-   *  Phase 38 (spec D4): a typed gap says whether its hint was opened. */
-  submitText: (text: string, hintOpened?: boolean) => void;
+   *  Phase 38 (spec D4): a typed gap says whether its hint was opened. Phase 55
+   *  (spec D6): a tiles or typed translation card says whether it was helped. */
+  submitText: (text: string, card?: { hintOpened?: boolean; helped?: boolean }) => void;
   /** Phase 24. Answers a board: each word's first-tried meaning, in board order. */
   submitBoard: (firstAttempts: number[]) => void;
   /** Phase 25. The speaking card's attempt that has recorded nothing yet. */
@@ -73,6 +92,14 @@ export type SessionValue = {
    *  first answer and which line to show. Null on every other card. Every
    *  answer above sends `retry: true` while it is set. */
   retry: PendingRetry | null;
+  /** Phase 55 (spec D7). The retype after a wrong or nearly right first typed
+   *  translation; null on every other card. While it is open there is no
+   *  banner, and Continue does nothing. */
+  retype: Retype | null;
+  /** The first character of a retype: the right answer hides. */
+  retypeTyping: () => void;
+  /** Checks a retype on the phone. Nothing is sent: the grade is the first answer's. */
+  retypeChecked: (text: string) => void;
   next: () => void;
 };
 
@@ -121,23 +148,9 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       // calling it, and SessionScreen redirects home while hasSession is false.
       // `question` stays undefined until the read lands, which keeps select()
       // inert meanwhile.
-      setState({
-        sessionId,
-        question: undefined,
-        position: 0,
-        total: SESSION_LENGTH,
-        answer: null,
-        complete: false,
-        correctCount: 0,
-        missedQuestions: [],
-        progress: [],
-        queued: null,
-        advanceRequested: false,
-        speech: IDLE_ATTEMPT,
-        speakingOff: null,
-        judging: 'idle',
-        retry: null,
-      });
+      // Phase 55 (spec D7): with no retype, which is never sent, so a session
+      // left mid-retype resumes on the card after it.
+      setState(enteredState(sessionId));
       void (async () => {
         try {
           const currentUser = userRef.current;
@@ -212,7 +225,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   // Phase 23: one path for a chosen option and a typed text. The guard on
   // `state.answer` is what makes a second tap, or Return then Check, a no-op.
   const answerWith = useCallback(
-    (input: { option_index: number } | { text: string }, hintOpened?: boolean) => {
+    (input: { option_index: number } | { text: string; helped?: boolean }, hintOpened?: boolean) => {
       if (!state || state.answer !== null || !state.question || state.judging === 'checking') return;
       const { sessionId, question, retry } = state;
       // Phase 34 (spec D9): the second try at a held card carries retry: true,
@@ -228,7 +241,9 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         return;
       }
 
-      setState((current) => (current ? { ...current, answer: input } : current));
+      // Phase 55 (spec D7): a wrong or nearly right first typed translation
+      // opens its retype here, before any banner; the response is queued as ever.
+      setState((current) => (current ? answeredState(current, input) : current));
 
       // Fired in the background: the verdict is already visible to the learner
       // the moment this returns (feedbackFor runs the server's own evaluate),
@@ -240,7 +255,11 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   );
 
   const select = useCallback((optionIndex: number) => answerWith({ option_index: optionIndex }), [answerWith]);
-  const submitText = useCallback((text: string, hintOpened?: boolean) => answerWith({ text }, hintOpened), [answerWith]);
+  const submitText = useCallback(
+    (text: string, { hintOpened, helped }: { hintOpened?: boolean; helped?: boolean } = {}) =>
+      answerWith(helped === undefined ? { text } : { text, helped }, hintOpened),
+    [answerWith],
+  );
 
   // Phase 24 (spec D10). A board's words are separate questions: their answers
   // go in board order, one call after another, and only the last response is
@@ -376,13 +395,18 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     if (state && passesUnseen(state.question, state.speakingOff, state.answer !== null)) pass('skip');
   }, [state, pass]);
 
+  // Phase 55 (spec D7): an open retype ignores Continue (continued).
   const next = useCallback(() => {
-    setState((current) => {
-      if (!current) return current;
-      return current.queued
-        ? applyQueued(current, current.queued)
-        : { ...current, advanceRequested: true };
-    });
+    setState((current) => (current ? continued(current) : current));
+  }, []);
+
+  // Phase 55 (spec D7). The retype is the phone's alone: nothing is sent.
+  const retypeTyping = useCallback(() => {
+    setState((current) => (current ? retypeTypingState(current) : current));
+  }, []);
+
+  const retypeChecked = useCallback((text: string) => {
+    setState((current) => (current ? retypeCheckedState(current, text) : current));
   }, []);
 
   const value = useMemo<SessionValue>(() => {
@@ -415,6 +439,9 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         judging: 'idle',
         submitJudged,
         retry: null,
+        retype: null,
+        retypeTyping,
+        retypeChecked,
         next,
       };
     }
@@ -446,9 +473,12 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       judging: state.judging,
       submitJudged,
       retry: state.retry,
+      retype: state.retype,
+      retypeTyping,
+      retypeChecked,
       next,
     };
-  }, [state, enter, select, submitText, submitBoard, submitSpeech, pass, seen, retrySpeech, markSpeechFailed, stopSpeaking, submitJudged, next]);
+  }, [state, enter, select, submitText, submitBoard, submitSpeech, pass, seen, retrySpeech, markSpeechFailed, stopSpeaking, submitJudged, retypeTyping, retypeChecked, next]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

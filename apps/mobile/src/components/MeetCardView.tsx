@@ -17,9 +17,10 @@ type Props = {
 
 /**
  * Phase 54 (spec D1). A new word, met before it is asked: the word large with
- * its play button, the line asking to say it aloud (nothing is recorded), its
- * Hebrew meaning, and one button. Drawn as the read-aloud card is, from the
- * same pieces. The word is said when the card opens (cardVoice) and on a tap.
+ * its play button, its Hebrew meaning, and one button. Drawn as the read-aloud
+ * card is, from the same pieces. The word is said when the card opens
+ * (cardVoice) and on a tap. Phase 55 (spec D1): saying it is the intro stage's
+ * read-aloud card, which listens, so this card no longer asks for it.
  */
 export function MeetCardView({ question, language, answered, onSeen }: Props) {
   return (
@@ -33,9 +34,6 @@ export function MeetCardView({ question, language, answered, onSeen }: Props) {
         </Text>
         <SpeakButton text={question.question} language={language} testID="speak-form" />
       </View>
-      <Text style={[answerStyles.instruction, styles.centred]} testID="meet-say">
-        {strings.meetSayAloud}
-      </Text>
       <Text style={speakingStyles.meaning} testID="meet-meaning">
         {question.meaning}
       </Text>

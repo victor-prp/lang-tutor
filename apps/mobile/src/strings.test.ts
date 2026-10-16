@@ -12,10 +12,24 @@ describe('sentence-card strings (phase 27 D5, D6)', () => {
 });
 
 describe('the meet card (phase 54 D1)', () => {
-  it('words its title, its prompt and its button exactly', () => {
+  it('words its title and its button exactly', () => {
     expect(strings.meetTitle).toBe('מילה חדשה');
-    expect(strings.meetSayAloud).toBe('אמרו את המילה בקול');
     expect(strings.continueLabel).toBe('המשך');
+  });
+
+  // Phase 55 (spec D1): saying the word moved to the read-aloud card, which listens.
+  it('no longer asks to say the word', () => {
+    expect('meetSayAloud' in strings).toBe(false);
+  });
+});
+
+describe('help, and the retype (phase 55 D7)', () => {
+  it('words the help, the wrong tile, the retype and the helped banner exactly', () => {
+    expect(strings.help).toBe('עזרה');
+    expect(strings.tilesWrong).toBe('לא האות הזאת');
+    expect(strings.retypeNotice).toBe('הקלידו את המילה שוב');
+    expect(strings.tryAgain).toBe('נסו שוב');
+    expect(strings.feedbackHelped).toBe('נכון, עם עזרה');
   });
 });
 
