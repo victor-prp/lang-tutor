@@ -24,6 +24,8 @@ import {
   continued,
   enteredState,
   helpedFor,
+  tappedFor,
+  wordTappedState,
   helpPressedState,
   landed,
   nextStepRequest,
@@ -73,6 +75,10 @@ export type SessionValue = {
   help: number;
   /** Help pressed: one more character. Every answer to the card then says it was helped. */
   pressHelp: () => void;
+  /** Phase 59 (spec D3, D5). The sentence translation's words tapped, by index. */
+  tapped: number[];
+  /** A word of the sentence tapped: its index, or `'mark'` on a card with no word map. */
+  pressWord: (tap: number | 'mark') => void;
   /** Phase 24. Answers a board: each word's first-tried meaning, in board order. */
   submitBoard: (firstAttempts: number[]) => void;
   /** Phase 25. The speaking card's attempt that has recorded nothing yet. */
@@ -345,12 +351,15 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       // Phase 56 (spec D5): a judged card says whether it was helped.
       const helped = helpedFor(question, state.help);
       const helps = helped === undefined ? {} : { helped };
+      // Phase 59 (spec D5): and which of its words were tapped.
+      const tapped = tappedFor(question, state.tapped);
+      const taps = tapped === undefined ? {} : { tapped };
       checkWith(
         sessionId,
         question.id,
         settle(question, retry, (as) =>
           api
-            .judgeAnswer(sessionId, retried({ question_id: question.id, text, ...helps }, as))
+            .judgeAnswer(sessionId, retried({ question_id: question.id, text, ...helps, ...taps }, as))
             .then((response) => ({ answer: judgedAnswer(text, response, helped), next: response.next })),
         ),
       );
@@ -434,6 +443,11 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     setState((current) => (current ? helpPressedState(current) : current));
   }, []);
 
+  // Phase 59 (spec D3). The phone's alone until the answer carries it.
+  const pressWord = useCallback((tap: number | 'mark') => {
+    setState((current) => (current ? wordTappedState(current, tap) : current));
+  }, []);
+
   const value = useMemo<SessionValue>(() => {
     if (!state) {
       return {
@@ -454,6 +468,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         submitText,
         help: 0,
         pressHelp,
+        tapped: [],
+        pressWord,
         submitBoard,
         speech: IDLE_ATTEMPT,
         speakingOff: null,
@@ -490,6 +506,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       submitText,
       help: state.help,
       pressHelp,
+      tapped: state.tapped,
+      pressWord,
       submitBoard,
       speech: state.speech,
       speakingOff: state.speakingOff,
@@ -507,7 +525,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       retypeChecked,
       next,
     };
-  }, [state, enter, select, submitText, pressHelp, submitBoard, submitSpeech, pass, seen, retrySpeech, markSpeechFailed, stopSpeaking, submitJudged, retypeTyping, retypeChecked, next]);
+  }, [state, enter, select, submitText, pressHelp, pressWord, submitBoard, submitSpeech, pass, seen, retrySpeech, markSpeechFailed, stopSpeaking, submitJudged, retypeTyping, retypeChecked, next]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

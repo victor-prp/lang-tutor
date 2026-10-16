@@ -1,9 +1,97 @@
 {
-  "id": "89d71eca-a3a0-419a-8cb6-dd6d65c845be",
+  "id": "0407a685-1b5a-4bdb-9d86-963f63881959",
   "prevId": "7d0c9f68-814d-4aec-9cae-b5c264cf3e6b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.answer_taps": {
+      "name": "answer_taps",
+      "schema": "",
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "word_index": {
+          "name": "word_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gloss_id": {
+          "name": "gloss_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tapped_at": {
+          "name": "tapped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "answer_taps_session_id_position_answers_session_id_position_fk": {
+          "name": "answer_taps_session_id_position_answers_session_id_position_fk",
+          "tableFrom": "answer_taps",
+          "tableTo": "answers",
+          "columnsFrom": [
+            "session_id",
+            "position"
+          ],
+          "columnsTo": [
+            "session_id",
+            "position"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "answer_taps_session_id_position_word_index_pk": {
+          "name": "answer_taps_session_id_position_word_index_pk",
+          "columns": [
+            "session_id",
+            "position",
+            "word_index"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "answer_taps_kind_known": {
+          "name": "answer_taps_kind_known",
+          "value": "\"answer_taps\".\"kind\" in ('target', 'list', 'free')"
+        },
+        "answer_taps_gloss_on_list": {
+          "name": "answer_taps_gloss_on_list",
+          "value": "(\"answer_taps\".\"kind\" = 'list') = (\"answer_taps\".\"gloss_id\" is not null)"
+        },
+        "answer_taps_word_index_nonneg": {
+          "name": "answer_taps_word_index_nonneg",
+          "value": "\"answer_taps\".\"word_index\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.answers": {
       "name": "answers",
       "schema": "",
@@ -2918,6 +3006,12 @@
           "notNull": true,
           "default": false
         },
+        "words": {
+          "name": "words",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3564,19 +3658,6 @@
           "type": "date",
           "primaryKey": false,
           "notNull": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'practice'"
-        },
-        "skipped_types": {
-          "name": "skipped_types",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -3675,10 +3756,6 @@
         "sessions_source_known": {
           "name": "sessions_source_known",
           "value": "\"sessions\".\"source\" in ('seed', 'list')"
-        },
-        "sessions_kind_known": {
-          "name": "sessions_kind_known",
-          "value": "\"sessions\".\"kind\" in ('practice', 'question_types')"
         },
         "sessions_completed_consistent": {
           "name": "sessions_completed_consistent",
@@ -4027,13 +4104,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'UTC'"
-        },
-        "tester": {
-          "name": "tester",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         }
       },
       "indexes": {},

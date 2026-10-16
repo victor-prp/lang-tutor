@@ -460,6 +460,7 @@ export function createSessionsRouter(sessions: SessionService) {
         text: body.text,
         retry: body.retry ?? false,
         helped: body.helped,
+        tapped: body.tapped,
       });
       return c.json({ verdict: result.verdict, next: buildNextStepResponse(id, result.session) }, 200);
     } catch (error) {

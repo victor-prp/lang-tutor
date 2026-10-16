@@ -2,7 +2,7 @@ import type { LlmContext } from '@lang-tutor/core/api';
 import { LlmContextSchema } from '@lang-tutor/core/api/schemas';
 import type { QuestionType } from '@lang-tutor/core/domain';
 
-import { comparable, type GenerationContext } from './distractors';
+import { comparable, learnerWordsJson, type GenerationContext, type LearnerWord } from './distractors';
 import { LANGUAGES, type LanguageCode } from './languages';
 import { findMark, findMarks, type Mark } from './marks';
 import { SENTENCE_MAX_WORDS, SENTENCE_MIN_WORDS, wordCount } from './sentences';
@@ -86,6 +86,8 @@ export type MarkItem = {
   sentence: string;
   /** Its target-language sentence. */
   translation: string;
+  /** Phase 59 (spec D2). A translation card: the call also maps each Hebrew word. */
+  map?: boolean;
 };
 
 export type ContextItem = BareContextItem | MarkItem;
@@ -120,7 +122,15 @@ export function contextItemFor(input: {
   const { key, type, row } = input;
   if (MARKS_SENTENCE.has(type)) {
     return input.sentence
-      ? { key, task: 'mark', word: input.sentence.word, meaning: row.translation, sentence: input.sentence.hebrew, translation: input.sentence.target }
+      ? {
+          key,
+          task: 'mark',
+          word: input.sentence.word,
+          meaning: row.translation,
+          sentence: input.sentence.hebrew,
+          translation: input.sentence.target,
+          ...(type === 'sentence_translation' ? { map: true } : {}),
+        }
       : null;
   }
   const task = contextLanguageOf(type);
@@ -162,7 +172,13 @@ const ASKED_WORDS = '4 to 10';
 const exampleHalf = (item: BareContextItem): string | null =>
   item.task === 'target' ? item.example : item.exampleTranslation;
 
-export function buildContextPrompt(input: { items: ContextItem[]; from: string; to: string }): ContextPrompt {
+export function buildContextPrompt(input: {
+  items: ContextItem[];
+  from: string;
+  to: string;
+  /** Phase 59 (spec D2): sent only when a mark item is mapped. */
+  learnerWords?: readonly LearnerWord[];
+}): ContextPrompt {
   const learned = language(input.from);
   const explained = language(input.to);
   const system = [
@@ -173,17 +189,26 @@ export function buildContextPrompt(input: { items: ContextItem[]; from: string; 
     'Each item has a task:',
     `- "target": the card shows the ${learned.name} word in word, which means meaning in ${explained.name}. In context, write a short, natural, everyday ${learned.name} sentence of ${ASKED_WORDS} words that uses word exactly as it is written there, once, in the sense of meaning and of the example, never in another sense. In context_word, write word as it appears in context. In context_translation, write the whole sentence in natural ${explained.name}.`,
     `- "explanation": the card shows the ${explained.name} word in word, which translates the ${learned.name} word in translates. In context, write a short, natural, everyday ${explained.name} sentence of ${ASKED_WORDS} words that uses word once, in whatever form the sentence needs, in the sense in which it translates translates and the example shows, never in another sense. Never write a ${learned.name} word in it. In context_word, write that ${explained.name} word exactly as it is written in context, with any prefix it takes. In context_translation, write the whole sentence in natural ${learned.name}.`,
-    `- "mark": sentence is a ${explained.name} sentence, and translation is a ${learned.name} translation of it that uses word, which means meaning. In sentence_word, write the ${explained.name} word or words of sentence that stand for word, exactly as they are written in sentence, with any prefix. Leave context, context_translation and context_word empty.`,
+    `- "mark": sentence is a ${explained.name} sentence, and translation is a ${learned.name} translation of it that uses word, which means meaning. In sentence_word, write the ${explained.name} word or words of sentence that stand for word, exactly as they are written in sentence, with any prefix. Leave context, context_translation and context_word empty. When the item has map, also fill sentence_words with one entry for each word of sentence, in order: in hebrew, that word exactly as written in sentence, with any prefix; in translation, the words of translation that render it, exactly as written in translation, or empty when none does; in word, the key of the learner_words entry it renders, in any form, or empty.`,
     'A sentence must differ from every sentence in avoid.',
     'Answer every item, using its key exactly as given.',
     ...explained.writing,
     ...learned.writing,
   ].join('\n');
 
+  const mapped = input.items.some((item) => item.task === 'mark' && item.map);
   const user = JSON.stringify({
     items: input.items.map((item) => {
       if (item.task === 'mark') {
-        return { key: item.key, task: item.task, word: item.word, meaning: item.meaning, sentence: item.sentence, translation: item.translation };
+        return {
+          key: item.key,
+          task: item.task,
+          word: item.word,
+          meaning: item.meaning,
+          sentence: item.sentence,
+          translation: item.translation,
+          ...(item.map ? { map: true } : {}),
+        };
       }
       // Spec D6: generated, not copied from the saved example, and never last time's.
       const avoid = unique([...(exampleHalf(item) ? [exampleHalf(item)!] : []), ...item.recent]);
@@ -200,6 +225,7 @@ export function buildContextPrompt(input: { items: ContextItem[]; from: string; 
         ...(avoid.length > 0 ? { avoid } : {}),
       };
     }),
+    ...(mapped && input.learnerWords && input.learnerWords.length > 0 ? { learner_words: learnerWordsJson(input.learnerWords) } : {}),
   });
   return { system, user, schema: LlmContextSchema };
 }
@@ -336,3 +362,58 @@ export function contextColumns(
     sentenceMarkEnd: sentenceMark?.end ?? null,
   };
 }
+
+/** Phase 59 (spec D2). One tappable run of a translation card's Hebrew: where it
+ *  is, the reference's words for it, the list word it renders (never the card's
+ *  own), and whether it is the practised word. */
+export type MapWord = { start: number; end: number; text: string; glossId: string | null; target: boolean };
+
+/** The words of a text, under `comparable`, as `holds` reads them. */
+const wordsOf = (value: string) => comparable(value).split(/[^\p{L}\p{M}\p{N}']+/u).filter(Boolean);
+
+const overlaps = (a: Mark, b: Mark) => a.start < b.end && b.start < a.end;
+
+/**
+ * Phase 59 (spec D2). A translation card's word map, from the context call's
+ * answer, or null when it has none usable. Never a refusal: a bad entry costs
+ * that word its tap. Each Hebrew word is found after the one before it; an entry
+ * whose Italian is not in the reference, or that overlaps one already kept, is
+ * dropped. The target is every entry over the mark, or with no mark the entry
+ * whose Italian is the gap; with a mark no entry covers, the mark itself, with
+ * the gap's text. Any other entry sharing a word with the gap is dropped, so a
+ * free tap never shows the answer.
+ */
+export function wordMapFor(
+  item: MarkItem,
+  found: Found | undefined,
+  mark: Mark | null,
+  learner: readonly LearnerWord[],
+  ownGlossId: string,
+): MapWord[] | null {
+  if (!item.map || !found?.sentence_words) return null;
+  const gapWords = new Set(wordsOf(item.word));
+  const glossOf = new Map(learner.map((word) => [word.key, word.glossId]));
+  const kept: MapWord[] = [];
+  let cursor = 0;
+  for (const entry of found.sentence_words) {
+    const text = entry.translation.trim();
+    const hebrew = entry.hebrew.trim();
+    if (text === '' || hebrew === '' || !holds(item.translation, text)) continue;
+    const at = findMarks(item.sentence, hebrew).find((place) => place.start >= cursor);
+    if (!at || kept.some((word) => overlaps(word, at))) continue;
+    cursor = at.end;
+    const target = mark ? overlaps(at, mark) : comparable(text) === comparable(item.word);
+    if (!target && wordsOf(text).some((word) => gapWords.has(word))) continue;
+    const glossId = target ? null : (glossOf.get(entry.word.trim()) ?? null);
+    kept.push({ start: at.start, end: at.end, text, glossId: glossId === ownGlossId ? null : glossId, target });
+  }
+  if (mark && !kept.some((word) => word.target)) {
+    kept.push({ start: mark.start, end: mark.end, text: item.word, glossId: null, target: true });
+    kept.sort((a, b) => a.start - b.start);
+  }
+  return kept.length > 0 ? kept : null;
+}
+
+/** Phase 59 (spec D5). A word map as the card is served it: never the list's glosses. */
+export const servedWords = (words: readonly MapWord[] | null) =>
+  words ? words.map(({ start, end, text, target }) => ({ start, end, text, target })) : null;

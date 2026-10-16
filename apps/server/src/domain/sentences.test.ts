@@ -56,6 +56,8 @@ describe('validateTranslateItem (spec D6)', () => {
     ['a Hebrew sentence it was told to avoid', { ...good, sentence: 'אני רוצה להזמין שולחן.' }],
     ['Latin letters in the Hebrew sentence', { ...good, sentence: 'הזמנו hotel במלון' }],
     ['too many Hebrew words', { ...good, sentence: 'אתמול בערב הזמנו חדר גדול ויפה מאוד במלון החדש שבמרכז העיר' }],
+    // Phase 59 (spec D1): three to five words.
+    ['six Hebrew words', { ...good, sentence: 'אתמול הזמנו חדר גדול במלון החדש' }],
     ['a gap missing from the reference', { ...good, gap: 'prenotare' }],
     ['Hebrew in the reference', { ...good, translation: 'Abbiamo prenotato חדר.' }],
     ['an emoji in the Hebrew sentence', { ...good, sentence: 'הזמנו חדר במלון 😀' }],
@@ -63,6 +65,14 @@ describe('validateTranslateItem (spec D6)', () => {
     ['a reference with no target letters', { ...good, translation: '12345', gap: '12345' }],
   ])('degrades %s', (_, found) => {
     expect(validateTranslateItem(input, found).ok).toBe(false);
+  });
+});
+
+describe('validateTranslateItem keeps five words (phase 59 D1)', () => {
+  it('accepts a five-word Hebrew sentence', () => {
+    const input = { form: 'prenotare', target: 'it' as const, explanation: 'he' as const, avoid: [] as string[] };
+    const verdict = validateTranslateItem(input, { sentence: 'אתמול הזמנו חדר גדול במלון', translation: 'Ieri abbiamo prenotato una camera.', gap: 'prenotato' });
+    expect(verdict.ok).toBe(true);
   });
 });
 
