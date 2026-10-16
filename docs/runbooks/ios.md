@@ -22,12 +22,20 @@ done.
 
 ## Where go-live stands
 
-Last updated 2026-10-11.
+Last updated 2026-10-16.
 
-- [ ] **1. Xcode and the simulators.** Not started. Can be done now, with no Apple account.
-- [ ] **2. Apple Developer Program.** Not started. Individual or organisation is still open.
-- [ ] **3. Signing and submission credentials in EAS.** Waits for step 2.
-- [ ] **4. The app in App Store Connect, and its id in `eas.json`.** Waits for step 3.
+- [ ] **1. Xcode and the simulators.** Not started. Blocked on a macOS update: the App Store's
+      Xcode needs macOS 26.6 or later and this Mac is on 26.5.2, so run Software Update first
+      (26.7.1 is enough). Nothing automated needs Xcode, only the simulator check by hand, so
+      this can wait for a real iPhone or iPad from TestFlight after step 6.
+- [x] **2. Apple Developer Program.** Active 2026-10-16: team Victor Perepelitsky
+      (6883G8TLZV), as an individual.
+- [x] **3. Signing and submission credentials in EAS.** Done 2026-10-16. The bundle id
+      `ai.wordspal.app` is registered with Push Notifications enabled; EAS holds the
+      distribution certificate, the provisioning profile, and an App Store Connect API key with
+      the App Manager role. No push key: reminders are Android-only.
+- [x] **4. The app in App Store Connect, and its id in `eas.json`.** Done 2026-10-16: Apple ID
+      `6823711479`, in `submit.production.ios.ascAppId`.
 - [ ] **5. TestFlight's external group.** Waits for step 4.
 - [ ] **6. The first release.** Waits for steps 3–5. `IOS_RELEASE` is not set yet, so releases
       until then skip iOS.
@@ -41,7 +49,9 @@ Run from the main checkout on `master`, after phase 36 has merged.
 
 1. **Xcode and the simulators** (the phase's done-means 1):
    1. Install **Xcode** from the Mac App Store, open it once, and let it install the iOS
-      platform. Then `sudo xcode-select -s /Applications/Xcode.app`.
+      platform. Then `sudo xcode-select -s /Applications/Xcode.app`. The App Store offers only
+      the newest Xcode, which needs the current macOS point release, so if it refuses with
+      "macOS … or later is required", run Software Update first (`softwareupdate -l` lists it).
    2. Expo Go in the simulators: `npm run mobile`, then press `i` for an iPhone, or `shift+i` to
       pick an iPad. Sign in and finish a session.
    3. The real built app, talking to production, with no Apple account needed:
@@ -77,6 +87,10 @@ Run from the main checkout on `master`, after phase 36 has merged.
    2. *App Store Connect → Manage your API key → Set up an API key for submissions*: lets
       `eas submit` upload without your Apple password.
 
+   `You have no team associated with your Apple account` after a successful sign-in means the
+   Developer Program enrolment is still being processed. Nothing to fix: wait for Apple's
+   welcome email and rerun.
+
    *Proves:* running it again lists the certificate, the profile and the API key.
 
 4. **The app in App Store Connect.** *Apps → + → New App*: iOS, name **WordsPal**, primary
@@ -98,8 +112,11 @@ Run from the main checkout on `master`, after phase 36 has merged.
 5. **TestFlight's external group.** In the app, *TestFlight*:
    1. *Test Information*: a feedback email, a beta description, and the privacy policy URL
       `https://app.wordspal.ai/privacy.html`.
-   2. *Beta App Review Information*: contact details, and a sign-in Apple's reviewer can use.
-      Sign-in is by email code, so give a test account whose inbox you can read and say so.
+   2. *Beta App Review Information*: contact details, and a sign-in Apple's reviewer can use:
+      user name `ios_tester_0001@wordspal.ai` and its fixed 8-digit code as the password, the
+      pair listed in the prod secret `REVIEWER_CODES` (see
+      [Reviewer accounts](hosting.md#reviewer-accounts)). In the notes: "Enter the email, tap
+      the button to get a code, then type the password as the code; no email is sent."
    3. *External Testing → +*: a group called **Friends**. Add their emails, or turn on its
       public link.
 

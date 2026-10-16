@@ -116,6 +116,8 @@ import type {
   UserSchema,
   VocabularyEntryInputSchema,
   VocabularyPageQuerySchema,
+  RemoveVocabularyLevelQuerySchema,
+  RemoveVocabularyLevelResponseSchema,
   VocabularyPageSchema,
   VocabularySenseSchema,
   VocabularyWordDetailSchema,
@@ -195,6 +197,8 @@ export type VocabularyEntryInput = z.infer<typeof VocabularyEntryInputSchema>;
 export type SaveVocabularyRequest = z.infer<typeof SaveVocabularyRequestSchema>;
 export type SaveVocabularyResponse = z.infer<typeof SaveVocabularyResponseSchema>;
 export type VocabularyPageQuery = z.infer<typeof VocabularyPageQuerySchema>;
+export type RemoveVocabularyLevelQuery = z.infer<typeof RemoveVocabularyLevelQuerySchema>;
+export type RemoveVocabularyLevelResponse = z.infer<typeof RemoveVocabularyLevelResponseSchema>;
 export type VocabularyWord = z.infer<typeof VocabularyWordSchema>;
 export type VocabularyPage = z.infer<typeof VocabularyPageSchema>;
 export type VocabularySense = z.infer<typeof VocabularySenseSchema>;

@@ -333,6 +333,7 @@ export function createServerDeps(io: {
     sendCode,
     now: io.now,
     logger: io.logger,
+    reviewerCodes: io.auth.reviewerCodes,
   });
 
   const translations = createTranslationService({ llm, transaction, logger: io.logger, now: io.now });

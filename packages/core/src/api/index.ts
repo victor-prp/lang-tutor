@@ -120,6 +120,8 @@ export type {
   User,
   VocabularyEntryInput,
   VocabularyPage,
+  RemoveVocabularyLevelQuery,
+  RemoveVocabularyLevelResponse,
   VocabularyPageQuery,
   VocabularySense,
   VocabularyWord,

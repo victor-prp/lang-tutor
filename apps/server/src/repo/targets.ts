@@ -259,6 +259,27 @@ export function createTargetRepo(tx: Tx) {
       return rows.map((row) => row.targetId).sort();
     },
 
+    /** Phase 58 (spec D3). removeGlossFromTargets for many glosses: each target it
+     *  changed, by id, with the gloss ids it lost, sorted. */
+    removeGlossesFromTargets: async (enrollmentId: string, glossIds: string[]): Promise<Map<string, string[]>> => {
+      if (glossIds.length === 0) return new Map();
+      const rows = await tx
+        .delete(targetWords)
+        .where(
+          and(
+            inArray(targetWords.glossId, glossIds),
+            inArray(targetWords.targetId, tx.select({ id: targets.id }).from(targets).where(eq(targets.enrollmentId, enrollmentId))),
+          ),
+        )
+        .returning({ targetId: targetWords.targetId, glossId: targetWords.glossId });
+      // Code-unit order, as removeGlossFromTargets sorts, so a log line reads the same each run.
+      const lost = new Map<string, string[]>();
+      for (const targetId of [...new Set(rows.map((row) => row.targetId))].sort()) {
+        lost.set(targetId, rows.filter((row) => row.targetId === targetId).map((row) => row.glossId).sort());
+      }
+      return lost;
+    },
+
     setDueOn: async (id: string, dueOn: string): Promise<void> => {
       await tx.update(targets).set({ dueOn }).where(eq(targets.id, id));
     },

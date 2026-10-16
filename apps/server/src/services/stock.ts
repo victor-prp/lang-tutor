@@ -70,9 +70,15 @@ export async function retireStocks(repos: Pick<Repos, 'session'>, enrollmentId: 
 
 /** Phase 53 (ruling R-D12b), phase 57 (spec D2). The next stock of the main path and of each
  *  changed target's path, asked of the stock job. */
-export async function requestStocks(repos: Pick<Repos, 'jobs'>, enrollmentId: string, targetIds: readonly string[]): Promise<void> {
+export async function requestStocks(
+  repos: Pick<Repos, 'jobs'>,
+  enrollmentId: string,
+  targetIds: readonly string[],
+  // Phase 58 (final review I1): removing a level's words restocks too, whether or not a target held them.
+  reason: 'target' | 'words_removed' = 'target',
+): Promise<void> {
   for (const path of changedPaths(targetIds)) {
-    await requestStock(repos, { enrollment_id: enrollmentId, reason: 'target', ...pathPayload(path) });
+    await requestStock(repos, { enrollment_id: enrollmentId, reason, ...pathPayload(path) });
   }
 }
 
@@ -96,8 +102,13 @@ export async function restockAfterTargetChange(
 }
 
 /** Phase 53 (ruling R-D12b). Once the change committed: each stock it retired. */
-export function logTargetRetired(logger: Logger, enrollmentId: string, sessionIds: readonly string[]): void {
+export function logTargetRetired(
+  logger: Logger,
+  enrollmentId: string,
+  sessionIds: readonly string[],
+  reason: 'target_changed' | 'words_removed' = 'target_changed',
+): void {
   for (const sessionId of sessionIds) {
-    logger.info({ event: 'session_retired', enrollment_id: enrollmentId, session_id: sessionId, reason: 'target_changed' });
+    logger.info({ event: 'session_retired', enrollment_id: enrollmentId, session_id: sessionId, reason });
   }
 }

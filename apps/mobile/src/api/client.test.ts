@@ -346,6 +346,21 @@ describe('api/client', () => {
     );
   });
 
+  // Phase 58 (spec D2).
+  it('removeVocabularyLevel sends DELETE with the level and reads the counts', async () => {
+    const mockFetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ removed_words: 2, removed_glosses: 5 }),
+    }));
+    const client = buildClient(mockFetch);
+    await expect(client.removeVocabularyLevel('e 1', 1)).resolves.toEqual({ removed_words: 2, removed_glosses: 5 });
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/enrollments/e%201/vocabulary?level=1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
   // Phase 29 (spec D12): the session says who is acting; no header can.
   it('names no acting user on a save', async () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_gloss_ids: ['s1'] }) }));

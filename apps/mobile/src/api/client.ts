@@ -28,6 +28,7 @@ import type {
   ReminderSettingsResponse,
   SaveVocabularyRequest,
   SaveVocabularyResponse,
+  RemoveVocabularyLevelResponse,
   SessionView,
   SkipSessionResponse,
   StartSessionRequest,
@@ -252,6 +253,11 @@ export function createApiClient({
       postJson<SaveVocabularyResponse>(vocabularyPath(enrollmentId), request),
     unsaveVocabulary: (enrollmentId: string, glossId: string) =>
       deleteResource(`${vocabularyPath(enrollmentId)}/glosses/${encodeURIComponent(glossId)}`),
+    // Phase 58 (spec D2). Every word at the level, every saved sense of it.
+    removeVocabularyLevel: async (enrollmentId: string, level: number) => {
+      const res = await send('DELETE', `${vocabularyPath(enrollmentId)}?level=${level}`);
+      return (await res.json()) as RemoveVocabularyLevelResponse;
+    },
     listVocabulary: (enrollmentId: string, query: { cursor?: string; limit?: number; level?: number }) => {
       const params = new URLSearchParams();
       if (query.cursor !== undefined) params.set('cursor', query.cursor);

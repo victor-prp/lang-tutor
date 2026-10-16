@@ -104,6 +104,9 @@ const unreachableVocabulary: VocabularyService = {
   unsave: () => {
     throw new Error('the health route must not reach the vocabulary service');
   },
+  removeLevel: () => {
+    throw new Error('the health route must not reach the vocabulary service');
+  },
   listWords: () => {
     throw new Error('the health route must not reach the vocabulary service');
   },

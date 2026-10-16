@@ -71,11 +71,11 @@ proves before the next one starts.
       - **Target audience:** 13 and over.
       - **Ads:** no ads.
       - **App access:** sign-in is by one-time email code, so a reviewer cannot use a real
-        account. The form names a placeholder reviewer account, `android_tester_0001@wordspal.ai`, that
-        the server does not accept yet. *(Entered 2026-10-13.)* Internal testing is rarely
-        reviewed, but **before the first production release** the server must accept a fixed
-        8-digit sign-in code for that account (the form's "password"; codes are 8 digits in
-        `SignInWithCodeRequestSchema`), or the entry must change to a mailbox you can share.
+        account. The form names a reviewer account, `android_tester_0001@wordspal.ai`, with a
+        fixed 8-digit code as its "password" *(entered 2026-10-13)*. The server accepts that code
+        for that address only while the prod secret `REVIEWER_CODES` lists the pair (see
+        [Reviewer accounts](hosting.md#reviewer-accounts)); the reviewer taps *send code*, no
+        email goes out, and the fixed code signs in.
 
    *Proves:* the app exists. Its package name, whether entered here or taken from the first
    upload, can never change afterwards.

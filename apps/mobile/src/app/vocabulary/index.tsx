@@ -1,9 +1,10 @@
 import { Redirect, router, useFocusEffect } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LevelBadge } from '@/components/LevelBadge';
+import { confirm } from '@/confirm';
 import { SpeakButton } from '@/components/SpeakButton';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useVocabulary } from '@/hooks/useVocabulary';
@@ -12,6 +13,8 @@ import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 import { partsOfSpeechLabel, showsMark } from '@/vocabulary';
 
 const LEVELS = [1, 2, 3, 4, 5];
+/** Phase 58 (spec D4). The one filter that offers removing every word it shows. */
+const NEW_LEVEL = 1;
 
 function Chip({
   label,
@@ -44,11 +47,33 @@ export default function VocabularyScreen() {
   const { active } = useCurrentUser();
   const v = useVocabulary();
   const { reload } = v;
+  const [removing, setRemoving] = useState(false);
+  const [removeFailed, setRemoveFailed] = useState(false);
   // On every focus, including the return from a drill-down: that is what makes
   // a change made there appear here.
   useFocusEffect(useCallback(() => reload(), [reload]));
   if (!active) return <Redirect href="/" />;
   const language = active.target_language;
+
+  const removeNew = async () => {
+    if (removing) return;
+    const sure = await confirm({
+      title: strings.vocabularyRemoveNewTitle,
+      message: strings.vocabularyRemoveNewMessage,
+      confirm: strings.vocabularyRemoveNewConfirm,
+      cancel: strings.cancel,
+    });
+    if (!sure) return;
+    setRemoving(true);
+    setRemoveFailed(false);
+    try {
+      await v.removeLevel(NEW_LEVEL);
+    } catch {
+      setRemoveFailed(true);
+    } finally {
+      setRemoving(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -81,11 +106,32 @@ export default function VocabularyScreen() {
             label={strings.levelName(level)}
             selected={v.query.level === level}
             onPress={() => {
-              if (v.query.level !== level) v.setQuery({ level });
+              if (v.query.level !== level) {
+                setRemoveFailed(false);
+                v.setQuery({ level });
+              }
             }}
           />
         ))}
       </View>
+
+      {v.query.level === NEW_LEVEL && v.words.length > 0 ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: removing }}
+          disabled={removing}
+          testID="vocabulary-remove-new"
+          onPress={() => void removeNew()}
+          style={removing && styles.disabled}
+        >
+          <Text style={styles.destructive}>{strings.vocabularyRemoveNew}</Text>
+        </Pressable>
+      ) : null}
+      {removeFailed ? (
+        <Text testID="vocabulary-remove-failed" style={styles.notice}>
+          {strings.vocabularyRemoveNewFailed}
+        </Text>
+      ) : null}
 
       <FlatList
         data={v.words}
@@ -184,5 +230,7 @@ const styles = StyleSheet.create({
   chipLabel: { fontSize: fontSizes.sm, color: colors.text },
   chipLabelSelected: { color: colors.onPrimary, fontWeight: '700' },
   empty: { gap: spacing.sm, alignItems: 'center', paddingTop: spacing.xl },
+  destructive: { color: colors.wrong, fontSize: fontSizes.md, fontWeight: '700', writingDirection: 'rtl' },
+  disabled: { opacity: 0.5 },
   notice: { fontSize: fontSizes.md, color: colors.muted, writingDirection: 'rtl', textAlign: 'center' },
 });
