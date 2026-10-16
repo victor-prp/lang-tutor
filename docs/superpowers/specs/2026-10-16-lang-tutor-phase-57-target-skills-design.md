@@ -227,8 +227,10 @@ the planned next practice day is tomorrow."
 
 A word's **work today**: the plan says it should be started by now and it is not, or it is planned
 by now and one of its live skills is below today's cap, or it owes its next-day check. A word started
-early (D7, practice more) owes nothing until its planned day except its next-day check: an optional
-session never turns a done day back into an owed one by itself. A target is **done for today** when
+early (D7, practice more) is **extra** that day **(Victor: "planned 10, all done plus 2 extra")**: it
+owes nothing more today, so an optional session never turns a done day back into an owed one. From
+the next day it is an ordinary started word: it owes the day's cap and its next-day check, and it
+counts toward the plan's later quota, which makes its planned day lighter. A target is **done for today** when
 no word has work. A **rest day** is a day the target is done before any session: nothing is owed.
 
 ---
@@ -252,9 +254,8 @@ In order:
    - A word may take a second card in the same session for a different owed skill, spaced apart
      from the first (my call; it halves the sessions a small list needs).
 3. **Done for today ("practice more") (Victor):** extra sessions stay on the target.
-   - First, the next planned words, started early (pulling ahead makes later days lighter). They
-     owe nothing more today (D6), and on the target screen they stay under "בהמשך" with their
-     readiness until their planned day.
+   - First, today's extra words (D6) up to today's cap; then the next planned words, started early
+     as extra (pulling ahead makes later days lighter).
    - Then the hardest cards: one recall card per word in a productive skill (spelling, written
      productive, speaking), the word whose hard skill was asked longest ago first (my call).
    - A right answer there changes nothing (the value is at cap); a miss costs −2 as always, so the
@@ -285,8 +286,8 @@ newest session of any path):
   reaches 10. Shown as a percentage, not a count: with the cap, no word can be ready before the eve,
   and "0 of 8 ready" for four days would not motivate (Victor approved).
 - **Today:** per word, done ✓, or the skills it still owes by name, or "later" (not yet planned);
-  per target, "today: k of M words", where M is the words with work planned by now and k those done.
-  Resets as the cap rises, like a daily goal.
+  per target, "today: k of M words", where M is the words with work planned by now and k those done,
+  plus the day's extra words when there are any ("+2"). Resets as the cap rises, like a daily goal.
 - **Colour (Victor):** the readiness bar and percentage go from red at 0% through orange and yellow
   to green at ready.
 - Keep recording FSRS recall on the due date beside the target values (in `session_targets` or its
@@ -339,6 +340,8 @@ The target card:
   "it's a stronger call to action" than "continue").
 - **Done for today:** a green line "כל הכבוד! סיימת להיום. נתראה מחר", the today line at k = M ✓, and
   an outlined "לתרגל עוד" that starts D7's practice-more session.
+- **Extra (Victor):** words started early today show on the today line as "+2 נוספות" after the ✓,
+  and the today bar runs past the plan in a lighter green (`extra-words.html`).
 - **Rest day:** "היום אין תרגול לבוחן. התרגול הבא בעוד N ימים", no today line, the readiness bar,
   and the outlined "לתרגל עוד" (my call: consistent with done).
 
@@ -347,8 +350,8 @@ The rest of home (translate, vocabulary, photo import, the new-target button) is
 ### D12. The target screen **(Victor: A, with B on tap)**
 
 - The header: the countdown title, the date, the today line and the readiness bar, as on the card.
-- **A — the words in three groups:** "נשאר להיום" (work owed), "סיימת להיום" (done today), "בהמשך"
-  (not yet planned). Each row: the form · its meaning, readiness % in its colour, and "היום ✓" or
+- **A — the words in groups:** "נשאר להיום" (work owed), "סיימת להיום" (done today), "נוספו היום"
+  (today's extra words, each tagged "בונוס ✓"), "בהמשך" (not yet planned). Each row: the form · its meaning, readiness % in its colour, and "היום ✓" or
   "היום נשאר: איות, כתיבה" (the skills owed, by core's names) or when it starts ("נתחיל מחר").
 - **B — tapping a word** opens its live skills, each a bar out of 10 with today's cap marked as a
   line; green at the cap.
@@ -356,13 +359,14 @@ The rest of home (translate, vocabulary, photo import, the new-target button) is
 - The four readiness words of phase 53 D4 (עוד לא התחלנו, בדרך, כמעט מוכנה, מוכנה) give way to the
   percentage; "מוכנה" stays for 100%.
 
-Mockups: `daily-flow-v2.html`, `days-left-options.html` (B), `paths-v2.html`, `target-screen.html`.
+Mockups: `daily-flow-v2.html`, `days-left-options.html` (B), `paths-v2.html`, `target-screen.html`,
+`extra-words.html`.
 All Hebrew in them is placeholder wording to finish in the build (UI is Hebrew only, RTL).
 
 ### D13. The wire (my call)
 
 Additive under ADR 0003: per target, `days_left`, `today` (k, M, state: `owed` | `done` | `rest` |
-`due_today`), readiness %, the next practice day; per word, readiness %, today's state and owed
+`due_today`) and today's extra words, readiness %, the next practice day; per word, readiness %, today's state and owed
 skills, and on request its skill values and today's cap. Home's read of the paths gives each path's
 order and its session state. `ready_count` keeps its name and now counts words at 100%; its meaning
 changes, so `API_LEVEL` rises under ADR 0012 (an older app would show "0 of 6 ready" most days).
