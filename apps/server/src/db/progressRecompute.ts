@@ -21,7 +21,7 @@ import { createTransaction } from './transaction';
  *
  * Here rather than in services/ because db/cli.ts is the command's composition
  * root, and ADR 0001 R4 forbids db/ from importing services/. The calls
- * below repeat recordProgress in services/sessions.ts; this file's integration
+ * below repeat recordProgress in services/sessionEnd.ts; this file's integration
  * test is what keeps the two in step.
  *
  * It rebuilds what today's saves can explain, no more. resetAll deletes every
@@ -82,7 +82,7 @@ export async function recomputeProgress(db: Db): Promise<{ sessions: number }> {
         await memory.upsertRows({ enrollmentId: evidence.enrollmentId, rows: next });
       }
 
-      // Phase 57 (spec D4). recordTargetSkills in services/sessions.ts, call for call.
+      // Phase 57 (spec D4). recordTargetSkills in services/sessionEnd.ts, call for call.
       const targets = await target.listActiveHolding(evidence.enrollmentId, glossIds, evidence.day, evidence.lastAnsweredAt);
       if (targets.length === 0) continue;
       const before = await targetSkills.findRows(targets.map((held) => held.id), glossIds);

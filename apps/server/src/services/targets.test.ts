@@ -294,6 +294,14 @@ function world(
     lockNextSession: async (_enrollmentId, path) => {
       calls.push(`lockNextSession ${path ?? 'main'}`);
     },
+    // Final review I1. A started session skipped: its row changes, then its answers count.
+    transition: async (sessionId, from, to, day) => {
+      calls.push(`transition ${sessionId} ${from.join('|')} ${to} ${day}`);
+      return true;
+    },
+    resolvePendingRetry: async (sessionId) => {
+      calls.push(`resolvePendingRetry ${sessionId}`);
+    },
     findOpen: async (_enrollmentId, path) => (path === null ? (setup.open ?? {}) : (setup.openOn?.[path] ?? {})),
     retireStock: async (sessionId) => {
       calls.push('retireStock');
@@ -317,6 +325,12 @@ function world(
     progress: stub<ProgressRepo>({
       lockEnrollment: async () => {
         calls.push('lockEnrollment');
+      },
+      lockSessionGlosses: async () => {},
+      // A skipped session with no answer writes no progress.
+      findSessionEvidence: async (sessionId) => {
+        calls.push(`findSessionEvidence ${sessionId}`);
+        return undefined;
       },
     }),
     targetSkills: stub<TargetSkillRepo>({ findRows: async () => setup.skills ?? [] }),
@@ -761,6 +775,44 @@ describe('end', () => {
       { event: 'target_ended', target_id: 't1', how: 'early' },
       { event: 'session_retired', enrollment_id: 'e1', session_id: 's_stock', reason: 'target_changed' },
     ]);
+  });
+
+  // Final review I1, ADR 0014 R4. Its path's started session would otherwise stay open forever,
+  // its words answered and met "today" every day: it is skipped in the end's transaction, its
+  // answers counted once as a skip's, in R4's order: the paths' locks, the target's row, the
+  // stocks retired and the session's row, the progress lock, then the stocks asked for.
+  it("skips its path's started session, its answers counted once, in ADR 0014 R4's order", async () => {
+    const { service, calls, retired, logger } = world({
+      targets: [target()],
+      open: { stock: listStock() },
+      openOn: { t1: { started: { ...listStock('s_started'), answered: 3 }, stock: listStock('s_t1') } },
+    });
+
+    await service.end(OWNER, 't1');
+
+    expect(retired).toEqual(['s_stock', 's_t1']);
+    expect(calls).toEqual([
+      'findTarget',
+      'lockNextSession main',
+      'lockNextSession t1',
+      'findTargetForUpdate',
+      'insertEvent ended_early',
+      'retireStock',
+      'retireStock',
+      `transition s_started preparing|ready skipped ${TODAY}`,
+      'resolvePendingRetry s_started',
+      'lockEnrollment',
+      'findSessionEvidence s_started',
+      'enqueue e1',
+      'enqueue e1:t1',
+    ]);
+    expect(logged(logger, 'session_skipped')).toEqual([{ event: 'session_skipped', session_id: 's_started', reason: 'target_ended' }]);
+  });
+
+  it('skips nothing when its path has no started session', async () => {
+    const { service, calls } = world({ targets: [target()], openOn: { t1: { stock: listStock('s_t1') } } });
+    await service.end(OWNER, 't1');
+    expect(calls.filter((call) => call.startsWith('transition') || call === 'lockEnrollment')).toEqual([]);
   });
 
   it('is a no-op on a target ended already', async () => {

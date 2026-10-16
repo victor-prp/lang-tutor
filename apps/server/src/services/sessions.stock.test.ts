@@ -400,6 +400,60 @@ describe('the main path (spec D1, D2)', () => {
     expect(eventsOf(logger, 'session_retired')).toEqual([{ event: 'session_retired', enrollment_id: E, session_id: 's_left', reason: 'target_ended' }]);
   });
 
+  // Final review I1, ADR 0014 R4. A target that ended on its date leaves its path closed: a
+  // session started there could never be resumed or skipped, its words answered and met
+  // "today" every day. The main path's stock that records the end skips it, its answers counted
+  // once as a skip's: the stocks retired and its row changed, then the progress lock.
+  it.each([
+    ['the stock job', (service: SessionService) => service.stockSession({ enrollment_id: E, reason: 'complete' })],
+    ['create', (service: SessionService) => service.createNextSession('u1', E, NO_DEVICES)],
+  ])("%s skips the started session of each target whose date has passed, counting its answers once", async (_, run) => {
+    const calls: string[] = [];
+    const ended = { ...target('t_yesterday', YESTERDAY, []), glossIds: undefined };
+    const targets = createFakeTargetRepo({ listEndedUnrecorded: async () => [ended] });
+    const { service, logger } = world(
+      {
+        ...nothingOpen,
+        findOpen: async (_enrollmentId, path) =>
+          path === 't_yesterday' ? { started: { ...summary('s_left', 'ready'), answered: 4 }, stock: summary('s_stock', 'ready') } : {},
+        retireStock: async (sessionId) => {
+          calls.push(`retireStock ${sessionId}`);
+          return true;
+        },
+        transition: async (sessionId, from, to, day) => {
+          calls.push(`transition ${sessionId} ${from.join('|')} ${to} ${day}`);
+          return true;
+        },
+        resolvePendingRetry: async (sessionId) => {
+          calls.push(`resolvePendingRetry ${sessionId}`);
+        },
+      },
+      {
+        target: targets,
+        progress: stub<ProgressRepo>({
+          findRows: async () => [],
+          lockEnrollment: async () => {
+            calls.push('lockEnrollment');
+          },
+          lockSessionGlosses: async () => {},
+          findSessionEvidence: async (sessionId) => {
+            calls.push(`findSessionEvidence ${sessionId}`);
+            return undefined;
+          },
+        }),
+      },
+    );
+    await run(service);
+    expect(calls).toEqual([
+      'retireStock s_stock',
+      `transition s_left preparing|ready skipped ${TODAY}`,
+      'resolvePendingRetry s_left',
+      'lockEnrollment',
+      'findSessionEvidence s_left',
+    ]);
+    expect(eventsOf(logger, 'session_skipped')).toEqual([{ event: 'session_skipped', session_id: 's_left', reason: 'target_ended' }]);
+  });
+
   it('plays a stock chosen on an earlier day as it is (phase 43 R5), reading nothing and taking no lock', async () => {
     // The list is not even read: listSavedGlosses is not stubbed here, and the words due are
     // counted from memory alone. Nor is a lock taken: the home read of the main path stays a read.

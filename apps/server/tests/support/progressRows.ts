@@ -15,6 +15,7 @@ import {
   sessionQuestions,
   sessions,
 } from '../../src/db/schema';
+import { createSessionRepo } from '../../src/repo/sessions';
 import { createVocabularyRepo } from '../../src/repo/vocabulary';
 import { ownerOf } from './vocabularyRows';
 import { withTx } from './withTx';
@@ -296,4 +297,16 @@ export async function setReachedOn(db: Db, input: { enrollmentId: string; glossI
     .update(glossMemory)
     .set({ reachedOn: input.reachedOn })
     .where(and(eq(glossMemory.enrollmentId, input.enrollmentId), eq(glossMemory.glossId, input.glossId)));
+}
+
+/** Final review I1. What a learner `day` reads as answered and as met, as a choice reads it
+ *  (findAnswersOn, findIntroducedOn): the sessions that count for it, and every open one. */
+export async function readLearnerDay(db: Db, enrollmentId: string, day: string): Promise<{ answered: string[]; met: string[] }> {
+  return withTx(db, async (tx) => {
+    const repo = createSessionRepo(tx);
+    return {
+      answered: (await repo.findAnswersOn(enrollmentId, day)).map((answer) => answer.glossId),
+      met: await repo.findIntroducedOn(enrollmentId, day),
+    };
+  });
 }

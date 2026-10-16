@@ -85,8 +85,7 @@ import { dropLoneMeets, keepCards, type CardUnit, type Refusal } from '../domain
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planCards } from '../domain/plan';
 import { dayState, withSessionInFlight } from '../domain/today';
-import { applySession } from '../domain/memoryUpdate';
-import { evaluateSession, progressChanges, type ProgressChange } from '../domain/progress';
+import { progressChanges, type ProgressChange } from '../domain/progress';
 import type { Devices, Path, SavedGloss, SessionRecord, SessionSummary } from '../domain/session';
 import {
   SESSION_LENGTH,
@@ -106,7 +105,6 @@ import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair }
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
 import { chooseTargetPicks, owedWords, stockServes, stockToCheck, targetMode, type StockChoice, type TargetPickInput } from '../domain/targetPicker';
 import { activeOn, readinessOf, recallOnDue } from '../domain/targets';
-import { targetSessionWrite } from '../domain/targetSkills';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
   AnswerKindMismatch,
@@ -131,8 +129,8 @@ import { learnerDay } from './learnerDay';
 import { readTargetDay } from './targetDayRead';
 import type { LlmClient, ModelCallRecord } from './llm';
 import type { SpeechTranscriber } from './speech';
+import { recordProgress, skipOpenSession } from './sessionEnd';
 import { pathPayload, requestStock } from './stock';
-import type { SessionEvidence } from '../repo/progress';
 import type { SessionTargetRow, TargetRow } from '../repo/targets';
 import type { Repos, Transaction } from './transaction';
 
@@ -181,8 +179,9 @@ type NextSession = { sessionId: string; status: SessionStatus; source: SessionSo
 
 /** Phase 53 (spec D8). A stock written: its session, its path (phase 57), the targets its
  *  choice found ended on their date, whose events name it, and the stocks those left on their
- *  paths, retired. Logged once its transaction commits. */
-type Stocked = { sessionId: string; path: Path; endedOnDate: string[]; endedStocks: string[] };
+ *  paths, retired, and (final review I1) their started sessions, skipped. Logged once its
+ *  transaction commits. */
+type Stocked = { sessionId: string; path: Path; endedOnDate: string[]; endedStocks: string[]; endedStarted: string[] };
 
 /** Phase 53 (ruling R-D12). A stale stock retired, and the stock built in its place. */
 type Replaced = Stocked & { retired: string };
@@ -191,76 +190,6 @@ type Replaced = Stocked & { retired: string };
  *  learner's today, the devices the stock was built for, and (phase 57) what it recorded of its
  *  target's day, which a check compares with today's. */
 type MaybeStale = { stockId: string; today: string; devices: Devices; recorded: StockChoice | undefined };
-
-/**
- * Phase 20. Runs the progress rule over an ended session's answers, inside the
- * transaction that ended it. The status change and these writes are dependent
- * (ADR 0001 R8, spec §3): an ended session without its progress, or progress
- * for a session that did not end, would each be wrong.
- *
- * A gloss with no rows is not saved, so it is skipped: that is the whole of
- * "only answers given while saved count". A session with no answers has no
- * evidence and writes nothing.
- *
- * Phase 31 (spec D14). The practised glosses' lexemes are share-locked before
- * anything is read, so a merge of one of them lands wholly before the evidence
- * is read or wholly after the progress is written: never between.
- *
- * Phase 57 (spec D4). The target skills are written here too, in the same
- * transaction: an ended session with part of its write would be as wrong. Each path has a
- * started session of its own (ADR 0014), so two of an enrollment's sessions can end at once:
- * the enrollment's progress lock is taken first (rulings T4-i, T4-k), so one end reads what
- * the other wrote, and a word taken out of a target waits for it.
- */
-async function recordProgress(repos: Repos, sessionId: string, enrollmentId: string): Promise<void> {
-  await repos.progress.lockEnrollment(enrollmentId);
-  await repos.progress.lockSessionGlosses(sessionId);
-  const evidence = await repos.progress.findSessionEvidence(sessionId);
-  if (!evidence) return;
-  await recordLevelsAndMemory(repos, sessionId, evidence);
-  await recordTargetSkills(repos, sessionId, evidence);
-}
-
-/** Phase 20, 35. The levels and the memory of the saved glosses a session asked. */
-async function recordLevelsAndMemory(repos: Repos, sessionId: string, evidence: SessionEvidence): Promise<void> {
-  const rows = await repos.progress.findRows({
-    enrollmentId: evidence.enrollmentId,
-    glossIds: [...new Set(evidence.answers.map((answer) => answer.glossId))],
-    savedBy: null,
-  });
-  if (rows.length === 0) return;
-  const outcome = evaluateSession(rows, evidence.answers, evidence.day);
-  await repos.progress.updateRows({ enrollmentId: evidence.enrollmentId, rows: outcome.changed });
-  await repos.progress.insertSnapshot({ sessionId, rows: outcome.snapshot });
-
-  // Phase 35 (spec D4). The same answers, as memory. `rows` exist only for saved
-  // glosses, so an answer about an unsaved one counts for nothing here too.
-  const saved = new Set(rows.map((row) => row.glossId));
-  const before = await repos.memory.findRows({ enrollmentId: evidence.enrollmentId, glossIds: [...saved] });
-  const memory = applySession(
-    before,
-    evidence.answers.filter((answer) => saved.has(answer.glossId)),
-    evidence.day,
-  );
-  await repos.memory.upsertRows({ enrollmentId: evidence.enrollmentId, rows: memory });
-}
-
-/**
- * Phase 57 (spec D4, D6, D10). The target skills of every target active on the session's day
- * that holds a word it asked, whatever path the session is on, each against its own cap, and
- * the day each word it asked started. Targets are read as they stood at the session's last
- * answer (listActiveHolding), so the recompute (db/progressRecompute.ts) replays this exactly.
- */
-async function recordTargetSkills(repos: Repos, sessionId: string, evidence: SessionEvidence): Promise<void> {
-  const glossIds = [...new Set(evidence.answers.map((answer) => answer.glossId))];
-  const targets = await repos.target.listActiveHolding(evidence.enrollmentId, glossIds, evidence.day, evidence.lastAnsweredAt);
-  if (targets.length === 0) return;
-  const before = await repos.targetSkills.findRows(targets.map((target) => target.id), glossIds);
-  const write = targetSessionWrite({ sessionId, day: evidence.day, targets, before, answers: evidence.answers });
-  await repos.targetSkills.upsertRows(write.rows);
-  await repos.targetSkills.insertEvents(write.events);
-  for (const started of write.started) await repos.target.markStarted(started.targetId, started.glossIds, evidence.day);
-}
 
 /**
  * Phase 29 (spec D13, ADR 0009 R7). A use case addressed by a session id
@@ -604,8 +533,10 @@ export function createSessionService({
    * learner day its words were chosen on. Phase 57 (spec D1, D2, D10): a target path's stock
    * records its target's day (session_targets) and is planned as a target's (ruling T3-l);
    * the main path's records each target whose date has passed as ended on it, naming the
-   * session, retires that target path's unstarted stock, and refreshes the families. The
-   * caller holds the path's next-session lock.
+   * session, retires that target path's unstarted stock and skips its started one (final
+   * review I1: its answers counted once as a skip's, the progress lock taken after its row, as
+   * ADR 0014 R4 orders it), and refreshes the families. The caller holds the path's
+   * next-session lock.
    */
   async function writeStock(repos: Repos, enrolled: Enrollment, devices: Devices, read: ChoiceRead, picks: ChosenStock): Promise<Stocked> {
     const { session, vocabulary, jobs } = repos;
@@ -613,12 +544,14 @@ export function createSessionService({
     const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId, devices, read.today, read.path);
     const endedOnDate: string[] = [];
     const endedStocks: string[] = [];
+    const endedStarted: string[] = [];
     if (read.path !== null) {
       await repos.target.insertSessionTarget(sessionId, read.row);
     } else {
       // Phase 53 (spec D8), phase 57 (spec D10). A target ends by itself the day after its
       // date; the first main-path stock chosen from then on writes its ended_on_date. Its
-      // path is off home: an unstarted stock left on it is retired.
+      // path is off home: an unstarted stock left on it is retired, and a session started on it,
+      // which nothing could resume or skip any more, is skipped (final review I1).
       for (const target of await repos.target.listEndedUnrecorded(enrollmentId, read.today)) {
         await repos.target.insertEvent({
           targetId: target.id,
@@ -629,8 +562,9 @@ export function createSessionService({
           sessionId,
         });
         endedOnDate.push(target.id);
-        const { stock } = await session.findOpen(enrollmentId, target.id);
+        const { stock, started } = await session.findOpen(enrollmentId, target.id);
         if (stock?.source === 'list' && (await session.retireStock(stock.id))) endedStocks.push(stock.id);
+        if (started && (await skipOpenSession(repos, started.id, enrollmentId, read.today))) endedStarted.push(started.id);
       }
       // Phase 39 (spec D4). The refresh is recorded once the session exists, so
       // each event names it; one that changed nothing writes nothing. Phase 46
@@ -649,7 +583,7 @@ export function createSessionService({
       speaking: devices.speaking,
       ...(read.path === null ? {} : { target: true }),
     });
-    return { sessionId, path: read.path, endedOnDate, endedStocks };
+    return { sessionId, path: read.path, endedOnDate, endedStocks, endedStarted };
   }
 
   /**
@@ -715,12 +649,13 @@ export function createSessionService({
 
   /** Phase 43 (spec D3). A stock made, once its transaction committed. Phase 53 (spec D8):
    *  each target its choice found ended on its date, first, and (phase 57) the stock each
-   *  left on its path, retired. */
+   *  left on its path, retired, and the session started there, skipped (final review I1). */
   function logStocked(enrollmentId: string, stocked: Stocked, reason: StockSessionPayload['reason'] | 'create' | 'stale_target'): void {
     for (const targetId of stocked.endedOnDate) logger.info({ event: 'target_ended', target_id: targetId, how: 'on_date' });
     for (const sessionId of stocked.endedStocks) {
       logger.info({ event: 'session_retired', enrollment_id: enrollmentId, session_id: sessionId, reason: 'target_ended' });
     }
+    for (const sessionId of stocked.endedStarted) logger.info({ event: 'session_skipped', session_id: sessionId, reason: 'target_ended' });
     logger.info({
       event: 'session_stocked',
       enrollment_id: enrollmentId,
@@ -934,11 +869,9 @@ export function createSessionService({
         if (state.status === 'skipped') return false;
         if (!isOpen(state.status)) throw new SessionNotSkippable(sessionId, state.status);
         const day = await learnerDay(repos, enrolled.user_id, now());
-        const changed = await repos.session.transition(sessionId, ['preparing', 'ready'], 'skipped', day);
-        // Phase 20. The answers given before the skip are real answers.
+        // Phase 20. The answers given before the skip are real answers (skipOpenSession).
+        const changed = await skipOpenSession(repos, sessionId, enrolled.id, day);
         if (changed) {
-          await repos.session.resolvePendingRetry(sessionId, { text: '', verdict: 'gave_up' });
-          await recordProgress(repos, sessionId, enrolled.id);
           // Phase 43 (spec D3). The next session in stock, if this was it. Not
           // after the seed (ruling R8): it is played before anything is saved,
           // and a stock built behind the first saves would hold one word.

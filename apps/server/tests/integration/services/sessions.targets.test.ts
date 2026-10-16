@@ -10,11 +10,11 @@ import type { VocabularyService } from '../../../src/services/vocabulary';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { jobPayloads, startTestBoss, stockJobKeys, stopTestBoss } from '../../support/jobs';
 import { holdProgressLock, holdSessionEnd, waitForBlockedQuery } from '../../support/locks';
-import { insertGlossMemory, setLevel } from '../../support/progressRows';
-import { insertListSession, type AskedGloss } from '../../support/questions';
+import { insertGlossMemory, readLearnerDay, readMemory, setLevel } from '../../support/progressRows';
+import { asChoice, insertListSession, type AskedGloss } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, makeBot, seedUser } from '../../support/seedUser';
-import { endTargetNow, readSessionTargets, readStockRow, readTargetEvents, seedTarget, setTargetWord } from '../../support/targetRows';
+import { endTargetNow, readSessionTargets, readStockRow, readTargetEvents, readTargetSkills, seedTarget, setTargetWord } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -318,6 +318,32 @@ describe('a removal beside a session end (ADR 0014 R4)', () => {
   });
 });
 
+// Final review I1. A target's end skips its path's started session, which takes the progress
+// lock: it asks for the stocks only after it, as a removal does, or a session end holding that
+// lock and enqueueing under the main path's key would wait on the end's uncommitted request.
+describe("a target's end beside a session end (ADR 0014 R4, final review I1)", () => {
+  it("skips its path's started session only after the progress lock, and asks for the stocks after it, so both commit", async () => {
+    const words = await savedWords();
+    const exam = await addTarget('exam', '2030-01-13', ids(words.slice(0, 3)));
+    const own = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [words[0]], types: ['multiple_choice'], targetId: exam });
+    await service.startSession('u_1', own.sessionId, NO_DEVICES);
+    const ending = holdSessionEnd(t.db, boss, E);
+    await ending.ready;
+
+    const end = targets.end('u_1', exam);
+    try {
+      await waitForBlockedQuery(t.db);
+    } finally {
+      ending.finish();
+    }
+    await expect(Promise.all([ending.done, end])).resolves.toBeDefined();
+
+    expect((await readStockRow(t.db, own.sessionId)).status).toBe('skipped');
+    expect((await readTargetEvents(t.db, exam)).map((event) => event.kind)).toEqual(['ended_early']);
+    expect((await stockJobs()).map((job) => job.key).sort()).toEqual([E, `${E}:${exam}`].sort());
+  });
+});
+
 // Phase 58 meets phase 57 (ruling M1). Removing a level is an unsave of every word at it, by
 // path: the main path's stock and the stock of each active target that held a removed word go,
 // and the next of each is asked for; a target that held none keeps its stock. Phase 58b (ruling
@@ -529,6 +555,64 @@ describe("a target's practice-more stock chosen beside the session that covered 
     expect(await service.createNextSession('u_1', E, NO_DEVICES, exam)).toMatchObject({ sessionId: stock, created: false });
     expect((await service.currentSession('u_1', E, exam)).current?.id).toBe(stock);
     expect(logged('session_retired')).toEqual([]);
+  });
+});
+
+// Final review I1 (ADR 0014 R4). A target's end closes its path: a session started there could
+// never be resumed or skipped again, and an open session counts as today's, so its answers and
+// first meetings read as today's on every day after. The end skips it in its own transaction,
+// early or on its date, its answers counted once, as a skip's.
+describe("a target's end skips the session started on its path (final review I1)", () => {
+  /** What `day` reads as answered and as met: the learner's day as the choice reads it. */
+  const readDay = (day: string) => readLearnerDay(t.db, E, day);
+
+  /** A session started on the exam's path, its first card answered right on DAY. */
+  async function startedOnExam(dueOn: string) {
+    const words = await savedWords();
+    const exam = await addTarget('exam', dueOn, ids(words.slice(0, 3)));
+    const own = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: [words[0], words[1]],
+      types: ['multiple_choice', 'multiple_choice'],
+      targetId: exam,
+    });
+    await service.startSession('u_1', own.sessionId, NO_DEVICES);
+    const card = asChoice(own.questions[0]);
+    await service.submitAnswer('u_1', own.sessionId, card.id, { option_index: card.correct_option });
+    // Open, it counts as any day's: here, the next day's.
+    expect(await readDay(NEXT_DAY)).toEqual({ answered: [words[0].glossId], met: [words[0].glossId] });
+    return { word: words[0], exam, own: own.sessionId };
+  }
+
+  it('ended early: skipped in the end, its answer written once, and no longer any other day\'s', async () => {
+    const { word, exam, own } = await startedOnExam('2030-01-13');
+
+    await targets.end('u_1', exam);
+
+    expect(await readStockRow(t.db, own)).toMatchObject({ status: 'skipped', practiceDay: DAY });
+    expect(await readDay(NEXT_DAY)).toEqual({ answered: [], met: [] });
+    expect(await readDay(DAY)).toEqual({ answered: [word.glossId], met: [word.glossId] });
+    // Counted once, as a skip counts: memory, and the exam's skills as they stood at the answer.
+    expect((await readMemory(t.db, E)).map((row) => row.glossId)).toContain(word.glossId);
+    expect(await readTargetSkills(t.db, exam)).toEqual([{ glossId: word.glossId, dimension: 'written_receptive', halves: 2, sessionId: own, day: DAY }]);
+    expect(logged('session_skipped').filter((entry) => entry.session_id === own)).toEqual([{ event: 'session_skipped', session_id: own, reason: 'target_ended' }]);
+  });
+
+  it('ended on its date: skipped by the first main-path stock that records the end', async () => {
+    const { word, exam, own } = await startedOnExam(DAY);
+
+    const after = '2030-01-10';
+    await makeBot(t.db, 'u_1', NEXT_DAY);
+    const main = await service.createNextSession('u_1', E, NO_DEVICES);
+
+    expect(await readTargetEvents(t.db, exam)).toEqual([
+      { kind: 'ended_on_date', before: null, after: { due_on: DAY }, actorUserId: null, sessionId: main.sessionId },
+    ]);
+    expect(await readStockRow(t.db, own)).toMatchObject({ status: 'skipped', practiceDay: NEXT_DAY });
+    expect(await readDay(after)).toEqual({ answered: [], met: [] });
+    expect((await readDay(NEXT_DAY)).answered).toEqual([word.glossId]);
+    expect(logged('session_skipped').filter((entry) => entry.session_id === own)).toEqual([{ event: 'session_skipped', session_id: own, reason: 'target_ended' }]);
   });
 });
 

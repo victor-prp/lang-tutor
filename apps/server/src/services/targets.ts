@@ -19,6 +19,7 @@ import { readTargetDay } from './targetDayRead';
 import { logImportSaved, saveImportsInTx, type ImportSaved } from './photoImports';
 import { lockPaths, logTargetRetired, requestStocks, restockAfterTargetChange, retireStocks } from './stock';
 import type { Repos, Transaction } from './transaction';
+import { skipOpenSession } from './sessionEnd';
 import { saveEntriesInTx } from './vocabulary';
 
 /** A target with its words, in the order they were added. */
@@ -341,10 +342,14 @@ export function createTargetService({
 
     /** Spec D1, D8. Ended now, before its date. Idempotent on a target ended already; one
      *  whose date has come is closed to change (phase 57, spec D10: it is active through the
-     *  date and ends by itself the day after). */
+     *  date and ends by itself the day after). Final review I1: its path's started session, which
+     *  nothing could resume or skip once the path is closed, is skipped in the same transaction,
+     *  its answers counted once as a skip's; so, as a removal does (ADR 0014 R4), the stocks are
+     *  retired and that session's row changed before the progress lock, and the next stocks are
+     *  asked for after it. */
     end: async (actorUserId: string, targetId: string): Promise<void> => {
       const ended = await transaction(async (repos) => {
-        const { enrolled, target, open } = await lockTarget(repos, actorUserId, targetId);
+        const { enrolled, target, today, open } = await lockTarget(repos, actorUserId, targetId);
         if (target.endedAt !== null) return null;
         if (!open) throw new TargetClosed(targetId);
         if (!(await repos.target.end(target.id, new Date(now())))) return null;
@@ -356,10 +361,15 @@ export function createTargetService({
           actorUserId,
           sessionId: null,
         });
-        return { enrollmentId: enrolled.id, retired: await restockAfterTargetChange(repos, enrolled.id, [target.id]) };
+        const retired = await retireStocks(repos, enrolled.id, [target.id]);
+        const { started } = await repos.session.findOpen(enrolled.id, target.id);
+        const skipped = started && (await skipOpenSession(repos, started.id, enrolled.id, today)) ? started.id : null;
+        await requestStocks(repos, enrolled.id, [target.id]);
+        return { enrollmentId: enrolled.id, retired, skipped };
       });
       if (ended === null) return;
       logger.info({ event: 'target_ended', target_id: targetId, how: 'early' });
+      if (ended.skipped) logger.info({ event: 'session_skipped', session_id: ended.skipped, reason: 'target_ended' });
       logTargetRetired(logger, ended.enrollmentId, ended.retired);
     },
   };
