@@ -1,5 +1,6 @@
 import type {
   Enrollment,
+  RemoveVocabularyLevelResponse,
   SaveVocabularyResponse,
   VocabularyEntryInput,
   VocabularyPage,
@@ -176,6 +177,56 @@ export function createVocabularyService({
       });
       logger.info({ event: 'vocabulary_unsaved', enrollment_id: enrollmentId });
       logTargetRetired(logger, enrollmentId, retired);
+    },
+
+    /**
+     * Phase 58 (spec D1–D3). Every word whose badge is `level` leaves the list, every
+     * saved sense of it, in one transaction: unsave once for the batch. One lock, one
+     * words_removed line per target changed, one restock. Nothing at the level is a
+     * 200 with zeros, so a retry after a lost answer is safe.
+     */
+    removeLevel: async (
+      actorUserId: string,
+      enrollmentId: string,
+      level: number,
+    ): Promise<RemoveVocabularyLevelResponse> => {
+      const { removed, retired } = await transaction(async (repos) => {
+        const enrolled = await enrollmentOrThrow(repos, enrollmentId);
+        await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.remove' });
+        // As unsave: a change to a target takes the next-session lock first.
+        await repos.session.lockNextSession(enrollmentId);
+        const atLevel = await repos.vocabulary.findGlossIdsAtLevel({ enrollmentId, level, live: LIVE_DIMENSIONS });
+        if (atLevel.length === 0) return { removed: { removed_words: 0, removed_glosses: 0 }, retired: null };
+        // Phase 31 (spec D14). Share-lock and resolve: a merge that forwarded one of
+        // these meanwhile stays inside its lexeme, so its survivor is the same word's.
+        const resolved = await repos.gloss.resolveGlosses(atLevel.map((row) => row.glossId));
+        const survivors = [...new Set(atLevel.map((row) => resolved.get(row.glossId)?.id ?? row.glossId))];
+        await repos.vocabulary.deleteEntries({ enrollmentId, glossIds: survivors });
+        const lost = await repos.target.removeGlossesFromTargets(enrollmentId, survivors);
+        for (const [targetId, glossIds] of lost) {
+          await repos.target.insertEvent({
+            targetId,
+            kind: 'words_removed',
+            before: { gloss_ids: glossIds },
+            after: { reason: 'unsaved' },
+            actorUserId,
+            sessionId: null,
+          });
+        }
+        return {
+          removed: { removed_words: new Set(atLevel.map((row) => row.lemma)).size, removed_glosses: survivors.length },
+          retired: lost.size > 0 ? await restockAfterTargetChange(repos, enrollmentId) : null,
+        };
+      });
+      logger.info({
+        event: 'vocabulary_level_removed',
+        enrollment_id: enrollmentId,
+        level,
+        word_count: removed.removed_words,
+        gloss_count: removed.removed_glosses,
+      });
+      logTargetRetired(logger, enrollmentId, retired);
+      return removed;
     },
 
     /**

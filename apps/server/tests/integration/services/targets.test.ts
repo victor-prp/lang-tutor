@@ -148,6 +148,23 @@ describe('unsave (spec D1)', () => {
   });
 });
 
+// Phase 58 (spec D3). Removing a level is one unsave for the batch: each target
+// changed gets one words_removed line naming every gloss that left it.
+describe('remove a level (phase 58)', () => {
+  it('takes every removed word out of the target, with one words_removed line', async () => {
+    const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
+    const made = await deps.targets.create('u_1', E, { kind: 'exam', due_on: DUE, photo_import_ids: [], entries: [typed(apple), typed(bread)] });
+
+    expect(await deps.vocabulary.removeLevel('u_1', E, 1)).toEqual({ removed_words: 2, removed_glosses: 2 });
+
+    expect((await deps.targets.getTarget('u_1', made.id)).words).toEqual([]);
+    const events = (await readTargetEvents(t.db, made.id)).map(({ kind, before, after, actorUserId }) => ({ kind, before, after, actorUserId }));
+    expect(events.slice(1)).toEqual([
+      { kind: 'words_removed', before: { gloss_ids: [apple.gloss_id, bread.gloss_id].sort() }, after: { reason: 'unsaved' }, actorUserId: 'u_1' },
+    ]);
+  });
+});
+
 describe('the stock a change leaves (ruling R-D12b)', () => {
   it('retires the unstarted list stock and asks the stock job for the next', async () => {
     const seed = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);

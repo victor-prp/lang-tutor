@@ -11,6 +11,7 @@ import { createTestServerDeps } from '../../support/serverDeps';
 import { seedEnrollment, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
+import { seedSavedSenses } from '../../support/vocabularyRows';
 
 let t: TestDb;
 let logger: FakeLogger;
@@ -84,6 +85,11 @@ const save = (enrollmentId: string, entries: unknown, actor = 'u_1') =>
   });
 const unsave = (enrollmentId: string, glossId: string, actor = 'u_1') =>
   app().request(`/api/enrollments/${enrollmentId}/vocabulary/glosses/${glossId}`, {
+    method: 'DELETE',
+    headers: { [ACT_AS]: actor },
+  });
+const removeLevel = (enrollmentId: string, query: string, actor = 'u_1') =>
+  app().request(`/api/enrollments/${enrollmentId}/vocabulary${query}`, {
     method: 'DELETE',
     headers: { [ACT_AS]: actor },
   });
@@ -200,6 +206,81 @@ describe('DELETE /api/enrollments/{id}/vocabulary/glosses/{gloss_id}', () => {
 
   it('answers 404 for an unknown enrollment', async () => {
     expect((await unsave('e_nobody', 's')).status).toBe(404);
+  });
+});
+
+// Phase 58 (spec D1, D2). The word is the unit: every saved sense of every word
+// whose badge is the level goes, whatever the sense's own level.
+describe('DELETE /api/enrollments/{id}/vocabulary?level=', () => {
+  const lemmas = async (enrollmentId: string) =>
+    ((await (await list(enrollmentId)).json()) as Page).items.map((item) => item.lemma);
+
+  // рама: two senses at 1 (badge 1). знать: a noun's two senses at 1 and a verb's at 2,
+  // mean 1.33 (badge 1). кот: one sense at 3 (badge 3).
+  async function threeWords() {
+    const rama = await russianWord('рама');
+    const noun = await russianWord('знать');
+    const verb = await russianVerb('знать', 'לדעת');
+    const kot = await russianWord('кот');
+    await save(RU, [
+      { gloss_id: rama.glossIds[0], variant_id: rama.variantIds[0] },
+      { gloss_id: rama.glossIds[1], variant_id: rama.variantIds[0] },
+      { gloss_id: noun.glossIds[0], variant_id: noun.variantIds[0] },
+      { gloss_id: noun.glossIds[1], variant_id: noun.variantIds[0] },
+      { gloss_id: verb.glossIds[0], variant_id: verb.variantIds[0] },
+      { gloss_id: kot.glossIds[0], variant_id: kot.variantIds[0] },
+    ]);
+    await setLevel(t.db, { enrollmentId: RU, glossId: verb.glossIds[0], level: 2 });
+    await setLevel(t.db, { enrollmentId: RU, glossId: kot.glossIds[0], level: 3 });
+  }
+
+  it("removes every saved sense of the level's words, a sense at another level included", async () => {
+    await threeWords();
+    expect(await lemmas(RU)).toEqual(expect.arrayContaining(['рама', 'знать', 'кот']));
+
+    const res = await removeLevel(RU, '?level=1');
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ removed_words: 2, removed_glosses: 5 });
+    expect(await lemmas(RU)).toEqual(['кот']);
+    expect(((await (await detail(RU, 'знать')).json()) as { level: number | null }).level).toBeNull();
+  });
+
+  it("leaves another enrollment's list alone", async () => {
+    await threeWords();
+    await seedSavedSenses(t.db, { enrollmentId: 'e_u_1', lemma: 'apple', translations: ['תפוח'] });
+    await removeLevel(RU, '?level=1');
+    expect(await lemmas('e_u_1')).toEqual(['apple']);
+  });
+
+  it('answers 200 with zeros when nothing is at the level, so a repeat is safe', async () => {
+    await threeWords();
+    await removeLevel(RU, '?level=1');
+    const again = await removeLevel(RU, '?level=1');
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ removed_words: 0, removed_glosses: 0 });
+    expect(await lemmas(RU)).toEqual(['кот']);
+  });
+
+  it.each(['', '?level=0', '?level=6', '?level=two', '?level=1.5'])('answers 400 for %s', async (query) => {
+    const res = await removeLevel(RU, query);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
+  });
+
+  it('answers 404 for an unknown enrollment', async () => {
+    expect((await removeLevel('e_nobody', '?level=1')).status).toBe(404);
+  });
+
+  it.each(['u_2', 'u_tutor'])('answers 403 for %s and removes nothing', async (actor) => {
+    await threeWords();
+    await seedUser(t.db, 'u_2');
+    await seedUser(t.db, 'u_tutor');
+    await seedGrant(t.db, { enrollmentId: RU, ownerUserId: 'u_1', granteeUserId: 'u_tutor', accepted: true });
+    const res = await removeLevel(RU, '?level=1', actor);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'forbidden' });
+    expect(await lemmas(RU)).toHaveLength(3);
   });
 });
 

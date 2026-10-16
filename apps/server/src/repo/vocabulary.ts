@@ -70,6 +70,32 @@ export const vocabularyQueries = {
     )}) AS d(dimension)`,
 
   /** Unsave: a primary-key delete. */
+  /**
+   * Phase 58 (spec D1, D2). Every saved gloss of every lemma whose badge is `level`,
+   * by the list's own level (wordsPage's LATERAL, grouped the same way), so what is
+   * removed is what the filtered list shows. A lemma with no live-dimension rows has
+   * no level and is never matched, as wordsPage drops it.
+   */
+  glossIdsAtLevel: (input: { enrollmentId: string; level: number; live: readonly Dimension[] }): SQL => sql`
+    SELECT ve.lemma, ve.gloss_id
+    FROM vocabulary_entries ve
+    WHERE ve.enrollment_id = ${input.enrollmentId}
+      AND ve.lemma IN (
+        SELECT ve.lemma
+        FROM vocabulary_entries ve
+        JOIN gloss_progress p ON p.enrollment_id = ve.enrollment_id
+                             AND p.gloss_id = ve.gloss_id
+                             AND p.dimension IN (${inList([...input.live])})
+        WHERE ve.enrollment_id = ${input.enrollmentId}
+        GROUP BY ve.lemma
+        HAVING ${LEVEL} = ${input.level})
+    ORDER BY ve.lemma, ve.gloss_id`,
+
+  deleteEntries: (input: { enrollmentId: string; glossIds: string[] }): SQL => sql`
+    DELETE FROM vocabulary_entries
+    WHERE enrollment_id = ${input.enrollmentId}
+      AND gloss_id IN (${inList(input.glossIds)})`,
+
   deleteEntry: (input: { enrollmentId: string; glossId: string }): SQL => sql`
     DELETE FROM vocabulary_entries
     WHERE enrollment_id = ${input.enrollmentId}
@@ -290,6 +316,21 @@ export function createVocabularyRepo(tx: Tx) {
     }): Promise<void> => {
       if (input.entries.length === 0) return;
       await tx.execute(vocabularyQueries.insertEntries(input));
+    },
+
+    findGlossIdsAtLevel: async (input: {
+      enrollmentId: string;
+      level: number;
+      live: readonly Dimension[];
+    }): Promise<{ lemma: string; glossId: string }[]> => {
+      const rows = await tx.execute<{ lemma: string; gloss_id: string }>(vocabularyQueries.glossIdsAtLevel(input));
+      return rows.rows.map((row) => ({ lemma: row.lemma, glossId: row.gloss_id }));
+    },
+
+    /** Their gloss_progress rows cascade away, as deleteEntry's do. */
+    deleteEntries: async (input: { enrollmentId: string; glossIds: string[] }): Promise<void> => {
+      if (input.glossIds.length === 0) return;
+      await tx.execute(vocabularyQueries.deleteEntries(input));
     },
 
     deleteEntry: async (input: { enrollmentId: string; glossId: string }): Promise<void> => {

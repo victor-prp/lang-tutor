@@ -1,6 +1,8 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import {
   ErrorSchema,
+  RemoveVocabularyLevelQuerySchema,
+  RemoveVocabularyLevelResponseSchema,
   SaveVocabularyRequestSchema,
   SaveVocabularyResponseSchema,
   VocabularyPageQuerySchema,
@@ -88,6 +90,26 @@ const unsaveRoute = createRoute({
   },
 });
 
+// Phase 58 (spec D2).
+const removeLevelRoute = createRoute({
+  method: 'delete',
+  path: BASE,
+  tags: ['vocabulary'],
+  summary: 'Remove every word at one level',
+  description:
+    'Every saved sense of every word whose level is `level` is unsaved, in one transaction: a ' +
+    "word's level is the list's, judged when the call runs, so a sense at another level goes " +
+    'with its word. Each target that held one loses it. Nothing at the level answers 200 with zeros.',
+  request: { params: enrollmentParams, query: RemoveVocabularyLevelQuerySchema },
+  responses: {
+    200: json(RemoveVocabularyLevelResponseSchema, 'What was removed: words, and the saved senses among them.'),
+    400: json(ErrorSchema, '`level` is missing or not one of the published values.'),
+    404: NOT_ENROLLED,
+    ...learnerResponses,
+    403: forbidden("the caller is not the list's owner, who alone may remove a word"),
+  },
+});
+
 const detailRoute = createRoute({
   method: 'get',
   path: `${BASE}/word`,
@@ -152,6 +174,18 @@ export function createVocabularyRouter(vocabulary: VocabularyService) {
     try {
       await vocabulary.unsave(c.var.actor, id, gloss_id);
       return c.body(null, 204);
+    } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
+      if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
+      throw error;
+    }
+  });
+
+  router.openapi(removeLevelRoute, async (c) => {
+    const { id } = c.req.valid('param');
+    const { level } = c.req.valid('query');
+    try {
+      return c.json(await vocabulary.removeLevel(c.var.actor, id, level), 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
