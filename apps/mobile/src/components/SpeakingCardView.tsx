@@ -15,6 +15,7 @@ import { MAX_RECORDING_SECONDS, secondsLeft, type Clip } from '@/recording';
 import { attemptNotice, type SpeechAttempt } from '@/speaking';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { allRevealed, revealed } from '@/typedHelp';
 
 type Props = {
   question: ReadAloudQuestion | SayTranslationQuestion;
@@ -32,6 +33,10 @@ type Props = {
   /** Phase 34 (spec D9). Held for a second try: the card says why, and the
    *  microphone is offered again. */
   retry: PendingRetry | null;
+  /** Phase 56 (spec D6). Help on say the translation: each press reveals one
+   *  more character of the word, in a line above the microphone. The count is
+   *  the session's, so it carries over when the card turns typed. */
+  help?: { presses: number; onPress: () => void } | null;
 };
 
 /**
@@ -39,7 +44,7 @@ type Props = {
  * the clip is checked the button is disabled. An attempt that was not
  * understood says what was heard, in neutral colours: it is not wrong.
  */
-export function SpeakingCardView({ question, instruction, language, answer, speech, onClip, onRetry, onPass, onCantSpeak, onRecordFailed, retry }: Props) {
+export function SpeakingCardView({ question, instruction, language, answer, speech, onClip, onRetry, onPass, onCantSpeak, onRecordFailed, retry, help = null }: Props) {
   const recorder = useRecorder();
   const speaker = useSpeaker();
   const [recording, setRecording] = useState(false);
@@ -62,6 +67,9 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
   const notice = attemptNotice(speech);
   const read = question.type === 'read_aloud';
   const form = rightAnswer(question);
+  // Phase 56 (spec D6): a read-aloud shows its word, so only say the translation takes help.
+  const helps = help !== null && !read;
+  const presses = help?.presses ?? 0;
 
   const clearTimer = () => {
     if (timer.current) clearInterval(timer.current);
@@ -186,6 +194,11 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
 
       {answered ? null : (
         <>
+          {helps && presses > 0 ? (
+            <Text style={styles.hint} testID="speak-hint">
+              {`${revealed(form, presses)}…`}
+            </Text>
+          ) : null}
           {retry !== null ? <RetryNotice retry={retry} type={question.type} /> : null}
           <Pressable
             accessibilityRole="button"
@@ -225,6 +238,19 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
           ) : null}
 
           <View style={answerStyles.actions}>
+            {/* Phase 56 (spec D6): help reveals; the answer is still said. */}
+            {help !== null && helps ? (
+              <Pressable
+                accessibilityRole="button"
+                testID="speak-help"
+                hitSlop={8}
+                disabled={checking || allRevealed(form, presses)}
+                onPress={help.onPress}
+                style={(checking || allRevealed(form, presses)) && styles.micBusy}
+              >
+                <Text style={answerStyles.help}>{strings.help}</Text>
+              </Pressable>
+            ) : null}
             {read ? null : (
               <Pressable
                 accessibilityRole="button"
@@ -263,6 +289,8 @@ export const speakingStyles = StyleSheet.create({
   form: { fontSize: fontSizes.xl, lineHeight: lineHeights.xl, color: colors.text, writingDirection: 'ltr', textAlign: 'center' },
   meaning: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, textAlign: 'center', writingDirection: 'rtl' },
   heard: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, textAlign: 'center', writingDirection: 'rtl' },
+  // Phase 56 (spec D6). The help's letters, as on the typed card: the target word, left to right.
+  hint: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.text, textAlign: 'center', writingDirection: 'ltr' },
   mic: {
     alignSelf: 'center',
     width: MIC,
