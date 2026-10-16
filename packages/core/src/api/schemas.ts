@@ -861,12 +861,19 @@ export const VocabularyWordSchema = z.object({
   added_by: z.array(z.string()),
 });
 
-// Phase 58 (spec D2). Every word whose badge is `level` leaves the list. Required,
-// with the list's own coercion and range, so the endpoint is not named after one filter.
-export const RemoveVocabularyLevelQuerySchema = z.object({
-  level: z.coerce.number().int().min(1).max(5),
-});
-export const RemoveVocabularyLevelResponseSchema = z.object({
+// Phase 58 (spec D2). Every word whose badge is `level` leaves the list, with the
+// list's own coercion and range. Phase 58b (R2): or every word, on `all=true` only.
+// Exactly one of the two: a missing parameter stays a 400, so a client bug that
+// drops it cannot empty a list.
+export const RemoveVocabularyWordsQuerySchema = z
+  .object({
+    level: z.coerce.number().int().min(1).max(5).optional(),
+    all: z.literal('true').optional(),
+  })
+  .refine((query) => (query.level === undefined) !== (query.all === undefined), {
+    message: 'exactly one of level or all=true',
+  });
+export const RemoveVocabularyWordsResponseSchema = z.object({
   removed_words: z.number().int(),
   removed_glosses: z.number().int(),
 });

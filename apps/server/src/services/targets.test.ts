@@ -1025,7 +1025,7 @@ describe('vocabulary.removeLevel (phase 58, ruling M1)', () => {
       openOn: { t1: { stock: listStock('s_t1') }, t2: { stock: listStock('s_t2') } },
     });
 
-    expect(await vocabularyService.removeLevel(OWNER, 'e1', 1)).toEqual({ removed_words: 2, removed_glosses: 2 });
+    expect(await vocabularyService.removeWords(OWNER, 'e1', { level: 1 })).toEqual({ removed_words: 2, removed_glosses: 2 });
 
     expect(saved).toEqual(['g_cane']);
     expect([...stored.values()].map((row) => [row.id, row.words])).toEqual([
@@ -1069,7 +1069,7 @@ describe('vocabulary.removeLevel (phase 58, ruling M1)', () => {
       openOn: { t1: { stock: listStock('s_t1') } },
     });
 
-    await vocabularyService.removeLevel(OWNER, 'e1', 1);
+    await vocabularyService.removeWords(OWNER, 'e1', { level: 1 });
 
     expect(events).toEqual([]);
     expect(retired).toEqual(['s_stock']);
@@ -1088,7 +1088,7 @@ describe('vocabulary.removeLevel (phase 58, ruling M1)', () => {
   it('takes no lock past the main path and touches no stock when nothing is at the level', async () => {
     const { vocabularyService, calls, retired, jobs } = world({ saved: ['g_casa'], targets: [target()], open: { stock: listStock() } });
 
-    expect(await vocabularyService.removeLevel(OWNER, 'e1', 3)).toEqual({ removed_words: 0, removed_glosses: 0 });
+    expect(await vocabularyService.removeWords(OWNER, 'e1', { level: 3 })).toEqual({ removed_words: 0, removed_glosses: 0 });
 
     expect(calls).toEqual(['lockNextSession main']);
     expect(retired).toEqual([]);

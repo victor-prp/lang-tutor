@@ -13,8 +13,6 @@ import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 import { partsOfSpeechLabel, showsMark } from '@/vocabulary';
 
 const LEVELS = [1, 2, 3, 4, 5];
-/** Phase 58 (spec D4). The one filter that offers removing every word it shows. */
-const NEW_LEVEL = 1;
 
 function Chip({
   label,
@@ -55,19 +53,21 @@ export default function VocabularyScreen() {
   if (!active) return <Redirect href="/" />;
   const language = active.target_language;
 
-  const removeNew = async () => {
+  // Phase 58 (spec D4), 58b (R2): every word the filter shows, every word on "all".
+  const removeShown = async () => {
     if (removing) return;
     const sure = await confirm({
-      title: strings.vocabularyRemoveNewTitle,
-      message: strings.vocabularyRemoveNewMessage,
-      confirm: strings.vocabularyRemoveNewConfirm,
+      title: strings.vocabularyRemoveTitle(v.query.level),
+      message: strings.vocabularyRemoveMessage,
+      confirm: strings.vocabularyRemoveConfirm,
       cancel: strings.cancel,
     });
     if (!sure) return;
     setRemoving(true);
     setRemoveFailed(false);
     try {
-      await v.removeLevel(NEW_LEVEL);
+      // Resolves once the list has reloaded, so the icon stays disabled until then.
+      await v.removeShown();
     } catch {
       setRemoveFailed(true);
     } finally {
@@ -96,7 +96,10 @@ export default function VocabularyScreen() {
           label={strings.levelAll}
           selected={v.query.level === null}
           onPress={() => {
-            if (v.query.level !== null) v.setQuery({ level: null });
+            if (v.query.level !== null) {
+              setRemoveFailed(false);
+              v.setQuery({ level: null });
+            }
           }}
         />
         {LEVELS.map((level) => (
@@ -113,23 +116,27 @@ export default function VocabularyScreen() {
             }}
           />
         ))}
+        {/* Phase 58b (R2). An icon, as the speaker is, at the row's end; the question
+            it asks names the filter's words, and a screen reader reads its label. */}
+        {v.words.length > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.vocabularyRemoveShown}
+            accessibilityState={{ disabled: removing }}
+            disabled={removing}
+            hitSlop={8}
+            testID="vocabulary-remove"
+            onPress={() => void removeShown()}
+            style={[styles.remove, removing && styles.disabled]}
+          >
+            <Text style={styles.removeGlyph}>🗑️</Text>
+          </Pressable>
+        ) : null}
       </View>
 
-      {v.query.level === NEW_LEVEL && v.words.length > 0 ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ disabled: removing }}
-          disabled={removing}
-          testID="vocabulary-remove-new"
-          onPress={() => void removeNew()}
-          style={removing && styles.disabled}
-        >
-          <Text style={styles.destructive}>{strings.vocabularyRemoveNew}</Text>
-        </Pressable>
-      ) : null}
       {removeFailed ? (
         <Text testID="vocabulary-remove-failed" style={styles.notice}>
-          {strings.vocabularyRemoveNewFailed}
+          {strings.vocabularyRemoveFailed}
         </Text>
       ) : null}
 
@@ -230,7 +237,9 @@ const styles = StyleSheet.create({
   chipLabel: { fontSize: fontSizes.sm, color: colors.text },
   chipLabelSelected: { color: colors.onPrimary, fontWeight: '700' },
   empty: { gap: spacing.sm, alignItems: 'center', paddingTop: spacing.xl },
-  destructive: { color: colors.wrong, fontSize: fontSizes.md, fontWeight: '700', writingDirection: 'rtl' },
+  // marginStart: 'auto' pushes the icon to the row's end, whatever the direction.
+  remove: { marginStart: 'auto', justifyContent: 'center', paddingHorizontal: spacing.xs },
+  removeGlyph: { fontSize: fontSizes.md },
   disabled: { opacity: 0.5 },
   notice: { fontSize: fontSizes.md, color: colors.muted, writingDirection: 'rtl', textAlign: 'center' },
 });

@@ -1,8 +1,8 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import {
   ErrorSchema,
-  RemoveVocabularyLevelQuerySchema,
-  RemoveVocabularyLevelResponseSchema,
+  RemoveVocabularyWordsQuerySchema,
+  RemoveVocabularyWordsResponseSchema,
   SaveVocabularyRequestSchema,
   SaveVocabularyResponseSchema,
   VocabularyPageQuerySchema,
@@ -91,19 +91,20 @@ const unsaveRoute = createRoute({
 });
 
 // Phase 58 (spec D2).
-const removeLevelRoute = createRoute({
+const removeWordsRoute = createRoute({
   method: 'delete',
   path: BASE,
   tags: ['vocabulary'],
-  summary: 'Remove every word at one level',
+  summary: 'Remove every word at one level, or every word',
   description:
-    'Every saved sense of every word whose level is `level` is unsaved, in one transaction: a ' +
-    "word's level is the list's, judged when the call runs, so a sense at another level goes " +
-    'with its word. Each target that held one loses it. Nothing at the level answers 200 with zeros.',
-  request: { params: enrollmentParams, query: RemoveVocabularyLevelQuerySchema },
+    'Exactly one of `level` and `all=true`. With `level`, every saved sense of every word whose ' +
+    "level is `level` is unsaved, in one transaction: a word's level is the list's, judged when the " +
+    'call runs, so a sense at another level goes with its word. With `all=true`, every saved sense ' +
+    'of the list is. Each target that held one loses it. Nothing to remove answers 200 with zeros.',
+  request: { params: enrollmentParams, query: RemoveVocabularyWordsQuerySchema },
   responses: {
-    200: json(RemoveVocabularyLevelResponseSchema, 'What was removed: words, and the saved senses among them.'),
-    400: json(ErrorSchema, '`level` is missing or not one of the published values.'),
+    200: json(RemoveVocabularyWordsResponseSchema, 'What was removed: words, and the saved senses among them.'),
+    400: json(ErrorSchema, 'Neither or both of `level` and `all=true`, or `level` is not one of the published values.'),
     404: NOT_ENROLLED,
     ...learnerResponses,
     403: forbidden("the caller is not the list's owner, who alone may remove a word"),
@@ -181,11 +182,13 @@ export function createVocabularyRouter(vocabulary: VocabularyService) {
     }
   });
 
-  router.openapi(removeLevelRoute, async (c) => {
+  router.openapi(removeWordsRoute, async (c) => {
     const { id } = c.req.valid('param');
-    const { level } = c.req.valid('query');
+    const query = c.req.valid('query');
+    // The schema let exactly one through.
+    const scope = query.level !== undefined ? { level: query.level } : { all: true as const };
     try {
-      return c.json(await vocabulary.removeLevel(c.var.actor, id, level), 200);
+      return c.json(await vocabulary.removeWords(c.var.actor, id, scope), 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);

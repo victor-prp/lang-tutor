@@ -293,7 +293,7 @@ describe('a removal beside a session end (ADR 0014 R4)', () => {
     ['removeWord', (words, exam) => targets.removeWord('u_1', exam, words[0].glossId), 'target'],
     ['unsave', (words) => vocabulary.unsave('u_1', E, words[0].glossId), 'target'],
     // Phase 58 (ruling M1). Every saved word is new, so the level is all six, the exam's three among them.
-    ['removeLevel', () => vocabulary.removeLevel('u_1', E, 1), 'words_removed'],
+    ['removeWords of a level', () => vocabulary.removeWords('u_1', E, { level: 1 }), 'words_removed'],
   ])('%s asks for the stocks only after the progress lock, so both commit', async (_, remove, reason) => {
     const words = await savedWords();
     const exam = await addTarget('exam', '2030-01-13', ids(words.slice(0, 3)));
@@ -331,7 +331,7 @@ describe('removing a level (phase 58, ruling M1)', () => {
     const homeworkStock = await service.createNextSession('u_1', E, NO_DEVICES, homework);
     expect([main.status, examStock.status, homeworkStock.status]).toEqual(['preparing', 'preparing', 'preparing']);
 
-    expect(await vocabulary.removeLevel('u_1', E, 1)).toEqual({ removed_words: 3, removed_glosses: 3 });
+    expect(await vocabulary.removeWords('u_1', E, { level: 1 })).toEqual({ removed_words: 3, removed_glosses: 3 });
 
     expect(await readStockRow(t.db, main.sessionId)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY, targetId: null });
     expect(await readStockRow(t.db, examStock.sessionId)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY, targetId: exam });

@@ -91,7 +91,7 @@ export function createFakeAppDeps(): AppDeps {
   const vocabulary: VocabularyService = {
     save: unreachable,
     unsave: unreachable,
-    removeLevel: unreachable,
+    removeWords: unreachable,
     listWords: unreachable,
     wordDetail: unreachable,
   };

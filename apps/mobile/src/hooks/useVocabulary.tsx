@@ -41,9 +41,10 @@ export type VocabularyValue = {
   loadWord: (lemma: string) => Promise<VocabularyWordDetail>;
   save: (entries: VocabularyEntryInput[]) => Promise<void>;
   unsave: (glossId: string) => Promise<void>;
-  /** Phase 58 (spec D4). Every word at the level leaves the list, which then reloads.
-   *  Throws when the server refused, so the screen can say so. */
-  removeLevel: (level: number) => Promise<void>;
+  /** Phase 58 (spec D4), 58b (R2). Every word the current filter shows leaves the
+   *  list, every word on "all"; resolves once the list has reloaded. Throws when the
+   *  server refused, so the screen can say so. */
+  removeShown: () => Promise<void>;
 };
 
 const VocabularyContext = createContext<VocabularyValue | undefined>(undefined);
@@ -130,14 +131,16 @@ export function VocabularyProvider({ api, children }: { api: ApiClient; children
     [api, active, user],
   );
 
-  const removeLevel = useCallback(
-    async (level: number) => {
-      if (!active || !user) return;
-      await api.removeVocabularyLevel(active.id, level);
-      reload();
-    },
-    [api, active, user, reload],
-  );
+  const removeShown = useCallback(async () => {
+    if (!active || !user) return;
+    const asked = queryRef.current;
+    const mine = generation.current;
+    await api.removeVocabularyWords(active.id, asked.level === null ? { all: true } : { level: asked.level });
+    // A switch of enrollment or filter meanwhile bumped the generation and loads its
+    // own list: reloading this one would put the old list under the new title.
+    if (mine !== generation.current) return;
+    await fetchPage(null, true, asked);
+  }, [api, active, user, fetchPage]);
 
   const value = useMemo<VocabularyValue>(
     () => ({
@@ -153,9 +156,9 @@ export function VocabularyProvider({ api, children }: { api: ApiClient; children
       loadWord,
       save,
       unsave,
-      removeLevel,
+      removeShown,
     }),
-    [words, status, cursor, query, setQuery, fetchPage, reload, loadWord, save, unsave, removeLevel],
+    [words, status, cursor, query, setQuery, fetchPage, reload, loadWord, save, unsave, removeShown],
   );
 
   return <VocabularyContext.Provider value={value}>{children}</VocabularyContext.Provider>;

@@ -211,7 +211,7 @@ describe('DELETE /api/enrollments/{id}/vocabulary/glosses/{gloss_id}', () => {
 
 // Phase 58 (spec D1, D2). The word is the unit: every saved sense of every word
 // whose badge is the level goes, whatever the sense's own level.
-describe('DELETE /api/enrollments/{id}/vocabulary?level=', () => {
+describe('DELETE /api/enrollments/{id}/vocabulary?level= | ?all=true', () => {
   const lemmas = async (enrollmentId: string) =>
     ((await (await list(enrollmentId)).json()) as Page).items.map((item) => item.lemma);
 
@@ -262,6 +262,32 @@ describe('DELETE /api/enrollments/{id}/vocabulary?level=', () => {
     expect(await lemmas(RU)).toEqual(['кот']);
   });
 
+  // Phase 58b. Every word, whatever its level, and only on an explicit all=true: a
+  // missing parameter stays a 400, so a client bug cannot empty a list.
+  it('removes every word on all=true, and leaves another enrollment alone', async () => {
+    await threeWords();
+    await seedSavedSenses(t.db, { enrollmentId: 'e_u_1', lemma: 'apple', translations: ['תפוח'] });
+
+    const res = await removeLevel(RU, '?all=true');
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ removed_words: 3, removed_glosses: 6 });
+    expect(await lemmas(RU)).toEqual([]);
+    expect(await lemmas('e_u_1')).toEqual(['apple']);
+  });
+
+  it('removes only the words at another level, when that is the level asked', async () => {
+    await threeWords();
+    expect(await (await removeLevel(RU, '?level=3')).json()).toEqual({ removed_words: 1, removed_glosses: 1 });
+    expect((await lemmas(RU)).sort()).toEqual(['знать', 'рама']);
+  });
+
+  it.each(['?all=true&level=1', '?all=false', '?all=yes', '?all=', '?all=TRUE'])('answers 400 for %s', async (query) => {
+    const res = await removeLevel(RU, query);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
+  });
+
   it.each(['', '?level=0', '?level=6', '?level=two', '?level=1.5'])('answers 400 for %s', async (query) => {
     const res = await removeLevel(RU, query);
     expect(res.status).toBe(400);
@@ -272,12 +298,17 @@ describe('DELETE /api/enrollments/{id}/vocabulary?level=', () => {
     expect((await removeLevel('e_nobody', '?level=1')).status).toBe(404);
   });
 
-  it.each(['u_2', 'u_tutor'])('answers 403 for %s and removes nothing', async (actor) => {
+  it.each([
+    ['u_2', '?level=1'],
+    ['u_tutor', '?level=1'],
+    ['u_2', '?all=true'],
+    ['u_tutor', '?all=true'],
+  ])('answers 403 for %s on %s and removes nothing', async (actor, query) => {
     await threeWords();
     await seedUser(t.db, 'u_2');
     await seedUser(t.db, 'u_tutor');
     await seedGrant(t.db, { enrollmentId: RU, ownerUserId: 'u_1', granteeUserId: 'u_tutor', accepted: true });
-    const res = await removeLevel(RU, '?level=1', actor);
+    const res = await removeLevel(RU, query, actor);
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'forbidden' });
     expect(await lemmas(RU)).toHaveLength(3);

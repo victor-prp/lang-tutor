@@ -346,19 +346,19 @@ describe('api/client', () => {
     );
   });
 
-  // Phase 58 (spec D2).
-  it('removeVocabularyLevel sends DELETE with the level and reads the counts', async () => {
+  // Phase 58 (spec D2), 58b (R2): a level, or every word on an explicit all=true.
+  it.each([
+    [{ level: 2 }, 'http://test.local/api/enrollments/e%201/vocabulary?level=2'],
+    [{ all: true as const }, 'http://test.local/api/enrollments/e%201/vocabulary?all=true'],
+  ])('removeVocabularyWords sends DELETE for %j and reads the counts', async (scope, url) => {
     const mockFetch = jest.fn(async () => ({
       ok: true,
       status: 200,
       json: async () => ({ removed_words: 2, removed_glosses: 5 }),
     }));
     const client = buildClient(mockFetch);
-    await expect(client.removeVocabularyLevel('e 1', 1)).resolves.toEqual({ removed_words: 2, removed_glosses: 5 });
-    expect(mockFetch).toHaveBeenCalledWith(
-      'http://test.local/api/enrollments/e%201/vocabulary?level=1',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
+    await expect(client.removeVocabularyWords('e 1', scope)).resolves.toEqual({ removed_words: 2, removed_glosses: 5 });
+    expect(mockFetch).toHaveBeenCalledWith(url, expect.objectContaining({ method: 'DELETE' }));
   });
 
   // Phase 29 (spec D12): the session says who is acting; no header can.

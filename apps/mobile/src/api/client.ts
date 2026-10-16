@@ -28,7 +28,7 @@ import type {
   ReminderSettingsResponse,
   SaveVocabularyRequest,
   SaveVocabularyResponse,
-  RemoveVocabularyLevelResponse,
+  RemoveVocabularyWordsResponse,
   SessionView,
   SkipSessionResponse,
   StartSessionRequest,
@@ -253,10 +253,12 @@ export function createApiClient({
       postJson<SaveVocabularyResponse>(vocabularyPath(enrollmentId), request),
     unsaveVocabulary: (enrollmentId: string, glossId: string) =>
       deleteResource(`${vocabularyPath(enrollmentId)}/glosses/${encodeURIComponent(glossId)}`),
-    // Phase 58 (spec D2). Every word at the level, every saved sense of it.
-    removeVocabularyLevel: async (enrollmentId: string, level: number) => {
-      const res = await send('DELETE', `${vocabularyPath(enrollmentId)}?level=${level}`);
-      return (await res.json()) as RemoveVocabularyLevelResponse;
+    // Phase 58 (spec D2). Every word at the level, every saved sense of it; 58b (R2):
+    // or every word of the list, which the server takes only as an explicit all=true.
+    removeVocabularyWords: async (enrollmentId: string, scope: { level: number } | { all: true }) => {
+      const query = 'all' in scope ? 'all=true' : `level=${scope.level}`;
+      const res = await send('DELETE', `${vocabularyPath(enrollmentId)}?${query}`);
+      return (await res.json()) as RemoveVocabularyWordsResponse;
     },
     listVocabulary: (enrollmentId: string, query: { cursor?: string; limit?: number; level?: number }) => {
       const params = new URLSearchParams();
