@@ -4,9 +4,13 @@ name: Nightly QA
 # agent and Gemini - and takes half an hour, neither of which belongs on every
 # push. It is also the one workflow whose failure is often a finding rather than
 # a regression.
+#
+# Paused on 2026-10-16 (docs/superpowers/specs/2026-10-16-lang-tutor-pause-qa-and-bots-design.md):
+# no schedule, so no night runs on its own. `gh workflow run nightly-qa.yml` still
+# runs one by hand. To resume, put back under `on:`
+#   schedule:
+#     - cron: '0 1 * * *'
 on:
-  schedule:
-    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       persona:
