@@ -39,6 +39,7 @@ describe('repos', () => {
       completeSession: notStubbed,
       insertPreparingSession: notStubbed,
       insertQuestionTypesSession: notStubbed,
+      setSkippedTypes: notStubbed,
       insertSessionQuestions: notStubbed,
       findState: notStubbed,
       transition: notStubbed,

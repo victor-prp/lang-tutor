@@ -24,6 +24,7 @@ import {
   spokenVerdict,
   wrongScript,
   type AnswerInput,
+  type QuestionType,
 } from '@lang-tutor/core/domain';
 
 export { SESSION_LENGTH };
@@ -36,7 +37,12 @@ export type SessionRecord = {
   completed_at: number | null;
   status: SessionStatus;
   source: SessionSource;
+  /** Phase 61 (spec D5). A question-types session's chosen types no card was generated for; absent on every other session. */
+  skipped_types?: SkippedType[];
 };
+
+/** Phase 61 (spec D5). A chosen question type no card could be generated for. */
+export type SkippedType = { type: QuestionType; reason: 'not_generated' };
 
 export function newSessionRecord(
   userId: string,

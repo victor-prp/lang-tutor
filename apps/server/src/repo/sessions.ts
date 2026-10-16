@@ -3,7 +3,7 @@ import { verdictCorrect } from '@lang-tutor/core/domain';
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import type { Devices, SessionRecord, SessionState, SessionSummary } from '../domain/session';
+import type { Devices, SessionRecord, SessionState, SessionSummary, SkippedType } from '../domain/session';
 import type { DayAnswer } from '../domain/today';
 import {
   answers,
@@ -113,6 +113,11 @@ export function createSessionRepo(tx: Tx) {
      *  session to every reader of `source`, chosen on no day, so no stale check replaces it. */
     insertQuestionTypesSession: (userId: string, enrollmentId: string, devices: Devices): Promise<string> =>
       insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', kind: 'question_types', ...devices }),
+
+    /** Phase 61 (spec D5). The chosen types a question-types session has no card for. */
+    setSkippedTypes: async (sessionId: string, skipped: SkippedType[]): Promise<void> => {
+      await tx.update(sessions).set({ skippedTypes: skipped }).where(eq(sessions.id, sessionId));
+    },
 
     /** Phase 43 (review C1). Serializes, per enrollment, the use cases that make
      *  its next session, create and the stock job: the second waits for the
@@ -360,6 +365,7 @@ export function createSessionRepo(tx: Tx) {
           completedAt: sessions.completedAt,
           status: sessions.status,
           source: sessions.source,
+          skippedTypes: sessions.skippedTypes,
         })
         .from(sessions)
         .where(eq(sessions.id, sessionId))
@@ -425,6 +431,7 @@ export function createSessionRepo(tx: Tx) {
         completed_at: session.completedAt === null ? null : session.completedAt.getTime(),
         status: session.status as SessionStatus,
         source: session.source as SessionSource,
+        ...(session.skippedTypes === null ? {} : { skipped_types: session.skippedTypes as SkippedType[] }),
       };
     },
 

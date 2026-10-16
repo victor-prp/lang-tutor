@@ -96,6 +96,8 @@ function sessionView(sessionId: string, result: SessionResult): z.infer<typeof S
     question: result.status === 'ready' ? (currentQuestion(result) ?? null) : null,
     pending_retry: result.status === 'ready' ? pendingRetryOf(result) : null,
     progress: result.progress.map(progressItem),
+    // Phase 61 (spec D5): a question-types session's, only.
+    ...(result.skipped_types ? { skipped_types: result.skipped_types } : {}),
   };
 }
 
