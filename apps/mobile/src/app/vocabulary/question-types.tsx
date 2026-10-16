@@ -167,8 +167,9 @@ export default function QuestionTypesScreen() {
               return (
                 <Pressable
                   key={entry.type}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: ticked, disabled: !entry.available || stage.kind !== 'choose' }}
+                  role="checkbox"
+                  aria-checked={ticked}
+                  aria-disabled={!entry.available || stage.kind !== 'choose'}
                   disabled={!entry.available || stage.kind !== 'choose'}
                   testID={`question-type-${entry.type}`}
                   onPress={() => setChosen((current) => toggled(current, entry.type))}

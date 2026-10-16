@@ -113,7 +113,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all thirty-eight paths and nothing else', async () => {
+  it('contains all forty paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/auth/email-otp/send-verification-otp',
@@ -122,10 +122,12 @@ describe('the document as a whole', () => {
       '/api/auth/sign-out',
       '/api/enrollments',
       '/api/enrollments/{id}/photo-imports',
+      '/api/enrollments/{id}/question-type-sessions',
       '/api/enrollments/{id}/sessions/current',
       '/api/enrollments/{id}/targets',
       '/api/enrollments/{id}/vocabulary',
       '/api/enrollments/{id}/vocabulary/glosses/{gloss_id}',
+      '/api/enrollments/{id}/vocabulary/question-types',
       '/api/enrollments/{id}/vocabulary/word',
       '/api/grants',
       '/api/grants/{id}',
@@ -676,6 +678,9 @@ describe('the 403 of an owner-only or granted route in the published document', 
     [VOCABULARY, 'get', /owner, who alone may read it/],
     [`${VOCABULARY}/glosses/{gloss_id}`, 'delete', /owner, who alone may remove a word/],
     [`${VOCABULARY}/word`, 'get', /owner, who alone may read it/],
+    // Phase 61 (spec D1).
+    [`${VOCABULARY}/question-types`, 'get', /not a tester/],
+    ['/api/enrollments/{id}/question-type-sessions', 'post', /not a tester/],
     ['/api/sessions', 'post', /another learner's/],
     ['/api/sessions/{id}', 'get', /another learner's/],
     ['/api/sessions/{id}/skip', 'post', /another learner's/],
