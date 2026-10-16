@@ -176,6 +176,29 @@ runbook's *The hourly trigger* replaces it, with no apply. `REMINDER_SECRET` is 
 Secrets Manager and in the connection that calls the reminder tick, so the reminders runbook's
 *Replacing the secret* changes both.
 
+## Reviewer accounts
+
+Apple's and Google's reviewers sign in with a fixed 8-digit code instead of an emailed one. The
+pairs live in one secret, `wordspal/prod/REVIEWER_CODES`, as `email=code` joined by commas:
+`android_tester_0001@wordspal.ai` with the code already in Play Console's *App access* form, and
+`ios_tester_0001@wordspal.ai` with the code you give App Store Connect. Nothing about them is in
+the repository. A code is exactly 8 digits; the server refuses to start on a malformed list, naming
+the pair's position and never its value.
+
+Creating it, once (it prompts, so the codes stay out of the shell history):
+
+```bash
+read -rs 'PLAY?Play reviewer code: ' && echo && read -rs 'APPLE?Apple reviewer code: ' && echo \
+  && aws secretsmanager create-secret --region eu-central-1 --name wordspal/prod/REVIEWER_CODES \
+       --secret-string "android_tester_0001@wordspal.ai=$PLAY,ios_tester_0001@wordspal.ai=$APPLE"; \
+  unset PLAY APPLE
+```
+
+Every name in `secret_env_names` must exist before a plan, so this comes before the merge of the
+PR that added it; re-run that PR's `terraform-plan` afterwards. Changing a pair later is
+*Changing a secret* above. To check once it is live: sign in on the app with a reviewer address
+and its code. No email goes out, and the log shows `auth_code_sent` with `reviewer: true`.
+
 ## Behind Lightsail's proxy
 
 Lightsail terminates TLS and forwards plain HTTP to the container on port 8080. The client's

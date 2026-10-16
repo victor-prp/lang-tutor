@@ -78,6 +78,8 @@ export function createAuth(deps: {
   sendCode: SendCode;
   now: () => number;
   logger: Logger;
+  /** Store reviewer accounts (spec D1): normalised email → its fixed code. */
+  reviewerCodes: ReadonlyMap<string, string>;
 }) {
   const { authRepo, logger, now } = deps;
   // Better Auth awaits the sender but swallows whatever it throws and still
@@ -161,10 +163,26 @@ export function createAuth(deps: {
         expiresIn: 600,
         allowedAttempts: 3,
         storeOTP: 'hashed',
+        // Store reviewer accounts (spec D2). A reviewer's sign-in code is its
+        // fixed one, stored, expired and tried like any other; for everyone
+        // else undefined, and Better Auth draws a random code as before.
+        generateOTP: ({ email, type }) =>
+          type === 'sign-in' ? deps.reviewerCodes.get(normalizeEmail(email)) : undefined,
         sendVerificationOTP: async ({ email, otp, type }, ctx) => {
           // The before-hook refuses every other type; this keeps a code of
           // another type from ever being mailed should that change.
           if (type !== 'sign-in') return;
+          // Spec D3: a reviewer cannot read our mail, so nothing is sent, but
+          // the send is counted: five an hour is what bounds guessing.
+          if (deps.reviewerCodes.has(normalizeEmail(email))) {
+            try {
+              await authRepo.recordSend(email);
+            } catch {
+              logger.error('auth code issued but not counted');
+            }
+            logger.info({ event: 'auth_code_sent', reviewer: true });
+            return;
+          }
           try {
             await deps.sendCode(email, otp);
           } catch (error) {

@@ -41,6 +41,13 @@ A session lasts 90 days and is extended by use at most once a day. Better Auth e
 only through the app's call to `GET /api/auth/get-session`, which re-issues the cookie; the server
 middleware reads sessions with refresh disabled, so the row and the cookie always move together.
 
+Store reviewers (Apple's and Google's) sign in through the same path with a fixed code
+(added 2026-10-16, [store reviewer accounts design](../superpowers/specs/2026-10-16-lang-tutor-store-reviewer-accounts-design.md)).
+The pairs come only from the `REVIEWER_CODES` environment variable, a prod secret, and never from
+the repository. `emailOTP`'s `generateOTP` returns a reviewer's fixed code for its address, so
+Better Auth stores, expires and tries it like any code. A reviewer's code is never mailed, but its
+send is counted against the five an hour.
+
 Better Auth logs through our `Logger`, level and the first line of the message only: its extra
 arguments are driver errors whose text holds query parameters (tokens, addresses). Its origin
 check is switched on explicitly (`advanced.disableOriginCheck: false`), because by default it is
