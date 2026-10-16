@@ -124,8 +124,9 @@ session) and returned as an optional `skipped_types` on the session read. If eve
 dropped, `prepareSession` marks the session `failed` at once (through `failPreparation`, with
 `skipped_types` written), not by throwing: a throw would be retried, paying for the model calls
 again, and leave the screen polling. A model or network error still throws and retries as today.
-The question-types screen shows a failed session's `skipped_types` itself. The results screen lists them under a
-"not generated" heading.
+The question-types screen shows a failed session's `skipped_types` itself. The question-types screen lists them before it enters the session, with a "continue" button
+*(ruling at build time: earlier than the results screen this line first named, and the session
+screen and its state stay untouched)*.
 
 **D6 — The app.** On the word page, each saved sense shows a "test question types" link when
 `me.user.tester`. It opens `vocabulary/question-types` (gloss and variant in the params), which
