@@ -48,12 +48,13 @@ export type ChoiceInput = {
   speaking: boolean;
   rng: () => number;
   /** Phase 39 (spec D5). Each family member's family (any stable id), and the glosses that wait.
-   *  Phase 54 (spec D2): `introductions`, the glosses glossFamilies introduces with their known
-   *  meanings, are NEW but no ladder: each keeps its single new_meaning card. */
+   *  Phase 54 (spec D2): a family's introduction is NEW but no ladder: it keeps its single
+   *  new_meaning card. Phase 60 (spec D1): `newMeanings`, glossFamilies' current meaning of
+   *  every family with a known one, asked or not: a missed new_meaning is no ladder either. */
   families: {
     familyOf: ReadonlyMap<string, number | string>;
     waiting: ReadonlySet<string>;
-    introductions: ReadonlySet<string>;
+    newMeanings: ReadonlySet<string>;
   };
 };
 
@@ -210,7 +211,7 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
   const levelOf = (glossId: string, dimension: Dimension) => levels.get(`${glossId}\u0000${dimension}`) ?? MIN_LEVEL;
   const pickOf = (glossId: string, dimension: Dimension, cls: ChoiceClass, rows: ReadonlyMap<Dimension, number> | undefined): ChosenPick => {
     const r = rows?.get(dimension) ?? null;
-    const ladder = cls === 'NEW' && !input.families.introductions.has(glossId);
+    const ladder = cls === 'NEW' && !input.families.newMeanings.has(glossId);
     return { glossId, dimension, rung: cls === 'STEP' ? 2 : rungFor(r), level: levelOf(glossId, dimension), r, cls, ladder };
   };
   // Phase 54 (spec D2). A gloss is learned once any of its skills was answered right: a row
