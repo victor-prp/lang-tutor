@@ -342,6 +342,7 @@ describe('loadAuthConfig', () => {
       resendApiKey: 're_test',
       resendBaseUrl: 'https://api.resend.com',
       mailFrom: 'WordsPal <code@wordspal.ai>',
+      reviewerCodes: new Map(),
     });
   });
 
@@ -366,6 +367,37 @@ describe('loadAuthConfig', () => {
 
   it('throws when WEB_ORIGINS holds no origin', () => {
     expect(() => loadAuthConfig({ ...authEnv, WEB_ORIGINS: ' , ' })).toThrow('WEB_ORIGINS');
+  });
+
+  // Store reviewer accounts (spec D1). Unset on every lane, in CI and in tests.
+  it.each([undefined, '', '  '])('has no reviewer codes when REVIEWER_CODES is %p', (value) => {
+    expect(loadAuthConfig({ ...authEnv, REVIEWER_CODES: value }).reviewerCodes).toEqual(new Map());
+  });
+
+  it('reads reviewer codes by normalised email, tolerating spaces and a trailing comma', () => {
+    const env = { ...authEnv, REVIEWER_CODES: ' A@Example.com=12345678 , b@example.com=87654321, ' };
+    expect(loadAuthConfig(env).reviewerCodes).toEqual(
+      new Map([
+        ['a@example.com', '12345678'],
+        ['b@example.com', '87654321'],
+      ]),
+    );
+  });
+
+  it.each([
+    ['no code', 'x@example.com'],
+    ['a short code', 'x@example.com=1234567'],
+    ['a code that is not digits', 'x@example.com=abcdefgh'],
+    ['an undeliverable address', 'x@example.invalid=12345678'],
+    ['the same address twice', 'x@example.com=12345678,X@example.com=11223344'],
+  ])('throws on %s without printing a value', (_case, value) => {
+    expect(() => loadAuthConfig({ ...authEnv, REVIEWER_CODES: value })).toThrow('REVIEWER_CODES');
+    try {
+      loadAuthConfig({ ...authEnv, REVIEWER_CODES: value });
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).not.toMatch(/\d{7}|abcdefgh|x@example/);
+    }
   });
 });
 
