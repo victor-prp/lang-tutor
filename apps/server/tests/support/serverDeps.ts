@@ -84,6 +84,7 @@ export function createTestServerDeps(io: {
       resendApiKey: 'test-key',
       resendBaseUrl: io.mailBaseUrl ?? 'http://127.0.0.1:9/never-registered',
       mailFrom: 'test@example.com',
+      reviewerCodes: new Map(),
     },
     translationTimeoutMs: io.translationTimeoutMs ?? 25_000,
     sessionGenerationTimeoutMs: io.sessionGenerationTimeoutMs ?? SESSION_GENERATION_BUDGET_MS,

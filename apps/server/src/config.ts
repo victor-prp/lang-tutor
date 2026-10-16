@@ -5,6 +5,7 @@ import {
   SESSION_GENERATION_BUDGET_MS,
   STOCK_SAVE_DELAY_SECONDS,
 } from './domain/jobs';
+import { isDeliverable, normalizeEmail } from './domain/auth';
 import { soundAlikeThreshold } from './domain/soundAlike';
 
 // A pure function of its argument: it reads no global, so a test hands it a
@@ -160,6 +161,8 @@ export type AuthConfig = {
   resendApiKey: string;
   resendBaseUrl: string;
   mailFrom: string;
+  /** Store reviewer accounts (spec D1): normalised email → its fixed 8-digit code. */
+  reviewerCodes: ReadonlyMap<string, string>;
 };
 
 const DEFAULT_RESEND_BASE_URL = 'https://api.resend.com';
@@ -189,7 +192,34 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv): AuthConfig {
     ),
     resendBaseUrl: env.RESEND_BASE_URL?.trim() || DEFAULT_RESEND_BASE_URL,
     mailFrom: required(env, 'MAIL_FROM', 'For example: WordsPal <code@wordspal.ai>'),
+    reviewerCodes: parseReviewerCodes(env.REVIEWER_CODES),
   };
+}
+
+/**
+ * Store reviewer accounts (spec D1). `email=code` pairs joined by commas, a prod
+ * secret only; unset, as on every lane, it is no account at all. A bad pair
+ * fails start-up by its position, never by its value: the value is a credential.
+ */
+function parseReviewerCodes(raw: string | undefined): ReadonlyMap<string, string> {
+  const codes = new Map<string, string>();
+  const pairs = (raw ?? '')
+    .split(',')
+    .map((pair) => pair.trim())
+    .filter(Boolean);
+  pairs.forEach((pair, index) => {
+    const fail = (why: string): never => {
+      throw new Error(`REVIEWER_CODES pair ${index + 1}: ${why}. Write each as email=code, the code 8 digits.`);
+    };
+    const [rawEmail, code, ...rest] = pair.split('=').map((part) => part.trim());
+    if (!rawEmail || code === undefined || rest.length > 0) fail('not email=code');
+    const email = normalizeEmail(rawEmail!);
+    if (!/^\d{8}$/.test(code!)) fail('the code is not 8 digits');
+    if (!isDeliverable(email)) fail('the address is undeliverable');
+    if (codes.has(email)) fail('the address is listed twice');
+    codes.set(email, code!);
+  });
+  return codes;
 }
 
 /**

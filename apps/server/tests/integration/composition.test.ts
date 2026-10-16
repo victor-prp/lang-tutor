@@ -45,6 +45,7 @@ describe('createServerDeps', () => {
         resendApiKey: 'test-key',
         resendBaseUrl: 'http://127.0.0.1:9/never-registered',
         mailFrom: 'test@example.com',
+        reviewerCodes: new Map(),
       },
       translationTimeoutMs: 25_000,
       sessionGenerationTimeoutMs: 120_000,

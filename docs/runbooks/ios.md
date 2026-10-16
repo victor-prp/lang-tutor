@@ -112,8 +112,11 @@ Run from the main checkout on `master`, after phase 36 has merged.
 5. **TestFlight's external group.** In the app, *TestFlight*:
    1. *Test Information*: a feedback email, a beta description, and the privacy policy URL
       `https://app.wordspal.ai/privacy.html`.
-   2. *Beta App Review Information*: contact details, and a sign-in Apple's reviewer can use.
-      Sign-in is by email code, so give a test account whose inbox you can read and say so.
+   2. *Beta App Review Information*: contact details, and a sign-in Apple's reviewer can use:
+      user name `ios_tester_0001@wordspal.ai` and its fixed 8-digit code as the password, the
+      pair listed in the prod secret `REVIEWER_CODES` (see
+      [Reviewer accounts](hosting.md#reviewer-accounts)). In the notes: "Enter the email, tap
+      the button to get a code, then type the password as the code; no email is sent."
    3. *External Testing → +*: a group called **Friends**. Add their emails, or turn on its
       public link.
 

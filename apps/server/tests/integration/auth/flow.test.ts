@@ -15,6 +15,8 @@ let auth: AuthModule;
 let logger: FakeLogger;
 let codes: Map<string, string>;
 let failSends: boolean;
+const REVIEWER = 'reviewer@example.com';
+const REVIEWER_CODE = '24681357';
 
 beforeEach(async () => {
   t = await createTestDb();
@@ -35,6 +37,7 @@ beforeEach(async () => {
     },
     now: Date.now,
     logger,
+    reviewerCodes: new Map([[REVIEWER, REVIEWER_CODE]]),
   });
 });
 afterEach(async () => {
@@ -223,6 +226,34 @@ describe('the session slides only through get-session', () => {
     expect(got.headers.get('set-cookie')).toContain('session_token=');
     const after = await expiresAtOf();
     expect(after.getTime() - Date.now()).toBeGreaterThan(89 * day);
+  });
+});
+
+// Store reviewer accounts (spec D2, D3).
+describe('a store reviewer', () => {
+  it('signs in with its fixed code, typed in any case, and is never mailed', async () => {
+    expect((await sendCode('Reviewer@Example.com')).status).toBe(200);
+    expect(codes.size).toBe(0);
+    const res = await signIn('Reviewer@Example.com', REVIEWER_CODE);
+    expect(res.status).toBe(200);
+    expect(cookieOf(res)).toMatch(/session_token=/);
+    expect(logger.events).toContainEqual({ event: 'auth_code_sent', reviewer: true });
+    const logged = JSON.stringify({ events: logger.events, errors: logger.errors });
+    expect(logged).not.toContain(REVIEWER_CODE);
+    expect(logged).not.toContain('reviewer@');
+  });
+
+  it("refuses the reviewer's code for any other address", async () => {
+    expect((await sendCode('other@example.com')).status).toBe(200);
+    expect(codes.get('other@example.com')).not.toBe(REVIEWER_CODE);
+    const res = await signIn('other@example.com', REVIEWER_CODE);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe('INVALID_OTP');
+  });
+
+  it('counts its sends: the sixth in an hour is 429', async () => {
+    for (let i = 0; i < 5; i += 1) expect((await sendCode(REVIEWER)).status).toBe(200);
+    expect((await sendCode(REVIEWER)).status).toBe(429);
   });
 });
 
