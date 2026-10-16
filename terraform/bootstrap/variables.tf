@@ -28,3 +28,9 @@ variable "alert_email" {
   description = "Where the bots' trigger alerts go (phase 40): the GitHub variable ALERT_EMAIL, as prod's budget. Set TF_VAR_alert_email."
   type        = string
 }
+
+variable "bots_schedule_enabled" {
+  description = "Whether the bots' hourly rule starts bots.yml. Off since 2026-10-16, while the bots are paused (docs/superpowers/specs/2026-10-16-lang-tutor-pause-qa-and-bots-design.md); docs/runbooks/bots.md, Start again, turns it back on."
+  type        = bool
+  default     = false
+}
