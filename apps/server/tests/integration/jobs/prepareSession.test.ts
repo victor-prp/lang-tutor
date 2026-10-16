@@ -232,28 +232,35 @@ describe('a ladder through the queue (phase 54, spec D3, D7; phase 55, spec D2, 
     expect(await readIntro(t.db, sessionId)).toEqual([true, true, true, false, false, false]);
   });
 
-  it('prepares a payload of three ladders, as a stock chosen before the deploy holds, with all of their cards', async () => {
-    // Nine intro cards q1-q9 ask nothing, then the three ladders' practice cards, stage by stage.
+  it('prepares a payload of three ladders, as a stock chosen before the deploy holds, as its first two ladders', async () => {
+    // Phase 55 (spec D4, ruled). A payload the pre-deploy picker chose may hold three ladders
+    // (phase 54's three slots each). Planned whole, two forms without tiles would ask eleven
+    // items, each one's intro typed card among them, above the ten the batch takes, and fail
+    // the session. The first two ladders in pick order are prepared; the third is dropped, not
+    // asked as a plain pick, which would ask a word never met cold. Each intro stage q1-q3 and
+    // q4-q6 asks only for its typed card's alternatives, then the practice, stage by stage.
     await expectDistractors(ns, {
-      tasks: [...Array(9).fill(null), 'meaning', 'meaning', 'meaning', 'word', 'word', 'word', 'typed', 'typed', 'typed'],
+      tasks: [null, null, 'typed', null, null, 'typed', 'meaning', 'meaning', 'word', 'word', 'typed', 'typed'],
     });
     await expectCheck(ns);
-    const sessionId = await enqueueSession(WORDS, [{ ladder: true }, { ladder: true }, { ladder: true }], { listening: false, speaking: true });
+    const words = { 'take off': 'להמריא', refrigerator: 'מקרר', tome: 'ספר' };
+    const sessionId = await enqueueSession(words, [{ ladder: true }, { ladder: true }, { ladder: true }], { listening: false, speaking: true });
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
     const { questions } = await deps.sessions.getSession('u_1', sessionId);
-    const intro = ['meet', 'read_aloud', 'letter_tiles'];
-    expect(questions).toHaveLength(18);
-    // Each word's intro stage is three cards in a row; then the practice, stage by stage.
-    expect(questions.slice(0, 9).map((q) => q.type)).toEqual([...intro, ...intro, ...intro]);
-    expect(questions.slice(9).map((q) => q.type)).toEqual([
-      ...Array(3).fill('multiple_choice'), ...Array(3).fill('reverse_choice'), ...Array(3).fill('typed_translation'),
+    const intro = ['meet', 'read_aloud', 'typed_translation'];
+    expect(questions.map((q) => q.type)).toEqual([
+      ...intro, ...intro, ...Array(2).fill('multiple_choice'), ...Array(2).fill('reverse_choice'), ...Array(2).fill('typed_translation'),
     ]);
+    // The first two picks' ladders, in pick order, and no card of the third.
+    const asked = questions.map((q) => ('question' in q ? q.question : null));
+    expect([asked[0], asked[3]]).toEqual(['take off', 'refrigerator']);
+    expect(asked).not.toContain('tome');
+    expect(asked).not.toContain('ספר');
     const lexemes = [...new Set(questions.map((q) => q.vocab_term_id))];
-    expect(lexemes).toHaveLength(3);
+    expect(lexemes).toHaveLength(2);
     for (const lexemeId of lexemes) expect(cardsOf(questions, lexemeId)).toEqual([...intro, ...PRACTICE]);
-    for (const at of [0, 3, 6]) expect(new Set(questions.slice(at, at + 3).map((q) => q.vocab_term_id)).size).toBe(1);
-    expect(await readIntro(t.db, sessionId)).toEqual([...Array(9).fill(true), ...Array(9).fill(false)]);
+    expect(await readIntro(t.db, sessionId)).toEqual([...Array(6).fill(true), ...Array(6).fill(false)]);
   });
 
   // Phase 55 (spec D2, as ruled). The intro stage is for encoding, not evidence: played, its

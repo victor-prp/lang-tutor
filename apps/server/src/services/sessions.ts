@@ -13,6 +13,7 @@ import {
   speakable,
   spokenTarget,
   spokenVerdict,
+  takesHelp,
   type AnswerInput,
   type JudgedQuestion,
   type QuestionType,
@@ -34,6 +35,7 @@ import {
   type CheckItem,
 } from '../domain/check';
 import { liveDimensions } from '../domain/choose';
+import { NEW_PER_SESSION } from '../domain/chooseConstants';
 import { findGap } from '../domain/cloze';
 import {
   buildContextPrompt,
@@ -811,11 +813,8 @@ export function createSessionService({
           // Phase 38 (spec D4): only the card that has a hint records whether it was opened.
           const askedType = loaded.questions[loaded.answers.length].type;
           const hinted = askedType === 'cloze_typed' ? { hintOpened: hintOpened ?? null } : {};
-          // Phase 55 (spec D6): only a tiles or typed card records whether it was helped.
-          const helps =
-            askedType === 'letter_tiles' || askedType === 'typed_translation'
-              ? { helped: 'helped' in answer ? answer.helped ?? null : null }
-              : {};
+          // Phase 55 (spec D6): only a card that takes help, tiles or typed, records whether it was helped.
+          const helps = takesHelp(askedType) ? { helped: 'helped' in answer ? answer.helped ?? null : null } : {};
           await repos.session.insertAnswer(
             sessionId,
             loaded.answers.length,
@@ -1156,6 +1155,14 @@ export function createSessionService({
     prepareSession: async (data: unknown, job: { attempt?: number } = {}): Promise<void> => {
       const payload = PrepareSessionPayloadSchema.parse(data);
       const sessionId = payload.session_id;
+      // Phase 55 (spec D4, ruled). A payload the code before this deploy chose may hold three
+      // ladders (phase 54's three slots each). Planned in the new shape, its forms without tiles
+      // each add an intro typed card, and it could ask the model more items than the batch
+      // takes (LlmDistractorsSchema, ten), failing the session. The first NEW_PER_SESSION ladder
+      // picks are kept, in pick order, and the rest dropped: asked as a plain pick, a word never
+      // met would be asked cold.
+      let ladders = 0;
+      const picks = payload.picks.filter((pick) => !pick.ladder || ++ladders <= NEW_PER_SESSION);
 
       const read = await transaction(async ({ session, enrollment, question, gloss, dict, jobs }) => {
         const state = await session.findState(sessionId);
@@ -1165,12 +1172,12 @@ export function createSessionService({
         if (!enrolled) return undefined;
         // Phase 31 (spec D14). A pick made before a merge names the survivor now,
         // and a gloss of another learner language is refused.
-        const resolved = await gloss.resolveGlosses(payload.picks.map((pick) => pick.gloss_id));
-        const foreign = payload.picks.find(
+        const resolved = await gloss.resolveGlosses(picks.map((pick) => pick.gloss_id));
+        const foreign = picks.find(
           (pick) => (resolved.get(pick.gloss_id)?.userLanguageCode ?? enrolled.source_language) !== enrolled.source_language,
         );
         if (foreign) throw new GlossLanguageMismatch(foreign.gloss_id);
-        const asked = payload.picks.map((pick) => ({
+        const asked = picks.map((pick) => ({
           glossId: resolved.get(pick.gloss_id)?.id ?? pick.gloss_id,
           senseId: pick.sense_id,
           variantId: pick.variant_id,
