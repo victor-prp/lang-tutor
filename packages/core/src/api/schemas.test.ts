@@ -7,9 +7,10 @@ import {
   LearnerDaySchema,
   TargetKindSchema,
   TargetListSchema,
-  TargetReadinessSchema,
   TargetRefusalSchema,
   TargetSchema,
+  TargetSummarySchema,
+  TargetWordSchema,
   CreateEnrollmentRequestSchema,
   CreateSessionRequestSchema,
   CreateUserRequestSchema,
@@ -1423,12 +1424,48 @@ describe('the target requests', () => {
 });
 
 describe('the target read models', () => {
-  const summary = { id: 't1', kind: 'homework', due_on: '2030-01-13', days_left: 5, word_count: 2, ready_count: 1 };
-  const word = { gloss_id: 'g1', form: 'apple', meaning: 'תפוח', readiness: 'ready' };
+  const summary = {
+    id: 't1',
+    kind: 'homework',
+    due_on: '2030-01-13',
+    days_left: 5,
+    word_count: 2,
+    ready_count: 1,
+    readiness_pct: 60,
+    today: { state: 'owed', done: 1, planned: 2, extra: 0, next_practice_in: null },
+    session: { session_id: 's1', status: 'ready', source: 'list', answered: 0, total: 10 },
+  };
+  const word = {
+    gloss_id: 'g1',
+    form: 'apple',
+    meaning: 'תפוח',
+    readiness_pct: 100,
+    today: 'done',
+    owed: [],
+    starts_in: null,
+    skills: [{ dimension: 'written_receptive', value: 10, cap: 3.5 }],
+  };
 
-  it('names two kinds and four readiness levels, in the order the app shows them', () => {
+  it('names two kinds', () => {
     expect(TargetKindSchema.options).toEqual(['homework', 'exam']);
-    expect(TargetReadinessSchema.options).toEqual(['not_started', 'on_the_way', 'almost', 'ready']);
+  });
+
+  it('parses a target day, a path session and a word day, in points and percent', () => {
+    expect(TargetSummarySchema.parse(summary)).toEqual(summary);
+    expect(TargetSummarySchema.parse({ ...summary, session: null, today: { ...summary.today, state: 'due_today', next_practice_in: 3 } }).session).toBeNull();
+    for (const state of ['owed', 'done', 'rest', 'due_today']) {
+      expect(TargetSummarySchema.safeParse({ ...summary, today: { ...summary.today, state } }).success).toBe(true);
+    }
+    expect(TargetSummarySchema.safeParse({ ...summary, today: { ...summary.today, state: 'late' } }).success).toBe(false);
+    expect(TargetSummarySchema.safeParse({ ...summary, readiness_pct: 12.5 }).success).toBe(false);
+    for (const today of ['owed', 'done', 'extra', 'later']) {
+      expect(TargetWordSchema.safeParse({ ...word, today, starts_in: today === 'later' ? 2 : null }).success).toBe(true);
+    }
+    expect(TargetWordSchema.safeParse({ ...word, today: 'soon' }).success).toBe(false);
+    expect(TargetWordSchema.safeParse({ ...word, owed: ['listening'] }).success).toBe(false);
+    expect(TargetWordSchema.safeParse({ ...word, skills: [{ dimension: 'spelling', value: 0.5, cap: 10 }] }).success).toBe(true);
+    // The old four-level enum is gone.
+    expect(TargetWordSchema.parse({ ...word, readiness: 'ready' })).not.toHaveProperty('readiness');
   });
 
   it('parses the list of active targets with the learner day it was read on', () => {
@@ -1438,10 +1475,10 @@ describe('the target read models', () => {
   });
 
   it('parses a target with its words, in the order given', () => {
-    const second = { ...word, gloss_id: 'g2', form: 'bread', meaning: 'לחם', readiness: 'not_started' };
+    const second = { ...word, gloss_id: 'g2', form: 'bread', meaning: 'לחם', readiness_pct: 0 };
     const target = { ...summary, words: [word, second] };
     expect(TargetSchema.parse(target).words.map((each) => each.gloss_id)).toEqual(['g1', 'g2']);
-    expect(TargetSchema.safeParse({ ...summary, words: [{ ...word, readiness: 'nearly' }] }).success).toBe(false);
+    expect(TargetSchema.safeParse({ ...summary, words: [{ ...word, readiness_pct: 'nearly' }] }).success).toBe(false);
     expect(TargetSchema.safeParse({ ...summary, days_left: 1.5, words: [] }).success).toBe(false);
   });
 });

@@ -395,12 +395,25 @@ describe('the home read of a path (spec D11)', () => {
     });
     await insertGlossMemory(t.db, [faded(words[0].glossId), faded(words[3].glossId)]);
 
-    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'list', savedCount: 6, dueCount: 1 });
+    // Ruling T5-q: the main path's saved words are those in no active target.
+    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'list', savedCount: 3, dueCount: 1 });
     // Five days of five: one word of three owed today.
     expect(await service.currentSession('u_1', E, exam)).toEqual({ current: null, nextSource: 'list', savedCount: 6, dueCount: 1 });
 
     await endTargetNow(t.db, exam);
     expect((await service.currentSession('u_1', E)).dueCount).toBe(2);
     expect((await service.currentSession('u_1', E, exam)).dueCount).toBe(0);
+    expect((await service.currentSession('u_1', E)).savedCount).toBe(6);
+  });
+
+  it('counts none saved on the main path when every saved word is in a target (ruling T5-q)', async () => {
+    const words = await savedWords();
+    const exam = await addTarget('exam', '2030-01-13', ids(words));
+
+    expect((await service.currentSession('u_1', E)).savedCount).toBe(0);
+    expect((await service.currentSession('u_1', E, exam)).savedCount).toBe(6);
+
+    await endTargetNow(t.db, exam);
+    expect((await service.currentSession('u_1', E)).savedCount).toBe(6);
   });
 });

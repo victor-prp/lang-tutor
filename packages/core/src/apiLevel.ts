@@ -21,8 +21,13 @@
  *
  * 4: phase 54 (spec D6). The meet question type and the seen answer: an older
  * app cannot draw the card.
+ *
+ * 5: phase 57 (spec D13). A target's `ready_count` now counts words at 100% readiness
+ * (it counted those ready by FSRS), and a target's word loses its `readiness` enum for
+ * `readiness_pct`, `today`, `owed`, `starts_in` and `skills`: an older app would read
+ * `undefined` where it drew a name.
  */
-export const API_LEVEL = 4;
+export const API_LEVEL = 5;
 
 /** Written here and nowhere else (ADR 0012 R3). */
 export const API_LEVEL_HEADER = 'X-Api-Level';

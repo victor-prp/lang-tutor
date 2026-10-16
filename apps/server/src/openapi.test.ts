@@ -598,7 +598,9 @@ describe('the target endpoints in the published document (phase 53)', () => {
     const doc = await openApiDocument();
     const list = doc.paths[TARGETS].get.responses['200'].content['application/json'].schema;
     expect(list.required.sort()).toEqual(['targets', 'today']);
-    expect(list.properties.targets.items.required.sort()).toEqual(['days_left', 'due_on', 'id', 'kind', 'ready_count', 'word_count']);
+    const SUMMARY = ['days_left', 'due_on', 'id', 'kind', 'readiness_pct', 'ready_count', 'session', 'today', 'word_count'];
+    expect(list.properties.targets.items.required.sort()).toEqual(SUMMARY);
+    expect(list.properties.targets.items.properties.today.properties.state.enum).toEqual(['owed', 'done', 'rest', 'due_today']);
     for (const [path, method, status] of [
       [TARGETS, 'post', '201'],
       [TARGET, 'get', '200'],
@@ -606,9 +608,12 @@ describe('the target endpoints in the published document (phase 53)', () => {
       [WORDS, 'post', '200'],
     ]) {
       const target = doc.paths[path][method].responses[status].content['application/json'].schema;
-      expect(target.required.sort()).toEqual(['days_left', 'due_on', 'id', 'kind', 'ready_count', 'word_count', 'words']);
-      expect(target.properties.words.items.required.sort()).toEqual(['form', 'gloss_id', 'meaning', 'readiness']);
-      expect(target.properties.words.items.properties.readiness.enum).toEqual(['not_started', 'on_the_way', 'almost', 'ready']);
+      expect(target.required.sort()).toEqual([...SUMMARY, 'words'].sort());
+      expect(target.properties.words.items.required.sort()).toEqual(
+        ['form', 'gloss_id', 'meaning', 'owed', 'readiness_pct', 'skills', 'starts_in', 'today'],
+      );
+      expect(target.properties.words.items.properties.today.enum).toEqual(['owed', 'done', 'extra', 'later']);
+      expect(target.properties.words.items.properties.readiness).toBeUndefined();
     }
   });
 

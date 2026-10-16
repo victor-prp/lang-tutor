@@ -51,8 +51,9 @@ const listRoute = createRoute({
   tags: ['targets'],
   summary: "An enrollment's active targets",
   description:
-    'The targets whose date is still to come and that were not ended early, nearest date first, each with how many of ' +
-    "its words are ready, and the learner's today, which the date a target is given must come after.",
+    'The targets through their due date that were not ended early, nearest date first, each with its day (work owed, ' +
+    'done or rest, readiness in percent, the words at 100%) and its path\'s session, and the learner\'s today, which the ' +
+    'date a target is given must come after.',
   request: { params: enrollmentParams },
   responses: {
     200: json(TargetListSchema, 'The active targets, possibly none.'),

@@ -251,6 +251,16 @@ describe('the session gate in createApp', () => {
     expect(await res.json()).toEqual({ error: 'app_update_required' });
   });
 
+  // Phase 57 (spec D13). Level 5: a target's ready_count changed meaning and its word lost
+  // `readiness`, so an app at level 4 is told to update, on the targets reads above all.
+  it('answers 426 to a level 4 client on the targets reads', async () => {
+    for (const path of ['/api/enrollments/e1/targets', '/api/targets/t1']) {
+      const res = await createApp(depsWithPing(true)).request(path, { headers: { 'X-Api-Level': '4' } });
+      expect(res.status).toBe(426);
+      expect(await res.json()).toEqual({ error: 'app_update_required' });
+    }
+  });
+
   it('answers 404, not 401, to an auth path Better Auth is not mounted on', async () => {
     const res = await createApp(depsWithPing(true)).request('/api/auth/update-user', { method: 'POST' });
     expect(res.status).toBe(404);

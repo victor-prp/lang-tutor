@@ -1,4 +1,4 @@
-import type { Target, TargetKind, TargetList, TargetReadiness, TargetSummary } from '@lang-tutor/core/api';
+import type { Target, TargetKind, TargetList, TargetSummary } from '@lang-tutor/core/api';
 
 import { ApiError } from '@/api/client';
 import { strings } from '@/strings';
@@ -13,9 +13,9 @@ export function targetTitle(kind: TargetKind): string {
   return strings.targetKindName(kind);
 }
 
-/** A word's readiness for the date, in the four words of spec D4. */
-export function readinessName(readiness: TargetReadiness): string {
-  return strings.targetReadinessName(readiness);
+/** A word's readiness, in percent (phase 57, spec D9). */
+export function readinessName(readinessPct: number): string {
+  return strings.targetReadinessName(readinessPct);
 }
 
 /** How soon a target is: tomorrow from one day left, "in N days" after. An active
@@ -135,7 +135,7 @@ export function withoutWord(target: Target, glossId: string): Target {
   return {
     ...target,
     word_count: target.word_count - 1,
-    ready_count: target.ready_count - (word.readiness === 'ready' ? 1 : 0),
+    ready_count: target.ready_count - (word.readiness_pct === 100 ? 1 : 0),
     words: target.words.filter((candidate) => candidate !== word),
   };
 }

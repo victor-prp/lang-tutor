@@ -909,10 +909,10 @@ export const VocabularyWordQuerySchema = z.object({
 // Phase 53 (spec D1, D4, D13). A target: a kind, a due date and words saved in the
 // enrollment, which sessions serve until the date. A learner day is ADR 0013's,
 // 'YYYY-MM-DD'. `days_left` counts from the learner's today, and a target is active
-// while it is at least 1. A word's readiness is its chance of being remembered on
-// the due date, in its weakest live skill, read against the kind's bars.
+// while it is at least 0 (phase 57: through its due date). Readiness is in percent: the
+// points of the live skills of the word (or of every word) over those they could earn,
+// rounded down, so 100 means every live skill is at its full 10 points.
 export const TargetKindSchema = z.enum(['homework', 'exam']);
-export const TargetReadinessSchema = z.enum(['not_started', 'on_the_way', 'almost', 'ready']);
 // A calendar day, not only the shape of one: 2026-02-30 and 2026-13-01 match the pattern, reached
 // Postgres, which raises 22008, and answered 500. The parts must survive a round trip through UTC,
 // so no locale and no time zone is read; setUTCFullYear rather than Date.UTC, which would remap
@@ -933,7 +933,20 @@ export const TargetSummarySchema = z.object({
   due_on: LearnerDaySchema,
   days_left: z.number().int(),
   word_count: z.number().int(),
+  // Words at 100% readiness.
   ready_count: z.number().int(),
+  readiness_pct: z.number().int(),
+  // Phase 57 (spec D9, D10). Today's work on the target's path: owed, done, rest (nothing owed
+  // and nothing practised today) or due_today (the date has come).
+  today: z.object({
+    state: z.enum(['owed', 'done', 'rest', 'due_today']),
+    done: z.number().int(),
+    planned: z.number().int(),
+    extra: z.number().int(),
+    next_practice_in: z.number().int().nullable(),
+  }),
+  // The target path's started session, else its stock, else its newest if it failed.
+  session: CurrentSessionSchema.nullable(),
 });
 // The active targets, nearest due date first, and the day they were read on: the
 // app's date step offers the days after it.
@@ -943,7 +956,14 @@ export const TargetWordSchema = z.object({
   gloss_id: z.string(),
   form: z.string(),
   meaning: z.string(),
-  readiness: TargetReadinessSchema,
+  readiness_pct: z.number().int(),
+  // Phase 57 (spec D9). The word's day: owed work, done, started early (extra) or still to come.
+  today: z.enum(['owed', 'done', 'extra', 'later']),
+  owed: z.array(KnowledgeDimensionSchema),
+  // For a later word: the days until it is introduced.
+  starts_in: z.number().int().nullable(),
+  // Points, 0 to 10 in steps of a half; `cap` is today's.
+  skills: z.array(z.object({ dimension: KnowledgeDimensionSchema, value: z.number(), cap: z.number() })),
 });
 // Its words in the order they were added.
 export const TargetSchema = TargetSummarySchema.extend({ words: z.array(TargetWordSchema) });

@@ -6,16 +6,16 @@ import type {
   Target,
   TargetList,
 } from '@lang-tutor/core/api';
-import { speakable, type Dimension, type MemoryState } from '@lang-tutor/core/domain';
 
-import { liveDimensions } from '../domain/choose';
 import { daysBetween } from '../domain/progress';
-import { openOn, readinessOf, recallOnDue } from '../domain/targets';
+import { targetDay } from '../domain/targetDay';
+import { openOn } from '../domain/targets';
 import { InvalidTarget, TargetClosed, TargetNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { TargetRow } from '../repo/targets';
 import { authorizeEnrollment } from './access';
 import { learnerDay } from './learnerDay';
+import { readTargetDay } from './targetDayRead';
 import { logImportSaved, saveImportsInTx, type ImportSaved } from './photoImports';
 import { lockPaths, logTargetRetired, requestStocks, restockAfterTargetChange, retireStocks } from './stock';
 import type { Repos, Transaction } from './transaction';
@@ -114,41 +114,64 @@ export function createTargetService({
   }
 
   /**
-   * Spec D4, D11, rulings R-D4, R-D11. Targets as the learner reads them on `today`: each
-   * word with the form it was saved from, as written (final review M3), its key, and its
-   * readiness for the target's date — its recall then in its weakest skill live in the
-   * enrollment's newest session (both spoken ones off when there is none), speaking skipped
-   * for a word that cannot be said, read against the kind's bars. A target's words are saved
-   * ones (unsaving takes a word out of every target), so a word the list does not hold is not
-   * shown.
+   * Phase 57 (spec D9, D10, D13, rulings T6-a, T6-b). Targets as the learner reads them on
+   * `today`: each word with the form it was saved from, as written (final review M3), its key,
+   * and its day (the day's state of it, its readiness in percent, its skills in points); and the
+   * target's own day (today's work, readiness, the words at 100) and its path's session as the
+   * home read gives it (started, else stock, else a failed newest). The day is readTargetDay's,
+   * the one the target's path plans by. A target's words are saved ones (unsaving takes a word
+   * out of every target), so a word the list does not hold is not shown.
    */
   async function view(repos: Repos, enrolled: Enrollment, today: string, targets: readonly TargetWithWords[]): Promise<Target[]> {
     if (targets.length === 0) return [];
     const glossIds = [...new Set(targets.flatMap((target) => target.glossIds))];
-    const saved = new Map((await repos.vocabulary.findSavedWords({ enrollmentId: enrolled.id, glossIds })).map((word) => [word.glossId, word]));
+    const saved = await repos.vocabulary.findSavedWords({ enrollmentId: enrolled.id, glossIds });
+    const savedOf = new Map(saved.map((word) => [word.glossId, word]));
     const devices = (await repos.session.findNewestDevices(enrolled.id)) ?? { listening: false, speaking: false };
-    const live = liveDimensions(devices.listening, devices.speaking);
-    const memory = await repos.memory.findRows({ enrollmentId: enrolled.id, glossIds });
-    const rowsOf = new Map<string, { dimension: Dimension; state: MemoryState }[]>();
-    for (const row of memory) rowsOf.set(row.glossId, [...(rowsOf.get(row.glossId) ?? []), row]);
 
-    return targets.map((target) => {
+    const out: Target[] = [];
+    for (const target of targets) {
+      const read = await readTargetDay(repos, enrolled, target, devices, today, saved);
+      const day =
+        read?.day ??
+        targetDay({ today, createdOn: today, dueOn: target.dueOn, words: [], skills: [], rightToday: new Set(), answeredToday: false });
+      const dayOf = new Map(day.words.map((word) => [word.glossId, word]));
       const words = target.glossIds.flatMap((glossId) => {
-        const gloss = saved.get(glossId);
-        if (!gloss) return [];
-        const recall = recallOnDue(rowsOf.get(glossId) ?? [], live, speakable(gloss.form), target.dueOn);
-        return [{ gloss_id: glossId, form: gloss.form, meaning: gloss.key, readiness: readinessOf(target.kind, recall) }];
+        const gloss = savedOf.get(glossId);
+        const word = dayOf.get(glossId);
+        if (!gloss || !word) return [];
+        return [
+          {
+            gloss_id: glossId,
+            form: gloss.form,
+            meaning: gloss.key,
+            readiness_pct: word.readinessPct,
+            today: word.state,
+            owed: word.owed,
+            starts_in: word.startsIn,
+            skills: word.skills.map((skill) => ({ dimension: skill.dimension, value: skill.halves / 2, cap: day.capHalves / 2 })),
+          },
+        ];
       });
-      return {
+      const { started, stock } = await repos.session.findOpen(enrolled.id, target.id);
+      const latest = started || stock ? undefined : await repos.session.findLatest(enrolled.id, target.id);
+      const current = started ?? stock ?? (latest?.status === 'failed' ? latest : null);
+      out.push({
         id: target.id,
         kind: target.kind,
         due_on: target.dueOn,
         days_left: daysBetween(today, target.dueOn),
         word_count: words.length,
-        ready_count: words.filter((word) => word.readiness === 'ready').length,
+        ready_count: day.readyCount,
+        readiness_pct: day.readinessPct,
+        today: { state: day.state, done: day.done, planned: day.planned, extra: day.extra, next_practice_in: day.nextPracticeIn },
+        session: current
+          ? { session_id: current.id, status: current.status, source: current.source, answered: current.answered, total: current.total }
+          : null,
         words,
-      };
-    });
+      });
+    }
+    return out;
   }
 
   /** One target as view reads it, its words as they are now in this transaction. */
@@ -167,14 +190,7 @@ export function createTargetService({
         const targets = await view(repos, enrolled, today, await repos.target.listActive(enrolled.id, today));
         return {
           today,
-          targets: targets.map(({ id, kind, due_on, days_left, word_count, ready_count }) => ({
-            id,
-            kind,
-            due_on,
-            days_left,
-            word_count,
-            ready_count,
-          })),
+          targets: targets.map(({ words, ...summary }) => summary),
         };
       }),
 

@@ -122,7 +122,6 @@ import type {
   VocabularyWordQuerySchema,
   VocabularyWordSchema,
   TargetKindSchema,
-  TargetReadinessSchema,
   TargetSummarySchema,
   TargetListSchema,
   TargetWordSchema,
@@ -202,7 +201,6 @@ export type VocabularySense = z.infer<typeof VocabularySenseSchema>;
 export type VocabularyWordDetail = z.infer<typeof VocabularyWordDetailSchema>;
 export type VocabularyWordQuery = z.infer<typeof VocabularyWordQuerySchema>;
 export type TargetKind = z.infer<typeof TargetKindSchema>;
-export type TargetReadiness = z.infer<typeof TargetReadinessSchema>;
 export type TargetSummary = z.infer<typeof TargetSummarySchema>;
 export type TargetList = z.infer<typeof TargetListSchema>;
 export type TargetWord = z.infer<typeof TargetWordSchema>;

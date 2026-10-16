@@ -32,6 +32,8 @@ import type { PhotoImportItemRow, PhotoImportRepo, PhotoImportRow } from '../rep
 import type { ProgressRepo } from '../repo/progress';
 import type { SessionRepo } from '../repo/sessions';
 import type { TargetEventInput, TargetRow } from '../repo/targets';
+import type { TargetSkillRepo } from '../repo/targetSkills';
+import type { TargetSkillRow } from '../domain/targetSkills';
 import type { UserRepo } from '../repo/users';
 import type { VocabularyRepo } from '../repo/vocabulary';
 import { createTargetService, type TargetService } from './targets';
@@ -143,6 +145,10 @@ function world(
     open?: { started?: SessionSummary; stock?: SessionSummary };
     /** Phase 57. Each target path's open sessions, by target id; none when not given. */
     openOn?: Record<string, { started?: SessionSummary; stock?: SessionSummary }>;
+    /** Phase 57 (spec D13). Each target path's newest session, by target id. */
+    latestOn?: Record<string, SessionSummary>;
+    /** Phase 57. The target skills rows read. */
+    skills?: TargetSkillRow[];
     /** Whether retireStock finds the stock still unstarted; false when a start took it first. */
     retires?: boolean;
     gloss?: Repos['gloss'];
@@ -222,6 +228,8 @@ function world(
         .sort((a, b) => a.dueOn.localeCompare(b.dueOn) || a.id.localeCompare(b.id))
         .map((row) => ({ ...plain(row), glossIds: [...row.words] })),
     listWordIds: async (id) => [...(stored.get(id)?.words ?? [])],
+    listWords: async (id) =>
+      (stored.get(id)?.words ?? []).map((glossId) => ({ glossId, addedAt: stored.get(id)!.createdAt, startedOn: null })),
     listHolding: async (enrollmentId, glossId) =>
       [...stored.values()]
         .filter((row) => row.enrollmentId === enrollmentId && row.words.includes(glossId))
@@ -273,6 +281,8 @@ function world(
       return setup.retires ?? true;
     },
     findNewestDevices: async () => setup.devices,
+    findAnswersOn: async () => [],
+    findLatest: async (_enrollmentId, path) => (path === null ? undefined : setup.latestOn?.[path]),
   });
 
   const transaction = createFakeTransaction({
@@ -289,6 +299,7 @@ function world(
         calls.push('lockEnrollment');
       },
     }),
+    targetSkills: stub<TargetSkillRepo>({ findRows: async () => setup.skills ?? [] }),
     memory: stub<MemoryRepo>({
       findRows: async ({ glossIds }) => (setup.memory ?? []).filter((row) => glossIds.includes(row.glossId)),
     }),
@@ -316,7 +327,8 @@ const createRequest = (over: Partial<CreateTargetRequest> = {}): CreateTargetReq
   entries: [entry('g_casa')],
   ...over,
 });
-const word = (glossId: string, readiness: string) => ({ gloss_id: glossId, form: WORDS[glossId].form, meaning: WORDS[glossId].key, readiness });
+const word = (glossId: string, over: Record<string, unknown> = {}) =>
+  expect.objectContaining({ gloss_id: glossId, form: WORDS[glossId].form, meaning: WORDS[glossId].key, ...over });
 const logged = (logger: { events: Record<string, unknown>[] }, event: string) => logger.events.filter((line) => line.event === event);
 /** Final review I3. A photo import saved through a target, logged as its own save logs it (phase
  *  26 D14), with the target named. */
@@ -337,6 +349,8 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
 
     const made = await service.create(OWNER, 'e1', createRequest({ photo_import_ids: ['i_a', 'i_b'], entries: [entry('g_cane'), entry('g_sole')] }));
 
+    // Phase 57 (spec D6): five days, two of the four words planned for today (the words added
+    // together go by gloss id), the others later.
     expect(made).toEqual({
       id: 't_new',
       kind: 'exam',
@@ -344,7 +358,15 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
       days_left: 5,
       word_count: 4,
       ready_count: 0,
-      words: [word('g_casa', 'not_started'), word('g_gatto', 'not_started'), word('g_cane', 'not_started'), word('g_sole', 'not_started')],
+      readiness_pct: 0,
+      today: { state: 'owed', done: 0, planned: 2, extra: 0, next_practice_in: 1 },
+      session: null,
+      words: [
+        word('g_casa', { today: 'owed', starts_in: null }),
+        word('g_gatto', { today: 'later', starts_in: 1 }),
+        word('g_cane', { today: 'owed', starts_in: null }),
+        word('g_sole', { today: 'later', starts_in: 2 }),
+      ],
     });
     // The photos are one review, so i_b's gatto is i_a's: saved once. Then the typed words.
     expect(inserted).toEqual([
@@ -748,43 +770,81 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
     ...memory('g_sole', ALL_SKILLS, fading),
   ];
 
-  it('reads each word’s readiness for the date in its weakest live skill, with the form saved and the key', async () => {
+  const skillRows = (glossId: string, halves: number, dims: readonly Dimension[] = ALL_SKILLS): TargetSkillRow[] =>
+    dims.map((dimension) => ({ targetId: 't1', glossId, dimension, halves, sessionId: null, day: null }));
+
+  it('reads each word’s day: readiness in percent, its state, what it owes, and its skills in points under the cap', async () => {
     const { service } = world({
-      saved: READ,
-      targets: [target({ words: READ })],
-      memory: MEMORY,
+      saved: ['g_casa', 'g_gatto', 'g_cane'],
+      targets: [target({ words: ['g_casa', 'g_gatto', 'g_cane'] })],
+      // g_casa at 10 points in every skill, g_gatto at 7 in one skill of five.
+      skills: [
+        ...skillRows('g_casa', 20),
+        ...skillRows('g_gatto', 0).map((row, i) => (i === 0 ? { ...row, halves: 14 } : row)),
+      ],
       devices: { listening: true, speaking: true },
     });
 
-    expect(await service.getTarget(OWNER, 't1')).toEqual({
-      id: 't1',
-      kind: 'exam',
-      due_on: DUE,
-      days_left: 5,
-      word_count: 5,
-      ready_count: 2,
-      words: [
-        word('g_casa', 'ready'),
-        word('g_lupo', 'ready'),
-        word('g_gatto', 'on_the_way'),
-        word('g_cane', 'not_started'),
-        word('g_sole', 'almost'),
-      ],
-    });
-  });
-
-  it('reads the bars of the target’s kind: what is "almost" for an exam is ready for homework', async () => {
-    const { service } = world({ saved: READ, targets: [target({ kind: 'homework', words: READ })], memory: MEMORY, devices: { listening: true, speaking: true } });
-    const homework = await service.getTarget(OWNER, 't1');
-    expect(homework.words.find((kept) => kept.gloss_id === 'g_sole')?.readiness).toBe('ready');
-    expect(homework.ready_count).toBe(3);
-  });
-
-  it('reads the live skills of the newest session: with no device to speak or listen, the spoken ones do not count', async () => {
-    const { service } = world({ saved: READ, targets: [target({ words: READ })], memory: MEMORY });
     const read = await service.getTarget(OWNER, 't1');
-    expect(read.words.find((kept) => kept.gloss_id === 'g_gatto')?.readiness).toBe('ready');
-    expect(read.ready_count).toBe(3);
+
+    expect(read.words[0]).toEqual({
+      gloss_id: 'g_casa',
+      form: 'casa',
+      meaning: WORDS.g_casa.key,
+      readiness_pct: 100,
+      today: 'owed',
+      owed: [],
+      starts_in: null,
+      skills: ALL_SKILLS.map((dimension) => ({ dimension, value: 10, cap: expect.any(Number) })),
+    });
+    expect(read.words[1]).toMatchObject({ gloss_id: 'g_gatto', readiness_pct: 14 });
+    expect(read.words[1].skills[0]).toMatchObject({ dimension: 'written_receptive', value: 7 });
+    // Points, never halves: a cap of 20 halves is 10 points.
+    expect(read.words.every((w) => w.skills.every((skill) => skill.cap <= 10))).toBe(true);
+  });
+
+  it('counts a word ready only at 100: ready_count is 0 while none is, whatever FSRS says of the date', async () => {
+    const none = world({
+      saved: READ,
+      targets: [target({ words: READ })],
+      memory: MEMORY,
+      skills: skillRows('g_casa', 19),
+      devices: { listening: true, speaking: true },
+    });
+    const first = await none.service.getTarget(OWNER, 't1');
+    expect(first.ready_count).toBe(0);
+    expect(first.words.find((w) => w.gloss_id === 'g_casa')?.readiness_pct).toBe(95);
+
+    const some = world({
+      saved: READ,
+      targets: [target({ words: READ })],
+      memory: MEMORY,
+      skills: skillRows('g_casa', 20),
+      devices: { listening: true, speaking: true },
+    });
+    const second = await some.service.getTarget(OWNER, 't1');
+    expect(second.ready_count).toBe(1);
+    expect(second.readiness_pct).toBe(Math.floor(100 / 5));
+  });
+
+  it('answers the target path’s session: the started one, else the stock, else a failed newest, else none', async () => {
+    const started = { ...listStock('s_started'), status: 'ready' as const, answered: 2 };
+    const failed: SessionSummary = { id: 's_failed', status: 'failed', source: 'list', answered: 0, total: 0 };
+    const done: SessionSummary = { id: 's_done', status: 'completed', source: 'list', answered: 5, total: 5 };
+    const sessionOf = async (setup: Parameters<typeof world>[0]) =>
+      (await world({ saved: ['g_casa'], targets: [target()], ...setup }).service.getTarget(OWNER, 't1')).session;
+
+    expect(await sessionOf({ openOn: { t1: { started, stock: listStock() } } })).toEqual({
+      session_id: 's_started',
+      status: 'ready',
+      source: 'list',
+      answered: 2,
+      total: 10,
+    });
+    expect(await sessionOf({ openOn: { t1: { stock: listStock() } } })).toMatchObject({ session_id: 's_stock' });
+    expect(await sessionOf({ latestOn: { t1: failed } })).toMatchObject({ session_id: 's_failed', status: 'failed' });
+    expect(await sessionOf({ latestOn: { t1: done } })).toBeNull();
+    expect(await sessionOf({})).toBeNull();
   });
 
   it('lists the active targets nearest date first, with today, and leaves out the ended, the past and another list’s', async () => {
@@ -805,9 +865,10 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
     expect(await service.list(OWNER, 'e1')).toEqual({
       today: TODAY,
       targets: [
-        { id: 't_today', kind: 'exam', due_on: TODAY, days_left: 0, word_count: 1, ready_count: 1 },
-        { id: 't_near', kind: 'exam', due_on: '2026-10-18', days_left: 3, word_count: 1, ready_count: 0 },
-        { id: 't_far', kind: 'homework', due_on: '2026-11-01', days_left: 17, word_count: 2, ready_count: 1 },
+        // A target on its due date is listed, due_today (phase 57, spec D10).
+        expect.objectContaining({ id: 't_today', kind: 'exam', due_on: TODAY, days_left: 0, word_count: 1, ready_count: 0, today: expect.objectContaining({ state: 'due_today' }) }),
+        expect.objectContaining({ id: 't_near', kind: 'exam', due_on: '2026-10-18', days_left: 3, word_count: 1 }),
+        expect.objectContaining({ id: 't_far', kind: 'homework', due_on: '2026-11-01', days_left: 17, word_count: 2 }),
       ],
     });
   });

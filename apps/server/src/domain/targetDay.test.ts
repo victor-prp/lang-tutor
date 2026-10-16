@@ -162,4 +162,19 @@ describe('targetDay', () => {
     expect(day.state).toBe('due_today');
     expect(day.words[0].checks).toEqual([]);
   });
+
+  it('startsIn says when a later word reaches its intro day, null for the rest', () => {
+    const day = targetDay({ ...base, today: D0, dueOn: addDays(D0, 20), words: words(20) });
+    expect(day.words.filter((w) => w.state === 'later').map((w) => w.startsIn)).toEqual(Array(10).fill(6));
+    expect(day.words.filter((w) => w.state !== 'later').every((w) => w.startsIn === null)).toBe(true);
+  });
+
+  it('readiness rounds down: 100 only when every live skill is at 20 halves', () => {
+    const w = word(0, { startedOn: D0 });
+    const skills = rows(['g00'], 20).map((r, i) => (i === 0 ? { ...r, halves: 19 } : r));
+    const day = targetDay({ ...base, today: addDays(D0, 2), dueOn: addDays(D0, 5), words: [w], skills });
+    expect(day.words[0].readinessPct).toBe(99);
+    expect(day.readinessPct).toBe(99);
+    expect(day.readyCount).toBe(0);
+  });
 });

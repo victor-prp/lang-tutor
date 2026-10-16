@@ -25,6 +25,8 @@ export type WordDay = {
   /** Live skills owing the next-day check: one right answer today. */
   checks: Dimension[];
   readinessPct: number;
+  /** A `later` word: the days until the intro day whose quota first covers it; else null. */
+  startsIn: number | null;
   skills: { dimension: Dimension; halves: number }[];
 };
 
@@ -44,7 +46,7 @@ export type TargetDay = {
 /** A skill's full value in half-points. */
 const FULL_HALVES = 20;
 
-const pct = (halves: number, live: number) => (live === 0 ? 0 : Math.round((100 * halves) / (FULL_HALVES * live)));
+const pct = (halves: number, live: number) => (live === 0 ? 0 : Math.floor((100 * halves) / (FULL_HALVES * live)));
 
 export function targetDay(input: {
   today: string;
@@ -97,6 +99,7 @@ export function targetDay(input: {
       (word.startedOn !== null && word.startedOn < today);
 
     let state: WordDay['state'];
+    let startsIn: number | null = null;
     let toStart = false;
     let owed: Dimension[] = [];
     let checks: Dimension[] = [];
@@ -119,8 +122,10 @@ export function targetDay(input: {
       extra += 1;
     } else {
       state = 'later';
+      const first = introDays.findIndex((_, j) => Math.ceil((ordered.length * (j + 1)) / introDays.length) > i);
+      startsIn = first === -1 ? null : daysLeft - introDays[first];
     }
-    out.push({ glossId: word.glossId, state, toStart, owed, checks, readinessPct, skills });
+    out.push({ glossId: word.glossId, state, toStart, owed, checks, readinessPct, startsIn, skills });
   });
 
   let state: TargetDay['state'];

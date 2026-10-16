@@ -126,18 +126,24 @@ describe('readyLabel', () => {
 });
 
 describe('readinessName', () => {
-  it('names the four levels, from not started to ready', () => {
-    expect(readinessName('not_started')).toBe('עוד לא התחלנו');
-    expect(readinessName('on_the_way')).toBe('בדרך');
-    expect(readinessName('almost')).toBe('כמעט מוכנה');
-    expect(readinessName('ready')).toBe('מוכנה');
+  it('writes the percent, its digits isolated', () => {
+    expect(readinessName(0)).toBe('\u20660%\u2069');
+    expect(readinessName(85)).toBe('\u206685%\u2069');
+    expect(readinessName(100)).toBe('\u2066100%\u2069');
   });
 });
+
+const WORD = { gloss_id: 'g0', form: '', meaning: '', readiness_pct: 0, today: 'owed' as const, owed: [], starts_in: null, skills: [] };
+const DAY = {
+  readiness_pct: 0,
+  today: { state: 'owed' as const, done: 0, planned: 0, extra: 0, next_practice_in: null },
+  session: null,
+};
 
 describe('targetsFor', () => {
   const list: TargetList = {
     today: '2026-10-15',
-    targets: [{ id: 't1', kind: 'exam', due_on: '2026-10-20', days_left: 5, word_count: 4, ready_count: 1 }],
+    targets: [{ id: 't1', kind: 'exam', due_on: '2026-10-20', days_left: 5, word_count: 4, ready_count: 1, ...DAY }],
   };
   const stored: StoredTargets = { enrollmentId: 'e1', list };
 
@@ -251,10 +257,11 @@ describe('withoutWord', () => {
     days_left: 5,
     word_count: 3,
     ready_count: 1,
+    ...DAY,
     words: [
-      { gloss_id: 'g1', form: 'cane', meaning: 'כלב', readiness: 'ready' },
-      { gloss_id: 'g2', form: 'casa', meaning: 'בית', readiness: 'almost' },
-      { gloss_id: 'g3', form: 'gatto', meaning: 'חתול', readiness: 'not_started' },
+      { ...WORD, gloss_id: 'g1', form: 'cane', meaning: 'כלב', readiness_pct: 100 },
+      { ...WORD, gloss_id: 'g2', form: 'casa', meaning: 'בית', readiness_pct: 80 },
+      { ...WORD, gloss_id: 'g3', form: 'gatto', meaning: 'חתול', readiness_pct: 0 },
     ],
   };
 

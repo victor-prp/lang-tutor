@@ -1,4 +1,4 @@
-import type { Target, TargetReadiness } from '@lang-tutor/core/api';
+import type { Target } from '@lang-tutor/core/api';
 import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -214,8 +214,8 @@ export default function TargetScreen() {
                   <Text style={[styles.form, { writingDirection: wordDirection }]}>{word.form}</Text>
                   <Text style={[styles.meaning, { writingDirection: meaningDirection }]}>{word.meaning}</Text>
                 </View>
-                <Text testID="target-word-readiness" style={[styles.readiness, READINESS_STYLES[word.readiness]]}>
-                  {readinessName(word.readiness)}
+                <Text testID="target-word-readiness" style={[styles.readiness, word.readiness_pct === 100 ? READY_STYLE : NOT_READY_STYLE]}>
+                  {readinessName(word.readiness_pct)}
                 </Text>
                 {open ? (
                   <Pressable
@@ -312,10 +312,6 @@ const styles = StyleSheet.create({
   endLabel: { color: colors.wrong, fontSize: fontSizes.md, fontWeight: '700' },
 });
 
-// Spec D4's four levels, from muted to the colour of a right answer.
-const READINESS_STYLES: Record<TargetReadiness, { color: string; backgroundColor: string }> = {
-  not_started: { color: colors.muted, backgroundColor: colors.background },
-  on_the_way: { color: colors.text, backgroundColor: colors.background },
-  almost: { color: colors.primary, backgroundColor: colors.background },
-  ready: { color: colors.correct, backgroundColor: colors.correctSurface },
-};
+// A word at 100% shows in the colour of a right answer, the rest muted.
+const NOT_READY_STYLE = { color: colors.muted, backgroundColor: colors.background };
+const READY_STYLE = { color: colors.correct, backgroundColor: colors.correctSurface };

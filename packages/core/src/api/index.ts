@@ -104,7 +104,6 @@ export type {
   Target,
   TargetKind,
   TargetList,
-  TargetReadiness,
   TargetRefusal,
   TargetSummary,
   TargetWord,

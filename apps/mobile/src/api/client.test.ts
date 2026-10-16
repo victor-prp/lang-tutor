@@ -689,7 +689,7 @@ describe('reminders', () => {
 
 // Phase 53 (spec D13). The target endpoints the app calls.
 describe('targets', () => {
-  const word = { gloss_id: 'g1', form: 'dita', meaning: 'אצבע', readiness: 'not_started' };
+  const word = { gloss_id: 'g1', form: 'dita', meaning: 'אצבע', readiness_pct: 0, today: 'owed', owed: [], starts_in: null, skills: [] };
   const target = {
     id: 't 1',
     kind: 'exam',

@@ -5,7 +5,6 @@ import {
   MAX_JUDGED_TEXT,
   evaluate,
   gatesScript,
-  gradesFor,
   isJudged,
   isSpeaking,
   wrongScript,
@@ -105,7 +104,6 @@ import { MAX_AVOID } from '../domain/sentences';
 import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
-import { targetDay } from '../domain/targetDay';
 import { chooseTargetPicks, owedWords, targetMode, type TargetPickInput } from '../domain/targetPicker';
 import { activeOn, readinessOf, recallOnDue } from '../domain/targets';
 import { targetSessionWrite } from '../domain/targetSkills';
@@ -129,7 +127,8 @@ import {
 } from '../errors';
 import type { Logger } from '../logger';
 import { authorizeEnrollment } from './access';
-import { learnerDay, learnerDays } from './learnerDay';
+import { learnerDay } from './learnerDay';
+import { readTargetDay } from './targetDayRead';
 import type { LlmClient, ModelCallRecord } from './llm';
 import type { SpeechTranscriber } from './speech';
 import { pathPayload, requestStock } from './stock';
@@ -483,52 +482,6 @@ export function createSessionService({
   }
 
   /**
-   * Phase 57 (spec D5, D6, D9, rulings P4, T3-j). A target's day as its path reads it on
-   * `today`: its words (those still saved), each with the day it joined (learnerDays, from
-   * when it was added, ruling P4), the day it started and its live skills (speaking skipped
-   * for a word that cannot be said, phase 53 R9), its skills, the skills answered right today
-   * and whether its path was practised today. `words` are the target's saved words with
-   * their forms. Null for a target with no saved word.
-   */
-  async function readTargetDay(
-    repos: Repos,
-    enrolled: Enrollment,
-    target: TargetRow,
-    devices: Devices,
-    today: string,
-    saved: readonly { glossId: string; form: string }[],
-  ) {
-    const rows = await repos.target.listWords(target.id);
-    const formOf = new Map(saved.map((gloss) => [gloss.glossId, gloss.form]));
-    const words = rows.filter((row) => formOf.has(row.glossId));
-    if (words.length === 0) return null;
-    const [createdOn, ...addedOn] = await learnerDays(repos, enrolled.user_id, [
-      target.createdAt.getTime(),
-      ...words.map((word) => word.addedAt.getTime()),
-    ]);
-    const live = liveDimensions(devices.listening, devices.speaking);
-    const liveOf = (glossId: string) => (speakable(formOf.get(glossId)!) ? live : live.filter((dimension) => dimension !== 'spoken_productive'));
-    const glossIds = words.map((word) => word.glossId);
-    const skills = await repos.targetSkills.findRows([target.id], glossIds);
-    const answers = await repos.session.findAnswersOn(enrolled.id, today);
-    const rightToday = new Set(
-      answers.flatMap((answer) =>
-        answer.intro ? [] : gradesFor(answer).flatMap((piece) => (piece.grade > 1 ? [`${answer.glossId}|${piece.dimension}`] : [])),
-      ),
-    );
-    const day = targetDay({
-      today,
-      createdOn,
-      dueOn: target.dueOn,
-      words: words.map((word, i) => ({ glossId: word.glossId, addedOn: addedOn[i], startedOn: word.startedOn, live: liveOf(word.glossId) })),
-      skills,
-      rightToday,
-      answeredToday: answers.some((answer) => answer.targetId === target.id),
-    });
-    return { day, glossIds, live, canSay: (glossId: string) => speakable(formOf.get(glossId)!) };
-  }
-
-  /**
    * Phase 57 (spec D1, D6–D9, rulings T3-j, T3-m, T3-n). A target path's choice, read on the
    * owner's learner day: its day (readTargetDay), and the picks its picker makes of it beside
    * the path's started session, whose graded cards it credits; owed work first, and practice
@@ -780,6 +733,21 @@ export function createSessionService({
   }
 
   /**
+   * Phase 57 (ruling T5-q). How many saved words a path can practise: a target path's is what
+   * its list holds as ever (the count of saved words), the main path's only those in no active
+   * target, so a learner whose every word is in a target sees "save words first" on My words
+   * rather than a create that 409s. A target's words are saved ones (unsaving takes a word out
+   * of every target), so the held ones are among the entries.
+   */
+  async function savedOn(repos: Repos, enrolled: Enrollment, path: Path): Promise<number> {
+    const saved = await repos.vocabulary.countEntries(enrolled.id);
+    if (path !== null) return saved;
+    const today = await learnerDay(repos, enrolled.user_id, now());
+    const held = new Set((await repos.target.listActive(enrolled.id, today)).flatMap((active) => active.glossIds));
+    return Math.max(0, saved - held.size);
+  }
+
+  /**
    * Phase 57 (spec D11). How many words wait on a path: on the main path, its words chooseWords
    * calls due (dueGlosses), with the live skills of the enrollment's newest session; on a
    * target's, its words with work owed today (none once it ended).
@@ -926,7 +894,7 @@ export function createSessionService({
           current: open.started ?? open.stock ?? (latest?.status === 'failed' ? latest : null),
           offered: open.started ? undefined : open.stock,
           nextSource: path === null ? nextSource(any !== undefined) : ('list' as const),
-          savedCount: await repos.vocabulary.countEntries(enrollmentId),
+          savedCount: await savedOn(repos, enrolled, path),
           dueCount: await waitingOn(repos, enrolled, target),
           replaced,
         };

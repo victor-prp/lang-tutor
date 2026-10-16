@@ -32,7 +32,7 @@ function dayOf(cap: number, specs: WordSpec[], state: TargetDay['state'] = 'owed
     const toStart = spec.toStart ?? false;
     const wordState = spec.state ?? 'owed';
     const owed = wordState === 'owed' && !toStart ? skills.filter((s) => s.halves < cap).map((s) => s.dimension) : [];
-    return { glossId: spec.id, state: wordState, toStart, owed, checks: spec.checks ?? [], readinessPct: 0, skills };
+    return { glossId: spec.id, state: wordState, toStart, owed, checks: spec.checks ?? [], readinessPct: 0, startsIn: null, skills };
   });
   return {
     daysLeft: state === 'due_today' ? 0 : 1,

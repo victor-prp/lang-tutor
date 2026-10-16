@@ -160,13 +160,10 @@ describe('targets (phase 53 D10, D11)', () => {
   // strong direction is reordered by the RTL layout on Android.
   const ltr = (text: string) => '\u2066' + text + '\u2069';
 
-  it('names the two kinds and the four levels of readiness', () => {
+  it('names the two kinds and writes a readiness percent', () => {
     expect(strings.targetKindName('homework')).toBe('שיעורי בית');
     expect(strings.targetKindName('exam')).toBe('בוחן');
-    expect(strings.targetReadinessName('not_started')).toBe('עוד לא התחלנו');
-    expect(strings.targetReadinessName('on_the_way')).toBe('בדרך');
-    expect(strings.targetReadinessName('almost')).toBe('כמעט מוכנה');
-    expect(strings.targetReadinessName('ready')).toBe('מוכנה');
+    expect(strings.targetReadinessName(40)).toBe(ltr('40%'));
   });
 
   it('says how soon a target is, isolating the number', () => {
