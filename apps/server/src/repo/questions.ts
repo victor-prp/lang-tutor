@@ -3,7 +3,7 @@ import type { QuestionType } from '@lang-tutor/core/domain';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import type { RecentContexts } from '../domain/context';
+import { servedWords, type MapWord, type RecentContexts } from '../domain/context';
 import type { GenerationContext, RecentSentences } from '../domain/distractors';
 import { dictLexemes, dictVariants, questions, type QuestionOption } from '../db/schema';
 
@@ -40,6 +40,8 @@ export type QuestionRow = {
   /** Phase 39 (spec D6). The meanings a new_meaning card lists as known; null
    *  on every other type (questions_known_meanings_valid). */
   knownMeanings: string[] | null;
+  /** Phase 59 (spec D2). A sentence translation's word map; null on every other card. */
+  words: MapWord[] | null;
   form: string;
   lemma: string;
   partOfSpeech: string;
@@ -66,6 +68,7 @@ export const questionColumns = {
   sentenceMarkStart: questions.sentenceMarkStart,
   sentenceMarkEnd: questions.sentenceMarkEnd,
   knownMeanings: questions.knownMeanings,
+  words: questions.words,
   form: dictVariants.form,
   lemma: dictLexemes.lemma,
   partOfSpeech: dictLexemes.partOfSpeech,
@@ -162,6 +165,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         gap: { start: row.gapStart!, end: row.gapEnd! },
         answer: row.sentence!.slice(row.gapStart!, row.gapEnd!),
         mark,
+        words: servedWords(row.words),
       };
     case 'letter_tiles':
       return {
@@ -534,6 +538,8 @@ export function createQuestionRepo(tx: Tx) {
         knownMeanings?: string[] | null;
         // Phase 55 (spec D2, as ruled): a card of a ladder's intro stage; left out (false) on every other.
         intro?: boolean;
+        // Phase 59 (spec D2): a sentence translation's word map; null on every other card.
+        words?: MapWord[] | null;
       }[];
     }): Promise<Question[]> => {
       if (input.questions.length === 0) return [];
@@ -566,6 +572,7 @@ export function createQuestionRepo(tx: Tx) {
             sentenceMarkEnd: question.sentenceMarkEnd ?? null,
             knownMeanings: question.knownMeanings ?? null,
             intro: question.intro ?? false,
+            words: question.words ?? null,
           })),
         )
         .returning({ id: questions.id });
@@ -590,6 +597,7 @@ export function createQuestionRepo(tx: Tx) {
             sentenceMarkStart: question.sentenceMarkStart ?? null,
             sentenceMarkEnd: question.sentenceMarkEnd ?? null,
             knownMeanings: question.knownMeanings ?? null,
+            words: question.words ?? null,
             form: question.form,
             lemma: question.lemma,
             partOfSpeech: question.partOfSpeech,

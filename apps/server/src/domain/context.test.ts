@@ -12,6 +12,7 @@ import {
   markFor,
   parseLlmContext,
   resolveContext,
+  wordMapFor,
   type BareContextItem,
   type MarkItem,
 } from './context';
@@ -68,9 +69,11 @@ describe('contextItemFor', () => {
 
   it('asks a sentence card for its word in the Hebrew, and nothing of a card that shows no sentence', () => {
     const sentence = { hebrew: 'בואו נשלב כוחות.', target: "Let's combine forces.", word: 'combine' };
+    // Phase 59 (spec D2): a translation card also asks for its word map.
     expect(contextItemFor({ key: 'q5', type: 'sentence_translation', row: SAW, alternatives: [], recent: [], sentence })).toEqual({
-      key: 'q5', task: 'mark', word: 'combine', meaning: 'לנסר', sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces.",
+      key: 'q5', task: 'mark', word: 'combine', meaning: 'לנסר', sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces.", map: true,
     });
+    expect(contextItemFor({ key: 'q5', type: 'cloze_typed', row: SAW, alternatives: [], recent: [], sentence })).not.toHaveProperty('map');
     for (const type of ['listen_choice', 'matching', 'dictation', 'letter_tiles', 'read_aloud', 'cloze_choice'] as const) {
       expect(contextItemFor({ key: 'q1', type, row: SAW, alternatives: [], recent: [], sentence: null })).toBeNull();
     }
@@ -104,6 +107,95 @@ describe('buildContextPrompt', () => {
     });
     expect(download).toMatchObject({ key: 'q2', task: 'explanation', word: 'להוריד', translates: 'download', avoid: ['אני צריך להוריד את הקובץ קודם.'] });
     expect(combine).toEqual({ key: 'q3', task: 'mark', word: 'combine', meaning: 'לשלב', sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces." });
+  });
+});
+
+describe('buildContextPrompt: the word map (phase 59 D2)', () => {
+  const mapped: MarkItem = { key: 'q3', task: 'mark', word: 'con', meaning: 'עם', sentence: 'אני הולך עם חברים.', translation: 'Vado con amici.', map: true };
+  const learnerWords = [{ key: 'w1', glossId: 'g-amico', word: 'amico', meaning: 'חבר' }];
+
+  it('asks a mapped mark item for sentence_words, and sends the learner\'s words once', () => {
+    const prompt = buildContextPrompt({ items: [mapped], from: 'it', to: 'he', learnerWords });
+    expect(prompt.system).toContain('sentence_words');
+    const sent = JSON.parse(prompt.user);
+    expect(sent.items[0]).toMatchObject({ key: 'q3', task: 'mark', map: true });
+    expect(sent.learner_words).toEqual([{ key: 'w1', word: 'amico', meaning: 'חבר' }]);
+  });
+
+  it('sends no learner words when no item is mapped', () => {
+    const plain: MarkItem = { key: 'q3', task: 'mark', word: 'combine', meaning: 'לשלב', sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces." };
+    expect(JSON.parse(buildContextPrompt({ items: [plain], from: 'en', to: 'he', learnerWords }).user)).not.toHaveProperty('learner_words');
+  });
+});
+
+describe('wordMapFor (phase 59 D2)', () => {
+  const item: MarkItem = { key: 'q1', task: 'mark', word: 'con', meaning: 'עם', sentence: 'אני הולך עם חברים.', translation: 'Vado con amici.', map: true };
+  const learner = [
+    { key: 'w1', glossId: 'g-amico', word: 'amico', meaning: 'חבר' },
+    { key: 'w2', glossId: 'g-con', word: 'con', meaning: 'עם' },
+  ];
+  const words = [
+    { hebrew: 'אני', translation: '', word: '' },
+    { hebrew: 'הולך', translation: 'Vado', word: '' },
+    { hebrew: 'עם', translation: 'con', word: 'w2' },
+    { hebrew: 'חברים', translation: 'amici', word: 'w1' },
+  ];
+  const mark = { start: 9, end: 11 };
+
+  it('maps each located word to its Italian, marks the target, and names a list word', () => {
+    expect(wordMapFor(item, { key: 'q1', sentence_words: words }, mark, learner, 'g-con')).toEqual([
+      { start: 4, end: 8, text: 'Vado', glossId: null, target: false },
+      { start: 9, end: 11, text: 'con', glossId: null, target: true },
+      { start: 12, end: 17, text: 'amici', glossId: 'g-amico', target: false },
+    ]);
+  });
+
+  it('drops an entry whose Italian is not in the reference, or whose Hebrew is not in the sentence', () => {
+    const map = wordMapFor(item, { key: 'q1', sentence_words: [
+      { hebrew: 'הולך', translation: 'andiamo', word: '' },
+      { hebrew: 'רץ', translation: 'Vado', word: '' },
+      ...words.slice(2),
+    ] }, mark, learner, 'g-con');
+    expect(map!.map((word) => word.text)).toEqual(['con', 'amici']);
+  });
+
+  it('drops a non-target entry that holds the target\'s Italian, so a free tap never shows the answer', () => {
+    const multi: MarkItem = { key: 'q1', task: 'mark', word: 'ci sono', meaning: 'יש', sentence: 'יש פה אנשים.', translation: 'Ci sono persone qui.', map: true };
+    const map = wordMapFor(multi, { key: 'q1', sentence_words: [
+      { hebrew: 'יש', translation: 'Ci sono', word: '' },
+      { hebrew: 'פה', translation: 'sono qui', word: '' },
+      { hebrew: 'אנשים', translation: 'persone', word: '' },
+    ] }, { start: 0, end: 2 }, [], 'g-ci');
+    expect(map!.map((word) => [word.text, word.target])).toEqual([['Ci sono', true], ['persone', false]]);
+  });
+
+  it('with no mark, takes the entry whose Italian is the gap as the target', () => {
+    const map = wordMapFor(item, { key: 'q1', sentence_words: words }, null, learner, 'g-con');
+    expect(map!.filter((word) => word.target)).toEqual([{ start: 9, end: 11, text: 'con', glossId: null, target: true }]);
+  });
+
+  it('adds the mark as the target when no entry covers it', () => {
+    const map = wordMapFor(item, { key: 'q1', sentence_words: [words[1], words[3]] }, mark, learner, 'g-con');
+    expect(map).toEqual([
+      { start: 4, end: 8, text: 'Vado', glossId: null, target: false },
+      { start: 9, end: 11, text: 'con', glossId: null, target: true },
+      { start: 12, end: 17, text: 'amici', glossId: 'g-amico', target: false },
+    ]);
+  });
+
+  it('names no gloss for an unknown key or the card\'s own gloss, and keeps the word free', () => {
+    const map = wordMapFor(item, { key: 'q1', sentence_words: [
+      { hebrew: 'הולך', translation: 'Vado', word: 'w9' },
+      { hebrew: 'חברים', translation: 'amici', word: 'w2' },
+    ] }, mark, learner, 'g-con');
+    expect(map!.filter((word) => !word.target).map((word) => word.glossId)).toEqual([null, null]);
+  });
+
+  it('is null with no map, an unmapped item, or nothing usable', () => {
+    expect(wordMapFor(item, { key: 'q1' }, mark, learner, 'g-con')).toBeNull();
+    expect(wordMapFor(item, undefined, mark, learner, 'g-con')).toBeNull();
+    expect(wordMapFor({ ...item, map: undefined }, { key: 'q1', sentence_words: words }, mark, learner, 'g-con')).toBeNull();
+    expect(wordMapFor(item, { key: 'q1', sentence_words: [{ hebrew: 'רץ', translation: 'x', word: '' }] }, null, learner, 'g-con')).toBeNull();
   });
 });
 

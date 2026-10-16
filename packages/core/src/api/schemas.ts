@@ -236,6 +236,10 @@ export const SentenceTranslationQuestionSchema = z.object({
   gap: GapSchema,
   answer: z.string(),
   mark: MarkSchema.nullable(),
+  // Phase 59 (spec D2, D3). The runs of `question` a tap shows the reference's
+  // words for, `target` the practised word's; null on a card stored before phase
+  // 59, or one the server could not map. Only `mark` is tappable then.
+  words: z.array(z.object({ start: z.number().int(), end: z.number().int(), text: z.string(), target: z.boolean() })).nullable().optional(),
 });
 
 // A tagged union. Consumers switch on `type`, so adding a type is additive and
@@ -1303,6 +1307,15 @@ export const LlmContextSchema = z.object({
         context_translation: z.string().optional(),
         context_word: z.string().optional(),
         sentence_word: z.string().optional(),
+        // Phase 59 (spec D2, ruling R6). A translation card's word map: each word
+        // of its Hebrew, the reference's words that render it (empty for none),
+        // and the learner_words key it renders (empty for none), every string
+        // required inside the entry. Measured before anything was built on it,
+        // `npx tsx tests/eval/measureSchema.ts --context`, ten items with two
+        // mapped translation cards and a six-word list, gemini-2.5-flash,
+        // 2026-10-16, production's budget: accepted on three runs, no 400, in
+        // 11.1, 10.2 and 10.8 s, both maps whole and every list word named.
+        sentence_words: z.array(z.object({ hebrew: z.string(), translation: z.string(), word: z.string() })).optional(),
       }),
     )
     .max(10),

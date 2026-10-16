@@ -44,6 +44,8 @@ import {
   contextLanguageOf,
   fallbackContext,
   markFor,
+  wordMapFor,
+  type MapWord,
   parseLlmContext,
   resolveContext,
   type BareContextItem,
@@ -1453,7 +1455,7 @@ export function createSessionService({
         let failure: string | null = null;
         try {
           const raw = await contextLlm({
-            ...buildContextPrompt({ items: [...contextItems.values()], from: target, to: read.enrolled.source_language }),
+            ...buildContextPrompt({ items: [...contextItems.values()], from: target, to: read.enrolled.source_language, learnerWords: read.learnerWords }),
             record: record('context'),
           });
           contextAnswer = raw === '' ? null : parseLlmContext(raw);
@@ -1486,8 +1488,11 @@ export function createSessionService({
         // Phase 34 (spec D5): only a sentence the model wrote is the checker's to read.
         let checkable: BareContextItem | null = null;
         let sentence: { text: string; mark: Mark | null } | null = null;
+        // Phase 59 (spec D2). A translation card's word map, never its refusal.
+        let words: MapWord[] | null = null;
         if (item?.task === 'mark') {
           sentence = { text: item.sentence, mark: contextAnswer ? markFor(item, found.get(item.key)) : null };
+          if (contextAnswer) words = wordMapFor(item, found.get(item.key), sentence.mark, read.learnerWords, card.row.glossId);
         } else if (item) {
           if (contextAnswer) {
             const outcome = resolveContext(item, found.get(item.key), languages);
@@ -1501,7 +1506,7 @@ export function createSessionService({
             context = fallbackContext(card.row, item.task);
           }
         }
-        return { ...card, context, checkable, sentence };
+        return { ...card, context, checkable, sentence, words };
       });
 
       // Phase 34 (spec D5). The checker: a second model reads the cards as a
@@ -1727,7 +1732,7 @@ export function createSessionService({
         if (!context && contextLanguageOf(generatedAs(type)) !== null) {
           events.push({ event: 'context_missing', session_id: sessionId, index: card.index, type });
         }
-        return { row, index: card.index, type, answered, context, sentence };
+        return { row, index: card.index, type, answered, context, sentence, words: card.words };
       });
       // Phase 48 (spec D4). The plan's order, a dropped card's place closed up:
       // a card's written position is its place here, while `index` stays its
@@ -1746,7 +1751,7 @@ export function createSessionService({
           enrollmentId: read.state.enrollmentId,
           targetLanguage: target,
           userLanguageCode: read.enrolled.source_language,
-          questions: kept.map(({ row, index, type, answered, context, sentence }) => ({
+          questions: kept.map(({ row, index, type, answered, context, sentence, words }) => ({
             glossId: survivorGlosses.get(row.glossId)?.id ?? row.glossId,
             variantId: row.variantId,
             form: row.form,
@@ -1766,6 +1771,8 @@ export function createSessionService({
             // Phase 55 (spec D2, as ruled): a card of a ladder's intro stage, by its plan index, which
             // goes with the card past a dropped one; its answer writes no memory and no progress.
             intro: plan.intro[index],
+            // Phase 59 (spec D2): a card degraded from a sentence translation keeps none.
+            words: type === 'sentence_translation' ? words : null,
           })),
         });
         // Each choice shuffled on its own, a board's words once together; the
