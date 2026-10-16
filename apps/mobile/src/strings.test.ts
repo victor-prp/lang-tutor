@@ -253,3 +253,13 @@ describe('the target wizard and the target screen (phase 53 D10, D11)', () => {
     expect(strings.targetEndConfirm).toBe('סיום ההכנה');
   });
 });
+
+describe('removing every new word (phase 58 D4)', () => {
+  it('words the button, its question and its failure', () => {
+    expect(strings.vocabularyRemoveNew).toBe('הסרת כל המילים החדשות');
+    expect(strings.vocabularyRemoveNewTitle).toBe('להסיר את כל המילים החדשות?');
+    expect(strings.vocabularyRemoveNewMessage).toBe('כל המילים ברמה "חדשה" יוסרו מהרשימה ומהיעדים. אי אפשר לבטל.');
+    expect(strings.vocabularyRemoveNewConfirm).toBe('הסרה');
+    expect(strings.vocabularyRemoveNewFailed).toBe('ההסרה נכשלה. נסו שוב.');
+  });
+});
