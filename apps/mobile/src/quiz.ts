@@ -8,7 +8,7 @@ import type {
   SessionProgressItem,
   SessionView,
 } from '@lang-tutor/core/api';
-import { SESSION_LENGTH } from '@lang-tutor/core/domain';
+import { SESSION_LENGTH, takesHelp } from '@lang-tutor/core/domain';
 
 import { checksFit, opensRetry, type CardAnswer } from '@/feedback';
 import type { JudgeAttempt } from '@/judging';
@@ -52,6 +52,10 @@ export type QuizState = {
    *  typed answer: open, it holds back the banner and Continue. Null on every
    *  other card, and on a session entered or resumed, since it is never sent. */
   retype: Retype | null;
+  /** Phase 56 (spec D5). How many characters help has revealed on the card on
+   *  screen: one count a card, kept through its second try and through "can't
+   *  speak now", 0 on the next card. The tiles card counts its own. */
+  help: number;
 };
 
 /** Phase 19. What a session starts as before its first card is read: starting
@@ -74,6 +78,7 @@ export function enteredState(sessionId: string): QuizState {
     judging: 'idle',
     retry: null,
     retype: null,
+    help: 0,
   };
 }
 
@@ -107,6 +112,7 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
       judging: 'idle',
       retry: null,
       retype: null,
+      help: 0,
     };
   }
   return {
@@ -120,7 +126,23 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
     judging: 'idle',
     retry: queued.retry,
     retype: null,
+    // Phase 56 (spec D5): the same card back for its second try keeps its help.
+    help: queued.question.id === current.question?.id ? current.help : 0,
   };
+}
+
+/** Phase 56 (spec D5). Help pressed on the card on screen: one more character
+ *  shown. An answered card takes none (a retype offers no help). */
+export function helpPressedState(current: QuizState): QuizState {
+  return current.answer !== null ? current : { ...current, help: current.help + 1 };
+}
+
+/** Phase 56 (spec D5). The `helped` an answer to `question` carries: none on a
+ *  card that takes no help; the tiles card's own say (a wrong tile helps, phase
+ *  55); on every other card, whether help was pressed on it. */
+export function helpedFor(question: Question, help: number, card?: { helped?: boolean }): boolean | undefined {
+  if (!takesHelp(question.type)) return undefined;
+  return question.type === 'letter_tiles' ? card?.helped === true : help > 0;
 }
 
 /** Phase 19. A loaded session continues from its current card. Phase 34 (spec
@@ -177,10 +199,12 @@ export function nextStepRequest(
 
 /** Phase 55 (spec D7). The retype a card's answer opens: a first answer to a
  *  typed translation whose text is wrong or nearly right, show the answer
- *  included. Not a second try (phase 34), which has its own banners. */
+ *  included. Not a second try (phase 34), which has its own banners. Phase 56
+ *  (spec D7): on a dictation, a typed gap and a typed say the translation too,
+ *  and on a typed meaning the judge called wrong. */
 function retypeFor(question: Question | undefined, answer: CardAnswer, retry: PendingRetry | null): Retype | null {
-  if (question === undefined || retry !== null || !('text' in answer) || 'judged' in answer) return null;
-  return opensRetype(question, answer.text) ? startRetype() : null;
+  if (question === undefined || retry !== null) return null;
+  return opensRetype(question, answer) ? startRetype() : null;
 }
 
 /** Phase 23. The card answered by the phone's own judge: its banner shows at
@@ -206,7 +230,7 @@ export function retypeTypingState(current: QuizState): QuizState {
 /** Phase 55 (spec D7). A retype checked on the phone; the card's answer stays
  *  the first one, which is what was sent. */
 export function retypeCheckedState(current: QuizState, text: string): QuizState {
-  if (current.retype === null || current.question?.type !== 'typed_translation') return current;
+  if (current.retype === null || current.question === undefined) return current;
   const retype = retypeChecked(current.retype, current.question, text);
   return retype === current.retype ? current : { ...current, retype };
 }
@@ -247,7 +271,8 @@ export type Settled = Sent & { met: PendingRetry | null };
  *  may, and only the server knows; a clip or a board is never sent twice. */
 function mayOpen(question: Question, answer: CardAnswer): boolean {
   if ('pass' in answer) return false;
-  if ('judged' in answer) return answer.text.trim() !== '';
+  // Phase 56 (spec D2): a helped one is stored wrong, which opens none.
+  if ('judged' in answer) return answer.text.trim() !== '' && answer.helped !== true;
   if ('heard' in answer || 'board' in answer) return true;
   // Phase 41 (spec D3): a word checked against the gap may be what the server held.
   return opensRetry(question, answer) || checksFit(question, answer);

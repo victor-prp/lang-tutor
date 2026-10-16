@@ -9,7 +9,8 @@ export function canJudge(attempt: JudgeAttempt, answered: boolean): boolean {
   return !answered && attempt !== 'checking';
 }
 
-/** The answer a judged response sets on the card. */
-export function judgedAnswer(text: string, response: JudgedAnswerResponse): { text: string; judged: TypedVerdict } {
-  return { text, judged: response.verdict };
+/** The answer a judged response sets on the card. Phase 56 (spec D8): with
+ *  `helped` when the card said, so its banner can say "right, with help". */
+export function judgedAnswer(text: string, response: JudgedAnswerResponse, helped?: boolean): { text: string; judged: TypedVerdict; helped?: boolean } {
+  return helped === undefined ? { text, judged: response.verdict } : { text, judged: response.verdict, helped };
 }

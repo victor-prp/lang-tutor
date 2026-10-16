@@ -491,3 +491,50 @@ describe('a helped answer (phase 55 D6, D7)', () => {
     });
   });
 });
+
+// Phase 56 (spec D8). A helped spoken or judged answer whose words were right is
+// right with help; a helped wrong one is wrong.
+describe('a helped answer on more cards (phase 56 D8)', () => {
+  const HELPED = { tone: 'other', title: 'נכון, עם עזרה', line: null, verdict: null };
+  const SAY: Question = { id: 's', type: 'say_translation', vocab_term_id: 'l', question: 'מדבר', part_of_speech: 'verb', answer: 'parlo', lemma: 'parlare', alternatives: ['dico'], context: null };
+  const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין', context: null };
+  const TRANSLATE: Question = { id: 'st', type: 'sentence_translation', vocab_term_id: 'l', question: 'בואו נשלב כוחות.', meaning: 'לשלב', sentence: 'Uniamo le forze.', gap: { start: 0, end: 6 }, answer: 'Uniamo', mark: null };
+  const CLOZE: Question = {
+    id: 'ct',
+    type: 'cloze_typed',
+    vocab_term_id: 'l',
+    sentence: 'Ieri parlavamo per ore.',
+    gap: { start: 5, end: 14 },
+    translation: 'אתמול דיברנו שעות.',
+    meaning: 'לדבר',
+    answer: 'parlavamo',
+    alternatives: ['chiacchieravamo'],
+    mark: null,
+  };
+  const DICTATION: Question = { id: 'd', type: 'dictation', vocab_term_id: 'l', question: 'parlo', meaning: 'מדבר' };
+
+  it('a spoken answer understood or another word, with help, is right with help', () => {
+    expect(feedbackFor(SAY, { heard: 'parlo', verdict: 'understood', helped: true }, null)).toEqual(HELPED);
+    expect(feedbackFor(SAY, { heard: 'dico', verdict: 'alternative', helped: true }, null)).toEqual(HELPED);
+    expect(feedbackFor(SAY, { heard: 'parlo', verdict: 'understood', helped: false }, null)).toMatchObject({ tone: 'correct', verdict: 'understood' });
+  });
+
+  it('a judged answer the judge called right, with help, is right with help; a wrong one is wrong', () => {
+    expect(feedbackFor(MEANING, { text: 'להזמין', judged: 'exact', helped: true }, null)).toEqual(HELPED);
+    expect(feedbackFor(TRANSLATE, { text: 'Uniamo le forze.', judged: 'exact', helped: true }, null)).toEqual(HELPED);
+    expect(feedbackFor(MEANING, { text: 'לבטל', judged: 'wrong', helped: true }, null)).toEqual({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'להזמין', verdict: 'wrong' });
+    expect(feedbackFor(MEANING, { text: 'להזמין', judged: 'exact', helped: true }, { answer: 'לשריין', wording: 'meaning' })).toEqual(HELPED);
+  });
+
+  it('a typed dictation or cloze with help is right with help', () => {
+    expect(feedbackFor(DICTATION, { text: 'parlo', helped: true }, null)).toEqual(HELPED);
+    expect(feedbackFor(CLOZE, { text: 'parlavamo', helped: true }, null)).toEqual(HELPED);
+    expect(feedbackFor(SAY, { text: 'parlare', helped: true }, null)).toEqual(HELPED);
+  });
+
+  it('asks no fit check for a helped gap word', () => {
+    expect(checksFit(CLOZE, { text: 'banana' })).toBe(true);
+    expect(checksFit(CLOZE, { text: 'banana', helped: false })).toBe(true);
+    expect(checksFit(CLOZE, { text: 'banana', helped: true })).toBe(false);
+  });
+});

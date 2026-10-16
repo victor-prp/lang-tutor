@@ -19,4 +19,11 @@ describe('judgedAnswer', () => {
     const next = { complete: true } as unknown as JudgedAnswerResponse['next'];
     expect(judgedAnswer('לשריין', { verdict: 'exact', next })).toEqual({ text: 'לשריין', judged: 'exact' });
   });
+  // Phase 56 (spec D8). A helped answer's banner needs to know it was helped.
+  it('carries helped when the card said', () => {
+    const next = { complete: true } as unknown as JudgedAnswerResponse['next'];
+    expect(judgedAnswer('לשריין', { verdict: 'exact', next }, true)).toEqual({ text: 'לשריין', judged: 'exact', helped: true });
+    expect(judgedAnswer('לשריין', { verdict: 'exact', next }, false)).toEqual({ text: 'לשריין', judged: 'exact', helped: false });
+    expect(judgedAnswer('לשריין', { verdict: 'exact', next }, undefined)).toStrictEqual({ text: 'לשריין', judged: 'exact' });
+  });
 });
