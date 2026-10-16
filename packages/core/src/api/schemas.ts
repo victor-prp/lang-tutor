@@ -258,6 +258,39 @@ export const QuestionSchema = z.discriminatedUnion('type', [
   SentenceTranslationQuestionSchema,
 ]);
 
+// Phase 61 (spec D2). Every question type by name, the union's tags; a test holds the two
+// to the same list.
+export const QuestionTypeSchema = z.enum([
+  'multiple_choice',
+  'new_meaning',
+  'reverse_choice',
+  'typed_translation',
+  'listen_choice',
+  'dictation',
+  'matching',
+  'letter_tiles',
+  'read_aloud',
+  'meet',
+  'say_translation',
+  'typed_meaning',
+  'cloze_choice',
+  'cloze_typed',
+  'sentence_translation',
+]);
+
+// Phase 61 (spec D2). Why one word cannot have a question type: the device has no voice
+// for the target or cannot record, the form is too long to say, it takes no tiles, its
+// example has no gap, the word has no other saved meaning, or the type needs more words.
+export const UnavailableReasonSchema = z.enum([
+  'no_voice',
+  'no_microphone',
+  'too_long',
+  'no_tiles',
+  'no_example_gap',
+  'no_other_meaning',
+  'needs_more_words',
+]);
+
 // Phase 23. How a typed answer was judged (spec D5). Every verdict but `wrong`
 // counts in the score.
 export const TypedVerdictSchema = z.enum(['exact', 'near_miss', 'alternative', 'wrong']);
@@ -401,6 +434,9 @@ export const SessionViewSchema = z.object({
   pending_retry: PendingRetrySchema.nullable(),
   // Phase 20. What a completed session did to the saved words; empty otherwise.
   progress: z.array(SessionProgressItemSchema),
+  // Phase 61 (spec D5). A question-types session's chosen types no card could be
+  // generated for; absent on every other session.
+  skipped_types: z.array(z.object({ type: QuestionTypeSchema, reason: z.literal('not_generated') })).optional(),
 });
 
 // Phase 23. A choice is answered by index, a typed card by its text. Empty
@@ -619,8 +655,9 @@ export const UserSchema = z.object({
   // Phase 52 (spec D1). The IANA zone the server holds for the learner, UTC until the app
   // reports one. It lets the app skip the report when nothing changed.
   time_zone: z.string(),
-  // Phase 61 (spec D1). A tester may start a session of one word's question types.
-  tester: z.boolean(),
+  // Phase 61 (spec D1). A tester may start a session of one word's question types. False
+  // when absent, so an app reads a server from before the flag as it reads a non-tester.
+  tester: z.boolean().default(false),
 });
 
 export const CreateUserRequestSchema = z.object({
@@ -909,6 +946,38 @@ export const VocabularyWordDetailSchema = z.object({
 // the string, and Postgres raises on a NUL in a text parameter, which would be a 500.
 export const VocabularyWordQuerySchema = z.object({
   lemma: z.string().min(1).regex(/^[^\u0000]*$/),
+});
+
+// Phase 61 (spec D2). Which question types one saved meaning of a word can have, on
+// this device: the rendering the session would use (`sense_id`), and every type with
+// a reason for each one it cannot have.
+export const QuestionTypesQuerySchema = z.object({
+  gloss_id: z.string().min(1),
+  variant_id: z.string().min(1),
+  listening: z.enum(['true', 'false']).optional(),
+  speaking: z.enum(['true', 'false']).optional(),
+});
+export const QuestionTypesResponseSchema = z.object({
+  sense_id: z.string(),
+  types: z.array(z.object({ type: QuestionTypeSchema, available: z.boolean(), reason: UnavailableReasonSchema.optional() })),
+});
+
+// Phase 61 (spec D3). A tester's session of one card per chosen type, `sense_id` as
+// the read answered it.
+export const CreateQuestionTypeSessionRequestSchema = z.object({
+  gloss_id: z.string().min(1),
+  variant_id: z.string().min(1),
+  sense_id: z.string().min(1),
+  types: z
+    .array(QuestionTypeSchema)
+    .min(1)
+    .refine((types) => new Set(types).size === types.length, { message: 'a type is chosen once' }),
+  listening: z.boolean(),
+  speaking: z.boolean(),
+});
+export const CreateQuestionTypeSessionResponseSchema = z.object({
+  session_id: z.string(),
+  status: SessionStatusSchema,
 });
 
 // Phase 53 (spec D1, D4, D13). A target: a kind, a due date and words saved in the

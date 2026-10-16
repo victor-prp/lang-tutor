@@ -1,4 +1,5 @@
-import { speakable, type QuestionType, type UnavailableReason } from '@lang-tutor/core/domain';
+import type { UnavailableReason } from '@lang-tutor/core/api';
+import { speakable, type QuestionType } from '@lang-tutor/core/domain';
 
 import { findGap } from './cloze';
 import type { CardFate, CardUnit } from './keepCards';
