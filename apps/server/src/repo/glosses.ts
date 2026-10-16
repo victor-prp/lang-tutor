@@ -267,6 +267,14 @@ export function createGlossRepo(tx: Tx) {
     // 4. Questions and memberships.
     const questions = await tx.execute(sql`UPDATE questions SET gloss_id = ${input.survivorId} WHERE gloss_id = ${input.otherId}`);
     const memberships = await tx.execute(sql`UPDATE dict_sense_glosses SET gloss_id = ${input.survivorId} WHERE gloss_id = ${input.otherId}`);
+    // Phase 59 (spec D4). A tapped list word, and each word map that names it.
+    await tx.execute(sql`UPDATE answer_taps SET gloss_id = ${input.survivorId} WHERE gloss_id = ${input.otherId}`);
+    await tx.execute(sql`
+      UPDATE questions q
+      SET words = (
+        SELECT jsonb_agg(CASE WHEN w->>'glossId' = ${input.otherId} THEN jsonb_set(w, '{glossId}', to_jsonb(${input.survivorId}::text)) ELSE w END ORDER BY ord)
+        FROM jsonb_array_elements(q.words) WITH ORDINALITY AS e(w, ord))
+      WHERE q.words @> jsonb_build_array(jsonb_build_object('glossId', ${input.otherId}::text))`);
 
     // 5. The other's words become the survivor's alternatives. Through the query
     //    builder: an array inside a sql`` template expands into a list.

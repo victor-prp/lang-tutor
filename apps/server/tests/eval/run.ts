@@ -796,6 +796,36 @@ function sentenceTier2(kase: SentenceCase, answer: LlmDistractors): Check[] {
   });
 }
 
+/** Phase 59 (spec D1). The share of a translation's words, its practised word left
+ *  out, that come from the learner's list: a word counts when it is a list word or
+ *  shares its first four letters with one (fratelli, ora), or is a list word of up to
+ *  three letters exactly (io, ho, qui, con). Words of one or two letters that are
+ *  not on the list (e, a, il, la) are grammar and left out of the count. */
+const LIST_SHARE_THRESHOLD = 0.5;
+
+function listShare(kase: SentenceCase, answer: LlmDistractors): Check[] {
+  if (!kase.learner) return [];
+  const listWords = [...new Set(kase.learner.flatMap((entry) => entry.word.toLowerCase().split(/\s+/u)))];
+  const fromList = (token: string) =>
+    listWords.some((word) => token === word || (word.length >= 4 && token.length >= 4 && token.slice(0, 4) === word.slice(0, 4)));
+  const items = sentenceItemsOf(kase);
+  return kase.items.map((item, index): Check => {
+    const got = answer.items.find((answered) => answered.key === items[index].key);
+    const gap = new Set((got?.gap ?? '').toLowerCase().split(/[^\p{L}\p{M}]+/u).filter(Boolean));
+    const tokens = (got?.translation ?? '')
+      .toLowerCase()
+      .split(/[^\p{L}\p{M}]+/u)
+      .filter((token) => token !== '' && !gap.has(token))
+      .filter((token) => token.length > 2 || fromList(token));
+    const share = tokens.length === 0 ? 1 : tokens.filter(fromList).length / tokens.length;
+    return {
+      name: `${item.form}: the translation is built from the learner's list`,
+      ok: share >= LIST_SHARE_THRESHOLD,
+      detail: `${(share * 100).toFixed(0)}%: ${got?.translation ?? '(none)'} / ${got?.sentence ?? ''}`,
+    };
+  });
+}
+
 const writtenBy = (kase: SentenceCase, answer: LlmDistractors): string[] => {
   const items = sentenceItemsOf(kase);
   return kase.items.map((item, index) => {
@@ -1129,13 +1159,15 @@ async function main(): Promise<void> {
   const scoreSentences = async (kase: SentenceCase): Promise<Row> => {
     const text = kase.items.map((item) => item.form).join(', ');
     try {
-      const answer = await askDistractors(sessionLlm, { from: kase.from, to: 'he', items: sentenceItemsOf(kase) });
+      const learnerWords = kase.learner?.map((entry, index) => ({ key: `w${index + 1}`, glossId: `g-w${index + 1}`, ...entry }));
+      const answer = await askDistractors(sessionLlm, { from: kase.from, to: 'he', items: sentenceItemsOf(kase), learnerWords });
       return {
         label: kase.label,
         text,
         tier1: sentenceTier1(kase, answer),
         tier2: [
           ...sentenceTier2(kase, answer),
+          ...listShare(kase, answer),
           ...(kase.task === 'sentence' ? await pointsToWord(kase, answer) : []),
           ...(kase.checked ? await survivesChecker(kase.from, 'he', sentenceItemsOf(kase), answer) : []),
         ],

@@ -77,7 +77,8 @@ export async function boardWords(page: Page): Promise<string[]> {
  *  with as many words as the saved form (one). The gap is inflected, so its
  *  lemma is a word that is not in the sentence. */
 export const STUB_SENTENCE = 'Вчера она прочитала эту книгу';
-export const STUB_SENTENCE_HEBREW = 'אתמול היא קראה את הספר הזה';
+// Phase 59 (spec D1): five words, the most a sentence to translate keeps.
+export const STUB_SENTENCE_HEBREW = 'אתמול היא קראה את הספר';
 export const STUB_GAP = 'прочитала';
 export const STUB_GAP_LEMMA = 'прочитать';
 

@@ -34,6 +34,28 @@ export function createMemoryRepo(tx: Tx) {
       }));
     },
 
+    /** Phase 59 (spec D1). The list's practised words (a gloss with a memory row),
+     *  as a translation sentence may use them: the saved form and the gloss's
+     *  meaning, the most recently reviewed first, at most `limit`. */
+    findPractisedWords: async (input: {
+      enrollmentId: string;
+      limit: number;
+    }): Promise<{ glossId: string; word: string; meaning: string }[]> => {
+      const rows = await tx.execute<{ gloss_id: string; word: string; meaning: string }>(sql`
+        SELECT ve.gloss_id, v.form AS word, g.key AS meaning
+        FROM vocabulary_entries ve
+        JOIN dict_variants v ON v.id = ve.variant_id
+        JOIN dict_glosses g  ON g.id = ve.gloss_id
+        JOIN (SELECT gloss_id, max(last_day) AS last_day
+              FROM gloss_memory
+              WHERE enrollment_id = ${input.enrollmentId}
+              GROUP BY gloss_id) m ON m.gloss_id = ve.gloss_id
+        WHERE ve.enrollment_id = ${input.enrollmentId}
+        ORDER BY m.last_day DESC, ve.gloss_id
+        LIMIT ${input.limit}`);
+      return rows.rows.map((row) => ({ glossId: row.gloss_id, word: row.word, meaning: row.meaning }));
+    },
+
     upsertRows: async (input: { enrollmentId: string; rows: MemoryRow[] }): Promise<void> => {
       if (input.rows.length === 0) return;
       await tx

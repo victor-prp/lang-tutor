@@ -1291,6 +1291,9 @@ export type SentenceCase = {
   items: SentenceCaseItem[];
   /** Phase 48 (spec D8). Also asks the real checker, and at least three wrong options must survive it. */
   checked?: boolean;
+  /** Phase 59 (spec D1). Translate only: the learner's practised words, which the
+   *  translation is built from as much as it can (tier 2, LIST_SHARE_THRESHOLD). */
+  learner?: { word: string; meaning: string }[];
 };
 
 const word = (
@@ -1421,8 +1424,29 @@ const sentenceCases = (task: 'sentence' | 'translate'): SentenceCase[] =>
     items: SENTENCE_WORDS[from],
   }));
 
+/** Phase 59 (spec D1). Victor's Italian list on 2026-10-16, his practised words as
+ *  findPractisedWords lists them: the sentences his cards gave him used none of it. */
+const VICTOR_IT_LIST = [
+  ['poi', 'אחר כך'], ['ci sono', 'להיות'], ['fratello', 'אח'], ['ora', 'עכשיו'], ['ho', 'לבעול'],
+  ['qui', 'כאן'], ['io', 'אני'], ['con', 'עם'], ['poi', 'לאחר מכן'], ['ora', 'שעה'], ['ora', 'שעות'], ['ora', 'תכף'], ['poi', 'אז'],
+].map(([word, meaning]) => ({ word, meaning }));
+
 export const SENTENCE_CASES: SentenceCase[] = sentenceCases('sentence');
-export const TRANSLATE_CASES: SentenceCase[] = sentenceCases('translate');
+export const TRANSLATE_CASES: SentenceCase[] = [
+  ...sentenceCases('translate'),
+  // Phase 59 (spec D1). Three of his words practised in sentences built from the rest.
+  {
+    label: "translate it, a learner's list: con, poi, fratello",
+    task: 'translate',
+    from: 'it',
+    learner: VICTOR_IT_LIST,
+    items: [
+      word('con', 'con', 'preposition' as PartOfSpeech, 'עם', 'Vado con amici.', 'אני הולך עם חברים.'),
+      word('poi', 'poi', 'adverb', 'אחר כך', 'Mangiamo adesso, e poi andiamo.', 'נאכל עכשיו, ואחר כך נלך.'),
+      word('fratello', 'fratello', 'noun', 'אח', 'Mio fratello abita qui.', 'אחי גר כאן.'),
+    ],
+  },
+];
 
 /**
  * Phase 27 Part B (spec D4). The translation judge: a Hebrew sentence, one good

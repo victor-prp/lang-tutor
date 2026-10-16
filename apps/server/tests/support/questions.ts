@@ -3,7 +3,7 @@ import { isChoice, type ChoiceQuestion, type QuestionType } from '@lang-tutor/co
 import { asc, eq } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
-import { answers, pronunciationScores, questions, sessionQuestions } from '../../src/db/schema';
+import { answerTaps, answers, pronunciationScores, questions, sessionQuestions } from '../../src/db/schema';
 import { findGap } from '../../src/domain/cloze';
 import { NOTHING_GENERATED, generatedContent, type Generated, type QuestionContent } from '../../src/domain/distractors';
 import { LANGUAGES } from '../../src/domain/languages';
@@ -202,4 +202,27 @@ export async function readSteps(db: Db, enrollmentId: string, day: string): Prom
     const repo = createSessionRepo(tx);
     return dayState(await repo.findAnswersOn(enrollmentId, day), new Set(await repo.findIntroducedOn(enrollmentId, day))).steps;
   });
+}
+
+/** Phase 59 (spec D2). A sentence translation's word map, set on a stored card. */
+export async function setWords(
+  db: Db,
+  questionId: string,
+  words: { start: number; end: number; text: string; glossId: string | null; target: boolean }[] | null,
+): Promise<void> {
+  await db.update(questions).set({ words }).where(eq(questions.id, questionId));
+}
+
+/** Phase 59 (spec D5). A session's stored taps, in card and word order. */
+export async function readTaps(db: Db, sessionId: string) {
+  return db
+    .select({ position: answerTaps.position, wordIndex: answerTaps.wordIndex, kind: answerTaps.kind, glossId: answerTaps.glossId })
+    .from(answerTaps)
+    .where(eq(answerTaps.sessionId, sessionId))
+    .orderBy(asc(answerTaps.position), asc(answerTaps.wordIndex));
+}
+
+/** Phase 59 (spec D4). The day's answers as dayState reads them. */
+export async function readDayAnswers(db: Db, enrollmentId: string, day: string) {
+  return withTx(db, (tx) => createSessionRepo(tx).findAnswersOn(enrollmentId, day));
 }

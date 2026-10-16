@@ -11,8 +11,11 @@ import { LANGUAGES, type LanguageCode } from './languages';
 
 /** Spec D5: a gap sentence stays short enough to read at a glance. */
 export const SENTENCE_MAX_WORDS = 12;
-/** Spec D6: a sentence to translate stays short enough to translate in one go. */
-export const TRANSLATE_MAX_WORDS = 10;
+/** Spec D6: a sentence to translate stays short enough to translate in one go.
+ *  Phase 59 (spec D1): five, so that its other words can come from the learner's list. */
+export const TRANSLATE_MAX_WORDS = 5;
+/** Phase 59 (spec D1). The most practised words a prompt is sent, the most recently reviewed. */
+export const MAX_LEARNER_WORDS = 200;
 /** Spec D5, D6: below three words there is no context for the word. */
 export const SENTENCE_MIN_WORDS = 3;
 /** Spec D5, D6: how many recent sentences a prompt is told to avoid, per sense and card. */
