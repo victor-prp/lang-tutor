@@ -9,7 +9,7 @@
   and started sessions), 53 (stale stock replaced), 58 (word page).
 - **Touches:** the users table and `/api/me`, core's wire schemas, a new domain module, the
   vocabulary and sessions routes and services, `prepareSession`, the db CLI, the app's word page,
-  a new app screen, the results screen, e2e.
+  a new app screen, e2e.
 
 ---
 
@@ -29,7 +29,7 @@ cannot support is shown as skipped, not silently left out.
 **In:** a tester flag per account, set by a CLI command (D1); a read of which question types one
 meaning of a word can have, with a reason for each that cannot (D2); a session built from the
 chosen types (D3–D5); an app screen to choose them, reached from the word page (D6); generation
-failures shown on the results screen (D5).
+failures shown before the session starts (D5).
 
 **Out** (one-pager): more than one word per session; a preview mode where answers do not count;
 learners seeing the action.
