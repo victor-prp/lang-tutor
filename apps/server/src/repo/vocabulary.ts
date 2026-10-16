@@ -91,6 +91,14 @@ export const vocabularyQueries = {
         HAVING ${LEVEL} = ${input.level})
     ORDER BY ve.lemma, ve.gloss_id`,
 
+  /** Phase 58b (R2). Every saved gloss of the enrollment, with its lemma: removing
+   *  every word. A lemma with no live-dimension rows is included, unlike the list. */
+  allSavedGlossIds: (enrollmentId: string): SQL => sql`
+    SELECT ve.lemma, ve.gloss_id
+    FROM vocabulary_entries ve
+    WHERE ve.enrollment_id = ${enrollmentId}
+    ORDER BY ve.lemma, ve.gloss_id`,
+
   deleteEntries: (input: { enrollmentId: string; glossIds: string[] }): SQL => sql`
     DELETE FROM vocabulary_entries
     WHERE enrollment_id = ${input.enrollmentId}
@@ -324,6 +332,11 @@ export function createVocabularyRepo(tx: Tx) {
       live: readonly Dimension[];
     }): Promise<{ lemma: string; glossId: string }[]> => {
       const rows = await tx.execute<{ lemma: string; gloss_id: string }>(vocabularyQueries.glossIdsAtLevel(input));
+      return rows.rows.map((row) => ({ lemma: row.lemma, glossId: row.gloss_id }));
+    },
+
+    findAllSavedGlossIds: async (enrollmentId: string): Promise<{ lemma: string; glossId: string }[]> => {
+      const rows = await tx.execute<{ lemma: string; gloss_id: string }>(vocabularyQueries.allSavedGlossIds(enrollmentId));
       return rows.rows.map((row) => ({ lemma: row.lemma, glossId: row.gloss_id }));
     },
 

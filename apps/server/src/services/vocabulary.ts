@@ -1,6 +1,6 @@
 import type {
   Enrollment,
-  RemoveVocabularyLevelResponse,
+  RemoveVocabularyWordsResponse,
   SaveVocabularyResponse,
   VocabularyEntryInput,
   VocabularyPage,
@@ -25,6 +25,9 @@ import { logTargetRetired, requestStockAfterSave, restockAfterTargetChange } fro
 import type { Repos, Transaction } from './transaction';
 
 const DEFAULT_PAGE_SIZE = 50;
+
+/** Phase 58b (R2). What removeWords removes: the words at one level, or every word. */
+export type RemoveScope = { level: number } | { all: true };
 
 async function enrollmentOrThrow(repos: Repos, enrollmentId: string): Promise<Enrollment> {
   const enrolled = await repos.enrollment.findById(enrollmentId);
@@ -188,18 +191,23 @@ export function createVocabularyService({
      * Final review I1: unlike a single unsave, it restocks whenever anything went, a
      * target or not. The removal is a reset, and a list stock chosen from the removed
      * words would otherwise serve them as the next session.
+     *
+     * Phase 58b (R2): or every word of the list, whatever its level.
      */
-    removeLevel: async (
+    removeWords: async (
       actorUserId: string,
       enrollmentId: string,
-      level: number,
-    ): Promise<RemoveVocabularyLevelResponse> => {
+      scope: RemoveScope,
+    ): Promise<RemoveVocabularyWordsResponse> => {
       const { removed, retired } = await transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
         await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.remove' });
         // As unsave: a change to a target takes the next-session lock first.
         await repos.session.lockNextSession(enrollmentId);
-        const atLevel = await repos.vocabulary.findGlossIdsAtLevel({ enrollmentId, level, live: LIVE_DIMENSIONS });
+        const atLevel =
+          'all' in scope
+            ? await repos.vocabulary.findAllSavedGlossIds(enrollmentId)
+            : await repos.vocabulary.findGlossIdsAtLevel({ enrollmentId, level: scope.level, live: LIVE_DIMENSIONS });
         if (atLevel.length === 0) return { removed: { removed_words: 0, removed_glosses: 0 }, retired: null };
         // Phase 31 (spec D14). Share-lock and resolve: a merge that forwarded one of
         // these meanwhile stays inside its lexeme, so its survivor is the same word's.
@@ -223,9 +231,9 @@ export function createVocabularyService({
         };
       });
       logger.info({
-        event: 'vocabulary_level_removed',
+        event: 'vocabulary_words_removed',
         enrollment_id: enrollmentId,
-        level,
+        scope: 'all' in scope ? 'all' : scope.level,
         word_count: removed.removed_words,
         gloss_count: removed.removed_glosses,
       });

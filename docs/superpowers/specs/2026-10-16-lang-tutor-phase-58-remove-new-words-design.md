@@ -105,3 +105,22 @@ gloss ids it lost. The route is transport only; the client gains `removeVocabula
   removed words would serve them as the next session, so the stock goes and a new one is asked
   for, with the stock reason and the `session_retired` reason `words_removed`. Nothing at the
   level leaves the stock alone. Cost if wrong: one extra stock build per removal.
+
+- **R2 (phase 58b, Victor, 2026-10-16) — an icon, and every filter, "all" included.** Victor
+  tested the merged phase and asked for two changes, approved in chat as a bounded design. They
+  amend D2, D4 and the Out list's "the action on any filter but new":
+  - **The icon.** The text button becomes 🗑️ at the end of the chip row, drawn as the speaker
+    is, with no icon library. A screen reader reads `הסרת המילים בסינון הזה`.
+  - **Every filter.** The icon shows on any filter with words loaded. The question names the
+    filter's words: `להסיר את כל המילים ברמה "<level name>"?`, or `להסיר את כל המילים ברשימה?`
+    on "all". Both keep `המילים יוסרו מהרשימה ומהיעדים. אי אפשר לבטל.`
+  - **The wire.** The endpoint takes exactly one of `level` and `all=true`. A missing parameter
+    stays a 400, so a client bug that drops it cannot empty a list. `all=true` removes every
+    saved sense of the list, a lemma with no live-dimension rows included. The transaction,
+    the target log and the restock are as D3 and R1 say. The schemas, the service method and
+    the client call drop "level" from their names (`RemoveVocabularyWords*`, `removeWords`,
+    `removeVocabularyWords`), and the log line is `vocabulary_words_removed` with a `scope`.
+    The change only adds an option, so `API_LEVEL` stays.
+  - **Two deferred minors fixed on the way, since the icon now shows on "all".** The icon stays
+    disabled until the list has reloaded, and a switch of filter or enrollment during the call
+    skips the reload. Every chip clears the failure notice.
