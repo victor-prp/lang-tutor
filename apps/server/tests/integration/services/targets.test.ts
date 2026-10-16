@@ -155,7 +155,7 @@ describe('remove a level (phase 58)', () => {
     const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
     const made = await deps.targets.create('u_1', E, { kind: 'exam', due_on: DUE, photo_import_ids: [], entries: [typed(apple), typed(bread)] });
 
-    expect(await deps.vocabulary.removeLevel('u_1', E, 1)).toEqual({ removed_words: 2, removed_glosses: 2 });
+    expect(await deps.vocabulary.removeWords('u_1', E, { level: 1 })).toEqual({ removed_words: 2, removed_glosses: 2 });
 
     expect((await deps.targets.getTarget('u_1', made.id)).words).toEqual([]);
     const events = (await readTargetEvents(t.db, made.id)).map(({ kind, before, after, actorUserId }) => ({ kind, before, after, actorUserId }));
@@ -177,7 +177,7 @@ describe('the stock removing a level leaves (phase 58)', () => {
     const { sessionId: stock, status } = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);
     expect(status).toBe('preparing');
 
-    await deps.vocabulary.removeLevel('u_1', E, 1);
+    await deps.vocabulary.removeWords('u_1', E, { level: 1 });
 
     expect(await readStockRow(t.db, stock)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY });
     expect(await jobPayloads(t.db, STOCK_SESSION)).toContainEqual({ enrollment_id: E, reason: 'words_removed' });
@@ -192,7 +192,7 @@ describe('the stock removing a level leaves (phase 58)', () => {
     }
     const { sessionId: stock } = await deps.sessions.createNextSession('u_1', E, NO_DEVICES);
 
-    expect(await deps.vocabulary.removeLevel('u_1', E, 3)).toEqual({ removed_words: 0, removed_glosses: 0 });
+    expect(await deps.vocabulary.removeWords('u_1', E, { level: 3 })).toEqual({ removed_words: 0, removed_glosses: 0 });
 
     expect((await readStockRow(t.db, stock)).status).not.toBe('skipped');
   });

@@ -248,6 +248,7 @@ describe('repos', () => {
     insertEntries: forbidden,
     deleteEntry: forbidden,
     findGlossIdsAtLevel: forbidden,
+    findAllSavedGlossIds: forbidden,
     deleteEntries: forbidden,
     findSavedGlossIds: forbidden,
     findWordsPage: forbidden,
