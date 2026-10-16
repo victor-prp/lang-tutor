@@ -36,6 +36,7 @@ import type { LlmClient, ModelCallRecorder, VisionClient } from './services/llm'
 import { createModelCallService } from './services/modelCalls';
 import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
 import { createReminderService, type PushSender, type ReminderService } from './services/reminders';
+import { createQuestionTypesService, type QuestionTypesService } from './services/questionTypes';
 import { createSessionService, type SessionService } from './services/sessions';
 import { createTargetService, type TargetService } from './services/targets';
 import type { SpeechTranscriber } from './services/speech';
@@ -64,6 +65,8 @@ export type ServerIdentity = {
 
 export type AppDeps = {
   sessions: SessionService;
+  // Phase 61 (spec D2, D3). A tester's read of one word's question types, and its session.
+  questionTypes: QuestionTypesService;
   users: UserService;
   enrollments: EnrollmentService;
   translations: TranslationService;
@@ -354,6 +357,7 @@ export function createServerDeps(io: {
       translationJudge,
       soundAlikeThreshold: io.soundAlikeThreshold,
     }),
+    questionTypes: createQuestionTypesService({ transaction, logger: io.logger }),
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations,

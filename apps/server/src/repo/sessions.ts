@@ -38,6 +38,7 @@ export function createSessionRepo(tx: Tx) {
     listening: boolean;
     speaking: boolean;
     chosenOn?: string;
+    kind?: 'practice' | 'question_types';
   }): Promise<string> {
     try {
       const [row] = await tx.insert(sessions).values(values).returning({ id: sessions.id });
@@ -107,6 +108,11 @@ export function createSessionRepo(tx: Tx) {
      *  D12): `chosenOn` is the learner day its words were chosen. */
     insertPreparingSession: (userId: string, enrollmentId: string, devices: Devices, chosenOn: string): Promise<string> =>
       insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', chosenOn, ...devices }),
+
+    /** Phase 61 (spec D3). A tester's session of one word's question types, preparing. A list
+     *  session to every reader of `source`, chosen on no day, so no stale check replaces it. */
+    insertQuestionTypesSession: (userId: string, enrollmentId: string, devices: Devices): Promise<string> =>
+      insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', kind: 'question_types', ...devices }),
 
     /** Phase 43 (review C1). Serializes, per enrollment, the use cases that make
      *  its next session, create and the stock job: the second waits for the

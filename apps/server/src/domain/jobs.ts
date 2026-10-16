@@ -1,3 +1,4 @@
+import { QuestionTypeSchema } from '@lang-tutor/core/api/schemas';
 import { DIMENSIONS, MAX_LEVEL, MIN_LEVEL, SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { z } from 'zod';
 
@@ -94,6 +95,9 @@ export const PrepareSessionPayloadSchema = z.object({
   // Phase 25 (spec D4). Absent in a job enqueued before the deploy: such a
   // session gets no speaking cards.
   speaking: z.boolean().default(false),
+  // Phase 61 (spec D3, D4). A tester's session of one pick, one card per type, in this
+  // order, instead of the plan's; absent on every other session.
+  question_types: z.array(QuestionTypeSchema).min(1).optional(),
   // Phase 24's `ordinal`, the rotation's step, is gone with the rotation (phase
   // 35, spec D6). A job enqueued before the deploy still parses: the key is dropped.
 });

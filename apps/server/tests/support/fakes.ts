@@ -21,6 +21,7 @@ import type { ReminderService } from '../../src/services/reminders';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { LlmAudioRequest, SpeechTranscriber } from '../../src/services/speech';
 import type { SessionService } from '../../src/services/sessions';
+import type { QuestionTypesService } from '../../src/services/questionTypes';
 import type { TargetService } from '../../src/services/targets';
 import type { Repos, Transaction } from '../../src/services/transaction';
 import type { TranslationService } from '../../src/services/translations';
@@ -126,8 +127,10 @@ export function createFakeAppDeps(): AppDeps {
     changeDate: unreachable,
     end: unreachable,
   };
+  const questionTypes: QuestionTypesService = { read: unreachable, create: unreachable };
   return {
     sessions,
+    questionTypes,
     users,
     enrollments,
     translations,
@@ -338,9 +341,6 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
       };
       rows.push(user);
       return user;
-    },
-    setTester: async () => {
-      throw new Error('the in-memory user repo does not keep emails');
     },
     findDayContext: async (userId) => {
       const timeZone = zoneOf(userId);

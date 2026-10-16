@@ -11,7 +11,6 @@ import { dropLaneDatabases, findOrphans, listLaneDatabases, liveWorktreesOf } fr
 import { requestLemmaRenders, requestLemmaRendersOnStart } from './lemmaRenders';
 import { runMigrations } from './migrate';
 import { createAuthRepo } from '../repo/auth';
-import { createUserRepo } from '../repo/users';
 import { createBots } from './bots';
 import { recomputeProgress } from './progressRecompute';
 import { reseedContent } from './reseed';
@@ -285,7 +284,7 @@ async function main(): Promise<void> {
         return;
       }
       const on = !process.argv.includes('--off');
-      const outcome = await db.transaction((tx) => createUserRepo(tx).setTester(email, on));
+      const outcome = await createAuthRepo(db).setTester(email, on);
       if (outcome === 'set') console.log(`${email.trim().toLowerCase()} is ${on ? 'now a tester' : 'no longer a tester'}`);
       else {
         console.error(`no profile signs in with ${email.trim().toLowerCase()}; nothing changed`);

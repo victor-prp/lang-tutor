@@ -2,7 +2,7 @@ import type { CreateUserRequest, User } from '@lang-tutor/core/api';
 import { and, eq } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import { authUsers, users } from '../db/schema';
+import { users } from '../db/schema';
 import { ProfileExists, UsernameTaken } from '../errors';
 import { constraintOf, isUniqueViolation } from './pgErrors';
 
@@ -37,21 +37,6 @@ const BOT_NATIVE_LANGUAGE = 'he';
 
 export function createUserRepo(tx: Tx) {
   return {
-    /**
-     * Phase 61 (spec D1). Turns the tester flag on or off for the profile of the
-     * sign-in identity with this email, compared as auth stores it (trimmed, lower
-     * case). The one writer of `tester`, run by `npm run db:tester`.
-     */
-    setTester: async (email: string, on: boolean): Promise<'set' | 'no_such_account'> => {
-      const [identity] = await tx
-        .select({ id: authUsers.id })
-        .from(authUsers)
-        .where(eq(authUsers.email, email.trim().toLowerCase()));
-      if (!identity) return 'no_such_account';
-      const changed = await tx.update(users).set({ tester: on }).where(eq(users.id, identity.id)).returning({ id: users.id });
-      return changed.length > 0 ? 'set' : 'no_such_account';
-    },
-
     /**
      * Phase 29 (spec D9). The profile, under the id of the sign-in identity it
      * belongs to. Inserts optimistically and lets the constraints decide. A

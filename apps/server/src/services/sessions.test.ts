@@ -38,6 +38,7 @@ describe('repos', () => {
       insertAnswer: notStubbed,
       completeSession: notStubbed,
       insertPreparingSession: notStubbed,
+      insertQuestionTypesSession: notStubbed,
       insertSessionQuestions: notStubbed,
       findState: notStubbed,
       transition: notStubbed,
@@ -88,9 +89,6 @@ describe('repos', () => {
   const userRepo: UserRepo = {
     insertUser: () => {
       throw new Error('the session service must not register a user');
-    },
-    setTester: () => {
-      throw new Error('the session service must not set the tester flag');
     },
     // Read by learnerDay, wherever a session ends.
     findDayContext: async () => ({ kind: 'learner', timeZone: 'UTC' }),

@@ -87,3 +87,25 @@ describe('claimAccount', () => {
     expect(sessions.rows[0]).toEqual({ n: 0 });
   });
 });
+
+// Phase 61 (spec D1). db:tester's write.
+describe('setTester', () => {
+  const testerOf = async (id: string) =>
+    (await t.db.execute<{ tester: boolean }>(sql`select tester from users where id = ${id}`)).rows[0].tester;
+
+  it("turns a profile's flag on and off by its sign-in email, as stored", async () => {
+    await seedUser(t.db, 'u_dana');
+    const repo = createAuthRepo(t.db);
+    expect(await testerOf('u_dana')).toBe(false);
+    expect(await repo.setTester(' U_Dana@test.invalid ', true)).toBe('set');
+    expect(await testerOf('u_dana')).toBe(true);
+    expect(await repo.setTester('u_dana@test.invalid', false)).toBe('set');
+    expect(await testerOf('u_dana')).toBe(false);
+  });
+
+  it('answers no_such_account for an address with no profile, and changes nothing', async () => {
+    await seedUser(t.db, 'u_dana');
+    expect(await createAuthRepo(t.db).setTester('nobody@example.com', true)).toBe('no_such_account');
+    expect(await testerOf('u_dana')).toBe(false);
+  });
+});

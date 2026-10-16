@@ -1,15 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
 import { createApp } from '../../../src/app';
-import { createUserRepo } from '../../../src/repo/users';
 import { signUp, signUpWithProfile } from '../../support/auth';
 import { createFakeLogger } from '../../support/fakes';
 import { clearNamespace, expectEmails, mailBaseUrlFor, mockNamespace } from '../../support/mockServer';
-import { timeZoneOf } from '../../support/seedUser';
+import { setTester, timeZoneOf } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
-import { withTx } from '../../support/withTx';
 
 // Phase 52 (spec D1). PUT /api/me/time-zone through the app production assembles,
 // with a real session: the gate (401 without one, 403 without a profile) is part
@@ -61,23 +59,15 @@ describe('GET /api/me', () => {
 
 // Phase 61 (spec D1). A tester is a flag on the account, off until db:tester turns it on.
 describe('the tester flag', () => {
-  const testerInMe = async () => {
-    const res = await app.request('/api/me', { headers: { cookie } });
-    expect(res.status).toBe(200);
-    return ((await res.json()) as { user: { tester: boolean } }).user.tester;
-  };
-
-  it('is off for a new account, and on and off as setTester says, by the sign-in email', async () => {
+  it('is off for a new account, and on once set', async () => {
+    const testerInMe = async () => {
+      const res = await app.request('/api/me', { headers: { cookie } });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { user: { tester: boolean } }).user.tester;
+    };
     expect(await testerInMe()).toBe(false);
-    expect(await withTx(t.db, (tx) => createUserRepo(tx).setTester('Learner@Example.com ', true))).toBe('set');
+    await setTester(t.db, userId);
     expect(await testerInMe()).toBe(true);
-    expect(await withTx(t.db, (tx) => createUserRepo(tx).setTester('learner@example.com', false))).toBe('set');
-    expect(await testerInMe()).toBe(false);
-  });
-
-  it('answers no_such_account for an email with no profile, and changes nothing', async () => {
-    expect(await withTx(t.db, (tx) => createUserRepo(tx).setTester('nobody@example.com', true))).toBe('no_such_account');
-    expect(await testerInMe()).toBe(false);
   });
 });
 
