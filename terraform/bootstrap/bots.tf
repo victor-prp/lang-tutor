@@ -47,6 +47,9 @@ resource "aws_cloudwatch_event_rule" "bots_hourly" {
   name                = "wordspal-bots-hourly"
   description         = "Starts the bots' run at :17 every hour (phase 40)"
   schedule_expression = "cron(17 * * * ? *)"
+  # Paused, the rule makes no call at all: no skipped run in gh run list, and no
+  # FailedInvocations for the alarm below.
+  state = var.bots_schedule_enabled ? "ENABLED" : "DISABLED"
 }
 
 resource "aws_cloudwatch_event_target" "bots_hourly" {
