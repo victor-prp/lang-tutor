@@ -251,6 +251,60 @@ describe('the target wizard and the target screen (phase 53 D10, D11)', () => {
   });
 });
 
+describe("home's cards (phase 57 D10, D11)", () => {
+  const ltr = (text: string) => '⁦' + text + '⁩';
+  const joined = (parts: { before: string; number: string | null; after: string }) =>
+    parts.before + (parts.number ?? '') + parts.after;
+
+  // Option B: the title is the countdown, its number apart so the card draws it large.
+  it('counts down to the date with its number apart, and says tomorrow for one day', () => {
+    expect(strings.targetCountdown('exam', 5)).toEqual({ before: 'בוחן בעוד ', number: ltr('5'), after: ' ימים' });
+    expect(joined(strings.targetCountdown('exam', 5))).toBe('בוחן בעוד ' + ltr('5') + ' ימים');
+    expect(joined(strings.targetCountdown('homework', 12))).toBe('שיעורי בית בעוד ' + ltr('12') + ' ימים');
+    expect(strings.targetCountdown('homework', 1)).toEqual({ before: 'שיעורי בית מחר', number: null, after: '' });
+    expect(joined(strings.targetCountdown('exam', 1))).toBe('בוחן מחר');
+  });
+
+  it('names the date itself once it has come (spec D10)', () => {
+    expect(strings.targetDueToday('exam')).toBe('הבוחן היום');
+    expect(strings.targetDueToday('homework')).toBe('שיעורי הבית היום');
+    expect(joined(strings.targetCountdown('exam', 0))).toBe('הבוחן היום');
+    expect(strings.targetCountdown('homework', -1)).toEqual({ before: 'שיעורי הבית היום', number: null, after: '' });
+    expect(strings.targetGoodLuck).toBe('בהצלחה!');
+    expect(strings.lastReview).toBe('חזרה אחרונה');
+  });
+
+  it("words today's line, its check and the extra words, isolating each number", () => {
+    expect(strings.targetToday(3, 8)).toBe('היום: ' + ltr('3') + ' מתוך ' + ltr('8') + ' מילים');
+    expect(strings.targetTodayCheck).toBe('✓');
+    // The plus sign is inside the isolate: alone in an RTL line it would land after the digit.
+    expect(strings.targetExtra(2)).toBe(ltr('+2') + ' נוספות');
+  });
+
+  it("words the readiness for the target's kind, the percent isolated", () => {
+    expect(strings.targetReadinessPct('exam', 18)).toBe('מוכנות לבוחן: ' + ltr('18%'));
+    expect(strings.targetReadinessPct('homework', 100)).toBe('מוכנות לשיעורי הבית: ' + ltr('100%'));
+  });
+
+  it('words the buttons, the praise and the rest day', () => {
+    expect(strings.practiceNow).toBe('לתרגל עכשיו');
+    expect(strings.practiceMore).toBe('לתרגל עוד');
+    expect(strings.targetDonePraise).toBe('כל הכבוד! סיימת להיום. נתראה מחר');
+    expect(strings.targetRest('exam', 3)).toBe('היום אין תרגול לבוחן. התרגול הבא בעוד ' + ltr('3') + ' ימים');
+    expect(strings.targetRest('homework', 2)).toBe('היום אין תרגול לשיעורי הבית. התרגול הבא בעוד ' + ltr('2') + ' ימים');
+    expect(strings.targetRest('exam', 1)).toBe('היום אין תרגול לבוחן. התרגול הבא מחר');
+    // No next practice day known: the first sentence alone.
+    expect(strings.targetRest('exam', null)).toBe('היום אין תרגול לבוחן.');
+  });
+
+  it('titles My words and counts the words waiting for review', () => {
+    expect(strings.myWords).toBe('המילים שלי');
+    expect(strings.wordsWaiting(12)).toBe(ltr('12') + ' מילים מחכות לחזרה');
+    expect(strings.wordsWaiting(0)).toBe(ltr('0') + ' מילים מחכות לחזרה');
+    expect(strings.wordsWaiting(1)).toBe('מילה אחת מחכה לחזרה');
+  });
+});
+
 describe('removing every new word (phase 58 D4)', () => {
   it('words the button, its question and its failure', () => {
     expect(strings.vocabularyRemoveNew).toBe('הסרת כל המילים החדשות');

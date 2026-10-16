@@ -1,4 +1,8 @@
-import type { CurrentSessionResponse } from '@lang-tutor/core/api';
+import type { CurrentSessionResponse, TargetSummary } from '@lang-tutor/core/api';
+import { SESSION_LENGTH } from '@lang-tutor/core/domain';
+
+import { strings } from '@/strings';
+import { homeOrder } from '@/targets';
 
 /** How often home re-reads a preparing session (spec §7). */
 export const POLL_INTERVAL_MS = 3_000;
@@ -28,6 +32,33 @@ export function homeActionOf(state: CurrentSessionResponse): HomeAction {
   }
   if (state.next_source === 'seed') return { kind: 'start-seed' };
   return state.saved_count > 0 ? { kind: 'create' } : { kind: 'save-words-first' };
+}
+
+/** Phase 57 (spec D1, D11). What a target's card offers, read from its own path's session
+ *  as homeActionOf reads `current`. A target always has words, so a failed session is
+ *  offered again, and with no session the card creates one (with the target's id). The
+ *  server stocks a target's next session itself, so the card never creates on its own. */
+export function targetSessionAction(target: Pick<TargetSummary, 'session'>): HomeAction {
+  const { session } = target;
+  switch (session?.status) {
+    case 'preparing':
+      return { kind: 'preparing', sessionId: session.session_id };
+    case 'ready':
+      return session.answered > 0
+        ? { kind: 'resume', sessionId: session.session_id }
+        : { kind: 'start', sessionId: session.session_id };
+    case 'failed':
+      return { kind: 'failed' };
+    default:
+      return { kind: 'create' };
+  }
+}
+
+/** Phase 57 (spec D11). The line under My words' title: the seed's words before the first
+ *  session, else how many words wait for review, else (none waiting) the meanings saved. */
+export function myWordsLine(state: CurrentSessionResponse, language: string): string {
+  if (homeActionOf(state).kind === 'start-seed') return strings.homeSetLabel(SESSION_LENGTH, language);
+  return state.due_count > 0 ? strings.wordsWaiting(state.due_count) : strings.homeSavedLabel(state.saved_count, language);
 }
 
 /** Phase 43 (spec D7). The `create` state is not a button: home sends create
@@ -75,6 +106,33 @@ export function reminderStartOf(
     case 'start-seed':
     case 'save-words-first':
     case 'failed':
+      return { kind: 'clear' };
+  }
+}
+
+/** Phase 57 (spec D2, D11). A reminder opens the path of home's first card (homeOrder's
+ *  `first`). `targets` is the targets read made after the tap: 'reading' until it is in,
+ *  'failed' if it failed, since then home cannot tell which card is first. A target first
+ *  is entered when its session is ready, as its card's button enters it, and the param is
+ *  cleared otherwise: the reminder never creates a session. My words first follows phase
+ *  52's rules over the main path's action. */
+export function homeReminderStartOf(
+  targets: 'reading' | 'failed' | readonly TargetSummary[],
+  main: HomeAction | null,
+  flags: { failed: boolean; read: boolean },
+): ReminderStart {
+  if (targets === 'reading') return { kind: 'wait' };
+  if (targets === 'failed') return { kind: 'clear' };
+  const { first } = homeOrder(targets);
+  const target = targets.find((candidate) => candidate.id === first);
+  if (!target) return reminderStartOf(main, flags);
+  const action = targetSessionAction(target);
+  switch (action.kind) {
+    case 'start':
+      return { kind: 'enter', sessionId: action.sessionId, fresh: true };
+    case 'resume':
+      return { kind: 'enter', sessionId: action.sessionId, fresh: false };
+    default:
       return { kind: 'clear' };
   }
 }

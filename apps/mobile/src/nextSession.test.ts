@@ -1,14 +1,17 @@
 import { describe, expect, it } from '@jest/globals';
-import type { CurrentSessionResponse } from '@lang-tutor/core/api';
+import type { CurrentSessionResponse, TargetSummary } from '@lang-tutor/core/api';
 
 import {
   createLook,
   currentFor,
   homeActionOf,
+  homeReminderStartOf,
   loadFailedFor,
+  myWordsLine,
   reminderStartOf,
   shouldAutoCreate,
   shouldPoll,
+  targetSessionAction,
 } from './nextSession';
 
 const none = (next_source: 'seed' | 'list', saved_count = 0): CurrentSessionResponse => ({
@@ -164,5 +167,107 @@ describe('reminderStartOf', () => {
     expect(reminderStartOf({ kind: 'start-seed' }, fresh)).toEqual({ kind: 'clear' });
     expect(reminderStartOf({ kind: 'save-words-first' }, fresh)).toEqual({ kind: 'clear' });
     expect(reminderStartOf({ kind: 'failed' }, fresh)).toEqual({ kind: 'clear' });
+  });
+});
+
+// Phase 57 (spec D1, D11). A target's card offers its own path's session, read from the
+// target's `session` as homeActionOf reads `current`; with none, the card creates one.
+const targetWith = (session: CurrentSessionResponse['current']): TargetSummary => ({
+  id: 't1',
+  kind: 'exam',
+  due_on: '2026-10-21',
+  days_left: 5,
+  word_count: 8,
+  ready_count: 0,
+  readiness_pct: 18,
+  today: { state: 'owed', done: 0, planned: 8, extra: 0, next_practice_in: null },
+  session,
+});
+const session = (status: 'preparing' | 'ready' | 'failed' | 'completed', answered = 0) => ({
+  session_id: 'ts1',
+  status,
+  source: 'list' as const,
+  answered,
+  total: status === 'preparing' ? 0 : 4,
+});
+
+describe('targetSessionAction', () => {
+  it.each([
+    ['no session: create one with the target', null, { kind: 'create' }],
+    ['preparing', session('preparing'), { kind: 'preparing', sessionId: 'ts1' }],
+    ['ready and untouched: start', session('ready', 0), { kind: 'start', sessionId: 'ts1' }],
+    ['ready with answers: resume', session('ready', 3), { kind: 'resume', sessionId: 'ts1' }],
+    // Every target has words, so a failed one is always offered again.
+    ['failed: try again', session('failed'), { kind: 'failed' }],
+    ['a finished session is not offered: create', session('completed', 4), { kind: 'create' }],
+  ])('%s', (_label, current, action) => {
+    expect(targetSessionAction(targetWith(current))).toEqual(action);
+  });
+});
+
+// Phase 57 (spec D2, D11). A reminder opens the path of home's first card: a target's, once
+// the targets read after the tap is in, else the main path's as phase 52 does.
+describe('homeReminderStartOf', () => {
+  const fresh = { failed: false, read: true };
+  const stale = { failed: false, read: false };
+  const owed = (current: CurrentSessionResponse['current']) => [targetWith(current)];
+  const done = (current: CurrentSessionResponse['current']): TargetSummary[] => [
+    { ...targetWith(current), today: { state: 'done', done: 8, planned: 8, extra: 0, next_practice_in: null } },
+  ];
+  const mainReady = { kind: 'start', sessionId: 'm1' } as const;
+
+  it('waits for the targets read made after the tap, whatever the main path holds', () => {
+    expect(homeReminderStartOf('reading', mainReady, fresh)).toEqual({ kind: 'wait' });
+  });
+
+  it('gives up when that read failed: home cannot tell which card is first', () => {
+    expect(homeReminderStartOf('failed', mainReady, fresh)).toEqual({ kind: 'clear' });
+  });
+
+  it("enters the first target's session when it is ready, as its card's button does", () => {
+    expect(homeReminderStartOf(owed(session('ready', 0)), mainReady, stale)).toEqual({
+      kind: 'enter',
+      sessionId: 'ts1',
+      fresh: true,
+    });
+    expect(homeReminderStartOf(owed(session('ready', 2)), null, stale)).toEqual({
+      kind: 'enter',
+      sessionId: 'ts1',
+      fresh: false,
+    });
+  });
+
+  it('clears when the first target has nothing ready to enter', () => {
+    expect(homeReminderStartOf(owed(null), mainReady, fresh)).toEqual({ kind: 'clear' });
+    expect(homeReminderStartOf(owed(session('preparing')), mainReady, fresh)).toEqual({ kind: 'clear' });
+    expect(homeReminderStartOf(owed(session('failed')), mainReady, fresh)).toEqual({ kind: 'clear' });
+  });
+
+  it("follows the main path's phase 52 rules when My words is first", () => {
+    expect(homeReminderStartOf([], mainReady, fresh)).toEqual({ kind: 'enter', sessionId: 'm1', fresh: true });
+    expect(homeReminderStartOf([], mainReady, stale)).toEqual({ kind: 'wait' });
+    expect(homeReminderStartOf([], null, { failed: true, read: false })).toEqual({ kind: 'clear' });
+    // A target done for today sits below My words: the reminder opens My words.
+    expect(homeReminderStartOf(done(session('ready')), mainReady, fresh)).toEqual({
+      kind: 'enter',
+      sessionId: 'm1',
+      fresh: true,
+    });
+  });
+});
+
+describe('myWordsLine', () => {
+  const ltr = (text: string) => `⁦${text}⁩`;
+
+  it('counts the words waiting for review', () => {
+    expect(myWordsLine({ ...none('list', 30), due_count: 12 }, 'איטלקית')).toBe(`${ltr('12')} מילים מחכות לחזרה`);
+  });
+
+  it('counts the saved meanings when none waits', () => {
+    expect(myWordsLine(none('list', 30), 'איטלקית')).toBe('30 משמעויות שמורות באיטלקית');
+  });
+
+  it("names the seed's words before the first session", () => {
+    expect(myWordsLine(none('seed'), 'איטלקית')).toBe('10 מילים באיטלקית');
   });
 });

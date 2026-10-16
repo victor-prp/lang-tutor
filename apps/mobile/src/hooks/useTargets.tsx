@@ -1,8 +1,9 @@
-import type { TargetList } from '@lang-tutor/core/api';
+import type { CreateSessionResponse, TargetList } from '@lang-tutor/core/api';
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useSessionDevices } from '@/hooks/useSessionDevices';
 import { targetsFor, type StoredTargets } from '@/targets';
 
 // Phase 53 (spec D11). The active enrollment's targets, for home. Constructed at the
@@ -13,14 +14,20 @@ export type TargetsContext = {
   /** The active targets, nearest date first, with the learner's today (the date step
    *  offers the days after it). Null until a read for the active enrollment lands. */
   list: TargetList | null;
-  /** Reads the list again. Never rejects: a read that fails leaves the list as it was. */
-  reload(): Promise<void>;
+  /** Reads the list again. Never rejects: a read that fails leaves the list as it was, and
+   *  answers false (a reminder must know whether the list it acts on is fresh). */
+  reload(): Promise<boolean>;
+  /** Phase 57 (spec D1). Creates the next session of a target's own path, built for this
+   *  device, then reads the list again (its card shows it preparing). Throws as the api does:
+   *  `target closed` once the target has ended. */
+  create(targetId: string): Promise<CreateSessionResponse>;
 };
 
 const TargetsValueContext = createContext<TargetsContext | null>(null);
 
 export function TargetsProvider({ api, children }: { api: ApiClient; children: ReactNode }) {
   const { active } = useCurrentUser();
+  const devices = useSessionDevices();
   // Keyed by the enrollment each read was about, not cleared on a switch: a slow answer
   // about Russian lands under Russian's id and is never shown while English is active
   // (see targetsFor). Clearing in an effect instead would run after home's own focus
@@ -35,20 +42,41 @@ export function TargetsProvider({ api, children }: { api: ApiClient; children: R
   // A stable identity while the enrollment holds: home hands it to useFocusEffect, and a
   // new function on every render would read again on every state change.
   const reload = useCallback(async () => {
-    if (!active) return;
+    if (!active) return false;
     const enrollmentId = active.id;
     const mine = ++started.current;
     try {
       const read = await api.listTargets(enrollmentId);
-      if (mine < applied.current) return;
+      // A newer read is already shown: the list is as fresh as this one.
+      if (mine < applied.current) return true;
       applied.current = mine;
       setStored({ enrollmentId, list: read });
+      return true;
     } catch {
       // Home keeps the list it has, and the next focus reads again.
+      return false;
     }
   }, [api, active]);
 
-  const value = useMemo<TargetsContext>(() => ({ list, reload }), [list, reload]);
+  const create = useCallback(
+    async (targetId: string) => {
+      if (!active) throw new Error('cannot create a session with no active enrollment');
+      try {
+        return await api.createSession({
+          enrollment_id: active.id,
+          target_id: targetId,
+          ...(await devices(active.target_language)),
+        });
+      } finally {
+        // Awaited, so the card's button stays busy until it shows the session preparing:
+        // a second tap before the read lands would send a second create.
+        await reload();
+      }
+    },
+    [api, active, devices, reload],
+  );
+
+  const value = useMemo<TargetsContext>(() => ({ list, reload, create }), [list, reload, create]);
   return <TargetsValueContext.Provider value={value}>{children}</TargetsValueContext.Provider>;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
-import type { Target, TargetList } from '@lang-tutor/core/api';
+import type { Target, TargetList, TargetSummary } from '@lang-tutor/core/api';
 
 import { ApiError } from './api/client';
 import {
@@ -9,12 +9,17 @@ import {
   dueDayLabel,
   daysLeftLabel,
   doneFailureMessage,
+  homeOrder,
   photosHint,
+  readinessColor,
   readinessName,
   readyLabel,
+  shouldPollTargets,
   stepTitle,
+  targetCardState,
   targetTitle,
   targetsFor,
+  todayBar,
   withoutWord,
   wizardTitle,
   type StoredTargets,
@@ -280,5 +285,189 @@ describe('withoutWord', () => {
     withoutWord(target, 'g1');
     expect(target.words).toHaveLength(3);
     expect(target.word_count).toBe(3);
+  });
+});
+
+// Phase 57 (spec D10, D11). Home's cards: their order, what a target's card shows, and colours.
+type TodayState = TargetSummary['today']['state'];
+const summary = (
+  id: string,
+  state: TodayState,
+  due_on: string,
+  over: Partial<Omit<TargetSummary, 'today'>> & { today?: Partial<TargetSummary['today']> } = {},
+): TargetSummary => ({
+  id,
+  kind: 'exam',
+  due_on,
+  days_left: 5,
+  word_count: 8,
+  ready_count: 0,
+  readiness_pct: 18,
+  session: null,
+  ...over,
+  today: { state, done: 0, planned: 8, extra: 0, next_practice_in: null, ...over.today },
+});
+
+describe('homeOrder', () => {
+  it('is My words alone with no target, and its button filled', () => {
+    expect(homeOrder([])).toEqual({ first: 'main', order: ['main'] });
+  });
+
+  it('puts the targets with work owed first, nearest date first, then My words, then the rest by date', () => {
+    const targets = [
+      summary('rest-late', 'rest', '2026-11-20'),
+      summary('owed-late', 'owed', '2026-10-25'),
+      summary('done-soon', 'done', '2026-10-18'),
+      summary('owed-soon', 'owed', '2026-10-19'),
+      summary('rest-soon', 'rest', '2026-10-30'),
+    ];
+    expect(homeOrder(targets)).toEqual({
+      first: 'owed-soon',
+      order: ['owed-soon', 'owed-late', 'main', 'done-soon', 'rest-soon', 'rest-late'],
+    });
+  });
+
+  it('breaks a tie on the date by id, whatever order the list came in', () => {
+    const a = summary('a', 'owed', '2026-10-20');
+    const b = summary('b', 'owed', '2026-10-20');
+    expect(homeOrder([b, a]).order).toEqual(['a', 'b', 'main']);
+    expect(homeOrder([a, b]).order).toEqual(['a', 'b', 'main']);
+  });
+
+  // Once the exam's work is done, My words moves to the top with the filled button.
+  it('fills My words once no target has work owed', () => {
+    const targets = [summary('done', 'done', '2026-10-18'), summary('rest', 'rest', '2026-10-17')];
+    expect(homeOrder(targets)).toEqual({ first: 'main', order: ['main', 'rest', 'done'] });
+  });
+
+  it('puts a target on its date first, ahead of one with work owed (spec D10)', () => {
+    const targets = [
+      summary('owed', 'owed', '2026-10-17'),
+      summary('today', 'due_today', '2026-10-16', { days_left: 0, readiness_pct: 60 }),
+    ];
+    expect(homeOrder(targets)).toEqual({ first: 'today', order: ['today', 'owed', 'main'] });
+  });
+
+  // Its last review is outlined at 100%: the next card down has the filled button.
+  it('fills the next card when the target on its date is already ready', () => {
+    const ready = summary('today', 'due_today', '2026-10-16', { days_left: 0, readiness_pct: 100 });
+    expect(homeOrder([ready])).toEqual({ first: 'main', order: ['today', 'main'] });
+    expect(homeOrder([ready, summary('owed', 'owed', '2026-10-20')])).toEqual({
+      first: 'owed',
+      order: ['today', 'owed', 'main'],
+    });
+  });
+});
+
+describe('targetCardState', () => {
+  const ltr = (text: string) => `⁦${text}⁩`;
+
+  it('owes work: the countdown, today\'s line and "practise now"', () => {
+    const card = targetCardState(summary('t', 'owed', '2026-10-21', { today: { done: 5, planned: 8 } }));
+    expect(card).toEqual({
+      title: { before: 'בוחן בעוד ', number: ltr('5'), after: ' ימים' },
+      note: null,
+      today: { text: `היום: ${ltr('5')} מתוך ${ltr('8')} מילים`, check: false, extra: null },
+      readiness: `מוכנות לבוחן: ${ltr('18%')}`,
+      button: 'לתרגל עכשיו',
+    });
+  });
+
+  it('is done: the praise, today\'s line with its check and the extra words, and "practise more"', () => {
+    const card = targetCardState(
+      summary('t', 'done', '2026-10-21', { days_left: 20, today: { done: 10, planned: 10, extra: 2 } }),
+    );
+    expect(card.title).toEqual({ before: 'בוחן בעוד ', number: ltr('20'), after: ' ימים' });
+    expect(card.note).toEqual({ kind: 'praise', text: 'כל הכבוד! סיימת להיום. נתראה מחר' });
+    expect(card.today).toEqual({
+      text: `היום: ${ltr('10')} מתוך ${ltr('10')} מילים`,
+      check: true,
+      extra: `${ltr('+2')} נוספות`,
+    });
+    expect(card.button).toBe('לתרגל עוד');
+  });
+
+  it('shows no extra words when there are none', () => {
+    const card = targetCardState(summary('t', 'done', '2026-10-21', { today: { done: 8, planned: 8, extra: 0 } }));
+    expect(card.today?.extra).toBeNull();
+  });
+
+  it('rests: the rest line with the next practice day, no today line, and "practise more"', () => {
+    const card = targetCardState(
+      summary('t', 'rest', '2026-11-02', { days_left: 17, today: { planned: 0, next_practice_in: 3 } }),
+    );
+    expect(card.note).toEqual({ kind: 'rest', text: `היום אין תרגול לבוחן. התרגול הבא בעוד ${ltr('3')} ימים` });
+    expect(card.today).toBeNull();
+    expect(card.button).toBe('לתרגל עוד');
+  });
+
+  it('is on its date: its own title, good luck, no today line and the last review (spec D10)', () => {
+    const card = targetCardState(
+      summary('t', 'due_today', '2026-10-16', { kind: 'homework', days_left: 0, readiness_pct: 100 }),
+    );
+    expect(card).toEqual({
+      title: { before: 'שיעורי הבית היום', number: null, after: '' },
+      note: { kind: 'due-today', text: 'בהצלחה!' },
+      today: null,
+      readiness: `מוכנות לשיעורי הבית: ${ltr('100%')}`,
+      button: 'חזרה אחרונה',
+    });
+  });
+
+  it('says tomorrow for one day left', () => {
+    expect(targetCardState(summary('t', 'owed', '2026-10-17', { days_left: 1 })).title).toEqual({
+      before: 'בוחן מחר',
+      number: null,
+      after: '',
+    });
+  });
+});
+
+describe('todayBar', () => {
+  it("fills the share of today's planned words done", () => {
+    expect(todayBar({ done: 5, planned: 8, extra: 0 })).toEqual({ done: 5 / 8, extra: 0 });
+    expect(todayBar({ done: 0, planned: 8, extra: 0 })).toEqual({ done: 0, extra: 0 });
+    expect(todayBar({ done: 8, planned: 8, extra: 0 })).toEqual({ done: 1, extra: 0 });
+  });
+
+  // extra-words.html: 10 of 10 and 2 more is 10/12 of the bar, then 2/12 in a lighter green.
+  it('runs past the plan with the extra words, out of the plan and the extra together', () => {
+    expect(todayBar({ done: 10, planned: 10, extra: 2 })).toEqual({ done: 10 / 12, extra: 2 / 12 });
+    expect(todayBar({ done: 3, planned: 8, extra: 2 })).toEqual({ done: 3 / 10, extra: 2 / 10 });
+  });
+
+  it('is empty with nothing planned or done', () => {
+    expect(todayBar({ done: 0, planned: 0, extra: 0 })).toEqual({ done: 0, extra: 0 });
+  });
+});
+
+describe('readinessColor', () => {
+  // Red at 0%, through orange and yellow, to green at ready (spec D9).
+  it('runs the hue from red at 0 to green at 100', () => {
+    expect(readinessColor(0)).toBe('hsl(0, 65%, 42%)');
+    expect(readinessColor(50)).toBe('hsl(60, 65%, 42%)');
+    expect(readinessColor(100)).toBe('hsl(120, 65%, 42%)');
+    expect(readinessColor(18)).toBe('hsl(22, 65%, 42%)');
+  });
+
+  it('keeps a percent outside 0-100 at the ends', () => {
+    expect(readinessColor(-5)).toBe(readinessColor(0));
+    expect(readinessColor(130)).toBe(readinessColor(100));
+  });
+});
+
+describe('shouldPollTargets', () => {
+  const preparing = { session_id: 's1', status: 'preparing' as const, source: 'list' as const, answered: 0, total: 0 };
+  const ready = { ...preparing, status: 'ready' as const, total: 4 };
+
+  it("polls while any target's session is preparing", () => {
+    const list = (sessions: (typeof preparing | typeof ready | null)[]): TargetList => ({
+      today: '2026-10-16',
+      targets: sessions.map((session, at) => summary(`t${at}`, 'owed', '2026-10-20', { session })),
+    });
+    expect(shouldPollTargets(list([ready, preparing]))).toBe(true);
+    expect(shouldPollTargets(list([ready, null]))).toBe(false);
+    expect(shouldPollTargets(list([]))).toBe(false);
+    expect(shouldPollTargets(null)).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 import type { Target, TargetKind, TargetList, TargetSummary } from '@lang-tutor/core/api';
 
 import { ApiError } from '@/api/client';
-import { strings } from '@/strings';
+import { strings, type Countdown } from '@/strings';
 import type { WizardMode, WizardStep } from '@/targetWizard';
 
 /** Phase 53 (spec D10, D11). What home and the target screen say about a target,
@@ -138,6 +138,109 @@ export function withoutWord(target: Target, glossId: string): Target {
     ready_count: target.ready_count - (word.readiness_pct === 100 ? 1 : 0),
     words: target.words.filter((candidate) => candidate !== word),
   };
+}
+
+/** Phase 57 (spec D11). A card on home: the main path ("My words") or a target, by its id. */
+export type HomeCard = 'main' | string;
+
+const byDate = (a: TargetSummary, b: TargetSummary) =>
+  a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+
+/** Phase 57 (spec D10, D11). Home's cards by priority: a target on its date, then the
+ *  targets with work owed today, nearest date first, then My words, then the targets done
+ *  for today or resting, by date (a tie on the date by id, so the order never flickers).
+ *
+ *  `first` is the card whose button is filled, and the path a reminder opens: the first in
+ *  that order, past a target on its date already at 100%, whose last review is outlined
+ *  (D10). My words is always a candidate, so there is always one. */
+export function homeOrder(targets: readonly TargetSummary[]): { first: HomeCard; order: HomeCard[] } {
+  const sorted = [...targets].sort(byDate);
+  const ids = (states: TargetSummary['today']['state'][]) =>
+    sorted.filter((target) => states.includes(target.today.state)).map((target) => target.id);
+  const order = [...ids(['due_today']), ...ids(['owed']), 'main', ...ids(['done', 'rest'])];
+  const outlined = new Set(
+    sorted
+      .filter((target) => target.today.state === 'due_today' && target.readiness_pct >= 100)
+      .map((target) => target.id),
+  );
+  const first = order.find((card) => !outlined.has(card)) ?? 'main';
+  return { first, order };
+}
+
+/** Phase 57 (spec D10, D11). What a target's card shows: its title (the countdown, or the
+ *  date itself), the line under it, today's line, its readiness and its button's label.
+ *  Readiness shows in every state; the card draws it with its bar. */
+export type TargetCardState = {
+  title: Countdown;
+  /** The praise once today's work is done, the rest day's line, or good luck on the date. */
+  note: { kind: 'praise' | 'rest' | 'due-today'; text: string } | null;
+  /** Today's words: none on a rest day or on the date. `check` once all planned are done. */
+  today: { text: string; check: boolean; extra: string | null } | null;
+  readiness: string;
+  button: string;
+};
+
+export function targetCardState(target: TargetSummary): TargetCardState {
+  const { kind, today } = target;
+  const title = strings.targetCountdown(kind, target.days_left);
+  const readiness = strings.targetReadinessPct(kind, target.readiness_pct);
+  const todayLine = {
+    text: strings.targetToday(today.done, today.planned),
+    check: today.state === 'done',
+    extra: today.extra > 0 ? strings.targetExtra(today.extra) : null,
+  };
+  switch (today.state) {
+    case 'owed':
+      return { title, note: null, today: todayLine, readiness, button: strings.practiceNow };
+    case 'done':
+      return {
+        title,
+        note: { kind: 'praise', text: strings.targetDonePraise },
+        today: todayLine,
+        readiness,
+        button: strings.practiceMore,
+      };
+    case 'rest':
+      return {
+        title,
+        note: { kind: 'rest', text: strings.targetRest(kind, today.next_practice_in) },
+        today: null,
+        readiness,
+        button: strings.practiceMore,
+      };
+    case 'due_today':
+      return {
+        title: strings.targetCountdown(kind, 0),
+        note: { kind: 'due-today', text: strings.targetGoodLuck },
+        today: null,
+        readiness,
+        button: strings.lastReview,
+      };
+  }
+}
+
+/** Phase 57 (spec D11, extra-words.html). The today bar's two parts, as shares of the
+ *  whole: the planned words done, then the day's extra words running past the plan. */
+export function todayBar(today: Pick<TargetSummary['today'], 'done' | 'planned' | 'extra'>): {
+  done: number;
+  extra: number;
+} {
+  const whole = Math.max(today.planned, today.done) + today.extra;
+  if (whole === 0) return { done: 0, extra: 0 };
+  return { done: today.done / whole, extra: today.extra / whole };
+}
+
+/** Phase 57 (spec D9). Readiness's colour: red at 0%, through orange and yellow, to green
+ *  at 100%, by hue alone. */
+export function readinessColor(pct: number): string {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return `hsl(${Math.round(clamped * 1.2)}, 65%, 42%)`;
+}
+
+/** Phase 57. Home reads the targets again while any target's session is being prepared,
+ *  as it does the main path's (nextSession's shouldPoll). */
+export function shouldPollTargets(list: TargetList | null): boolean {
+  return list?.targets.some((target) => target.session?.status === 'preparing') ?? false;
 }
 
 /** A read of the active targets, tagged with the enrollment it was about. */
