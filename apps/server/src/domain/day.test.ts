@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { SESSION_LENGTH, type Dimension, type QuestionType } from '@lang-tutor/core/domain';
+import { SESSION_LENGTH, dimensionsTested, gradesFor, type Dimension, type QuestionType } from '@lang-tutor/core/domain';
 
 import { choosePools, chooseWords, liveDimensions, type ChoiceInput, type ChosenPick } from './choose';
 import {
@@ -10,12 +10,17 @@ import {
   NEW_PER_SESSION,
   RETURNS_PER_DAY,
   SPEAKING_PER_SESSION,
+  TARGET_SPEAKING_PER_SESSION,
 } from './chooseConstants';
 import { LANE0_DAY } from './day.fixture';
 import { glossFamilies, type Families, type FamilyGloss } from './glossFamilies';
 import { applySession, type MemoryRow } from './memoryUpdate';
 import { RUNGS, planCards } from './plan';
-import { evaluateSession, type AnsweredQuestion, type ProgressRow } from './progress';
+import { daysBetween, evaluateSession, type AnsweredQuestion, type ProgressRow } from './progress';
+import { targetDay, type TargetDay } from './targetDay';
+import { chooseTargetPicks, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
+import { activeOn, readinessOf, recallOnDue, type TargetKind } from './targets';
+import { capHalves, targetSessionWrite, type TargetSkillEvent, type TargetSkillRow } from './targetSkills';
 import { dayState, type DayAnswer } from './today';
 
 /**
@@ -67,6 +72,11 @@ import { dayState, type DayAnswer } from './today';
  *   9. two ladders a session at most, and ten graded cards: all but the meet and a ladder's read aloud;
  *  10. the adjacency bound counted outside each word's intro stage;
  *  11. "all wrong" counts the practice cards: the intro stage writes nothing.
+ *
+ * Phase 57 (spec §7). Phase 53's split session is gone: each target is a path of its own (D1), and
+ * the learner plays, session by session, the first card home shows (D11). The target scenarios at
+ * the end run on runPaths; phase 53's marks on the share of a list ready by FSRS on its due date
+ * stay their gates, and target readiness (D9) has its own.
  */
 
 const DIMENSIONS: Dimension[] = ['written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling'];
@@ -736,9 +746,718 @@ describe('families over days: twenty-five days of six sessions, phase 37\'s lear
   });
 });
 
-// Phase 53 (spec §2): the day simulation with targets. Phase 57 (spec §7): the phase 53 target
-// scenarios read the split session (targetSession.ts, targetWish, splitSlots, owedNew), which phase
-// 57 removed with paths (spec D1, §8); they are rewritten in Task 7 over the target picker, each
-// target on a path of its own. Their marks stay the gates and are never lowered (spec §7): the
-// share of a list ready by FSRS on its due date, exam 0.57 (the mean over the rhythm's five
-// phases), homework 0.85.
+// Phase 53 (spec §2): the day simulation with targets. Phase 57 (spec §7): each target on a path of
+// its own (D1), its sessions its own picker's (D7), the learner following home (D11).
+
+const SESSIONS_A_DAY = 6;
+
+/** A learner who answers every card right. */
+const NEVER_MISSES = Number.POSITIVE_INFINITY;
+
+/** Phase 53 (spec §2), phase 57 (spec §7). The share of a list ready by FSRS on its due date (recall
+ *  on the date in its weakest live skill at TARGET_READY, the recorded yardstick of spec D9), phase
+ *  37's learner, the mean over the five phases of its miss rhythm, for the 14-day scenarios. Never
+ *  lowered to let a change pass (spec §7). */
+const READY_ON_DUE_PASS: Record<TargetKind, number> = {
+  // Phase 53's 0.65 was one phase, at the rhythm's best: its five phases average 0.57 (0.65 0.65 0.55
+  // 0.40 0.60). Phase 54 measured 0.58 (0.70 0.50 0.60 0.60 0.50), phase 55 0.58 (0.65 0.50 0.60 0.50
+  // 0.65), both from the split session. Phase 57, each target on its own path with TARGET_CAP_HALVES
+  // as first set: 0.60 (0.60 0.55 0.50 0.65 0.70; measured 2026-10-16).
+  exam: 0.57,
+  // Measured 2026-10-15 at the first phase alone: 0.85; phase 54 0.90, phase 55 0.90 (measured
+  // 2026-10-16). Phase 57 (spec §7, as ruled): the mean over the five phases, as the exam's: 0.92
+  // (0.90 0.90 0.90 0.95 0.95; measured 2026-10-16).
+  homework: 0.85,
+};
+
+const listId = (n: number) => `t${String(n).padStart(2, '0')}`;
+/** Words `from` to `to` of the list. */
+const listIds = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => listId(from + i));
+
+/** A word of a target's list, saved on `day` (the day it joined its target, as the wizard and the
+ *  target screen save it), never met, the only meaning of its word. `glossId` names it otherwise. */
+const listWord = (n: number, day: number, glossId = listId(n)): Omit<FamilyGloss, 'knownAt'> => ({
+  glossId,
+  key: `list-${n}`,
+  savedAt: `${dayAfter(LANE0_DAY.today, day)}T18:${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}.000000Z`,
+  lexemeId: `x-list-${n}`,
+  lemma: `x-list-${n}`,
+  forms: [`f-list-${n}`],
+  order: [0, 0],
+  speakable: true,
+});
+
+/** Lane 0's list of 2026-10-11 as the main path, `words` list words saved on its first day, and
+ *  `later.words` more saved on day `later.on`. */
+function withList(words: number, later = { words: 0, on: 0 }): DayList {
+  return {
+    today: LANE0_DAY.today,
+    saved: [
+      ...LANE0_DAY.saved,
+      ...Array.from({ length: words }, (_, i) => listWord(i + 1, 0)),
+      ...Array.from({ length: later.words }, (_, i) => listWord(words + i + 1, later.on)),
+    ],
+    memory: LANE0_DAY.memory,
+    progress: LANE0_DAY.progress,
+  };
+}
+
+/** The date `days` days after the lists' first day. */
+const dueIn = (days: number) => dayAfter(LANE0_DAY.today, days);
+const LANE0_GLOSSES: ReadonlySet<string> = new Set(LANE0_DAY.saved.map((gloss) => gloss.glossId));
+const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+const mean = (values: readonly number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+
+/** A target as a day of the run holds it: its kind, the day it was created, its due date and its
+ *  words, each with the day it joined. */
+type SimTarget = {
+  id: string;
+  kind: TargetKind;
+  createdOn: string;
+  dueOn: string;
+  words: readonly { glossId: string; addedOn: string }[];
+};
+
+/** A target created on the lists' first day and due `days` later, holding `glossIds` from then. */
+const targetOf = (kind: TargetKind, days: number, glossIds: readonly string[]): SimTarget => ({
+  id: kind,
+  kind,
+  createdOn: dueIn(0),
+  dueOn: dueIn(days),
+  words: glossIds.map((glossId) => ({ glossId, addedOn: dueIn(0) })),
+});
+
+/** What the learner answered: right, wrong (gave up, for a say translation), or one of the
+ *  2026-10-16 replay's misses. */
+type Verdict = 'right' | 'wrong' | 'near_miss' | 'gave_up';
+/** A card of a run on paths: `path` is its target's id, null for My words. */
+type PathAsked = Asked & { path: string | null; verdict: Verdict };
+/** Phase 37's learner, with `scripted` misses: the verdict for a card the learner answers otherwise
+ *  than its rhythm says, given the cards before it in the run; undefined to follow the rhythm. */
+type PathLearner = Learner & {
+  scripted?: (card: { glossId: string; type: QuestionType }, earlier: readonly PathAsked[]) => Verdict | undefined;
+};
+
+/** The sessions a day: a number, or `untilDone`: sessions while some target has work owed (D11's
+ *  first card a target's), at most that many, for a learner who practises until the day is done. */
+type SessionsOn = number | { untilDone: number };
+
+/** A session of a run on paths. `home`: each active target's day as home read it before the
+ *  session (spec D11); `path`: the target whose card was first, null for My words; `mode`, the
+ *  target picker's (ruling T3-m: practice more when owed work returns no pick); `input` and
+ *  `families`, My words' choice. */
+type PathSession = {
+  at: number;
+  day: number;
+  date: string;
+  path: string | null;
+  home: ReadonlyMap<string, TargetDay>;
+  mode: TargetMode | null;
+  picks: ChosenPick[];
+  input: ChoiceInput | null;
+  families: Families | null;
+};
+
+/** A day of a run on paths: the sessions played, the memory before the first (the memory the day
+ *  before left), and each active target's day before the first session and after the last. */
+type PathDay = {
+  date: string;
+  played: number;
+  memory: readonly MemoryRow[];
+  start: ReadonlyMap<string, TargetDay>;
+  end: ReadonlyMap<string, TargetDay>;
+};
+
+type PathRun = {
+  sessions: PathSession[];
+  log: PathAsked[];
+  days: PathDay[];
+  events: TargetSkillEvent[];
+  /** `${targetId}|${glossId}` → the day the word started on the target (spec D6). */
+  startedOn: ReadonlyMap<string, string>;
+};
+
+function pathAnswer(glossId: string, type: QuestionType, verdict: Verdict): AnsweredQuestion {
+  if (verdict === 'right' || verdict === 'wrong') return answerOf(glossId, type, verdict === 'right');
+  return { glossId, type, verdict } as AnsweredQuestion;
+}
+
+/**
+ * Phase 57 (spec D1, D4, D6, D7, D11). `days` days over `list` and its `targets` (a target is active
+ * from its creation through its due date, D10), each session the first card home shows: a target
+ * with work owed today, the nearest due date first, else My words. Each session is ended as
+ * recordProgress ends one.
+ *
+ * A target's session is chooseTargetPicks' over its day (targetDay), read as the session service
+ * reads it (services/sessions.ts readTarget, services/targetDayRead.ts): the skills answered right
+ * today from every path's non-intro answers, practised today when its own path was, known when the
+ * word has FSRS memory, started on the day of the first session that asks it after it joined (any
+ * answer, ruling T4-e), practice more when owed work returns no pick (T3-m), and room for the day's
+ * new words, DAY_NEW_CAP less those met today (T3-n); planned with the target flag (T3-l). My words
+ * is chooseWords over the saved words in no active target, its families over every saved word
+ * (T5-k), its new words counting every path's first meetings today (D8). Every session writes FSRS
+ * memory and levels as before (Done 1), and the target skills of every active target holding a word
+ * it asked through targetSessionWrite (D4). Sessions run one after another, so none is in flight
+ * when the next is chosen: the stock lag of D2 is the service's.
+ */
+function runPaths(
+  list: DayList,
+  days: number,
+  sessionsADay: SessionsOn | ((day: number) => SessionsOn),
+  targets: readonly SimTarget[] | ((day: number) => readonly SimTarget[]),
+  learner: PathLearner = PHASE_37_LEARNER,
+): PathRun {
+  const targetsOn = typeof targets === 'function' ? targets : () => targets;
+  const sessionsOn = typeof sessionsADay === 'function' ? sessionsADay : () => sessionsADay;
+  const memory = new Map<string, MemoryRow>(
+    list.memory.map((row) => [
+      keyOf(row.glossId, row.dimension),
+      { ...row, reachedOn: row.state.stability >= KNOWN_STABILITY ? row.state.lastDay : null },
+    ]),
+  );
+  const progress = new Map<string, ProgressRow>(list.progress.map((row) => [keyOf(row.glossId, row.dimension), row]));
+  const met = new Set(list.memory.map((row) => row.glossId));
+  const knownIn = new Map<string, number>();
+  const skills = new Map<string, TargetSkillRow>();
+  const startedOn = new Map<string, string>();
+  const events: TargetSkillEvent[] = [];
+  const log: PathAsked[] = [];
+  const sessions: PathSession[] = [];
+  const record: PathDay[] = [];
+  const { missEvery, phase = 0, forgets = new Set<string>(), scripted } = learner;
+  let cards = phase;
+
+  for (let day = 0; day < days; day++) {
+    const date = dayAfter(list.today, day);
+    const saved = list.saved.filter((gloss) => gloss.savedAt.slice(0, 10) <= date);
+    const today: DayAnswer[] = [];
+    const pathOf = new Map<string, string | null>();
+    const introduced = new Set<string>();
+    const active = targetsOn(day).filter((target) => activeOn({ endedAt: null, dueOn: target.dueOn }, date));
+    const wordsOf = (target: SimTarget) => target.words.filter((word) => word.addedOn <= date);
+
+    /** Spec D6, D9: the target's day as readTargetDay reads it. */
+    const dayOf = (target: SimTarget): TargetDay =>
+      targetDay({
+        today: date,
+        createdOn: target.createdOn,
+        dueOn: target.dueOn,
+        words: wordsOf(target).map(({ glossId, addedOn }) => ({
+          glossId,
+          addedOn,
+          startedOn: startedOn.get(`${target.id}|${glossId}`) ?? null,
+          live: LIVE,
+        })),
+        skills: [...skills.values()].filter((row) => row.targetId === target.id),
+        rightToday: new Set(
+          today.flatMap((answer) =>
+            answer.intro ? [] : gradesFor(answer).flatMap((piece) => (piece.grade > 1 ? [keyOf(answer.glossId, piece.dimension)] : [])),
+          ),
+        ),
+        answeredToday: today.some((answer) => pathOf.get(answer.sessionId) === target.id),
+      });
+    const homeNow = () => new Map(active.map((target) => [target.id, dayOf(target)]));
+    const start = homeNow();
+    const memoryAtStart = [...memory.values()];
+    const plan = sessionsOn(day);
+    const max = typeof plan === 'number' ? plan : plan.untilDone;
+    let played = 0;
+
+    for (let session = 0; session < max; session++) {
+      const at = sessions.length;
+      const home = homeNow();
+      // Spec D11: the targets with work owed today, the nearest due date first, then My words.
+      const owed = active
+        .filter((target) => home.get(target.id)!.state === 'owed')
+        .sort((a, b) => compare(a.dueOn, b.dueOn) || compare(a.id, b.id));
+      if (typeof plan !== 'number' && owed.length === 0) break;
+      const target: SimTarget | undefined = owed[0];
+      const rows = [...memory.values()];
+      let picks: ChosenPick[];
+      let mode: TargetMode | null = null;
+      let input: ChoiceInput | null = null;
+      let families: Families | null = null;
+      if (target) {
+        const pickInput: TargetPickInput = {
+          day: home.get(target.id)!,
+          mode: targetMode(home.get(target.id)!),
+          levels: new Map([...progress.values()].map((row) => [`${row.glossId}|${row.dimension}`, row.level])),
+          known: new Set(rows.map((row) => row.glossId)),
+          keys: new Map(saved.map((gloss) => [gloss.glossId, gloss.key])),
+          inFlight: [],
+          newRoom: Math.max(0, DAY_NEW_CAP - introduced.size),
+        };
+        mode = pickInput.mode;
+        picks = chooseTargetPicks(pickInput);
+        if (picks.length === 0 && mode === 'owed') {
+          mode = 'more';
+          picks = chooseTargetPicks({ ...pickInput, mode });
+        }
+      } else {
+        families = glossFamilies({
+          saved: saved.map((gloss) => ({ ...gloss, knownAt: knownIn.has(gloss.glossId) ? `session ${knownIn.get(gloss.glossId)}` : null })),
+          memory: rows,
+          live: LIVE,
+        });
+        for (const glossId of families.newlyKnown) knownIn.set(glossId, at);
+        const waiting = new Set([...families.state].filter(([, state]) => state === 'waiting').map(([glossId]) => glossId));
+        const held = new Set(active.flatMap((one) => wordsOf(one).map((word) => word.glossId)));
+        const { steps, done } = dayState(today, introduced);
+        input = {
+          saved: saved.filter((gloss) => !held.has(gloss.glossId)),
+          memory: rows,
+          levels: [...progress.values()].map(({ glossId, dimension, level }) => ({ glossId, dimension, level })),
+          today: date,
+          steps,
+          done,
+          newToday: introduced.size,
+          listening: true,
+          speaking: true,
+          rng: () => 0.5,
+          families: { familyOf: families.familyOf, waiting, introductions: new Set(families.introductions.keys()) },
+        };
+        picks = chooseWords(input);
+      }
+      const path = target?.id ?? null;
+      sessions.push({ at, day, date, path, home, mode, picks, input, families });
+      const planned = picks.map((pick, i) => ({
+        form: `w${i}`,
+        translation: `מ${i}`,
+        tiles: true,
+        speakable: true,
+        clozeGap: true,
+        dimension: pick.dimension,
+        rung: pick.rung,
+        level: pick.level,
+        r: pick.r,
+        step: pick.cls === 'STEP',
+        knownMeanings: families?.introductions.get(pick.glossId),
+        ladder: pick.ladder,
+      }));
+      const cardPlan = planCards(planned, { listening: true, speaking: true, target: target !== undefined });
+
+      const given: AnsweredQuestion[] = cardPlan.order.map((index, position) => {
+        const pick = picks[index];
+        const type = cardPlan.types[position];
+        const intro = cardPlan.intro[position];
+        const free = UNMISSED.has(type) || intro;
+        const rhythm = free || (cards++ % missEvery !== missEvery - 1 && !forgets.has(pick.glossId));
+        const verdict: Verdict = (free ? undefined : scripted?.({ glossId: pick.glossId, type }, log)) ?? (rhythm ? 'right' : 'wrong');
+        const { knownMeanings } = planned[index];
+        log.push({ session, at, glossId: pick.glossId, cls: pick.cls, rung: pick.rung, type, right: verdict === 'right', knownMeanings, intro, path, verdict });
+        return { ...pathAnswer(pick.glossId, type, verdict), intro };
+      });
+
+      const glossIds = [...new Set(given.map((answer) => answer.glossId))];
+      const before = [...memory.values()].filter((row) => glossIds.includes(row.glossId));
+      for (const row of applySession(before, given, date)) memory.set(keyOf(row.glossId, row.dimension), row);
+      const levels = glossIds.flatMap((glossId) =>
+        DIMENSIONS.map(
+          (dimension) => progress.get(keyOf(glossId, dimension)) ?? { glossId, dimension, level: 1, lastStepOn: null, lastWrongOn: null },
+        ),
+      );
+      for (const row of evaluateSession(levels, given, date).changed) progress.set(keyOf(row.glossId, row.dimension), row);
+      // Spec D4: the target skills of every active target holding a word the session asked, whatever
+      // its path, each against its own cap, as recordProgress writes them.
+      const write = targetSessionWrite({
+        sessionId: `s${at}`,
+        day: date,
+        targets: active.map((one) => ({
+          id: one.id,
+          dueOn: one.dueOn,
+          words: wordsOf(one).map(({ glossId, addedOn }) => ({ glossId, addedAt: `${addedOn}T00:00:00.000000Z` })),
+        })),
+        before: [...skills.values()],
+        answers: given.map((answer) => ({ ...answer, helped: false, answeredAt: `${date}T12:00:00.000000Z` })),
+      });
+      for (const row of write.rows) skills.set(`${row.targetId}|${row.glossId}|${row.dimension}`, row);
+      events.push(...write.events);
+      for (const { targetId, glossIds: asked } of write.started) {
+        for (const glossId of asked) if (!startedOn.has(`${targetId}|${glossId}`)) startedOn.set(`${targetId}|${glossId}`, date);
+      }
+      for (const glossId of glossIds) {
+        if (!met.has(glossId)) {
+          met.add(glossId);
+          introduced.add(glossId);
+        }
+      }
+      today.push(...given.map((answer) => ({ ...answer, sessionId: `s${at}` })));
+      pathOf.set(`s${at}`, path);
+      played++;
+    }
+    record.push({ date, played, memory: memoryAtStart, start, end: homeNow() });
+  }
+  return { sessions, log, days: record, events, startedOn };
+}
+
+/** The run's day of `date`. */
+const dayIndex = (date: string) => daysBetween(LANE0_DAY.today, date);
+
+/** Spec §7, phase 53's measure: the share of the target's words ready by FSRS on its due date, by
+ *  the memory the day before left: recall on the date in the weakest live skill at TARGET_READY. */
+function fsrsReadyShare(run: PathRun, target: SimTarget): number {
+  const due = run.days[dayIndex(target.dueOn)];
+  const ready = target.words.filter(
+    ({ glossId }) =>
+      readinessOf(target.kind, recallOnDue(due.memory.filter((row) => row.glossId === glossId), LIVE, true, target.dueOn)) === 'ready',
+  ).length;
+  return ready / target.words.length;
+}
+
+/** The target's day on `date`, before its first session (`start`) or after its last (`end`). */
+const targetOn = (run: PathRun, id: string, date: string, when: 'start' | 'end') => run.days[dayIndex(date)][when].get(id);
+
+/** The days the learner practised the target: some session on its path. */
+const practiceDaysOf = (run: PathRun, id: string) =>
+  run.days.filter(({ date }) => run.sessions.some((session) => session.date === date && session.path === id)).map(({ date }) => date);
+
+/**
+ * Anti-goal 1 (spec D7 step 4, Done 7). While its target has work owed, a target's session asks only
+ * cards that serve it: a card of an owed word owed a start (its ladder, or a known word's first
+ * card), or one that grades a skill of an owed word still below today's cap or answers its open
+ * next-day check, all as home read the target's day before the session. Returns the cards checked.
+ */
+function expectOnlyOwedWork(run: PathRun): number {
+  let checked = 0;
+  for (const session of run.sessions) {
+    if (session.path === null) continue;
+    const day = session.home.get(session.path)!;
+    if (day.state !== 'owed') continue;
+    const words = new Map(day.words.map((word) => [word.glossId, word]));
+    for (const card of run.log.filter((asked) => asked.at === session.at)) {
+      const word = words.get(card.glossId);
+      const serves =
+        word?.state === 'owed' &&
+        (word.toStart || dimensionsTested(card.type).some((dimension) => word.owed.includes(dimension) || word.checks.includes(dimension)));
+      expect({ at: session.at, glossId: card.glossId, type: card.type, serves }).toEqual({
+        at: session.at,
+        glossId: card.glossId,
+        type: card.type,
+        serves: true,
+      });
+      checked++;
+    }
+  }
+  return checked;
+}
+
+/** My words' sessions as phase 54's checks read a run: their inputs, picks and families, and their
+ *  cards, numbered among them. */
+function mainRun(run: PathRun): Run {
+  const main = run.sessions.filter((session) => session.path === null);
+  const index = new Map(main.map((session, k) => [session.at, k]));
+  return {
+    sessions: main.map((session) => ({ input: session.input!, picks: session.picks, families: session.families! })),
+    log: run.log.filter((card) => index.has(card.at)).map((card) => ({ ...card, at: index.get(card.at)! })),
+  };
+}
+
+/**
+ * Spec D1, D4, D7, in every scenario: a target's session asks its own words only, each new one as a
+ * ladder (phase 55's cards, in order), NEW_PER_SESSION ladders, SESSION_LENGTH graded cards and
+ * TARGET_SPEAKING_PER_SESSION say translations at most, and only owed work while work is owed
+ * (anti-goal 1); My words asks no word of an active target; no target value drops but by a miss
+ * (anti-goal 2). `targets` are the run's targets as they stand on its last day.
+ */
+function itKeepsTheTargetPaths(run: PathRun, targets: readonly SimTarget[]) {
+  it("asks a target's own words on its path, and none of an active target's on My words", () => {
+    for (const session of run.sessions) {
+      const active = targets.filter((target) => target.createdOn <= session.date && session.date <= target.dueOn);
+      const own = session.path === null ? null : new Set(targets.find((target) => target.id === session.path)!.words.map((word) => word.glossId));
+      const held = new Set(active.flatMap((target) => target.words.filter((word) => word.addedOn <= session.date).map((word) => word.glossId)));
+      const strays = session.picks.filter((pick) => (own ? !own.has(pick.glossId) : held.has(pick.glossId))).map((pick) => pick.glossId);
+      expect({ at: session.at, strays }).toEqual({ at: session.at, strays: [] });
+    }
+    expect(run.sessions.some((session) => session.path !== null)).toBe(true);
+  });
+
+  it('asks each new word of a target as a ladder, another word two cards at most, and two ladders, ten graded cards and three say translations a session at most (spec D7)', () => {
+    let ladders = 0;
+    for (const session of run.sessions.filter((one) => one.path !== null)) {
+      const cards = run.log.filter((card) => card.at === session.at);
+      const ladderIds = new Set(session.picks.filter((pick) => pick.ladder).map((pick) => pick.glossId));
+      // Spec D7: a ladder is its word's only pick; another word takes a card a pick, two at most.
+      for (const glossId of new Set(session.picks.map((pick) => pick.glossId))) {
+        const own = session.picks.filter((pick) => pick.glossId === glossId).length;
+        const asked = cards.filter((card) => card.glossId === glossId);
+        const types = asked.map((card) => card.type);
+        expect({
+          at: session.at,
+          glossId,
+          asked: ladderIds.has(glossId)
+            ? { own, types }
+            : { own: own <= 2, cards: types.length, intro: asked.some((card) => card.intro || card.type === 'meet') },
+        }).toEqual({
+          at: session.at,
+          glossId,
+          asked: ladderIds.has(glossId) ? { own: 1, types: LADDER } : { own: true, cards: own, intro: false },
+        });
+      }
+      ladders += ladderIds.size;
+      const graded = cards.filter((card) => !freeCard(card, ladderIds)).length;
+      const said = cards.filter((card) => card.type === 'say_translation').length;
+      expect({
+        at: session.at,
+        ladders: ladderIds.size <= NEW_PER_SESSION,
+        graded: graded <= SESSION_LENGTH,
+        said: said <= TARGET_SPEAKING_PER_SESSION,
+      }).toEqual({
+        at: session.at,
+        ladders: true,
+        graded: true,
+        said: true,
+      });
+    }
+    expect(ladders).toBeGreaterThan(0);
+  });
+
+  it('never asks a target card that serves no owed work while work is owed (anti-goal 1)', () => {
+    expect(expectOnlyOwedWork(run)).toBeGreaterThan(0);
+  });
+
+  it('never lowers a target value but for a miss (anti-goal 2)', () => {
+    expect(run.events.filter((event) => event.after < event.before && event.why !== 'miss')).toEqual([]);
+    expect(run.events.length).toBeGreaterThan(0);
+  });
+}
+
+/** Spec D1, D10: My words gets a target's words back the day after its date, not before, and keeps
+ *  its speaking pick, phase 39's families and phase 54's ladders beside the target paths. */
+function itKeepsMyWords(run: PathRun, targets: readonly SimTarget[]) {
+  it('gives My words the words of a target back the day after its date, not before', () => {
+    for (const target of targets) {
+      for (const session of run.sessions.filter((one) => one.path === null)) {
+        const main = new Set(session.input!.saved.map((gloss) => gloss.glossId));
+        const back = target.words.filter((word) => word.addedOn <= session.date).every(({ glossId }) => main.has(glossId));
+        expect({ at: session.at, target: target.id, back }).toEqual({ at: session.at, target: target.id, back: session.date > target.dueOn });
+      }
+      expect(run.sessions.some((session) => session.path === null && session.date > target.dueOn)).toBe(true);
+    }
+  });
+
+  it("keeps My words' speaking pick to one a session, and phase 39's families", () => {
+    const main = mainRun(run);
+    main.sessions.forEach(({ picks }, at) => {
+      expect({ at, speak: picks.filter((pick) => pick.cls === 'SPEAK').length <= SPEAKING_PER_SESSION }).toEqual({ at, speak: true });
+    });
+    expectOneGlossPerFamily(main.sessions);
+    expectNoWaitingGloss(main.sessions);
+  });
+
+  itHoldsTheLadders(mainRun(run));
+}
+
+/** Both paths' rules, for a run that plays My words too. */
+function itKeepsThePaths(run: PathRun, targets: readonly SimTarget[]) {
+  itKeepsTheTargetPaths(run, targets);
+  itKeepsMyWords(run, targets);
+}
+
+describe.each<[TargetKind]>([['exam'], ['homework']])(
+  "a target on its own path, phase 37's learner: %s due in 14 days, twenty words, six sessions a day (phase 57, spec §7)",
+  (kind) => {
+    const target = targetOf(kind, 14, listIds(1, 20));
+    const runs = EVERY_PHASE.map((learner) => runPaths(withList(20), 16, SESSIONS_A_DAY, [target], learner));
+    const [run] = runs;
+    const shares = runs.map((one) => fsrsReadyShare(one, target));
+    const share = mean(shares);
+    /** Spec D9: target readiness on the due date, by the values the eve left. */
+    const readiness = runs.map((one) => targetOn(one, kind, target.dueOn, 'start')!.readinessPct);
+    const evenings = runs.map((one) => practiceDaysOf(one, kind).length);
+    /** My words' sessions before the date, of the 84 the learner plays. */
+    const mine = runs.map((one) => one.sessions.filter((session) => session.path === null && session.date < target.dueOn).length);
+
+    const each = shares.map((one) => one.toFixed(2)).join(' ');
+    it(`ready by FSRS on the due date, the mean over the rhythm's five phases: ${share.toFixed(2)} (${each}; pass ≥ ${READY_ON_DUE_PASS[kind].toFixed(2)})`, () => {
+      expect(share).toBeGreaterThanOrEqual(READY_ON_DUE_PASS[kind]);
+    });
+
+    it(`measures, over the five phases, target readiness on the due date (${readiness.join(' ')}%), practice evenings (${evenings.join(' ')}) and My words' sessions before the date (${mine.join(' ')}); never 100% before the eve`, () => {
+      for (const one of runs) {
+        for (const session of one.sessions.filter((s) => daysBetween(s.date, target.dueOn) > 1)) {
+          expect({ at: session.at, pct: session.home.get(kind)!.readinessPct < 100 }).toEqual({ at: session.at, pct: true });
+        }
+      }
+    });
+
+    it('never asks a target card that serves no owed work while work is owed, at any phase (anti-goal 1)', () => {
+      for (const one of runs) expect(expectOnlyOwedWork(one)).toBeGreaterThan(0);
+    });
+
+    itKeepsThePaths(run, [target]);
+  },
+);
+
+/** Lane 0's homework of 2026-10-16 (the one-pager's evidence): six words, due the next day. */
+const REPLAY = ['biglietto', 'spesa', 'stazione', 'divertirsi', 'chiave', 'cassetto'] as const;
+const REPLAY_LIST: DayList = { ...withList(0), saved: [...LANE0_DAY.saved, ...REPLAY.map((glossId, i) => listWord(i + 1, 0, glossId))] };
+/** The cards answered by typing the word, whose spelling a near miss grades Again. */
+const TYPED_ANSWER: ReadonlySet<QuestionType> = new Set(['typed_translation', 'cloze_typed', 'sentence_translation']);
+const NEAR_MISSES: ReadonlySet<string> = new Set(['spesa', 'cassetto']);
+const GIVES_UP = 'divertirsi';
+
+/** Spec Done 7, ruling P3. The learner of 2026-10-16: a spelling near miss in the first typed answer
+ *  of spesa ("spessa") and cassetto ("casseto"), and a give-up on divertirsi's first two say
+ *  translations; every other card right. */
+const REPLAY_LEARNER: PathLearner = {
+  missEvery: NEVER_MISSES,
+  scripted: ({ glossId, type }, earlier) => {
+    const before = earlier.filter((card) => card.glossId === glossId && !card.intro);
+    if (NEAR_MISSES.has(glossId) && TYPED_ANSWER.has(type) && !before.some((card) => TYPED_ANSWER.has(card.type))) return 'near_miss';
+    if (glossId === GIVES_UP && type === 'say_translation' && before.filter((card) => card.type === 'say_translation').length < 2) return 'gave_up';
+    return undefined;
+  },
+};
+
+describe('the 2026-10-16 replay: homework due tomorrow, six words, the same misses, played until done (phase 57, spec Done 7, ruling P3)', () => {
+  const homework = targetOf('homework', 1, REPLAY);
+  const run = runPaths(REPLAY_LIST, 1, { untilDone: 25 }, [homework], REPLAY_LEARNER);
+  const end = targetOn(run, 'homework', dueIn(0), 'end')!;
+  const { played } = run.days[0];
+
+  it(`gets all six words ready the same evening: 100% after ${played} sessions (at most 25)`, () => {
+    expect({ readinessPct: end.readinessPct, readyCount: end.readyCount, state: end.state }).toEqual({
+      readinessPct: 100,
+      readyCount: REPLAY.length,
+      state: 'done',
+    });
+    expect(played).toBeLessThanOrEqual(25);
+  });
+
+  it('asks only cards that serve owed work: every card of every session (anti-goal 1)', () => {
+    expect(expectOnlyOwedWork(run)).toBe(run.log.length);
+  });
+
+  it("misses as on 2026-10-16, and asks again what each miss cost: spelling for spesa and cassetto, speaking for divertirsi", () => {
+    const missed = run.log.filter((card) => card.verdict !== 'right');
+    expect(missed.map(({ glossId, verdict }) => `${glossId} ${verdict}`).sort()).toEqual([
+      'cassetto near_miss',
+      'divertirsi gave_up',
+      'divertirsi gave_up',
+      'spesa near_miss',
+    ]);
+    const cost = (glossId: string): Dimension => (glossId === GIVES_UP ? 'spoken_productive' : 'spelling');
+    for (const miss of missed) {
+      const index = run.log.indexOf(miss);
+      const again = run.log
+        .slice(index + 1)
+        .some((card) => card.glossId === miss.glossId && card.verdict === 'right' && dimensionsTested(card.type).includes(cost(miss.glossId)));
+      expect({ glossId: miss.glossId, again }).toEqual({ glossId: miss.glossId, again: true });
+    }
+  });
+
+  itKeepsTheTargetPaths(run, [homework]);
+});
+
+describe("an exam in 3 days, ten words, phase 37's learner practising until each day is done (phase 57, spec Done 6)", () => {
+  const exam = targetOf('exam', 3, listIds(1, 10));
+  const runs = EVERY_PHASE.map((learner) => runPaths(withList(10), 4, { untilDone: 25 }, [exam], learner));
+  const [run] = runs;
+  /** Per phase, each practice day's sessions and readiness at its end. */
+  const days = runs.map((one) => one.days.slice(0, 3).map(({ played, end }) => `${played}:${end.get('exam')!.readinessPct}%`).join(' '));
+
+  it(`reaches 100% only on its eve, each day done (sessions:readiness at day end, days left 3 2 1, five phases: ${days.join(', ')})`, () => {
+    for (const one of runs) {
+      const ends = one.days.slice(0, 3).map(({ end }) => end.get('exam')!);
+      expect(ends.map((day) => day.state)).toEqual(['done', 'done', 'done']);
+      expect(ends.map((day) => day.readinessPct === 100)).toEqual([false, false, true]);
+      for (const session of one.sessions.filter((s) => s.date < dueIn(2))) {
+        expect({ at: session.at, below: session.home.get('exam')!.readinessPct < 100 }).toEqual({ at: session.at, below: true });
+      }
+    }
+  });
+
+  itKeepsTheTargetPaths(run, [exam]);
+});
+
+describe('an exam in 20 days, twenty words, a learner who never misses practising until each day is done (phase 57, spec Done 6, D5, D6)', () => {
+  const exam = targetOf('exam', 20, listIds(1, 20));
+  const learner: Learner = { missEvery: NEVER_MISSES };
+  const run = runPaths(withList(20), 21, { untilDone: 25 }, [exam], learner);
+  const evenings = practiceDaysOf(run, 'exam');
+  const summary = evenings.map((date) => `${daysBetween(date, exam.dueOn)}:${run.days[dayIndex(date)].played}`).join(' ');
+
+  it(`asks for ${evenings.length} evenings of practice in twenty days (pass ≤ 10), each done that evening (days left:sessions ${summary})`, () => {
+    expect(evenings.length).toBeLessThanOrEqual(10);
+    for (const date of evenings) expect({ date, state: targetOn(run, 'exam', date, 'end')!.state }).toEqual({ date, state: 'done' });
+  });
+
+  it('is ready on its eve: 100%', () => {
+    expect(targetOn(run, 'exam', dueIn(19), 'end')!.readinessPct).toBe(100);
+  });
+
+  // Spec D6: unfinished planned work carries over. Days left 9 is a practice day with no next-day
+  // check after it, so the day after it rests unless the practice day is skipped.
+  const skipped = dayIndex(dueIn(11));
+  const skipping = runPaths(withList(20), 21, (day) => (day === skipped ? 0 : { untilDone: 25 }), [exam], learner);
+
+  it('owes a skipped practice day the next day, and gets it done then', () => {
+    expect(targetOn(run, 'exam', dueIn(12), 'start')!.state).toBe('rest');
+    expect({ played: skipping.days[skipped].played, owed: targetOn(skipping, 'exam', dueIn(11), 'start')!.state }).toEqual({ played: 0, owed: 'owed' });
+    const next = targetOn(skipping, 'exam', dueIn(12), 'start')!;
+    expect({ daysLeft: next.daysLeft, state: next.state, owed: next.words.filter((word) => word.state === 'owed').length }).toEqual({
+      daysLeft: 8,
+      state: 'owed',
+      owed: exam.words.length,
+    });
+    expect(targetOn(skipping, 'exam', dueIn(12), 'end')!.state).toBe('done');
+    expect(targetOn(skipping, 'exam', dueIn(19), 'end')!.readinessPct).toBe(100);
+  });
+
+  itKeepsTheTargetPaths(run, [exam]);
+});
+
+describe("words added after halfway, phase 37's learner: an exam due in 14 days, twenty words, four more added with 4 days left (phase 57, spec D6)", () => {
+  const added = listIds(21, 24);
+  const first = targetOf('exam', 14, listIds(1, 20));
+  const exam: SimTarget = { ...first, words: [...first.words, ...added.map((glossId) => ({ glossId, addedOn: dueIn(10) }))] };
+  const run = runPaths(withList(20, { words: 4, on: 10 }), 16, SESSIONS_A_DAY, [exam]);
+
+  it('owes them at once and starts them the same day', () => {
+    expect(targetOn(run, 'exam', dueIn(9), 'start')!.words).toHaveLength(20);
+    const day = targetOn(run, 'exam', dueIn(10), 'start')!;
+    for (const glossId of added) {
+      expect({ glossId, ...day.words.find((word) => word.glossId === glossId), startedOn: run.startedOn.get(`exam|${glossId}`) }).toMatchObject({
+        glossId,
+        state: 'owed',
+        toStart: true,
+        startedOn: dueIn(10),
+      });
+    }
+  });
+
+  itKeepsThePaths(run, [exam]);
+});
+
+describe("a date moved earlier, phase 37's learner: an exam of twenty words due in 14 days, moved on day 3 to day 7 (phase 57, spec D5, D6)", () => {
+  const examOn = (day: number): SimTarget[] => [targetOf('exam', day < 3 ? 14 : 7, listIds(1, 20))];
+  const run = runPaths(withList(20), 9, SESSIONS_A_DAY, examOn);
+
+  it('follows the new date from the day it moves: days left, the cap, and every word planned at once, the halfway point recomputed', () => {
+    const before = targetOn(run, 'exam', dueIn(2), 'start')!;
+    expect({ daysLeft: before.daysLeft, capHalves: before.capHalves, later: before.words.filter((word) => word.state === 'later').length }).toEqual({
+      daysLeft: 12,
+      capHalves: capHalves(12),
+      later: 10,
+    });
+    const moved = targetOn(run, 'exam', dueIn(3), 'start')!;
+    const later = moved.words.filter((word) => word.state === 'later').length;
+    expect({ daysLeft: moved.daysLeft, capHalves: moved.capHalves, state: moved.state, later }).toEqual({
+      daysLeft: 4,
+      capHalves: capHalves(4),
+      state: 'owed',
+      later: 0,
+    });
+  });
+
+  it('starts every word by the new halfway point, the day it moves', () => {
+    expect(listIds(1, 20).filter((glossId) => !(run.startedOn.get(`exam|${glossId}`)! <= dueIn(3)))).toEqual([]);
+  });
+
+  it('ends after the new date: no session on its path from the day after', () => {
+    expect(run.sessions.filter((session) => session.date > dueIn(7) && session.path !== null)).toEqual([]);
+    expect(targetOn(run, 'exam', dueIn(7), 'start')!.state).toBe('due_today');
+  });
+
+  itKeepsThePaths(run, examOn(8));
+});
