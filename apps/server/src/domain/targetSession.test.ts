@@ -49,7 +49,7 @@ type Word = {
   state?: Partial<Record<Dimension, MemoryState>>;
 };
 
-const NO_FAMILIES = { familyOf: new Map<string, number>(), waiting: new Set<string>(), introductions: new Set<string>() };
+const NO_FAMILIES = { familyOf: new Map<string, number>(), waiting: new Set<string>(), newMeanings: new Set<string>() };
 
 const savedAt = (i: number) => `2026-01-01T00:${String(i).padStart(2, '0')}:00.000000Z`;
 
@@ -138,7 +138,7 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
           speaking: true,
           steps: [step('r1', SK, 0), step('r0', WR, 1)],
           done: new Set(['done']),
-          families: { familyOf: new Map([['r0', 1], ['kin', 1]]), waiting: new Set<string>(), introductions: new Set<string>() },
+          families: { familyOf: new Map([['r0', 1], ['kin', 1]]), waiting: new Set<string>(), newMeanings: new Set<string>() },
         },
       ],
     ];
@@ -406,7 +406,7 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     const homework = [...unmet(2), ready('r0')];
     // The main path's two neediest words: one of t0's family, one of t1's key.
     const main = [known('kin', { [WR]: 0.3 }), { ...known('twin', { [WR]: 0.35 }), key: 'KEY-t1 ' }, ...mains(12)];
-    const families = { familyOf: new Map([['t0', 1], ['kin', 1]]), waiting: new Set<string>(), introductions: new Set<string>() };
+    const families = { familyOf: new Map([['t0', 1], ['kin', 1]]), waiting: new Set<string>(), newMeanings: new Set<string>() };
     const { picks } = chooseWithTargets(session([...homework, ...main], [target('hw', 'homework', 5, homework)], { families }));
     expect(picks).toHaveLength(4);
     expect(ids(picks)).toEqual(expect.arrayContaining(['t0', 't1']));
@@ -419,7 +419,7 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     // two slots of its own.
     const homework = [...unmet(2), ready('r0')];
     const main = [{ id: 'ret', memory: { [WR]: 1 } }, ...mains(12)];
-    const families = { familyOf: new Map([['t0', 1], ['ret', 1]]), waiting: new Set<string>(), introductions: new Set<string>() };
+    const families = { familyOf: new Map([['t0', 1], ['ret', 1]]), waiting: new Set<string>(), newMeanings: new Set<string>() };
     const { picks } = chooseWithTargets(
       session([...homework, ...main], [target('hw', 'homework', 5, homework)], { steps: [step('ret', WR)], families }),
     );
@@ -435,7 +435,7 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     // seven slots and the main path has three of its own to ask kin in.
     const exam = [t, ...range(3, (i) => ready(`r${i}`))];
     const words = [...exam, known('kin', { [WR]: 0.3 }), ...mains(12)];
-    const families = { familyOf: new Map([['t', 1], ['kin', 1]]), waiting: new Set(['t']), introductions: new Set<string>() };
+    const families = { familyOf: new Map([['t', 1], ['kin', 1]]), waiting: new Set(['t']), newMeanings: new Set<string>() };
     for (const daysLeft of [4, 2, 1]) {
       const { picks, split } = chooseWithTargets(session(words, [target('exam', 'exam', daysLeft, exam)], { families }));
       // t is a ladder, four slots, and the ready words three. In the run-up the exam asks for every
@@ -472,7 +472,7 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     const short = chooseWithTargets(
       session([...homework, fresh('meaning'), ...others], [target('hw', 'homework', 2, homework)], {
         newToday: DAY_NEW_CAP - 1,
-        families: { ...NO_FAMILIES, introductions: new Set(['meaning']) },
+        families: { ...NO_FAMILIES, newMeanings: new Set(['meaning']) },
       }),
     );
     expect(short.split[0]).toMatchObject({ slots: 8, picked: 2 });
@@ -579,7 +579,7 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     // first pool to list g0, asks it. New words past the cap from a listing pool are shown by
     // choosePools' "goes past the daily cap only for a session still empty".
     const words = [{ id: 'g0', memory: { [WR]: 0.95, [SP]: 0.5, [SR]: 0.1, [SK]: 0.1 } }, fresh('g1', { key: 'run' })];
-    const families = { familyOf: new Map<string, number | string>([['g0', 'f2'], ['g1', 0]]), waiting: new Set(['g0']), introductions: new Set<string>() };
+    const families = { familyOf: new Map<string, number | string>([['g0', 'f2'], ['g1', 0]]), waiting: new Set(['g0']), newMeanings: new Set<string>() };
     const targets = [target('x0', 'homework', 13, [words[0]]), target('x1', 'homework', 9, []), target('x2', 'exam', 14, words)];
     expect(owedNew(1, 1, 14)).toBe(0);
     const { picks, split } = chooseWithTargets(
@@ -700,7 +700,7 @@ describe('choosePools (ruling R-D6)', () => {
     // leave room for one new word before r; left out of the lists, d would leave room for two.
     // The second comes after the due word, in the four slots left.
     const words = [{ id: 'r', memory: { [WR]: 1 } }, known('d', { [WP]: 0.4 }), known('e', { [WP]: 0.4 }), ...range(3, (i) => fresh(`f${i}`))];
-    const families = { familyOf: new Map([['r', 1], ['d', 1]]), waiting: new Set<string>(), introductions: new Set<string>() };
+    const families = { familyOf: new Map([['r', 1], ['d', 1]]), waiting: new Set<string>(), newMeanings: new Set<string>() };
     const picks = chooseWords(input(words, { steps: [step('r', WR)], families }));
     expect(picks.map((pick) => [pick.glossId, pick.cls])).toEqual([
       ['f2', 'NEW'],
@@ -714,7 +714,7 @@ describe('choosePools (ruling R-D6)', () => {
     // A key bridges a's family to c, so the three count as one group (phase 39): the first
     // pass stops at a, and c, free as it is, waits for another session.
     const words = [{ id: 'a', memory: { [WR]: 1 } }, { ...known('b', { [WP]: 0.4 }), key: 'k2' }, { ...known('c'), key: 'k2' }];
-    const families = { familyOf: new Map([['a', 1], ['b', 1]]), waiting: new Set<string>(), introductions: new Set<string>() };
+    const families = { familyOf: new Map([['a', 1], ['b', 1]]), waiting: new Set<string>(), newMeanings: new Set<string>() };
     expect(ids(chooseWords(input(words, { steps: [step('a', WR)], families })))).toEqual(['a']);
   });
 

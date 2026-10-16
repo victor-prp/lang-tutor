@@ -44,6 +44,9 @@ export type Families = {
   state: ReadonlyMap<string, FamilyState>;
   newlyKnown: ReadonlySet<string>;
   introductions: ReadonlyMap<string, string[]>;
+  /** Phase 60 (spec D1). The current gloss of every family with a known member, practised or
+   *  not: a new meaning of a known word, which is never a ladder. */
+  newMeanings: ReadonlySet<string>;
   evidence: ReadonlyMap<string, FamilyEvidence>;
 };
 
@@ -138,6 +141,7 @@ export function glossFamilies(input: FamilyInput): Families {
     if (g.knownAt === null && knownFrom(g.speakable, rowsOf.get(g.glossId) ?? [], live)) newlyKnown.add(g.glossId);
   }
   const introductions = new Map<string, string[]>();
+  const newMeanings = new Set<string>();
   const evidence = new Map<string, FamilyEvidence>();
 
   const ordered = [...groups.values()]
@@ -174,6 +178,7 @@ export function glossFamilies(input: FamilyInput): Families {
       } else state.set(g.glossId, 'waiting');
     }
 
+    if (current && known.size >= 1) newMeanings.add(current.glossId);
     if (current && !practised.has(current.glossId) && known.size >= 1) {
       introductions.set(
         current.glossId,
@@ -182,5 +187,5 @@ export function glossFamilies(input: FamilyInput): Families {
     }
   }
 
-  return { families, familyOf, state, newlyKnown, introductions, evidence };
+  return { families, familyOf, state, newlyKnown, introductions, newMeanings, evidence };
 }
