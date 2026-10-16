@@ -504,6 +504,13 @@ export const strings = {
   targetTodayCheck: '✓',
   // The words started early today, after the check (extra-words.html).
   targetExtra: (count: number) => `${isolateLtr(`+${count}`)} נוספות`,
+  // The target screen's word groups and each word's line for today (spec D12).
+  targetGroupTitle: { owed: 'נשאר להיום', done: 'סיימת להיום', extra: 'נוספו היום', later: 'בהמשך' } as const,
+  targetWordOwed: (names: string[]) => `היום נשאר: ${names.join(', ')}`,
+  targetWordDone: 'היום ✓',
+  targetWordExtra: 'בונוס ✓',
+  targetWordStartsIn: (days: number) =>
+    days === 1 ? 'נתחיל מחר' : `נתחיל בעוד ${isolateLtr(String(days))} ימים`,
   targetReadinessPct: (kind: TargetKind, pct: number) => `מוכנות ${TARGET_FOR[kind]}: ${isolateLtr(`${pct}%`)}`,
   practiceNow: 'לתרגל עכשיו',
   practiceMore: 'לתרגל עוד',

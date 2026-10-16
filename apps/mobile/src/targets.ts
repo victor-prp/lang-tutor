@@ -1,4 +1,4 @@
-import type { Target, TargetKind, TargetList, TargetSummary } from '@lang-tutor/core/api';
+import type { Target, TargetKind, TargetList, TargetSummary, TargetWord } from '@lang-tutor/core/api';
 
 import { ApiError } from '@/api/client';
 import { strings, type Countdown } from '@/strings';
@@ -253,4 +253,36 @@ export type StoredTargets = { enrollmentId: string; list: TargetList };
  *  discard the read that effect started. */
 export function targetsFor(stored: StoredTargets | null, activeId: string | undefined): TargetList | null {
   return stored !== null && stored.enrollmentId === activeId ? stored.list : null;
+}
+
+/** Phase 57 (spec D12). The target screen's groups, in the order they show. */
+export type WordGroup = { today: TargetWord['today']; words: TargetWord[] };
+
+const GROUP_ORDER: TargetWord['today'][] = ['owed', 'done', 'extra', 'later'];
+
+/** The words by what today holds for them, an empty group left out, each keeping the
+ *  order the server sent. */
+export function wordGroups(words: readonly TargetWord[]): WordGroup[] {
+  return GROUP_ORDER.map((today) => ({ today, words: words.filter((word) => word.today === today) })).filter(
+    (group) => group.words.length > 0,
+  );
+}
+
+export function groupTitle(today: TargetWord['today']): string {
+  return strings.targetGroupTitle[today];
+}
+
+/** A word's line for today under its row: what it still owes, that it is done, a bonus,
+ *  or when it starts. Null when there is nothing to say (a later word with no start). */
+export function wordTodayLine(word: TargetWord): string | null {
+  switch (word.today) {
+    case 'owed':
+      return strings.targetWordOwed(word.owed.map((dimension) => strings.dimensionName(dimension)));
+    case 'done':
+      return strings.targetWordDone;
+    case 'extra':
+      return strings.targetWordExtra;
+    case 'later':
+      return word.starts_in === null ? null : strings.targetWordStartsIn(word.starts_in);
+  }
 }

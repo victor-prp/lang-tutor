@@ -86,7 +86,7 @@ function Note({ id, note }: { id: string; note: NonNullable<TargetCardState['not
 
 /** Today's bar: the planned words done (green once all are), then the extra words in a
  *  lighter green past the plan. */
-function TodayBar({ today }: { today: TargetSummary['today'] }) {
+export function TodayBar({ today }: { today: TargetSummary['today'] }) {
   const shares = todayBar(today);
   return (
     <Bar
@@ -100,7 +100,7 @@ function TodayBar({ today }: { today: TargetSummary['today'] }) {
 
 /** A bar of coloured parts from the start of the line (the right, in RTL), each a share
  *  of the whole; the rest of the track is left empty. */
-function Bar({ parts }: { parts: { share: number; color: string }[] }) {
+export function Bar({ parts }: { parts: { share: number; color: string }[] }) {
   const clamped = parts.map((part) => ({ ...part, share: Math.max(0, Math.min(1, part.share)) }));
   const rest = Math.max(0, 1 - clamped.reduce((sum, part) => sum + part.share, 0));
   return (

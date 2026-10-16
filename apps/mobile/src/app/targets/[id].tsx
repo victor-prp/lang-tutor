@@ -1,9 +1,10 @@
-import type { Target } from '@lang-tutor/core/api';
+import type { Target, TargetWord } from '@lang-tutor/core/api';
 import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Bar, TodayBar } from '@/components/TargetCard';
 import { confirm } from '@/confirm';
 import { useApi } from '@/hooks/useApi';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -11,12 +12,15 @@ import { strings } from '@/strings';
 import {
   actionFailureMessage,
   dateHasCome,
-  daysLeftLabel,
   dueDayLabel,
+  groupTitle,
+  readinessColor,
   readinessName,
-  readyLabel,
+  targetCardState,
   targetTitle,
   withoutWord,
+  wordGroups,
+  wordTodayLine,
 } from '@/targets';
 import type { WizardMode } from '@/targetWizard';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
@@ -39,6 +43,14 @@ export default function TargetScreen() {
   // taps in one frame), the state draws them disabled.
   const removing = useRef(new Set<string>());
   const [removals, setRemovals] = useState<ReadonlySet<string>>(new Set());
+  // Words whose skills are open: several at once, each toggled by tapping its row.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (glossId: string) =>
+    setOpened((current) => {
+      const next = new Set(current);
+      if (!next.delete(glossId)) next.add(glossId);
+      return next;
+    });
   const ending = useRef(false);
   const [endBusy, setEndBusy] = useState(false);
   // Reads are numbered as they start: an answer is shown unless a newer one already has
@@ -154,17 +166,7 @@ export default function TargetScreen() {
         )
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
-          <View style={styles.summary}>
-            <Text testID="target-due" style={styles.due}>
-              {dueDayLabel(target.due_on)}
-            </Text>
-            <Text testID="target-days-left" style={styles.when}>
-              {daysLeftLabel(target.days_left)}
-            </Text>
-            <Text testID="target-ready" style={styles.ready}>
-              {readyLabel(target.ready_count, target.word_count)}
-            </Text>
-          </View>
+          <Summary target={target} />
 
           {open ? (
             <View style={styles.actions}>
@@ -206,33 +208,57 @@ export default function TargetScreen() {
               {strings.targetEmpty}
             </Text>
           ) : null}
-          {target.words.map((word) => {
-            const busy = removals.has(word.gloss_id);
-            return (
-              <View key={word.gloss_id} testID={`target-word-${word.gloss_id}`} style={styles.word}>
-                <View style={styles.wordText}>
-                  <Text style={[styles.form, { writingDirection: wordDirection }]}>{word.form}</Text>
-                  <Text style={[styles.meaning, { writingDirection: meaningDirection }]}>{word.meaning}</Text>
-                </View>
-                <Text testID="target-word-readiness" style={[styles.readiness, word.readiness_pct === 100 ? READY_STYLE : NOT_READY_STYLE]}>
-                  {readinessName(word.readiness_pct)}
-                </Text>
-                {open ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: busy }}
-                    disabled={busy}
-                    hitSlop={8}
-                    testID={`target-word-remove-${word.gloss_id}`}
-                    onPress={() => void remove(word.gloss_id)}
-                    style={busy && styles.disabled}
-                  >
-                    <Text style={styles.remove}>{strings.targetWordRemove}</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            );
-          })}
+          {wordGroups(target.words).map((group) => (
+            <View key={group.today} testID={`target-group-${group.today}`} style={styles.group}>
+              <Text style={styles.groupTitle}>{groupTitle(group.today)}</Text>
+              {group.words.map((word) => {
+                const busy = removals.has(word.gloss_id);
+                const line = group.today === 'owed' || !dateHasCome(target) ? wordTodayLine(word) : null;
+                const showing = opened.has(word.gloss_id);
+                return (
+                  <View key={word.gloss_id} style={styles.wordBox}>
+                    <View testID={`target-word-${word.gloss_id}`} style={styles.word}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{ expanded: showing }}
+                        testID={`target-word-toggle-${word.gloss_id}`}
+                        onPress={() => toggle(word.gloss_id)}
+                        style={styles.wordText}
+                      >
+                        <Text style={[styles.form, { writingDirection: wordDirection }]}>{word.form}</Text>
+                        <Text style={[styles.meaning, { writingDirection: meaningDirection }]}>{word.meaning}</Text>
+                        {line ? (
+                          <Text testID={`target-word-today-${word.gloss_id}`} style={styles.todayLine}>
+                            {line}
+                          </Text>
+                        ) : null}
+                      </Pressable>
+                      <Text
+                        testID="target-word-readiness"
+                        style={[styles.readiness, { color: readinessColor(word.readiness_pct) }]}
+                      >
+                        {readinessName(word.readiness_pct)}
+                      </Text>
+                      {open ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityState={{ disabled: busy }}
+                          disabled={busy}
+                          hitSlop={8}
+                          testID={`target-word-remove-${word.gloss_id}`}
+                          onPress={() => void remove(word.gloss_id)}
+                          style={busy && styles.disabled}
+                        >
+                          <Text style={styles.remove}>{strings.targetWordRemove}</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                    {showing ? <Skills word={word} /> : null}
+                  </View>
+                );
+              })}
+            </View>
+          ))}
 
           {open ? (
             <Pressable
@@ -252,7 +278,81 @@ export default function TargetScreen() {
   );
 }
 
+/** The header, as home's card draws a target: the countdown, the date, today's line and
+ *  bar, and the readiness line with its bar. */
+function Summary({ target }: { target: Target }) {
+  const card = targetCardState(target);
+  return (
+    <View style={styles.summary}>
+      <Text testID="target-countdown" style={styles.countdown}>
+        {card.title.before}
+        {card.title.number !== null ? <Text style={styles.countdownNumber}>{card.title.number}</Text> : null}
+        {card.title.after}
+      </Text>
+      <Text testID="target-due" style={styles.due}>
+        {dueDayLabel(target.due_on)}
+      </Text>
+      {card.today ? (
+        <>
+          <Text testID="target-today" style={styles.when}>
+            {card.today.text}
+            {card.today.check ? ` ${strings.targetTodayCheck}` : ''}
+            {card.today.extra ? <Text style={styles.extra}>{` ${card.today.extra}`}</Text> : null}
+          </Text>
+          <TodayBar today={target.today} />
+        </>
+      ) : null}
+      <Text testID="target-readiness" style={styles.when}>
+        {card.readiness}
+      </Text>
+      <Bar parts={[{ share: target.readiness_pct / 100, color: readinessColor(target.readiness_pct) }]} />
+    </View>
+  );
+}
+
+/** A tapped word's live skills (option B): a bar out of 10 filled to the value, a thin
+ *  line at the cap, green once the value reaches it, and the skill's name. */
+function Skills({ word }: { word: TargetWord }) {
+  return (
+    <View testID={`target-word-skills-${word.gloss_id}`} style={styles.skills}>
+      {word.skills.map((skill) => (
+        <View key={skill.dimension} style={styles.skill}>
+          <Text style={styles.skillName}>{strings.dimensionName(skill.dimension)}</Text>
+          <View style={styles.skillTrack}>
+            <View
+              style={{
+                width: `${(skill.value / 10) * 100}%`,
+                backgroundColor: skill.value >= skill.cap ? colors.correct : colors.primary,
+              }}
+            />
+            <View style={[styles.capLine, { start: `${(skill.cap / 10) * 100}%` }]} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  countdown: { fontSize: fontSizes.lg, lineHeight: lineHeights.xl, fontWeight: '700', color: colors.text, writingDirection: 'rtl' },
+  countdownNumber: { fontSize: fontSizes.xl, fontWeight: '800', color: colors.primary },
+  extra: { color: colors.correct, fontWeight: '800' },
+  group: { gap: spacing.sm },
+  groupTitle: { fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '700', color: colors.muted, writingDirection: 'rtl', marginTop: spacing.sm },
+  wordBox: { gap: spacing.xs },
+  todayLine: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, writingDirection: 'rtl' },
+  skills: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  skill: { gap: spacing.xs },
+  skillName: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.text, writingDirection: 'rtl' },
+  skillTrack: { flexDirection: 'row', height: 8, borderRadius: radii.pill, backgroundColor: colors.border, overflow: 'hidden' },
+  capLine: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: colors.text },
   screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.sm },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: fontSizes.lg, fontWeight: '700', color: colors.text, writingDirection: 'rtl' },
@@ -312,6 +412,4 @@ const styles = StyleSheet.create({
   endLabel: { color: colors.wrong, fontSize: fontSizes.md, fontWeight: '700' },
 });
 
-// A word at 100% shows in the colour of a right answer, the rest muted.
-const NOT_READY_STYLE = { color: colors.muted, backgroundColor: colors.background };
-const READY_STYLE = { color: colors.correct, backgroundColor: colors.correctSurface };
+

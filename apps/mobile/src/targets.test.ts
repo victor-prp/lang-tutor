@@ -1,5 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
-import type { Target, TargetList, TargetSummary } from '@lang-tutor/core/api';
+import type { Target, TargetList, TargetSummary, TargetWord } from '@lang-tutor/core/api';
 
 import { ApiError } from './api/client';
 import {
@@ -22,6 +22,9 @@ import {
   todayBar,
   withoutWord,
   wizardTitle,
+  wordGroups,
+  wordTodayLine,
+  groupTitle,
   type StoredTargets,
 } from './targets';
 
@@ -469,5 +472,52 @@ describe('shouldPollTargets', () => {
     expect(shouldPollTargets(list([ready, null]))).toBe(false);
     expect(shouldPollTargets(list([]))).toBe(false);
     expect(shouldPollTargets(null)).toBe(false);
+  });
+});
+
+describe('wordGroups', () => {
+  const word = (gloss_id: string, today: TargetWord['today'], over: Partial<TargetWord> = {}): TargetWord => ({
+    gloss_id,
+    form: gloss_id,
+    meaning: 'm',
+    readiness_pct: 0,
+    today,
+    owed: [],
+    starts_in: null,
+    skills: [],
+    ...over,
+  });
+
+  it('groups by today in the order owed, done, extra, later, keeping the words order', () => {
+    const groups = wordGroups([
+      word('a', 'later'),
+      word('b', 'owed'),
+      word('c', 'done'),
+      word('d', 'owed'),
+      word('e', 'extra'),
+    ]);
+    expect(groups.map((group) => group.today)).toEqual(['owed', 'done', 'extra', 'later']);
+    expect(groups[0]?.words.map((w) => w.gloss_id)).toEqual(['b', 'd']);
+  });
+
+  it('leaves out an empty group', () => {
+    expect(wordGroups([word('a', 'done')]).map((group) => group.today)).toEqual(['done']);
+    expect(wordGroups([])).toEqual([]);
+  });
+
+  it('titles the groups', () => {
+    expect(groupTitle('owed')).toBe('נשאר להיום');
+    expect(groupTitle('done')).toBe('סיימת להיום');
+    expect(groupTitle('extra')).toBe('נוספו היום');
+    expect(groupTitle('later')).toBe('בהמשך');
+  });
+
+  it("words a row's line", () => {
+    expect(wordTodayLine(word('a', 'owed', { owed: ['spelling', 'written_productive'] }))).toBe('היום נשאר: איות, כתיבה');
+    expect(wordTodayLine(word('a', 'done'))).toBe('היום ✓');
+    expect(wordTodayLine(word('a', 'extra'))).toBe('בונוס ✓');
+    expect(wordTodayLine(word('a', 'later', { starts_in: 1 }))).toBe('נתחיל מחר');
+    expect(wordTodayLine(word('a', 'later', { starts_in: 3 }))).toBe(`נתחיל בעוד ${ltr('3')} ימים`);
+    expect(wordTodayLine(word('a', 'later'))).toBeNull();
   });
 });
