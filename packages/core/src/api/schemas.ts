@@ -619,6 +619,8 @@ export const UserSchema = z.object({
   // Phase 52 (spec D1). The IANA zone the server holds for the learner, UTC until the app
   // reports one. It lets the app skip the report when nothing changed.
   time_zone: z.string(),
+  // Phase 61 (spec D1). A tester may start a session of one word's question types.
+  tester: z.boolean(),
 });
 
 export const CreateUserRequestSchema = z.object({

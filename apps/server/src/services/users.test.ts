@@ -29,7 +29,7 @@ function build() {
 describe('createProfile', () => {
   it("creates the profile under the signed-in user's own id", async () => {
     const { service } = build();
-    expect(await service.createProfile('u_dana', REQUEST)).toEqual({ id: 'u_dana', ...REQUEST, time_zone: 'UTC' });
+    expect(await service.createProfile('u_dana', REQUEST)).toEqual({ id: 'u_dana', ...REQUEST, time_zone: 'UTC', tester: false });
   });
 
   it('logs the new profile once the write has resolved', async () => {

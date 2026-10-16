@@ -11,6 +11,7 @@ import { dropLaneDatabases, findOrphans, listLaneDatabases, liveWorktreesOf } fr
 import { requestLemmaRenders, requestLemmaRendersOnStart } from './lemmaRenders';
 import { runMigrations } from './migrate';
 import { createAuthRepo } from '../repo/auth';
+import { createUserRepo } from '../repo/users';
 import { createBots } from './bots';
 import { recomputeProgress } from './progressRecompute';
 import { reseedContent } from './reseed';
@@ -271,6 +272,25 @@ async function main(): Promise<void> {
       } as const;
       (outcome === 'claimed' ? console.log : console.error)(messages[outcome]);
       if (outcome !== 'claimed') process.exitCode = 1;
+      return;
+    }
+
+    // Phase 61 (spec D1). The only writer of the tester flag. Run by Victor, against
+    // production with DATABASE_URL set to it; idempotent.
+    if (process.argv.includes('--set-tester')) {
+      const email = argValue('--email');
+      if (!email) {
+        console.error('usage: npm run db:tester -- --email <address> [--off]');
+        process.exitCode = 1;
+        return;
+      }
+      const on = !process.argv.includes('--off');
+      const outcome = await db.transaction((tx) => createUserRepo(tx).setTester(email, on));
+      if (outcome === 'set') console.log(`${email.trim().toLowerCase()} is ${on ? 'now a tester' : 'no longer a tester'}`);
+      else {
+        console.error(`no profile signs in with ${email.trim().toLowerCase()}; nothing changed`);
+        process.exitCode = 1;
+      }
       return;
     }
 

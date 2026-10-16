@@ -288,6 +288,13 @@
       "when": 1792111576644,
       "tag": "0040_intro_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792183323994,
+      "tag": "0041_tester_and_question_type_sessions",
+      "breakpoints": true
     }
   ]
 }

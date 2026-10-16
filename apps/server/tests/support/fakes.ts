@@ -334,9 +334,13 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
         age: input.age,
         native_language: input.native_language,
         time_zone: 'UTC', // the column's default, until the app reports one
+        tester: false, // the column's default, until db:tester sets it
       };
       rows.push(user);
       return user;
+    },
+    setTester: async () => {
+      throw new Error('the in-memory user repo does not keep emails');
     },
     findDayContext: async (userId) => {
       const timeZone = zoneOf(userId);

@@ -140,7 +140,7 @@ describe('the app as production assembles it', () => {
       const created = await app.request('/api/users', json(profile, as));
       expect(created.status).toBe(201);
       // Phase 52: a new profile starts on UTC until the app reports its zone.
-      const stored = { id: fresh.userId, ...profile, time_zone: 'UTC' };
+      const stored = { id: fresh.userId, ...profile, time_zone: 'UTC', tester: false };
       expect(await created.json()).toEqual(stored);
 
       const after = await app.request('/api/me', { headers: as });
