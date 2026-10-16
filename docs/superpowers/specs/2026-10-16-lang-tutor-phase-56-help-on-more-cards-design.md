@@ -2,7 +2,8 @@
 
 - **Status:** Victor said "make decisions and continue till PR" on 2026-10-16, after reading the
   one-pager: the design is self-approved (CLAUDE.md, *Continue till PR*). Implemented inline on branch
-  `phase-56-help-on-more-cards`.
+  `phase-56-help-on-more-cards`: six tasks and a final review, which added R12 (D3, D5 amended).
+  Every ruling is at the end.
 - **Date:** 2026-10-16
 - **Source:** `drafts/2026-10-16-help-on-more-cards-one-pager.md` (main checkout), its decisions 1–15.
 - **Builds on:** phase 55 (help on tiles and typed, the retype), phase 41 (cloze typed's fit check),
@@ -92,7 +93,7 @@ other card is ignored and stored null, as today.
 
 `helped?: boolean` joins `JudgedAnswerRequestSchema` (`/sessions/{id}/judged-answer`) and
 `SpeechAnswerRequestSchema` (`/sessions/{id}/speech`); `NextStepRequest`'s text answer has it since
-phase 55, and its comment names the new cards. Optional request fields: `API_LEVEL` stays 4 (ADR
+phase 55, and its comment names the new cards. *Amended by R12:* its pass answer has it too. Optional request fields: `API_LEVEL` stays 4 (ADR
 0012); the app ships after the server.
 
 The responses keep reporting the judgement of what was said or typed, not the grade stored:
@@ -124,7 +125,7 @@ speak now" turns a say the translation from spoken to typed (one-pager decision 
 stay shown, and help goes on from there.
 
 Every answer the hook sends to a card that takes help carries `helped`, on every route (next-step,
-judged, speech), first try or second: `true` once help was pressed on the card, `false` otherwise.
+judged, speech), first try or second, a spoken "show the answer" or skip included (R12): `true` once help was pressed on the card, `false` otherwise.
 The tiles card still says it itself (a wrong tile helps, phase 55); its own help stays its own.
 
 ### D6. The app: the views
@@ -213,3 +214,71 @@ group by q.type order by q.type;
 
 The first answer counts, never a second try's give-up. `helped` is null on every answer from before
 this phase, so the before-count shows 0 helped.
+
+---
+
+## Rulings
+
+Made during the run under *Continue till PR*; each says what it costs if wrong.
+
+**The decisions as built**
+
+- **R1. Done means 2 counts an answer with no text as a give-up or a skip** (§3; amends the
+  one-pager's decision 15 and its query). A typed "show the answer" is stored `wrong` with an empty
+  text, not `gave_up`, so counting `gave_up` and `skipped` would miss every typed give-up; a helped
+  spoken answer is `gave_up` with its transcript, so counting empty texts also leaves it out. *If
+  wrong:* the before/after comparison counts a slightly different thing from what Victor saw; the
+  query is one line.
+- **R2. A helped spoken answer replays as `understood`** (D4). The replay finds it by its shape, the
+  one `gave_up` with a transcript, rather than reading `helped`, which `loadSession` does not load.
+  An `alternative` said with help replays `understood` too. *If wrong:* both show **נכון, עם עזרה**,
+  so a re-sent clip after a lost response only drops the line naming what was heard; the grade is
+  the same.
+- **R3. A helped judged answer replays its stored `wrong`** (D4). The judge's own verdict is not
+  stored, so a lost response re-sent opens a retype for a text that was right. *If wrong:* one extra
+  retype on a rare network retry; the grade is the same.
+- **R4. Every punctuation mark joins the letter after it** (D1). `typedHelp`'s join set is
+  `[\s\p{P}ʼ]`: the one-pager asked for punctuation; phase 55 joined spaces and apostrophes only.
+  *If wrong:* a hyphenated or punctuated form reveals two characters on one press.
+- **R5. The retype on typed meaning compares by `normaliseHebrew`** (D7), not by `judgeTyped`,
+  whose leading-article rule is Italian and English. The meaning's trailing `!`, niqqud and spacing
+  do not count. *If wrong:* a retype typed with a different mark is accepted; it is a retype, never
+  graded.
+
+**The app**
+
+- **R6. The help count lives in the session state** (D5): `QuizState.help`, 0 on a new card, kept
+  when `applyQueued` brings the same card back for its second try; `TypedAnswerView` no longer
+  counts. That is what lets a say the translation keep its letters across "can't speak now", where
+  the view changes. The tiles card keeps its own count. *If wrong:* none known; reverting is a prop.
+- **R7. `opensRetype` takes the card's answer, not its text** (D7), so a typed meaning opens on its
+  judged verdict; phase 55's tests pass `{ text }`. *If wrong:* one signature.
+- **R8. A helped judged answer opens no hold** (`mayOpen`; not in the plan). It is stored `wrong`,
+  so a hold its response carries was met from an earlier answer, and the answer goes again as that
+  card's second try, as phase 34 does for a "show the answer". *If wrong:* such a race would show
+  the helped banner over a held card.
+- **R9. A planned unit test was dropped**: "help kept through can't speak now" could only spread an
+  object in a pure test, and passed with no code; the e2e test covers it. *If wrong:* none.
+
+**Server and tests**
+
+- **R10. Answers from an older app to the five cards store `helped = null`**, as phase 55's do on
+  tiles and typed: the unit expectations for the judged, speech and fit-check paths gained
+  `helped: null`. *If wrong:* none; it is the column's meaning.
+- **R11. The e2e help tests extend the specs that reach each card** rather than adding a spec with
+  its own setup: the dictation in `listening-variety`, the meaning card in `meaning-recall`, both
+  sentence cards in a new `sentence-cards` test, say the translation in `speaking`'s first session
+  (spoken) and a new carry-over test. *If wrong:* those tests now play the card helped. An unhelped
+  dictation answered right is still played by `answer-language.spec.ts`; an unhelped spoken say the
+  translation is no longer played to its banner by any e2e test, only by the unit and integration
+  tests.
+
+**The final review**
+
+- **R12. A spoken card given up after help says it was helped** (amends D3, D5; final review). The
+  pass answer of `NextStepRequest` and core's `AnswerInput` gained `helped?`, and the app sends it on
+  "show the answer" and on the skip after an unheard clip. Without it, pressing help on say the
+  translation and then giving up — Victor's case — stored `helped = null`, so §3 never counted that
+  help. A pass is a give-up or a skip whatever `helped` says; nothing reads it but §3. *If wrong:*
+  the `helped` column counts help on cards that were given up anyway, which §3's give-up column
+  already counts.
