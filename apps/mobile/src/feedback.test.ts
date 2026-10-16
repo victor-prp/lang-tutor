@@ -463,6 +463,15 @@ describe('a helped answer (phase 55 D6, D7)', () => {
     expect(feedbackFor(typed, { text: 'vetrata', helped: true }, { answer: 'vetri', wording: 'word' })).toMatchObject({ tone: 'other', title: strings.feedbackStillOther });
   });
 
+  // Review M1. Core records a helped second try `wrong`, a near miss included, and no
+  // retype follows a second try: its banner is the helped one, not "nearly". A first
+  // try's near miss opens the retype, which shows that answer's own title.
+  it('a helped near miss is helped on a second try, and keeps its title for the retype on a first', () => {
+    expect(feedbackFor(typed, { text: 'finestar', helped: true }, { answer: 'vetrata', wording: 'word' })).toEqual(HELPED);
+    expect(feedbackFor(typed, { text: 'finestar', helped: false }, { answer: 'vetrata', wording: 'word' })).toMatchObject({ tone: 'correct', verdict: 'near_miss' });
+    expect(feedbackFor(typed, { text: 'finestar', helped: true }, null)).toEqual({ tone: 'correct', title: 'כמעט! כך כותבים:', line: 'finestra', verdict: 'near_miss' });
+  });
+
   it('a retype that is open leaves the first answer’s banner; one that ended tells how', () => {
     expect(feedbackFor(typed, { text: 'finestar', helped: false }, null, { attempt: 1, showing: true, outcome: null })).toMatchObject({
       title: 'כמעט! כך כותבים:',

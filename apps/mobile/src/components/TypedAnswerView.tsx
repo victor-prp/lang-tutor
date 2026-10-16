@@ -112,7 +112,10 @@ export function TypedAnswerView({
   // Phase 39 (spec D8): the last send was in the wrong alphabet, or one word
   // for a whole sentence; the text stays.
   const [refused, setRefused] = useState<'wrong_script' | 'word_only' | null>(null);
-  // Phase 55 (spec D7): how many characters help has revealed on this card.
+  // Phase 55 (spec D7): how many characters help has revealed on this card. It
+  // counts for the whole card, its second try included (spec D6); a typed
+  // translation, the one card with help, is keyed by question id, so a new card
+  // starts at none on its first render (review M2).
   const [presses, setPresses] = useState(0);
   const input = useRef<TextInput>(null);
   // Phase 55 (spec D7): the retype open, which unlocks the answered card for
@@ -127,11 +130,6 @@ export function TypedAnswerView({
     setText(retryText(question.type, retry));
     setRefused(null);
   }, [question.id, question.type, retry, attempt]);
-
-  // Help counts for the whole card, its second try included (spec D6).
-  useEffect(() => {
-    setPresses(0);
-  }, [question.id]);
 
   // The keyboard went down with the first answer: the second try brings it
   // back, as does each attempt of a retype.

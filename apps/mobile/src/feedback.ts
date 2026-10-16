@@ -39,16 +39,17 @@ export type CardAnswer =
  *
  * Phase 55 (spec D6, D7). The text is told by its own verdict, without `helped`:
  * the server records a helped tiles or typed answer `wrong`, and its banner is
- * "right, with help" when the text was the word or another accepted one, with
- * no line and its input not coloured; a helped wrong text is a wrong one. A
- * retype that has ended tells how it ended, whatever the first answer was; one
- * still open leaves the first answer's banner, whose title the retype shows.
+ * "right, with help" when the text was the word or another accepted one (on a
+ * second try, nearly the word too), with no line and its input not coloured; a
+ * helped wrong text is a wrong one. A retype that has ended tells how it ended,
+ * whatever the first answer was; one still open leaves the first answer's
+ * banner, whose title the retype shows.
  */
 export function feedbackFor(question: Question, answer: CardAnswer, retry: PendingRetry | null, retype: Retype | null = null): Feedback {
   if (retype?.outcome === 'right') return { tone: 'correct', title: strings.feedbackCorrect, line: null, verdict: 'exact' };
   if (retype?.outcome === 'failed') return { tone: 'wrong', title: strings.feedbackWrong, line: rightAnswer(question), verdict: 'wrong' };
   const feedback = answerFeedback(question, unhelped(answer));
-  if (retry === null) return helpedOr(answer, feedback);
+  if (retry === null) return helpedOr(answer, feedback, false);
   if (feedback.tone === 'wrong' && gaveUp(answer)) return alternativeFeedback(question);
   // Phase 45 (spec D1, review I1). Another accepted word again, or the first answer
   // sent again: the second try asked for the practised word, so it is not "right";
@@ -56,7 +57,7 @@ export function feedbackFor(question: Question, answer: CardAnswer, retry: Pendi
   if (feedback.verdict === 'alternative' || (feedback.tone === 'wrong' && repeats(question, answer, retry))) {
     return stillOtherFeedback(question);
   }
-  return helpedOr(answer, feedback);
+  return helpedOr(answer, feedback, true);
 }
 
 /** Phase 55 (spec D6). The answer as its text alone: `helped` changes how it
@@ -69,9 +70,13 @@ function helped(answer: CardAnswer): boolean {
   return 'helped' in answer && answer.helped === true;
 }
 
-/** Phase 55 (spec D7). A right text found with help: neither green nor red. */
-function helpedOr(answer: CardAnswer, feedback: Feedback): Feedback {
-  if (!helped(answer) || (feedback.verdict !== 'exact' && feedback.verdict !== 'alternative')) return feedback;
+/** Phase 55 (spec D7). A right text found with help: neither green nor red.
+ *  On a second try a near miss is one too (review M1): core records it `wrong`,
+ *  and no retype follows a second try. A first try's near miss keeps its banner,
+ *  whose title its retype shows. */
+function helpedOr(answer: CardAnswer, feedback: Feedback, secondTry: boolean): Feedback {
+  const right = feedback.verdict === 'exact' || feedback.verdict === 'alternative' || (secondTry && feedback.verdict === 'near_miss');
+  if (!helped(answer) || !right) return feedback;
   return { tone: 'other', title: strings.feedbackHelped, line: null, verdict: null };
 }
 

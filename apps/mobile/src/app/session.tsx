@@ -151,9 +151,11 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       // Phase 34 (spec D9): another accepted word waits for the server to hold
       // the card, so it checks and fails as a judged card does. Phase 55 (spec
       // D7): help, said with the answer, and the retype after a wrong or nearly
-      // right first answer, under that answer's title.
+      // right first answer, under that answer's title. Keyed by question id
+      // (review M2), as the tiles card is: a new card starts with no help shown.
       return (
         <TypedAnswerView
+          key={question.id}
           question={question}
           instruction={strings.questionInstructionTyped(language)}
           answerLanguage={answerLanguage}
