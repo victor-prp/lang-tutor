@@ -64,7 +64,9 @@ reproduces (`file.ts` never reopens), and triage and calibration read open issue
 (`targets.ts`). Real bugs among them (`triage:real-bug` #55, #61, #77, #104) would stay parked for
 good. So the close adds the label `paused-2026-10`, which is not in `SETTLED`, and the restart
 reopens everything carrying it, before the first night. The reopen command is in the
-`nightly-qa.yml` header, beside the `schedule:` lines it goes with. *(my call; the label came out
+`nightly-qa.yml` header, beside the `schedule:` lines it goes with. The night's triage report
+(`nightly-qa-triage-report`) is closed without the label: the next night's report supersedes it,
+so there is nothing to reopen. *(my call; the label came out
 of the final review)*
 
 The close waits for the merge. Until then the scheduled night still runs. It would comment
