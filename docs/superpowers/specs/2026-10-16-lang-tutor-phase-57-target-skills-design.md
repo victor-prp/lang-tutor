@@ -1,8 +1,9 @@
 # Phase 57 — Target skills and a path per target
 
-- **Status:** draft for Victor's review (brainstorming, 2026-10-16), after a builder check whose five
-  questions are settled in the text (D5's next-day check, D6's known words and early starts, D10's
-  last review, §7's marks). Nothing is built.
+- **Status:** Victor said "go till PR, subagents" on 2026-10-16 after approving the extra words; the
+  rest of the design is self-approved (CLAUDE.md, *Continue till PR*). Built on branch
+  `phase-57-target-skills` by subagents: ten tasks, two merges of master (phases 58 and 58b), a final
+  review and its fix wave. Every ruling of the run is at the end (R1–R41).
 - **Date:** 2026-10-16
 - **Source:** `drafts/2026-10-16-target-skills-one-pager.md` (main checkout, gitignored) and its
   evidence folder `drafts/2026-10-16-target-skills-evidence/`; the brainstorming chat of 2026-10-16
@@ -428,3 +429,108 @@ Table and column names, the migration and backfill (existing targets start from 
 the recompute), the event log's shape, wire field names, how the stock job keys paths, Hebrew wording
 beyond the strings above, the tuned cap table, and how the target picker shares code with
 `chooseWords`.
+
+---
+
+## Rulings
+
+Made while executing the plan, each with what it costs if wrong. The ledger of the run kept them
+under task ids (in brackets).
+
+**Changes to the approved design**
+
+- **R1. The next-day check only checks** (amends D5's strip, where D-19 was drawn as a cap rise) [builder
+  check]. It owes one right answer per live skill; readiness does not move for it, so the cap stays one
+  number per target. Cost: the bar does not move on a check day.
+- **R2. Hardest cards in practice more go to the word with the fewest half-points in its hard skills**
+  (amends D7's "asked longest ago"), and a word the session in flight asks goes last [T3-b, T3-g]: no
+  last-asked stamp exists. Cost: order only.
+- **R3. A known word starts with a recall card even at 0** [T3-a] (D6 over D7's "0 → recognition").
+  Cost: a forgotten known word gets a hard first card.
+- **R4. When the picker owes nothing because the session in flight covers it, the stock is a practice-more
+  one; such a stock is checked again even the same day, and the app always creates before entering a
+  target's unstarted stock** [T3-m, F-C1-b…d]. Final review C1: without it a practice-more stock was played
+  while work was owed. Cost: a home tap on a target waits for create's answer.
+- **R5. Ending a target skips its started session** [F-I1-a…d], early or by date, so its answers count once
+  and it stops counting as today's open session. Cost: a half-played last review is closed for the learner.
+- **R6. My words counts only words in no active target** [T5-q, T6-f]; when every word is in a target it
+  says "כל המילים שלך כבר בהכנה לבוחן." (or for homework) with no button [F-M2-a].
+- **R7. Readiness percentages round down** [T6-a]: 100% only when every live skill is at 10. A word at 100%
+  reads "מוכנה"; the card's and header's line keep "100%" [F-T9-a].
+- **R8. From the due date on, the target screen shows one list with no today lines** [F-M1-a] (D10: nothing
+  owed).
+- **R9. A due-today target already at 100% is drawn outlined and My words takes the filled button and the
+  reminder** [T8-a, T8-l]; with two due today only the first is filled [T8-m].
+- **R10. An empty target has no button and is never first** [F-M3-a].
+- **R11. Target readiness 100% on the eve gates learners who practise until done** (the 2026-10-16 replay:
+  14 sessions; the 3-day exam); the fixed six-sessions-a-day 14-day scenarios report it (85–86%) [T7-g].
+  Victor's steps make the last two days of a 20-word list need about eight sessions each.
+- **R12. The FSRS marks gate the serial simulation, as on master** (exam 0.60 ≥ 0.57, homework 0.92 ≥
+  0.85). With the stock lag modelled (closest to the app; master never modelled it) they are printed,
+  not gated: exam 0.61 before R4's fix and 0.56 after (mark 0.57), homework 0.81 before and 0.83 after
+  (mark 0.85) [F-C1-e, F-C1-f]. R4 stays (anti-goal 1 binds); Victor decides whether to accept, tune
+  D5's table, or gate the lagged measure.
+
+**Settled during the build**
+
+- **R13. Values and caps are half-points** (0–20) in storage; the wire shows points [T1-c, T6].
+- **R14. Only changed skills get a row** [T1-a]; a missing row is 0 [T1-b].
+- **R15. Target picks** [T3-c…T3-i]: "furthest below" is the sum of gaps; owed words take picks in two
+  rounds; next-day checks take up to two recall cards covering the most checks; in-flight credit is one
+  tally per word and skill; the hardest card's skill is the hard skill with the fewest half-points; the
+  last review starts unstarted words too.
+- **R16. Target sessions plan with the target flag** [T3-l, T5-p]: exempt from MAX_PER_TYPE and from the
+  one-word speaking rule. **Speaking**: at most 3 say-translation picks; a ladder's read aloud is not
+  counted [T3-o]. **Intro cards** are not in-flight credit [T3-j]. **Early ladders** respect DAY_NEW_CAP
+  [T3-n, T5-l].
+- **R17. The session-end write** [T4-a…T4-e]: targets as they stood at the session's last answer (as-of
+  reading of ended_at and date changes) so the recompute is exact; `target_skills` hangs off
+  `target_words` (cascade); instants compared as microsecond UTC text; started_on from the same window.
+- **R18. Events carry the session's last answer as their instant** on both paths [F-T4-a]; a recompute
+  rebuilds them with new ids, and a removed word's log is gone after it [T4-h].
+- **R19. No data migration: the recompute is the backfill** [T4-f] (Left for Victor).
+- **R20. Locks** [T4-i, T4-k, T5-h, T5-i]: a per-enrollment progress lock first in every session end and
+  every target-word removal; the target row is locked FOR NO KEY UPDATE; ADR 0014 R4 orders path locks,
+  stock retirement, the progress lock, writes, then stock requests.
+- **R21. The stale check** stores each target stock's owed words (`session_targets.owed_gloss_ids`) and
+  replaces a stock when cap or owed words changed [T5-a, T5-b].
+- **R22. Only main-path stocks write ended_on_date** and retire an ended target's leftover stock [T5-c].
+- **R23. Errors** [T5-d, T5-e]: create on an ended target is 409 `target closed`; another enrollment's
+  target is 404, another learner's 403.
+- **R24. due_count** [T5-f]: main path, words whose weakest live skill with memory has R ≤ R_TARGET; a
+  target path, its owed words.
+- **R25. The seed is the main path's** [T5-g]; a learner whose first session is a target's skips it.
+- **R26. ADR 0014 has a check script** [T5-j] (two greppable rules, planted violations fire).
+- **R27. Families** are computed over every saved word, chosen over main words, refreshed by main stocks
+  [T5-k].
+- **R28. Logs** [T5-n, F-I1-d]: session_retired reasons stale_target and target_ended; target_id on target
+  paths' stock events; skip reason target_closed; a skip on a target's end logs reason target_ended.
+- **R29. The target's wire `session` is a plain read** [T6-d]; a past target read by id answers
+  `due_today` [T6-e]; `ready_count` counts words at 100% [T6-g]; `starts_in` comes from the plan [T6-b].
+- **R30. Home** [T8-b…T8-i, T8-j, T8-k]: the reminder judges the first card on a targets read made after the
+  tap and waits for a target's session rather than falling through to My words [F-CI-1-a, F-CI-1-b];
+  homework's wording "שיעורי הבית היום", "לשיעורי הבית"; My words shows "N מילים מחכות לחזרה" only when
+  N > 0, singular "מילה אחת מחכה לחזרה"; the button label follows the card's state; the countdown is drawn
+  in three parts.
+- **R31. The target screen** [T9-a…T9-c]: several skills panels can be open; header ids renamed.
+- **R32. Merges** [M1, M2]: phase 58's level removal and 58b's remove-all follow unsave's per-path order;
+  the level is judged before the progress lock; ADR 0014 R4 names both.
+- **R33. The simulation** [P3, T7]: replay and short exams play until done (at most 25 sessions); 20-word
+  long exams use a never-missing learner; scripted misses as on 2026-10-16 (spesa's "soper" left out).
+- **R34. e2e** [T10-a…T10-f]: targets made over the API; due-today and rest states written to the lane's
+  e2e database; a reminder e2e; MockServer lookups registered before generation.
+- **R35. Learner days of a target's creation and its words' additions come from learnerDay** [P4]; bots
+  read every instant as today [T5 concern].
+- **R36. Planning facts**: a planned started word owing nothing is done [T2-b]; "yesterday" is
+  daysBetween = 1 [T2-a].
+- **R37. Removing a word restocks main and every holding target** [T5-i, M1]; an unsave always takes the
+  progress lock.
+- **R38. The stock job key is per path** (`E` main, `E:T` target) [T5].
+- **R39. The prepare flag is session-wide** [T5-p].
+- **R40. The wire's session summary carries `started`**; a started target session is entered without
+  create, on the button and the reminder, and a create answered `session_open` re-reads and enters
+  [F2-N1-a…c]. The main path keeps phase 43's start and resume. Final review N1: a session entered and
+  left before its first answer had become a dead end.
+- **R41. When several targets end on their date, every started session is closed before any progress is
+  recorded** (ADR 0014 R4), and a target's end dates its skip by the session's last answer, today when
+  none [F2-N2-a, F2-I1-c].
