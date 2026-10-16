@@ -60,3 +60,8 @@ export function helpText(question: Question): string | null {
 export function allRevealed(answer: string, presses: number): boolean {
   return presses >= steps(answer).length;
 }
+
+/** Phase 59 (spec D3). The presses that show the whole form: a tap on the practised word. */
+export function wholeForm(answer: string): number {
+  return steps(answer).length;
+}

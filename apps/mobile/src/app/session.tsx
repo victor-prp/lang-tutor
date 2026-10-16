@@ -14,6 +14,7 @@ import { NewMeaningPrompt } from '@/components/NewMeaningPrompt';
 import { ProgressBar } from '@/components/ProgressBar';
 import { SentenceGap } from '@/components/SentenceGap';
 import { SpeakButton } from '@/components/SpeakButton';
+import { TappableSentence } from '@/components/TappableSentence';
 import { SpeakingCardView } from '@/components/SpeakingCardView';
 import { TypedAnswerView } from '@/components/TypedAnswerView';
 import { confirm } from '@/confirm';
@@ -59,11 +60,21 @@ function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered:
 // Phase 27 (spec D6). The translation card's prompt: the Hebrew sentence and,
 // once judged, the reference with its practised word in bold. Phase 34 (spec
 // D8): the Hebrew sentence marks the practised word too.
-function translatePrompt(question: SentenceTranslationQuestion, answered: boolean, language: string) {
+function translatePrompt(question: SentenceTranslationQuestion, session: SessionValue, language: string) {
+  const answered = session.answered;
   const { before, word, after } = splitAtGap(question.sentence, question.gap);
   return (
     <View style={styles.gapCard}>
-      <MarkedText text={question.question} mark={question.mark} style={styles.hebrewPrompt} testID="sentence-translation" />
+      {/* Phase 59 (spec D3): each word a tap shows the Italian of; the practised word's is help. */}
+      <TappableSentence
+        text={question.question}
+        words={question.words}
+        mark={question.mark}
+        tapped={session.tapped}
+        onTap={answered ? null : session.pressWord}
+        style={styles.hebrewPrompt}
+        testID="sentence-translation"
+      />
       {answered ? (
         <View style={styles.reference}>
           <Text style={styles.referenceLabel}>{strings.translationReference}</Text>
@@ -227,7 +238,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           failed={session.judging === 'failed'}
           onSubmit={session.submitJudged}
           retry={session.retry}
-          prompt={translatePrompt(question, session.answered, language)}
+          prompt={translatePrompt(question, session, language)}
           help={helpOf(session)}
         />
       );

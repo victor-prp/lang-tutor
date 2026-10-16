@@ -22,6 +22,8 @@ import {
   retypeTypingState,
   seenState,
   settle,
+  tappedFor,
+  wordTappedState,
   type QuizState,
   type Sent,
 } from './quiz';
@@ -45,6 +47,7 @@ const BASE: QuizState = {
   retry: null,
   retype: null,
   help: 0,
+  tapped: [],
 };
 
 describe('applyQueued (spec D9, Review Focus 3)', () => {
@@ -544,5 +547,58 @@ describe('help on more cards (phase 56 D5, D7)', () => {
     expect(retypeCheckedState(meaning, 'לדבר').retype).toMatchObject({ outcome: 'right' });
     const dictation = answeredState(ON(DICTATION), { text: 'casa', helped: false });
     expect(retypeCheckedState(dictation, 'parla').retype).toEqual({ attempt: 2, showing: true, outcome: null });
+  });
+});
+
+// Phase 59 (spec D3, D5). Taps on a sentence translation's words: one list a card,
+// kept through its second try, the target's tap help that reveals the whole word.
+describe('taps on a sentence translation (phase 59 D3, D5)', () => {
+  const WORDS = [
+    { start: 0, end: 4, text: 'Vado', target: false },
+    { start: 5, end: 7, text: 'con', target: true },
+    { start: 8, end: 13, text: 'amici', target: false },
+  ];
+  const TRANSLATE: Question = { id: 'st', type: 'sentence_translation', vocab_term_id: 'l', question: 'אני הולך עם חברים.', meaning: 'עם', sentence: 'Vado con amici.', gap: { start: 5, end: 8 }, answer: 'con', mark: { start: 9, end: 11 }, words: WORDS };
+  const OLD: Question = { ...TRANSLATE, words: null };
+  const SAY: Question = { id: 's1', type: 'say_translation', vocab_term_id: 'l', question: 'מדבר', part_of_speech: 'verb', answer: 'parlo', lemma: 'parlare', alternatives: [], context: null };
+  const ON = (question: Question): QuizState => ({ ...enteredState('s'), question, position: 3 });
+
+  it('keeps each word once, in the order first tapped, from none on a session entered', () => {
+    expect(enteredState('s').tapped).toEqual([]);
+    const tapped = wordTappedState(wordTappedState(wordTappedState(ON(TRANSLATE), 2), 0), 2);
+    expect(tapped.tapped).toEqual([2, 0]);
+    expect(tapped.help).toBe(0);
+  });
+
+  it('makes a tap on the target help, revealing the whole word', () => {
+    const tapped = wordTappedState(ON(TRANSLATE), 1);
+    expect(tapped.tapped).toEqual([1]);
+    expect(tapped.help).toBe(3);
+    expect(helpedFor(TRANSLATE, tapped.help)).toBe(true);
+  });
+
+  it('on a card with no word map, takes a tap on the mark as help and keeps no index', () => {
+    const tapped = wordTappedState(ON(OLD), 'mark');
+    expect(tapped.tapped).toEqual([]);
+    expect(tapped.help).toBe(3);
+  });
+
+  it('takes no tap once answered, out of range, or on another card', () => {
+    const answered = { ...ON(TRANSLATE), answer: { text: 'x', judged: 'wrong' as const } };
+    expect(wordTappedState(answered, 0)).toBe(answered);
+    expect(wordTappedState(ON(TRANSLATE), 7).tapped).toEqual([]);
+    expect(wordTappedState(ON(SAY), 0).tapped).toEqual([]);
+  });
+
+  it('starts a new card with none, and keeps them when the same card comes back for its second try', () => {
+    const tapped = { ...ON(TRANSLATE), tapped: [2] };
+    expect(applyQueued(tapped, { complete: false, question: SAY, position: 4, retry: null }).tapped).toEqual([]);
+    expect(applyQueued(tapped, { complete: false, question: TRANSLATE, position: 3, retry: { answer: 'x', wording: 'meaning' } }).tapped).toEqual([2]);
+  });
+
+  it('sends the taps only on a sentence translation that has some', () => {
+    expect(tappedFor(TRANSLATE, [2, 0])).toEqual([2, 0]);
+    expect(tappedFor(TRANSLATE, [])).toBeUndefined();
+    expect(tappedFor(SAY, [1])).toBeUndefined();
   });
 });

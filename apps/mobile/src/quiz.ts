@@ -14,6 +14,7 @@ import { checksFit, opensRetry, type CardAnswer } from '@/feedback';
 import type { JudgeAttempt } from '@/judging';
 import { opensRetype, retypeChecked, retypeTyping, startRetype, type Retype } from '@/retype';
 import { IDLE_ATTEMPT, type SpeakingOff, type SpeechAttempt } from '@/speaking';
+import { wholeForm } from '@/typedHelp';
 
 // What the background next-step call resolved to, waiting to be applied when
 // the learner taps Continue. Only one of these is ever in flight at a time,
@@ -56,6 +57,10 @@ export type QuizState = {
    *  screen: one count a card, kept through its second try and through "can't
    *  speak now", 0 on the next card. The tiles card counts its own. */
   help: number;
+  /** Phase 59 (spec D3, D5). The words of a sentence translation tapped, by their
+   *  index in its `words`, in the order first tapped: kept through its second
+   *  try, none on the next card. */
+  tapped: number[];
 };
 
 /** Phase 19. What a session starts as before its first card is read: starting
@@ -79,6 +84,7 @@ export function enteredState(sessionId: string): QuizState {
     retry: null,
     retype: null,
     help: 0,
+    tapped: [],
   };
 }
 
@@ -113,8 +119,10 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
       retry: null,
       retype: null,
       help: 0,
+      tapped: [],
     };
   }
+  const same = queued.question.id === current.question?.id;
   return {
     ...current,
     question: queued.question,
@@ -127,8 +135,30 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
     retry: queued.retry,
     retype: null,
     // Phase 56 (spec D5): the same card back for its second try keeps its help.
-    help: queued.question.id === current.question?.id ? current.help : 0,
+    help: same ? current.help : 0,
+    // Phase 59 (spec D5): and its taps.
+    tapped: same ? current.tapped : [],
   };
+}
+
+/** Phase 59 (spec D3). A word of the sentence translation on screen tapped: its
+ *  index, kept once; `'mark'` is the practised word on a card with no word map.
+ *  A tap on the practised word is help that shows the whole form. An answered
+ *  card, another card and an index the map has no word at take none. */
+export function wordTappedState(current: QuizState, tap: number | 'mark'): QuizState {
+  const question = current.question;
+  if (current.answer !== null || question?.type !== 'sentence_translation') return current;
+  const word = tap === 'mark' ? null : question.words?.[tap];
+  if (tap !== 'mark' && !word) return current;
+  const target = tap === 'mark' || word!.target;
+  const tapped = tap === 'mark' || current.tapped.includes(tap) ? current.tapped : [...current.tapped, tap];
+  return { ...current, tapped, help: target ? Math.max(current.help, wholeForm(question.answer)) : current.help };
+}
+
+/** Phase 59 (spec D5). The `tapped` a judged answer to `question` carries: none
+ *  on another card, or with no taps. */
+export function tappedFor(question: Question, tapped: readonly number[]): number[] | undefined {
+  return question.type === 'sentence_translation' && tapped.length > 0 ? [...tapped] : undefined;
 }
 
 /** Phase 56 (spec D5). Help pressed on the card on screen: one more character
