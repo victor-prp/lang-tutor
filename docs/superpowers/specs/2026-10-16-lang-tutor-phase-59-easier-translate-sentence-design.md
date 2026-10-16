@@ -1,6 +1,6 @@
 # Phase 59 — An easier translate-sentence card
 
-- **Status:** Draft, awaiting Victor's review.
+- **Status:** Victor said "go till PR" on 2026-10-16 after reading it: approved, implemented inline on branch `phase-59-easier-translate`.
 - **Date:** 2026-10-16
 - **Source:** `drafts/2026-10-16-easier-translate-sentence-one-pager.md` (main checkout), and the
   brainstorming that followed it on 2026-10-16.
@@ -188,3 +188,9 @@ path as a card's (preferred, so `dayState`, the event log and `reached_on` read 
 - **R4 (Victor).** "Practised at least once" is what makes a list word count as known.
 - **R5 (Victor, after the builder check).** A tapped list word's miss reaches its memory and
   progress, not the session score or the missed list.
+- **R6 (planning).** The word map is asked of the context call's `mark` task, not the batch: that
+  call already reads the Hebrew and its reference after the batch, a failure there costs one card's
+  mark and never the session, and the batch's schema is the one that once hung on new fields. The
+  learner's words go to both calls. Stored as `questions.words`; taps in `answer_taps`.
+- **R7 (planning).** Taps also travel on a pass (show the answer, skip) of a sentence-translation
+  card: giving up after looking a word up is the likeliest case of a list word's miss.
