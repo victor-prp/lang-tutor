@@ -155,6 +155,18 @@ describe('NextStepRequestSchema', () => {
     expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'casa', helped: 'yes' }).success).toBe(false);
   });
 
+  // Phase 56 (spec D3). Help on a spoken or a judged card travels with its request.
+  it('keeps helped on a spoken and a judged answer, takes them without it, and refuses one that is not a boolean', () => {
+    const spoken = { question_id: 'q1', mime_type: 'audio/aac', audio: 'AAAA' } as const;
+    expect(SpeechAnswerRequestSchema.parse({ ...spoken, helped: true })).toEqual({ ...spoken, helped: true });
+    expect(SpeechAnswerRequestSchema.parse(spoken)).not.toHaveProperty('helped');
+    expect(SpeechAnswerRequestSchema.safeParse({ ...spoken, helped: 'yes' }).success).toBe(false);
+    const judged = { question_id: 'q1', text: 'לדבר' };
+    expect(JudgedAnswerRequestSchema.parse({ ...judged, helped: true })).toEqual({ ...judged, helped: true });
+    expect(JudgedAnswerRequestSchema.parse(judged)).not.toHaveProperty('helped');
+    expect(JudgedAnswerRequestSchema.safeParse({ ...judged, helped: 1 }).success).toBe(false);
+  });
+
   // Phase 41 (spec D2). The app asks the server to check an unlisted typed-cloze word.
   it('keeps check_fit on a text answer, and refuses one that is not a boolean', () => {
     expect(NextStepRequestSchema.parse({ question_id: 'q1', text: 'edit', check_fit: true })).toEqual({

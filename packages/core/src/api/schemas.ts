@@ -425,8 +425,9 @@ export const NextStepRequestSchema = z.union([
     // opened its Hebrew sentence. Optional, so an older app is unchanged; stored for
     // `cloze_typed` only, and never changed by a retry.
     hint_opened: z.boolean().optional(),
-    // Phase 55 (spec D6). Help used or a wrong tile placed on a letter_tiles or
-    // typed_translation card: graded wrong. Ignored on any other type.
+    // Phase 55 (spec D6). Help used or a wrong tile placed on a card that takes
+    // help: graded wrong. Ignored on any other type. Phase 56 (spec D3): tiles,
+    // typed translation, say the translation typed, dictation and typed cloze.
     helped: z.boolean().optional(),
     // Phase 41 (spec D2). On a first answer to a typed cloze that the rule calls
     // wrong: the app waits while the server asks the model whether the word fits
@@ -485,6 +486,10 @@ export const SpeechAnswerRequestSchema = z.object({
   // Phase 34 (spec D9). The second try at a card held for one. Absent, a clip
   // for the held card replays its first answer.
   retry: z.boolean().optional(),
+  // Phase 56 (spec D3). Help used on the card, say the translation: an answer
+  // said with help is given up, whatever was heard. Optional, so an older app
+  // is unchanged.
+  helped: z.boolean().optional(),
 });
 
 // How an attempt was judged. `unheard` records nothing (spec D5).
@@ -509,9 +514,14 @@ export const JudgedAnswerRequestSchema = z.object({
   // this route's give-up, as an empty text, `show_answer` or a skip is
   // next-step's. Absent, a text for the held card replays its first answer.
   retry: z.boolean().optional(),
+  // Phase 56 (spec D3). Help used on the card: a helped answer is stored wrong,
+  // whatever the judge says, and the response's verdict stays the judge's.
+  helped: z.boolean().optional(),
 });
 
 export const JudgedAnswerResponseSchema = z.object({
+  // Phase 56 (spec D3): the judgement of the text, also for a helped answer,
+  // which is stored wrong; the app tells "right, with help" by it.
   verdict: TypedVerdictSchema,
   // The next-step response, which the app queues while the banner shows.
   next: NextStepResponseSchema,

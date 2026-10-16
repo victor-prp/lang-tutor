@@ -33,18 +33,18 @@ export type QuestionType = Question['type'];
 export type AnswerInput =
   | { option_index: number }
   // Phase 55 (spec D6). `helped`: the learner used help, or placed a wrong tile,
-  // on a letter_tiles or typed_translation card. The app sends it; no other card
-  // reads it.
+  // on a card that takes help (`takesHelp`). The app sends it; no other card
+  // reads it. Phase 56 (spec D2): a transcript and a judged text carry it too.
   | { text: string; helped?: boolean }
-  | { heard: string }
+  | { heard: string; helped?: boolean }
   // Phase 50 (spec D5). A transcript the server scored as sounding like the
   // card's form, which it names. Only the server builds it: the next-step
   // schema has no `sounds_like` field.
-  | { heard: string; sounds_like: string }
+  | { heard: string; sounds_like: string; helped?: boolean }
   | { pass: 'skip' | 'show_answer' }
   // Phase 27 (spec D3). A text the server judged, by rule or by a model call.
   // Only the server builds it: the next-step schema has no `judged` field.
-  | { text: string; judged: TypedVerdict }
+  | { text: string; judged: TypedVerdict; helped?: boolean }
   // Phase 54 (spec D6). A meet card, tapped through. It takes no other answer.
   | { seen: true };
 
@@ -193,13 +193,27 @@ function verdictFor(question: TextQuestion | SayTranslationQuestion, text: strin
 /**
  * Phase 55 (spec D6). The cards on which help, or a wrong tile, grades the
  * answer wrong whatever its text. On any other type `helped` is ignored.
+ * Phase 56 (spec D2): every card where the learner produces the answer.
  */
-const HELPED: ReadonlySet<QuestionType> = new Set(['letter_tiles', 'typed_translation']);
+const HELPED: ReadonlySet<QuestionType> = new Set([
+  'letter_tiles',
+  'typed_translation',
+  'say_translation',
+  'typed_meaning',
+  'sentence_translation',
+  'dictation',
+  'cloze_typed',
+]);
 
 /** Phase 55 (spec D6; review M8). Whether a card takes help: `evaluate` grades
  *  `helped` on it, and the server stores it. The one list of them. */
 export function takesHelp(type: QuestionType): boolean {
   return HELPED.has(type);
+}
+
+/** Phase 55 (spec D6). An answer that carried help, on a card that takes it. */
+function helpedOn(question: Question, answer: AnswerInput): boolean {
+  return 'helped' in answer && answer.helped === true && takesHelp(question.type);
 }
 
 // answers_typed_text_length: a transcript is stored as the text of its answer.
@@ -245,6 +259,11 @@ export function evaluate(question: Question, answer: AnswerInput): AnswerRecord 
   if (isSpeaking(question) && 'heard' in answer) {
     const verdict = 'sounds_like' in answer ? 'understood' : spokenVerdict(question, answer.heard);
     if (verdict === 'unheard') throw new Error('an unheard transcript is never recorded (spec D5)');
+    // Phase 56 (spec D2). Said with help: given up, which grades the spoken skill
+    // the card tests; `wrong` here would read as the typed form's.
+    if (helpedOn(question, answer)) {
+      return recorded(question, { question_id: question.id, is_correct: false, answer_string: answer.heard.slice(0, MAX_ANSWER_TEXT), verdict: 'gave_up' });
+    }
     return recorded(question, { question_id: question.id, is_correct: true, answer_string: answer.heard.slice(0, MAX_ANSWER_TEXT), verdict });
   }
   if (isSpeaking(question) && 'pass' in answer) {
@@ -256,16 +275,18 @@ export function evaluate(question: Question, answer: AnswerInput): AnswerRecord 
     return recorded(question, { question_id: question.id, is_correct: false, answer_string: '', verdict: 'seen' });
   }
   if (isJudged(question) && 'judged' in answer) {
+    // Phase 56 (spec D2). A helped answer is wrong whatever the judge said.
+    const verdict = helpedOn(question, answer) ? 'wrong' : answer.judged;
     return recorded(question, {
       question_id: question.id,
-      is_correct: verdictCorrect(answer.judged),
+      is_correct: verdictCorrect(verdict),
       answer_string: answer.text.slice(0, MAX_JUDGED_TEXT),
-      verdict: answer.judged,
+      verdict,
     });
   }
   if (!isChoice(question) && !isJudged(question) && question.type !== 'read_aloud' && question.type !== 'meet' && 'text' in answer && !('judged' in answer)) {
     // Phase 55 (spec D6). A helped answer is wrong whatever its text.
-    const verdict = 'helped' in answer && answer.helped && takesHelp(question.type) ? 'wrong' : verdictFor(question, answer.text);
+    const verdict = helpedOn(question, answer) ? 'wrong' : verdictFor(question, answer.text);
     return recorded(question, { question_id: question.id, is_correct: verdictCorrect(verdict), answer_string: answer.text, verdict });
   }
   throw new Error(`the answer does not fit a ${question.type} question`);
