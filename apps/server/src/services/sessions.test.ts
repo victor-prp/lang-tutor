@@ -281,6 +281,7 @@ describe('repos', () => {
 
   const memoryRepo: MemoryRepo = {
     findRows: unreachableProgress,
+    findPractisedWords: unreachableProgress,
     upsertRows: unreachableProgress,
     deleteAll: unreachableProgress,
   };

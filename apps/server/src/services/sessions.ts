@@ -56,6 +56,7 @@ import {
   NOTHING_GENERATED,
   boardMeanings,
   buildDistractorPrompt,
+  type LearnerWord,
   distractorItems,
   generatedContent,
   keyOf,
@@ -98,7 +99,7 @@ import {
   step,
 } from '../domain/session';
 import { reminderForSession } from '../domain/reminders';
-import { MAX_AVOID } from '../domain/sentences';
+import { MAX_AVOID, MAX_LEARNER_WORDS } from '../domain/sentences';
 import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
@@ -1179,7 +1180,7 @@ export function createSessionService({
       let ladders = 0;
       const picks = payload.picks.filter((pick) => !pick.ladder || ++ladders <= NEW_PER_SESSION);
 
-      const read = await transaction(async ({ session, enrollment, question, gloss, dict, jobs }) => {
+      const read = await transaction(async ({ session, enrollment, question, gloss, dict, jobs, memory }) => {
         const state = await session.findState(sessionId);
         // Skipped, or gone (a reseed): nothing to prepare, and not a failure.
         if (!state || state.status !== 'preparing') return undefined;
@@ -1260,7 +1261,11 @@ export function createSessionService({
           userLanguageCode: enrolled.source_language,
           targetLanguage: enrolled.target_language,
         });
-        return { state, enrolled, context: formed, picked: context.map(pickOf), recent, recentContexts, siblings, known };
+        // Phase 59 (spec D1). The list's practised words, which a translation
+        // sentence is built from as much as it can, keyed as the prompts name them.
+        const practised = await memory.findPractisedWords({ enrollmentId: state.enrollmentId, limit: MAX_LEARNER_WORDS });
+        const learnerWords: LearnerWord[] = practised.map((word, index) => ({ key: `w${index + 1}`, ...word }));
+        return { state, enrolled, context: formed, picked: context.map(pickOf), recent, recentContexts, siblings, known, learnerWords };
       });
       if (!read) {
         logger.info({ event: 'session_preparation_dropped', session_id: sessionId, stage: 'read' });
@@ -1336,7 +1341,7 @@ export function createSessionService({
       const board = plan.board;
       try {
         const raw = await llm({
-          ...buildDistractorPrompt({ items, from: target, to: read.enrolled.source_language, others }),
+          ...buildDistractorPrompt({ items, from: target, to: read.enrolled.source_language, others, learnerWords: read.learnerWords }),
           record: record('session_generation'),
         });
         modelMs = now() - started;

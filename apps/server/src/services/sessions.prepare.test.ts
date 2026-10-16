@@ -23,6 +23,7 @@ import type { DictRepo } from '../repo/dictionary';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GlossRepo } from '../repo/glosses';
 import type { QuestionRepo } from '../repo/questions';
+import type { MemoryRepo } from '../repo/memory';
 import type { SessionRepo } from '../repo/sessions';
 import { createSessionService } from './sessions';
 
@@ -124,6 +125,8 @@ function world(opts: {
   /** Phase 34 (spec D3). What findKnownRight answers; nothing known by default. */
   known?: KnownRight;
   enrollment?: Enrollment;
+  /** Phase 59 (spec D1). What findPractisedWords answers; none by default. */
+  practised?: { glossId: string; word: string; meaning: string }[];
   /** The clock's ticks; 1 000 then 1 250 by default. */
   clock?: number[];
 }) {
@@ -239,6 +242,7 @@ function world(opts: {
         },
       }),
       jobs,
+      memory: stub<MemoryRepo>({ findPractisedWords: async () => opts.practised ?? [] }),
     }),
     rng: testRng(7),
     logger,
@@ -707,7 +711,7 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
   it('hands a translate item the recent Hebrew sentences and the example\'s Hebrew, and degrades a card that repeats one', async () => {
     // Three forms typed: a typed translation, a typed cloze and a sentence translation.
     const PAYLOAD_T = tenPayload(TEN_CARDS.map((card, i) => (i === 4 ? produce(0.9) : card)));
-    const hebrew = (row: GenerationContext) => `אתמול ראינו שם את ${row.translation} החדש.`;
+    const hebrew = (row: GenerationContext) => `ראינו את ${row.translation} החדש.`;
     const recent: RecentSentences = new Map(EXAMPLES.map((row) => [row.glossId, { cloze: [], translate: [hebrew(row)] }]));
     const probe = world({ context: EXAMPLES, reply: 'nope', recent });
     await expect(probe.service.prepareSession(PAYLOAD_T)).rejects.toThrow();
@@ -1276,6 +1280,20 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
       type: 'sentence_translation', sentenceTranslation: 'בואו נשלב כוחות.', sentenceMarkStart: 5, sentenceMarkEnd: 9, context: null,
     });
     expect(calls.sessionQuestions[0][2]).toMatchObject({ question: 'בואו נשלב כוחות.', mark: { start: 5, end: 9 } });
+  });
+
+  // Phase 59 (spec D1).
+  it('hands the batch the learner\'s practised words, keyed w1, w2, when a card translates a sentence', async () => {
+    const practised = [
+      { glossId: 'g-p1', word: 'forces', meaning: 'כוחות' },
+      { glossId: 'g-p2', word: 'let', meaning: 'לתת' },
+    ];
+    const { service, llm } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT, checkReply: SENTENCES_CHECK, practised });
+    await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
+    expect(JSON.parse(llm.calls[0].user).learner_words).toEqual([
+      { key: 'w1', word: 'forces', meaning: 'כוחות' },
+      { key: 'w2', word: 'let', meaning: 'לתת' },
+    ]);
   });
 
   // Review Focus 4.

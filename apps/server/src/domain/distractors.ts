@@ -279,11 +279,21 @@ function language(code: string): Language {
  *  board's later words. */
 export type OtherRow = { form: string; translation: string };
 
+/** Phase 59 (spec D1). A practised word of the learner's list, as the prompts
+ *  name it: `key` (w1, w2, …) is how the context call's word map points back at it. */
+export type LearnerWord = { key: string; glossId: string; word: string; meaning: string };
+
+/** Phase 59 (spec D1). The learner's words as a prompt's user JSON carries them. */
+export const learnerWordsJson = (words: readonly LearnerWord[]) =>
+  words.map(({ key, word, meaning }) => ({ key, word, meaning }));
+
 export function buildDistractorPrompt(input: {
   items: DistractorItem[];
   from: string;
   to: string;
   others: readonly OtherRow[];
+  /** Phase 59 (spec D1): sent only when an item translates. */
+  learnerWords?: readonly LearnerWord[];
 }): DistractorPrompt {
   const learned = language(input.from);
   const answers = language(input.to);
@@ -303,7 +313,7 @@ export function buildDistractorPrompt(input: {
     `- "typed": the learner sees the ${answers.name} translation and types the ${learned.name} word. Leave distractors empty. As alternatives, list every other ${learned.name} word or phrase that translates it equally well in this sense, at most ${MAX_ALTERNATIVES}, or none.`,
     `- "gap": the learner sees the example sentence with the ${learned.name} word blanked, and picks the missing word. Write ${DISTRACTOR_MARKER} in ${learned.name}: words of the same part of speech and in the same form as the blanked word, but from a different field of meaning, each of which makes this sentence wrong or meaningless, so that a learner who reads the sentence alone can rule it out. Read each candidate into the sentence and drop it if the sentence still makes sense, however differently: never a word that also fits. In an example where many words make sense in the blank (anything one puts in a drink, any adjective for a city), none of those words may be a wrong answer of this item: its wrong answers clash with the other words of the sentence (an object, subject, place or time they cannot go with).`,
     `- "sentence": write a new, natural, everyday ${learned.name} sentence of ${SENTENCE_MIN_WORDS} to ${SENTENCE_MAX_WORDS} words that uses the word in the meaning given by correct and shown by the example, never in another sense. Use whatever form of the word the sentence needs, written as consecutive words, as many as the word has. Write it so that its other words point to the word: someone reading it without its translation and without the word should guess that word, or one of the same meaning; never a sentence that many different words would complete, such as "Please ___ the file." It must differ from every sentence in avoid. Put it in sentence; the word exactly as written in the sentence in gap; the whole sentence in natural ${answers.name}, which fixes its person, number and tense, in translation; and in alternatives every other ${learned.name} word that would fill the gap with the sentence read on its own, without its translation, leaving a correct and natural sentence whatever it then means, not only words of the same meaning, in the form the gap needs, agreeing in gender, number and case with the words around it, the likeliest first, at most ${MAX_GAP_ALTERNATIVES}, or none. Leave distractors empty.`,
-    `- "translate": write a short, natural, everyday ${answers.name} sentence of ${SENTENCE_MIN_WORDS} to ${TRANSLATE_MAX_WORDS} words that uses the meaning in correct, in the sense the example shows. It must differ from every sentence in avoid. Put it in sentence; a natural ${learned.name} translation of it that uses the word, in whatever form the translation needs, in translation; and that word exactly as written in the translation in gap. Leave distractors empty.`,
+    `- "translate": write a short, natural, everyday ${answers.name} sentence of ${SENTENCE_MIN_WORDS} to ${TRANSLATE_MAX_WORDS} words that uses the meaning in correct, in the sense the example shows. It must differ from every sentence in avoid. Put it in sentence; a natural ${learned.name} translation of it that uses the word, in whatever form the translation needs, in translation; and that word exactly as written in the translation in gap. Leave distractors empty. Keep it short. When learner_words is given, the learner knows those ${learned.name} words: build the translation from them as much as you can, in whatever form each needs, and use another word only where the sentence cannot do without it, a simple one.`,
     'A wrong answer of a "meaning" or "word" item must be plausible: the same part of speech, the same register and a',
     'similar length as the correct answer. A "gap" item\'s wrong answers follow the gap rule above instead.',
     'A wrong answer must never be right: not the correct answer itself, not a synonym of it, and',
@@ -322,6 +332,8 @@ export function buildDistractorPrompt(input: {
     ...learned.writing,
   ].join('\n');
 
+  const translates = input.items.some((item) => item.task === 'translate');
+  const learnerWords = translates && input.learnerWords && input.learnerWords.length > 0 ? input.learnerWords : null;
   const user = JSON.stringify({
     items: input.items.map((item) => ({
       key: item.key,
@@ -339,6 +351,7 @@ export function buildDistractorPrompt(input: {
     ...(related.length > 0
       ? { also_in_session: related.map((other) => ({ word: other.form, correct: other.translation })) }
       : {}),
+    ...(learnerWords ? { learner_words: learnerWordsJson(learnerWords) } : {}),
   });
 
   return { system, user, schema: LlmDistractorsSchema };
