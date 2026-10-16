@@ -19,7 +19,14 @@ import {
 import { asChoice, insertListSession, type AskedGloss } from '../../support/questions';
 import { enrollmentOf, makeBot, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
-import { readStartedOn, readTargetSkillEvents, readTargetSkills, seedTarget, spoilTargetSkills } from '../../support/targetRows';
+import {
+  readStartedOn,
+  readTargetSkillEventTimes,
+  readTargetSkillEvents,
+  readTargetSkills,
+  seedTarget,
+  spoilTargetSkills,
+} from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -439,5 +446,37 @@ describe('recomputeProgress', () => {
     await spoilTargetSkills(t.db); // junk the rebuild must replace
     expect(await recomputeProgress(t.db)).toEqual({ sessions: 3 });
     expect(await written()).toEqual(before);
+  });
+
+  // Final review T4. Each event is stamped with its session's last answer, live and rebuilt
+  // alike, so a rebuilt log reads in the order the live one does, a skip's too.
+  it('stamps each target skill event with its session last answer, live and rebuilt alike', async () => {
+    await makeBot(t.db, 'u_1', '2030-01-08');
+    const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+    const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'tome', translations: ['ספר'] });
+    const tome: AskedGloss = { glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'tome', lemma: 'tome', translation: 'ספר' };
+    const exam = await seedTarget(t.db, { enrollmentId: E, kind: 'exam', dueOn: '2030-01-13', glossIds: [tome.glossId] });
+    const play = async (types: QuestionType[], answered: number, end: 'complete' | 'skip') => {
+      const { sessionId, questions } = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: types.map(() => tome), types });
+      for (const question of questions.slice(0, answered)) {
+        const choice = asChoice(question);
+        await deps.sessions.submitAnswer('u_1', sessionId, question.id, { option_index: choice.correct_option });
+      }
+      if (end === 'skip') await deps.sessions.skipSession('u_1', sessionId);
+      return sessionId;
+    };
+    // A session answered and skipped later, then one answered to its end.
+    const skipped = await play(['multiple_choice', 'multiple_choice'], 1, 'skip');
+    await makeBot(t.db, 'u_1', '2030-01-09');
+    const completed = await play(['multiple_choice'], 1, 'complete');
+
+    const live = await readTargetSkillEventTimes(t.db, exam);
+    expect(live.map(({ sessionId, atLastAnswer }) => ({ sessionId, atLastAnswer }))).toEqual([
+      { sessionId: skipped, atLastAnswer: true },
+      { sessionId: completed, atLastAnswer: true },
+    ]);
+
+    expect(await recomputeProgress(t.db)).toEqual({ sessions: 2 });
+    expect(await readTargetSkillEventTimes(t.db, exam)).toEqual(live);
   });
 });

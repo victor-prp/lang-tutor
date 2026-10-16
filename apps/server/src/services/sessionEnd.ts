@@ -74,7 +74,7 @@ async function recordTargetSkills(repos: Repos, sessionId: string, evidence: Ses
   const before = await repos.targetSkills.findRows(targets.map((target) => target.id), glossIds);
   const write = targetSessionWrite({ sessionId, day: evidence.day, targets, before, answers: evidence.answers });
   await repos.targetSkills.upsertRows(write.rows);
-  await repos.targetSkills.insertEvents(write.events);
+  await repos.targetSkills.insertEvents(write.events, evidence.lastAnsweredAt);
   for (const started of write.started) await repos.target.markStarted(started.targetId, started.glossIds, evidence.day);
 }
 

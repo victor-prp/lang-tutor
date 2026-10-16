@@ -94,6 +94,18 @@ export async function readTargetSkillEvents(db: Db, targetId: string) {
   return rows.rows;
 }
 
+/** Final review T4. A target's skill events in the order of their time, each with its time as
+ *  Postgres prints it and whether that is its session's last answer, compared in SQL. */
+export async function readTargetSkillEventTimes(db: Db, targetId: string) {
+  const rows = await db.execute<{ sessionId: string; glossId: string; dimension: string; createdAt: string; atLastAnswer: boolean }>(sql`
+    select e.session_id::text as "sessionId", e.gloss_id as "glossId", e.dimension, e.created_at::text as "createdAt",
+           e.created_at = (select max(a.answered_at) from answers a where a.session_id = e.session_id) as "atLastAnswer"
+    from target_skill_events e
+    where e.target_id = ${targetId}
+    order by e.created_at, e.gloss_id, e.dimension`);
+  return rows.rows;
+}
+
 /** Phase 57 (spec D6). Each of a target's words and the learner day it was started, or null. */
 export async function readStartedOn(db: Db, targetId: string): Promise<Record<string, string | null>> {
   const rows = await db.execute<{ gloss_id: string; started_on: string | null }>(sql`

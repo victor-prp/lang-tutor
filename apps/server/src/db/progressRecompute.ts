@@ -88,7 +88,7 @@ export async function recomputeProgress(db: Db): Promise<{ sessions: number }> {
       const before = await targetSkills.findRows(targets.map((held) => held.id), glossIds);
       const write = targetSessionWrite({ sessionId, day: evidence.day, targets, before, answers: evidence.answers });
       await targetSkills.upsertRows(write.rows);
-      await targetSkills.insertEvents(write.events);
+      await targetSkills.insertEvents(write.events, evidence.lastAnsweredAt);
       for (const started of write.started) await target.markStarted(started.targetId, started.glossIds, evidence.day);
     }
     return { sessions: ended.length };

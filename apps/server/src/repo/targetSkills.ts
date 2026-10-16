@@ -42,9 +42,13 @@ export function createTargetSkillRepo(tx: Tx) {
         });
     },
 
-    insertEvents: async (events: readonly TargetSkillEvent[]): Promise<void> => {
+    /** Final review T4. Each line stamped `at`, the instant of its session's last answer as
+     *  Postgres prints it (SessionEvidence.lastAnsweredAt), not the writing transaction's now():
+     *  the session end and the recompute stamp a line alike, so a rebuilt log reads in the
+     *  order the live one does. */
+    insertEvents: async (events: readonly TargetSkillEvent[], at: string): Promise<void> => {
       if (events.length === 0) return;
-      await tx.insert(targetSkillEvents).values([...events]);
+      await tx.insert(targetSkillEvents).values(events.map((event) => ({ ...event, createdAt: sql`${at}::timestamptz` })));
     },
 
     /** Recompute only: every value and every line of the log, before the replay rebuilds them. */
