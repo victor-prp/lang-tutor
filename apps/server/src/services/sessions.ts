@@ -82,6 +82,7 @@ import {
 import { dropLoneMeets, keepCards, type CardUnit, type Refusal } from '../domain/keepCards';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planCards } from '../domain/plan';
+import { renderingFlags } from '../domain/questionTypes';
 import { dayState, withSessionInFlight } from '../domain/today';
 import { applySession } from '../domain/memoryUpdate';
 import { evaluateSession, progressChanges, type ProgressChange } from '../domain/progress';
@@ -1288,12 +1289,8 @@ export function createSessionService({
           return {
             form: row.form,
             translation: row.translation,
-            // Phase 34 (spec D2): tiles build the form the card asks for.
-            tiles: tileEligible(row.answerForm ?? row.form),
-            // read_aloud and the sentence cards use the saved form, say_translation the asked one.
-            speakable: speakable(row.form) && speakable(row.answerForm ?? row.form),
-            // Phase 27 (spec D7): a cloze choice needs the form, or its lemma, once in the saved example.
-            clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
+            // Phase 61: tiles, speakable and the cloze gap, as the question-types read finds them.
+            ...renderingFlags(row),
             // Phase 34 (spec D3): no board word's meaning is one the dictionary knows for another.
             meanings: knownMeanings(read.known, row.lexemeId),
             dimension,

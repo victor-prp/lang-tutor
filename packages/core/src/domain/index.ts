@@ -18,9 +18,10 @@ export {
   spokenTarget,
   spokenVerdict,
   takesHelp,
+  UNAVAILABLE_REASONS,
   verdictCorrect,
 } from './quiz';
-export type { AnswerInput, ChoiceQuestion, JudgedQuestion, QuestionType, SpeakingQuestion } from './quiz';
+export type { AnswerInput, ChoiceQuestion, JudgedQuestion, QuestionType, SpeakingQuestion, UnavailableReason } from './quiz';
 export { MAX_SOUND_PAIRS, MAX_SPOKEN_WORDS, judgeSpoken, soundPairs, speakable, spokenWords } from './spoken';
 export type { SoundPair, SpokenTarget } from './spoken';
 export { TILE_MAX_LETTERS, TILE_MIN_LETTERS, stripStress, tileLetters } from './tiles';

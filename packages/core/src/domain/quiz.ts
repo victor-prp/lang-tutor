@@ -27,6 +27,21 @@ export const SESSION_LENGTH = 10;
 /** Phase 23. Derived here rather than in api/types.ts, which holds z.infers only. */
 export type QuestionType = Question['type'];
 
+/** Phase 61 (spec D2). Why one word cannot have a question type: the device has no
+ *  voice for the target or cannot record, the form is too long to say, it takes no
+ *  tiles, its example has no gap, the word has no other saved meaning, or the type
+ *  needs more words than one. */
+export const UNAVAILABLE_REASONS = [
+  'no_voice',
+  'no_microphone',
+  'too_long',
+  'no_tiles',
+  'no_example_gap',
+  'no_other_meaning',
+  'needs_more_words',
+] as const;
+export type UnavailableReason = (typeof UNAVAILABLE_REASONS)[number];
+
 /** Phase 23. A choice is answered by index, a typed card by its text. Phase 25:
  *  a speaking card by a transcript, which only the server builds from the audio
  *  it judged, or by a pass (spec D5). */
