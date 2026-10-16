@@ -109,7 +109,8 @@ async function pass(page: Page, card: Card) {
 
 /** Phase 55. The next card on screen after `after`. With speaking off a read
  *  aloud is passed unseen (phase 25 D8), and a ladder's read aloud follows its
- *  meet card (spec D3), so the counter can step over a position. */
+ *  meet card (spec D3), so the counter can step over a position, which the
+ *  caller checks (review M4). */
 async function nextShown(page: Page, after: number): Promise<{ position: number; card: Card }> {
   const label = page.getByTestId('progress-label');
   const at = async () => Number(/(\d+)\s*\/\s*\d+/.exec(stripIsolates(await label.textContent()))?.[1]);
@@ -212,6 +213,21 @@ test("speaking: can't speak now passes the read aloud, and say the translation t
   await saveFourWords(page.request);
   await seedMemory('e2e_speak_cant_ru', CANT_SPEAK);
 
+  // Review M4. Each card the server sends, by position: what a position the counter
+  // stepped over held. Read once the session is played.
+  const served: Promise<[number, string] | null>[] = [];
+  page.on('response', (response) => {
+    if (response.request().method() !== 'POST' || !/\/next-step$/.test(response.url())) return;
+    served.push(
+      response
+        .json()
+        .then((body: { question?: { type: string }; position?: { position: number } }) =>
+          body.question && body.position ? ([body.position.position, body.question.type] as [number, string]) : null,
+        )
+        .catch(() => null),
+    );
+  });
+
   await clearGemini(request);
   await expectGeneration(request);
   // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
@@ -232,13 +248,17 @@ test("speaking: can't speak now passes the read aloud, and say the translation t
   // read aloud it is, a new word's or ромашка's, speaking is off from here.
   await page.getByTestId('speak-cant-speak').click();
   let shown = await nextShown(page, position);
+  // Review M4: the card it passed is the one gone, and the next is up: none stepped over.
+  // The first read aloud is the first ladder's, so the next card is its tiles.
+  expect(shown.position, 'the card after the one passed').toBe(position + 1);
   await expect(page.getByTestId('feedback-title')).toHaveCount(0);
   await expect(page.getByTestId('continue-button')).toHaveCount(0);
 
   // Say the translation renders as the typed card from now on: черепаха's card
   // is the one typed card that is not a new word's translation (phase 54). Every
   // read aloud left is passed unseen, so none shows.
-  for (; ; shown = await nextShown(page, shown.position)) {
+  const stepped: number[] = [];
+  for (;;) {
     const { card } = shown;
     expect(card.kind, `position ${shown.position}`).not.toBe('say');
     expect(card.kind, `position ${shown.position}`).not.toBe('read');
@@ -249,7 +269,14 @@ test("speaking: can't speak now passes the read aloud, and say the translation t
       break;
     }
     await pass(page, card);
+    const before = shown.position;
+    shown = await nextShown(page, before);
+    for (let at = before + 1; at < shown.position; at++) stepped.push(at);
   }
+  // Review M4. Exactly the read alouds left before черепаха's card were stepped over,
+  // passed unseen: the second ladder's and ромашка's. A real card skipped would be one more.
+  const types = new Map((await Promise.all(served)).filter((entry) => entry !== null));
+  expect(stepped.map((at) => types.get(at)), `stepped over ${stepped.join(', ')}`).toEqual(['read_aloud', 'read_aloud']);
   position = shown.position;
   // The last card ends on the results; an earlier one is skipped back home. The results
   // keep home's start button mounted behind them, so each ending is checked on its own.

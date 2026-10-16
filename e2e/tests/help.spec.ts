@@ -166,3 +166,38 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
+
+// Review M5. A wrong tile alone makes the card helped: no help pressed, the right
+// tiles after it, and the answer is sent helped and told right with help.
+test('a wrong tile alone makes the tiles card helped', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const sent: unknown[] = [];
+  page.on('request', (req) => {
+    if (req.method() === 'POST' && /\/next-step$/.test(req.url())) sent.push(req.postDataJSON());
+  });
+  await startSession(page, request, 'e2e_help_tile_ru', report);
+
+  await readCard(page, 1, 5, 'meet');
+  await continueMeet(page);
+  await readCard(page, 2, 5, 'tiles');
+  const letters = tileLetters(WORD.form)!;
+
+  // One wrong tap, then every letter by hand: the help button is never pressed.
+  const wrong = (await tilesOnScreen(page)).findIndex((letter) => letter !== letters[0]);
+  await page.getByTestId(`tile-${wrong}`).click();
+  await expect(page.getByTestId('tiles-wrong')).toHaveText('לא האות הזאת');
+  await expect(page.getByTestId(/^tile-slot-\d+$/)).toHaveCount(0);
+  await buildTiles(page, WORD.form);
+
+  await expect(page.getByTestId('feedback-other')).toBeVisible();
+  await expect(page.getByTestId('feedback-title')).toHaveText('נכון, עם עזרה');
+  await expect(page.getByTestId('feedback-line')).toHaveCount(0);
+  await expect.poll(() => sent.length).toBe(2);
+  expect(sent).toEqual([
+    { question_id: expect.any(String), seen: true },
+    { question_id: expect.any(String), text: WORD.form, helped: true },
+  ]);
+
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
