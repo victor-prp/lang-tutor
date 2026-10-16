@@ -1051,6 +1051,10 @@ export const sessions = pgTable(
     // earlier day is replaced when the day's split no longer matches the one in
     // session_targets. Null for a seed and for every session before this phase.
     chosenOn: date('chosen_on', { mode: 'string' }),
+    // Phase 57 (spec D1). The path the session belongs to: a target's id, or null for the
+    // main path. Null for every session before this phase, and for the code before it,
+    // which the old container still runs for a minute after the new one migrates (ADR 0010).
+    targetId: uuid('target_id'),
   },
   (t) => [
     foreignKey({
@@ -1058,6 +1062,8 @@ export const sessions = pgTable(
       columns: [t.userId, t.enrollmentId],
       foreignColumns: [enrollments.userId, enrollments.id],
     }),
+    // Phase 57. No action on delete: a target is never deleted while its sessions hold it.
+    foreignKey({ name: 'sessions_target_fk', columns: [t.targetId], foreignColumns: [targets.id] }),
     check(
       'sessions_status_known',
       sql`${t.status} in ('preparing', 'ready', 'completed', 'skipped', 'failed')`,
@@ -1462,6 +1468,10 @@ export const targetWords = pgTable(
     targetId: uuid('target_id').notNull(),
     glossId: text('gloss_id').notNull(),
     addedAt: timestamp('added_at', tz).notNull().defaultNow(),
+    // Phase 57 (spec D6). The learner day of the first session that asked the word after it
+    // joined the target, any answer counting; null until one has. Written by recordProgress
+    // in the transaction that ends that session, never moved, and rebuilt by the recompute.
+    startedOn: date('started_on', { mode: 'string' }),
   },
   (t) => [
     primaryKey({ name: 'target_words_pkey', columns: [t.targetId, t.glossId] }),
@@ -1505,23 +1515,92 @@ export const targetEvents = pgTable(
 // transaction that chooses the session's words; read back only by the stale-stock
 // check (D12). Nothing ties `picked` to `slots`: a target is handed slots the main
 // path could not use in a second pass, so it can pick more than it was given.
+// Phase 57 (spec D2, D9). A target path's stock writes one row with no wish, slots,
+// picks or reason (null, which the reason check passes), and with the cap of its day
+// in half-points, its readiness in percent and its words ready by FSRS on the date.
 export const sessionTargets = pgTable(
   'session_targets',
   {
     sessionId: uuid('session_id').notNull(),
     targetId: uuid('target_id').notNull(),
-    wish: integer('wish').notNull(),
-    slots: integer('slots').notNull(),
-    picked: integer('picked').notNull(),
-    reason: text('reason').notNull(),
+    wish: integer('wish'),
+    slots: integer('slots'),
+    picked: integer('picked'),
+    reason: text('reason'),
     daysLeft: integer('days_left').notNull(),
     readyCount: integer('ready_count').notNull(),
     wordCount: integer('word_count').notNull(),
+    capHalves: integer('cap_halves'),
+    readinessPct: integer('readiness_pct'),
+    fsrsReadyCount: integer('fsrs_ready_count'),
   },
   (t) => [
     primaryKey({ name: 'session_targets_pkey', columns: [t.sessionId, t.targetId] }),
     foreignKey({ name: 'session_targets_session_fk', columns: [t.sessionId], foreignColumns: [sessions.id] }).onDelete('cascade'),
     foreignKey({ name: 'session_targets_target_fk', columns: [t.targetId], foreignColumns: [targets.id] }).onDelete('cascade'),
     check('session_targets_reason_known', sql`${t.reason} in ('exclusive', 'run_up', 'not_ready', 'steady')`),
+  ],
+);
+
+// Phase 57 (spec D3, D4). A target's skill values: one row per target, gloss and dimension a
+// session has moved, in half-points (0-20: 20 is 10 points); a skill with no row is at 0.
+// Derived from the answer log and recorded ("derive, then record"): recordProgress writes it
+// in the transaction that ends a session, the recompute rebuilds it, and every change is a
+// line of target_skill_events. `session_id` and `day` are the session and learner day of the
+// last change. Keyed through the target word, as gloss_progress is through its entry:
+// removing a word from a target takes its skills, and a gloss merge moves them with it.
+export const targetSkills = pgTable(
+  'target_skills',
+  {
+    targetId: uuid('target_id').notNull(),
+    glossId: text('gloss_id').notNull(),
+    dimension: text('dimension').notNull(),
+    halves: smallint('halves').notNull(),
+    sessionId: uuid('session_id'),
+    day: date('day', { mode: 'string' }),
+  },
+  (t) => [
+    primaryKey({ name: 'target_skills_pkey', columns: [t.targetId, t.glossId, t.dimension] }),
+    foreignKey({
+      name: 'target_skills_word_fk',
+      columns: [t.targetId, t.glossId],
+      foreignColumns: [targetWords.targetId, targetWords.glossId],
+    })
+      .onDelete('cascade')
+      .onUpdate('cascade'),
+    check(
+      'target_skills_dimension_known',
+      sql`${t.dimension} in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')`,
+    ),
+    check('target_skills_halves_range', sql`${t.halves} between 0 and 20`),
+  ],
+);
+
+// Phase 57 (spec D3). Append-only: every change of a target skill, the session that made it,
+// the values before and after, and why (domain/targetSkills.ts TargetSkillEvent). gloss_id
+// and session_id carry no foreign key, so a line outlives its word's removal and its session,
+// as target_events' do. The recompute deletes and rebuilds the log with the values.
+export const targetSkillEvents = pgTable(
+  'target_skill_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    targetId: uuid('target_id').notNull(),
+    glossId: text('gloss_id').notNull(),
+    dimension: text('dimension').notNull(),
+    sessionId: uuid('session_id').notNull(),
+    before: smallint('before').notNull(),
+    after: smallint('after').notNull(),
+    why: text('why').notNull(),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'target_skill_events_target_fk', columns: [t.targetId], foreignColumns: [targets.id] }).onDelete('cascade'),
+    check(
+      'target_skill_events_dimension_known',
+      sql`${t.dimension} in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')`,
+    ),
+    check('target_skill_events_why_known', sql`${t.why} in ('miss', 'recall', 'recognition')`),
+    check('target_skill_events_values_range', sql`${t.before} between 0 and 20 and ${t.after} between 0 and 20`),
+    index('target_skill_events_target_created_idx').on(t.targetId, t.createdAt),
   ],
 );

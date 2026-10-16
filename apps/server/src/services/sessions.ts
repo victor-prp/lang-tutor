@@ -103,6 +103,7 @@ import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
 import { chooseWithTargets, splitChanged, targetSplit, type TargetSessionInput, type TargetSplit } from '../domain/targetSession';
+import { targetSessionWrite } from '../domain/targetSkills';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
   AnswerKindMismatch,
@@ -125,6 +126,7 @@ import { learnerDay } from './learnerDay';
 import type { LlmClient, ModelCallRecord } from './llm';
 import type { SpeechTranscriber } from './speech';
 import { requestStock } from './stock';
+import type { SessionEvidence } from '../repo/progress';
 import type { Repos, Transaction } from './transaction';
 
 export type { Transaction } from './transaction';
@@ -194,11 +196,20 @@ type MaybeStale = { stockId: string; today: string; devices: Devices; recorded: 
  * Phase 31 (spec D14). The practised glosses' lexemes are share-locked before
  * anything is read, so a merge of one of them lands wholly before the evidence
  * is read or wholly after the progress is written: never between.
+ *
+ * Phase 57 (spec D4). The target skills are written here too, in the same
+ * transaction: an ended session with part of its write would be as wrong.
  */
 async function recordProgress(repos: Repos, sessionId: string): Promise<void> {
   await repos.progress.lockSessionGlosses(sessionId);
   const evidence = await repos.progress.findSessionEvidence(sessionId);
   if (!evidence) return;
+  await recordLevelsAndMemory(repos, sessionId, evidence);
+  await recordTargetSkills(repos, sessionId, evidence);
+}
+
+/** Phase 20, 35. The levels and the memory of the saved glosses a session asked. */
+async function recordLevelsAndMemory(repos: Repos, sessionId: string, evidence: SessionEvidence): Promise<void> {
   const rows = await repos.progress.findRows({
     enrollmentId: evidence.enrollmentId,
     glossIds: [...new Set(evidence.answers.map((answer) => answer.glossId))],
@@ -219,6 +230,23 @@ async function recordProgress(repos: Repos, sessionId: string): Promise<void> {
     evidence.day,
   );
   await repos.memory.upsertRows({ enrollmentId: evidence.enrollmentId, rows: memory });
+}
+
+/**
+ * Phase 57 (spec D4, D6, D10). The target skills of every target active on the session's day
+ * that holds a word it asked, whatever path the session is on, each against its own cap, and
+ * the day each word it asked started. Targets are read as they stood at the session's last
+ * answer (listActiveHolding), so the recompute (db/progressRecompute.ts) replays this exactly.
+ */
+async function recordTargetSkills(repos: Repos, sessionId: string, evidence: SessionEvidence): Promise<void> {
+  const glossIds = [...new Set(evidence.answers.map((answer) => answer.glossId))];
+  const targets = await repos.target.listActiveHolding(evidence.enrollmentId, glossIds, evidence.day, evidence.lastAnsweredAt);
+  if (targets.length === 0) return;
+  const before = await repos.targetSkills.findRows(targets.map((target) => target.id), glossIds);
+  const write = targetSessionWrite({ sessionId, day: evidence.day, targets, before, answers: evidence.answers });
+  await repos.targetSkills.upsertRows(write.rows);
+  await repos.targetSkills.insertEvents(write.events);
+  for (const started of write.started) await repos.target.markStarted(started.targetId, started.glossIds, evidence.day);
 }
 
 /**

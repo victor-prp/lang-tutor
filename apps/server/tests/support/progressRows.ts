@@ -276,7 +276,10 @@ export async function insertAnsweredSession(
  * Makes every insert into `table` fail, to prove a write is all-or-nothing.
  * The database is the test's own clone, so the trigger goes with it.
  */
-export async function failInsertsInto(db: Db, table: 'session_progress' | 'gloss_progress' | 'gloss_memory'): Promise<void> {
+export async function failInsertsInto(
+  db: Db,
+  table: 'session_progress' | 'gloss_progress' | 'gloss_memory' | 'target_skills' | 'target_skill_events',
+): Promise<void> {
   await db.execute(
     sql.raw(`
       create function fail_insert() returns trigger language plpgsql as $$

@@ -614,7 +614,10 @@ describe('phase 37: answers and introductions on a day', () => {
     const b = await savedWord('bread', 'לחם');
     const sessionId = await play([a, b], D2);
     const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
-    expect(await read((repo) => repo.findAnswersOn(E, D2))).toEqual(evidence!.answers.map((answer) => ({ ...answer, sessionId })));
+    // Phase 57: the evidence also carries helped and answeredAt, which a day's answers do not.
+    expect(await read((repo) => repo.findAnswersOn(E, D2))).toEqual(
+      evidence!.answers.map(({ helped: _helped, answeredAt: _answeredAt, ...answer }) => ({ ...answer, sessionId })),
+    );
   });
 
   it("reads a held answer by its retry, as the session's evidence does (phase 34, spec D9)", async () => {

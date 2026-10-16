@@ -12,6 +12,7 @@ import type {
   SnapshotRow,
   TextAnswerType,
 } from '../domain/progress';
+import { instantText } from './instants';
 import { canonicalOptions } from './questions';
 
 const TEXT_TYPES: ReadonlySet<string> = new Set([
@@ -27,6 +28,11 @@ const TEXT_TYPES: ReadonlySet<string> = new Set([
   'sentence_translation',
 ]);
 
+/** Phase 57 (spec D4). An answer as the rules read it, with what the target skills read
+ *  beyond its grade: whether help was used on it (phase 56; null on a card that takes none
+ *  reads false), and when it was given, as instantText. */
+export type SessionAnswer = AnsweredQuestion & { helped: boolean; answeredAt: string };
+
 /** A session's answers as the rule reads them. */
 export type SessionEvidence = {
   enrollmentId: string;
@@ -35,7 +41,7 @@ export type SessionEvidence = {
   /** The last answer's time as Postgres prints it. The recompute compares it with
    *  each entry's save time, and the `::text` round trip keeps microseconds. */
   lastAnsweredAt: string;
-  answers: AnsweredQuestion[];
+  answers: SessionAnswer[];
 };
 
 /** A stored answer as its question and answer rows give it. Phase 55 (spec D2, as
@@ -108,10 +114,14 @@ export function createProgressRepo(tx: Tx) {
     },
 
     findSessionEvidence: async (sessionId: string): Promise<SessionEvidence | undefined> => {
-      const rows = await tx.execute<AnswerRow & { enrollment_id: string; day: string; last_answered_at: string }>(sql`
+      const rows = await tx.execute<
+        AnswerRow & { enrollment_id: string; day: string; last_answered_at: string; helped: boolean; answered_at: string }
+      >(sql`
         SELECT s.enrollment_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro,
                s.practice_day::text AS day,
-               (max(a.answered_at) OVER ())::text AS last_answered_at
+               (max(a.answered_at) OVER ())::text AS last_answered_at,
+               coalesce(a.helped, false) AS helped,
+               ${instantText(sql`a.answered_at`)} AS answered_at
         FROM answers a
         JOIN sessions s  ON s.id = a.session_id
         JOIN questions q ON q.id = a.question_id
@@ -123,7 +133,7 @@ export function createProgressRepo(tx: Tx) {
         enrollmentId: first.enrollment_id,
         day: first.day,
         lastAnsweredAt: first.last_answered_at,
-        answers: rows.rows.map(decodeAnswer),
+        answers: rows.rows.map((row) => ({ ...decodeAnswer(row), helped: row.helped, answeredAt: row.answered_at })),
       };
     },
 

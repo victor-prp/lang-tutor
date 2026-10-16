@@ -1,9 +1,11 @@
-import { and, asc, eq, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { sessionTargets, targetEvents, targets, targetWords } from '../db/schema';
 import type { TargetSplit } from '../domain/targetSession';
+import type { HoldingTarget } from '../domain/targetSkills';
 import type { ShareReason, TargetKind } from '../domain/targets';
+import { instantText } from './instants';
 
 // `targets.id` is a `uuid` column: a malformed value makes Postgres raise 22P02
 // before a WHERE clause can run, which would surface as a 500 where a target id
@@ -98,6 +100,63 @@ export function createTargetRepo(tx: Tx) {
         else glossIdsOf.set(targetId, [glossId]);
       }
       return rows.map((row) => ({ ...asTarget(row), glossIds: glossIdsOf.get(row.id) ?? [] }));
+    },
+
+    /**
+     * Phase 57 (spec D4, D10). The enrollment's targets active on `day` holding any of
+     * `glossIds`, as they stood at `asOf`, the instant of a session's last answer: not ended
+     * by then, and due on or after `day` by the date they had then, which is the `before` of
+     * the log's first date change after `asOf` (the date they have now when none came after).
+     * Read so, the session-end write and the recompute see a target alike, whatever changed
+     * since. Each with its words among `glossIds` and when they joined it (instantText), so an
+     * answer given before can count for nothing. Nearest date first, then id.
+     */
+    listActiveHolding: async (enrollmentId: string, glossIds: readonly string[], day: string, asOf: string): Promise<HoldingTarget[]> => {
+      if (glossIds.length === 0) return [];
+      const rows = await tx.execute<{ id: string; due_on: string; gloss_id: string; added_at: string }>(sql`
+        SELECT t.id, t.due_on::text AS due_on, w.gloss_id, ${instantText(sql`w.added_at`)} AS added_at
+        FROM (
+          SELECT t.id,
+                 coalesce(
+                   (SELECT (e.before->>'due_on')::date
+                    FROM target_events e
+                    WHERE e.target_id = t.id AND e.kind = 'date_changed' AND e.created_at > ${asOf}::timestamptz
+                    ORDER BY e.created_at, e.id
+                    LIMIT 1),
+                   t.due_on) AS due_on
+          FROM targets t
+          WHERE t.enrollment_id = ${enrollmentId}
+            AND (t.ended_at IS NULL OR t.ended_at > ${asOf}::timestamptz)
+        ) t
+        JOIN target_words w ON w.target_id = t.id
+        WHERE t.due_on >= ${day}::date
+          AND w.gloss_id IN (${sql.join(glossIds.map((glossId) => sql`${glossId}`), sql`, `)})
+        ORDER BY t.due_on, t.id, w.added_at, w.gloss_id`);
+      const held = new Map<string, HoldingTarget & { words: { glossId: string; addedAt: string }[] }>();
+      for (const row of rows.rows) {
+        let target = held.get(row.id);
+        if (!target) {
+          target = { id: row.id, dueOn: row.due_on, words: [] };
+          held.set(row.id, target);
+        }
+        target.words.push({ glossId: row.gloss_id, addedAt: row.added_at });
+      }
+      return [...held.values()];
+    },
+
+    /** Phase 57 (spec D6). The day these words of a target started, for those not started yet:
+     *  a word's first session sets it and no later one moves it. */
+    markStarted: async (targetId: string, glossIds: readonly string[], day: string): Promise<void> => {
+      if (glossIds.length === 0) return;
+      await tx
+        .update(targetWords)
+        .set({ startedOn: day })
+        .where(and(eq(targetWords.targetId, targetId), inArray(targetWords.glossId, [...glossIds]), isNull(targetWords.startedOn)));
+    },
+
+    /** Recompute only: no word started, before the replay starts them again. */
+    clearStarted: async (): Promise<void> => {
+      await tx.update(targetWords).set({ startedOn: null }).where(isNotNull(targetWords.startedOn));
     },
 
     /** A target's gloss ids, in the order they were added. */
@@ -215,7 +274,8 @@ export function createTargetRepo(tx: Tx) {
     },
 
     /** What insertSessionSplit recorded, by target id; empty for a session that served no
-     *  target, and for a malformed id. */
+     *  target, and for a malformed id. Phase 57: a target path's row records no split (its
+     *  wish, slots, picks and reason are null), so it is not one. */
     findSessionSplit: async (sessionId: string): Promise<TargetSplit[]> => {
       if (!UUID_RE.test(sessionId)) return [];
       const rows = await tx
@@ -232,7 +292,11 @@ export function createTargetRepo(tx: Tx) {
         .from(sessionTargets)
         .where(eq(sessionTargets.sessionId, sessionId))
         .orderBy(asc(sessionTargets.targetId));
-      return rows.map((row) => ({ ...row, reason: row.reason as ShareReason }));
+      return rows.flatMap(({ wish, slots, picked, reason, ...rest }) =>
+        wish === null || slots === null || picked === null || reason === null
+          ? []
+          : [{ ...rest, wish, slots, picked, reason: reason as ShareReason }],
+      );
     },
   };
 }

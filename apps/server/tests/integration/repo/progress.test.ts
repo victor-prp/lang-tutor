@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { DIMENSIONS } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
-import { createProgressRepo } from '../../../src/repo/progress';
+import { createProgressRepo, type SessionEvidence } from '../../../src/repo/progress';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { insertLexeme } from '../../support/dictRows';
 import {
@@ -50,6 +50,11 @@ afterEach(async () => {
 const repo = <T>(fn: (r: ReturnType<typeof createProgressRepo>) => Promise<T>) =>
   withTx(t.db, (tx) => fn(createProgressRepo(tx)));
 
+/** A session's answers as the rules decode them, without what the target skills read
+ *  beside them (phase 57): the tests of the decoding compare these. */
+const decoded = (evidence: SessionEvidence | undefined) =>
+  evidence!.answers.map(({ helped: _helped, answeredAt: _answeredAt, ...answer }) => answer);
+
 /** Saves `senseIndexes` of kite at `at`, with their five rows. */
 async function saveAt(at: string, senseIndexes: number[]) {
   for (const i of senseIndexes) {
@@ -84,10 +89,40 @@ describe('findSessionEvidence', () => {
       day: '2026-10-05',
       lastAnsweredAt: expect.any(String),
       answers: [
-        { glossId: kite.glossIds[0], type: 'multiple_choice', correct: true },
-        { glossId: kite.glossIds[1], type: 'multiple_choice', correct: false },
+        { glossId: kite.glossIds[0], type: 'multiple_choice', correct: true, helped: false, answeredAt: '2026-10-05T10:00:00.000000Z' },
+        { glossId: kite.glossIds[1], type: 'multiple_choice', correct: false, helped: false, answeredAt: '2026-10-05T10:01:00.000000Z' },
       ],
     });
+  });
+
+  // Phase 57 (spec D4). The target skills compare each answer's time with its word's joining
+  // a target, so it is read as UTC text to the microsecond whatever the session's TimeZone,
+  // and a helped answer says so (a card that takes no help reads false).
+  it('reads whether help was used, and when each answer was given, in UTC to the microsecond', async () => {
+    const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'tome', translations: ['ספר'] });
+    const asked = { glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'tome', lemma: 'tome', translation: 'ספר' };
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: [asked, asked],
+      types: ['typed_translation', 'multiple_choice'],
+    });
+    await withTx(t.db, async (tx) => {
+      const sessions = createSessionRepo(tx);
+      await sessions.insertAnswer(sessionId, 0, questions[0].id, { text: 'tome', verdict: 'wrong', helped: true });
+      await sessions.insertAnswer(sessionId, 1, questions[1].id, { displayIndex: 0 });
+    });
+    await t.db.execute(sql`
+      update answers set answered_at = '2026-10-05 21:01:00.000123-03' where session_id = ${sessionId} and position = 0`);
+    const evidence = await withTx(t.db, async (tx) => {
+      await tx.execute(sql`SET LOCAL TimeZone = 'America/Sao_Paulo'`);
+      return createProgressRepo(tx).findSessionEvidence(sessionId);
+    });
+    expect(evidence!.answers.map(({ helped, answeredAt }) => [helped, answeredAt.length])).toEqual([
+      [true, 27],
+      [false, 27],
+    ]);
+    expect(evidence!.answers[0].answeredAt).toBe('2026-10-06T00:01:00.000123Z');
   });
 
   // Review Focus 1: a session across UTC midnight counts for its last answer's day.
@@ -361,7 +396,7 @@ describe('phase 23: reversed and typed questions', () => {
   it('reads a choice by its option and a typed answer by its verdict', async () => {
     const { sessionId, asked } = await mixedSession();
     const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
-    expect(evidence!.answers).toEqual([
+    expect(decoded(evidence)).toEqual([
       { glossId: asked[0].glossId, type: 'multiple_choice', correct: true },
       { glossId: asked[1].glossId, type: 'reverse_choice', correct: false },
       { glossId: asked[2].glossId, type: 'typed_translation', verdict: 'near_miss' },
@@ -408,7 +443,7 @@ describe('phase 25: spoken answers as evidence', () => {
       await sessions.insertAnswer(sessionId, 1, questions[1].id, { text: '', verdict: 'skipped' });
     });
     const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
-    expect(evidence!.answers).toEqual([
+    expect(decoded(evidence)).toEqual([
       { glossId: asked[0].glossId, type: 'read_aloud', verdict: 'understood' },
       { glossId: asked[1].glossId, type: 'say_translation', verdict: 'skipped' },
     ]);
@@ -427,7 +462,7 @@ describe('phase 27: a judged answer as evidence', () => {
     });
     await withTx(t.db, (tx) => createSessionRepo(tx).insertAnswer(sessionId, 0, questions[0].id, { text: 'ספר', verdict: 'exact' }));
     const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
-    expect(evidence!.answers).toEqual([{ glossId: asked[0].glossId, type: 'typed_meaning', verdict: 'exact' }]);
+    expect(decoded(evidence)).toEqual([{ glossId: asked[0].glossId, type: 'typed_meaning', verdict: 'exact' }]);
   });
 
   it('reads the sentence cards: a choice by its option, the two typed ones by their verdict (phase 27 Part B)', async () => {
@@ -446,7 +481,7 @@ describe('phase 27: a judged answer as evidence', () => {
       await sessions.insertAnswer(sessionId, 2, questions[2].id, { text: 'book', verdict: 'wrong' });
     });
     const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
-    expect(evidence!.answers).toEqual([
+    expect(decoded(evidence)).toEqual([
       { glossId: sense.glossId, type: 'cloze_choice', correct: true },
       { glossId: sense.glossId, type: 'cloze_typed', verdict: 'exact' },
       { glossId: sense.glossId, type: 'sentence_translation', verdict: 'wrong' },

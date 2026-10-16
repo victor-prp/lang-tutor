@@ -13,6 +13,7 @@ import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { TargetRepo } from '../repo/targets';
+import type { TargetSkillRepo } from '../repo/targetSkills';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
 import type { UserRepo } from '../repo/users';
@@ -317,6 +318,7 @@ describe('repos', () => {
         pronunciation: stub<PronunciationRepo>({}),
         reminders: stub<ReminderRepo>({}),
         target: stub<TargetRepo>({}),
+        targetSkills: stub<TargetSkillRepo>({}),
         // Phase 43 (spec D3). The one job an answer may ask for: the next session in stock.
         jobs,
       });

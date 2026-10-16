@@ -275,6 +275,8 @@ export function createFakeTargetRepo(overrides: Partial<TargetRepo> = {}): FakeT
     findTarget: missing.findTarget,
     findTargetForUpdate: missing.findTargetForUpdate,
     listActive: async () => [],
+    // Phase 57. No target holds a word a session asked, so no target skill moves.
+    listActiveHolding: async () => [],
     listWordIds: missing.listWordIds,
     addWords: async (...args) => {
       written.push({ method: 'addWords', args });
@@ -303,6 +305,10 @@ export function createFakeTargetRepo(overrides: Partial<TargetRepo> = {}): FakeT
       written.push({ method: 'insertSessionSplit', args });
     },
     findSessionSplit: async () => [],
+    markStarted: async (...args) => {
+      written.push({ method: 'markStarted', args });
+    },
+    clearStarted: missing.clearStarted,
     ...overrides,
   };
 }
@@ -399,6 +405,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     pronunciation: repos.pronunciation ?? unreachableRepo('pronunciation repo'),
     reminders: repos.reminders ?? unreachableRepo('reminders repo'),
     target: repos.target ?? createFakeTargetRepo(),
+    targetSkills: repos.targetSkills ?? unreachableRepo('target skill repo'),
   };
   return (run) => run(bound);
 }

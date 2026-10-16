@@ -21,6 +21,7 @@ import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
 import { createTargetRepo } from './repo/targets';
+import { createTargetSkillRepo } from './repo/targetSkills';
 import { createEnrollmentRepo } from './repo/enrollments';
 import { createGrantRepo } from './repo/grants';
 import { createUserRepo } from './repo/users';
@@ -132,6 +133,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     pronunciation: createPronunciationRepo(tx),
     reminders: createReminderRepo(tx),
     target: createTargetRepo(tx),
+    targetSkills: createTargetSkillRepo(tx),
   };
 }
 

@@ -6,6 +6,7 @@ import {
   TARGET_CAP_HALVES,
   TARGET_POINTS_HALVES,
 } from './chooseConstants';
+import { daysBetween } from './progress';
 
 /**
  * Phase 57 (spec D4, D5). A target's skills: a value per word and dimension, in half-points
@@ -124,4 +125,54 @@ export function applyTargetSession(input: {
     events.push({ targetId: input.targetId, glossId, dimension, sessionId: input.sessionId, before, after, why });
   }
   return { rows, events };
+}
+
+/**
+ * Phase 57 (spec D4, D10). A target as the session-end write reads it: active while the
+ * session's answers were given, its due date then, and when each of its words the session
+ * asked joined it. Instants are fixed-width UTC text to the microsecond (repo/instants.ts),
+ * so two compare as strings exactly as the instants do.
+ */
+export type HoldingTarget = { id: string; dueOn: string; words: readonly { glossId: string; addedAt: string }[] };
+
+/** A session's answer and when it was given, in the same text as HoldingTarget's instants. */
+export type TimedTargetAnswer = TargetAnswer & { answeredAt: string };
+
+/**
+ * Spec D4, D5. What one ended session writes for every target holding a word it asked: each
+ * target's changed skills against its own cap on the session's day, one event per change, and
+ * the words it started (any answer, an intro card's or a helped one too). An answer counts for
+ * a target only when it was given at or after its word joined it.
+ */
+export function targetSessionWrite(input: {
+  sessionId: string;
+  day: string;
+  targets: readonly HoldingTarget[];
+  before: readonly TargetSkillRow[];
+  answers: readonly TimedTargetAnswer[];
+}): { rows: TargetSkillRow[]; events: TargetSkillEvent[]; started: { targetId: string; glossIds: string[] }[] } {
+  const rows: TargetSkillRow[] = [];
+  const events: TargetSkillEvent[] = [];
+  const started: { targetId: string; glossIds: string[] }[] = [];
+  for (const target of input.targets) {
+    const addedAt = new Map(target.words.map((word) => [word.glossId, word.addedAt]));
+    const counted = input.answers.filter((answer) => {
+      const joined = addedAt.get(answer.glossId);
+      return joined !== undefined && answer.answeredAt >= joined;
+    });
+    if (counted.length === 0) continue;
+    const moved = applyTargetSession({
+      targetId: target.id,
+      sessionId: input.sessionId,
+      day: input.day,
+      capHalves: capHalves(daysBetween(input.day, target.dueOn)),
+      glossIds: new Set(addedAt.keys()),
+      before: input.before,
+      answers: counted,
+    });
+    rows.push(...moved.rows);
+    events.push(...moved.events);
+    started.push({ targetId: target.id, glossIds: [...new Set(counted.map((answer) => answer.glossId))] });
+  }
+  return { rows, events, started };
 }

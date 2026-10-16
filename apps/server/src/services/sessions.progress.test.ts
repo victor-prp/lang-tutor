@@ -46,8 +46,8 @@ const EVIDENCE: SessionEvidence = {
   day: DAY,
   lastAnsweredAt: '2026-10-05 12:00:00+00',
   answers: [
-    { glossId: 's1', type: 'multiple_choice', correct: true },
-    { glossId: 'sX', type: 'multiple_choice', correct: true },
+    { glossId: 's1', type: 'multiple_choice', correct: true, helped: false, answeredAt: '2026-10-05T11:59:00.000000Z' },
+    { glossId: 'sX', type: 'multiple_choice', correct: true, helped: false, answeredAt: '2026-10-05T12:00:00.000000Z' },
   ],
 };
 const ROWS: ProgressRow[] = DIMENSIONS.map((dimension) => ({

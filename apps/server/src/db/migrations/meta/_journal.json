@@ -288,6 +288,13 @@
       "when": 1792111576644,
       "tag": "0040_intro_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792170221835,
+      "tag": "0041_target_skills",
+      "breakpoints": true
     }
   ]
 }

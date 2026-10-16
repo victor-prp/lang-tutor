@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { Question } from '@lang-tutor/core/api';
+import type { QuestionType } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
 import { recomputeProgress } from '../../../src/db/progressRecompute';
@@ -15,9 +16,10 @@ import {
   saveSessionGlosses,
   setLevel,
 } from '../../support/progressRows';
-import { asChoice, insertListSession } from '../../support/questions';
-import { enrollmentOf, seedUser } from '../../support/seedUser';
+import { asChoice, insertListSession, type AskedGloss } from '../../support/questions';
+import { enrollmentOf, makeBot, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
+import { readStartedOn, readTargetSkillEvents, readTargetSkills, seedTarget, spoilTargetSkills } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -364,5 +366,78 @@ describe('recomputeProgress', () => {
 
     expect(await recomputeProgress(t.db)).toEqual({ sessions: 3 });
     expect(await readMemory(t.db, E)).toEqual(before);
+  });
+
+  // Phase 57 (spec D3, D4). Target skills, their events and the day each word started, replayed
+  // from the answers as the live path wrote them. Each session counts for the targets active
+  // when its answers were given, at the cap of the due date they had then: a target ended
+  // early keeps what its sessions before the end gave it, and one whose date moved keeps the
+  // caps its earlier sessions were played under. The learner is a bot, so the day is the
+  // profile's while every instant is the real clock's, as the targets service's are.
+  it('rebuilds target skills, their events and started_on as the live path wrote them', async () => {
+    await makeBot(t.db, 'u_1', '2030-01-08');
+    const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+    const word = async (lemma: string, translation: string): Promise<AskedGloss> => {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
+      return { glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation };
+    };
+    const tome = await word('tome', 'ספר');
+    const quill = await word('quill', 'נוצה');
+    const play = async (cards: [AskedGloss, QuestionType, boolean][]) => {
+      const { sessionId, questions } = await insertListSession(t.db, {
+        userId: 'u_1',
+        enrollmentId: E,
+        asked: cards.map(([asked]) => asked),
+        types: cards.map(([, type]) => type),
+      });
+      for (const [i, [asked, type, right]] of cards.entries()) {
+        if (type === 'multiple_choice') {
+          const q = asChoice(questions[i]);
+          await deps.sessions.submitAnswer('u_1', sessionId, q.id, { option_index: right ? q.correct_option : (q.correct_option + 1) % q.options.length });
+        } else {
+          await deps.sessions.submitAnswer('u_1', sessionId, questions[i].id, { text: right ? asked.form : 'zzzz' });
+        }
+      }
+    };
+    // Five days left on the first day: cap 7; twenty for the homework: cap 4.
+    const exam = await seedTarget(t.db, { enrollmentId: E, kind: 'exam', dueOn: '2030-01-13', glossIds: [tome.glossId, quill.glossId] });
+    const homework = await seedTarget(t.db, { enrollmentId: E, kind: 'homework', dueOn: '2030-01-28', glossIds: [tome.glossId] });
+
+    await play([[tome, 'typed_translation', true], [quill, 'multiple_choice', true]]);
+    await deps.targets.end('u_1', homework);
+    await makeBot(t.db, 'u_1', '2030-01-09');
+    await play([[tome, 'typed_translation', false], [quill, 'typed_translation', true]]);
+    await deps.targets.changeDate('u_1', exam, { due_on: '2030-02-20' });
+    await makeBot(t.db, 'u_1', '2030-01-10');
+    await play([[quill, 'multiple_choice', false]]);
+
+    const written = async () => ({
+      skills: [await readTargetSkills(t.db, exam), await readTargetSkills(t.db, homework)],
+      events: [await readTargetSkillEvents(t.db, exam), await readTargetSkillEvents(t.db, homework)],
+      started: [await readStartedOn(t.db, exam), await readStartedOn(t.db, homework)],
+    });
+    const before = await written();
+    // The live path's own values, so the comparison below is not between two empty results,
+    // and so a replay at today's date (cap 2) or without the ended homework would differ.
+    const halves = (rows: { glossId: string; dimension: string; halves: number }[]) =>
+      Object.fromEntries(rows.map((row) => [`${row.glossId === tome.glossId ? 'tome' : 'quill'}:${row.dimension}`, row.halves]));
+    expect(halves(before.skills[0])).toEqual({
+      'tome:written_receptive': 4,
+      'tome:written_productive': 0,
+      'tome:spelling': 4,
+      'quill:written_receptive': 2,
+      'quill:written_productive': 4,
+      'quill:spelling': 4,
+    });
+    expect(halves(before.skills[1])).toEqual({ 'tome:written_receptive': 4, 'tome:written_productive': 4, 'tome:spelling': 4 });
+    expect(before.events[0].map((event) => event.why)).toContain('miss');
+    expect(before.started).toEqual([
+      { [tome.glossId]: '2030-01-08', [quill.glossId]: '2030-01-08' },
+      { [tome.glossId]: '2030-01-08' },
+    ]);
+
+    await spoilTargetSkills(t.db); // junk the rebuild must replace
+    expect(await recomputeProgress(t.db)).toEqual({ sessions: 3 });
+    expect(await written()).toEqual(before);
   });
 });
