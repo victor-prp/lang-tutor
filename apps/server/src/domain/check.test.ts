@@ -85,12 +85,25 @@ describe('parseCheck and readCheck', () => {
   // Which option a "yes" belongs to could only be guessed.
   it('refuses a choice or gap answer that does not say, option by option, which are right', () => {
     const without = (key: string, over: object) => ({ items: full.items.map((item) => (item.key === key ? { key, ...over } : item)) });
-    for (const [key, answer] of [['q1', without('q1', {})], ['q1', without('q1', { options: [true, false] })], ['q2', without('q2', { gap_fits: [false, false, false, true] })], ['q2', without('q2', { options: [false, false, false] })]] as const) {
+    for (const [key, answer] of [['q1', without('q1', {})], ['q1', without('q1', { options: [true, false] })], ['q2', without('q2', { gap_fits: [false, false, false, true] })], ['q2', without('q2', { options: [false, false, false, true] })]] as const) {
       const reading = readCheck(ITEMS, answer);
       expect(reading.unjudged.has(key)).toBe(true);
       expect(reading.byKey.has(key)).toBe(false);
     }
     expect(readCheck(ITEMS, without('q1', {})).unjudged.get('q1')).toBe("the checker did not say which of q1's 3 options are right");
+  });
+
+  // Phase 62. A call of gap items alone came back with every gap item's booleans in
+  // `options`, one run in three: the same answer, option by option, under the choice
+  // field's name. Read as unjudged it refused every one of those cards.
+  it('reads a gap item answered in options, as its gap_fits, when gap_fits is missing', () => {
+    const misnamed = { items: full.items.map((item) => (item.key === 'q2' ? { key: 'q2', options: [false, true, false] } : item)) };
+    const reading = readCheck(ITEMS, misnamed);
+    expect(reading.unjudged.has('q2')).toBe(false);
+    expect(reading.byKey.get('q2')).toEqual({ task: 'gap', alsoRight: [false, true, false] });
+    // gap_fits, when given, is what counts.
+    const both = { items: full.items.map((item) => (item.key === 'q2' ? { key: 'q2', gap_fits: [true, false, false], options: [false, true, false] } : item)) };
+    expect(readCheck(ITEMS, both).byKey.get('q2')).toEqual({ task: 'gap', alsoRight: [true, false, false] });
   });
 
   it('phase 48 (spec D2): a miscounted item is unjudged and every other item is still read', () => {
