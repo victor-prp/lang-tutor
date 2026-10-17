@@ -629,20 +629,22 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
   // choice, the second, with a gap in its example, a cloze choice.
   const GAP_PAYLOAD = tenPayload(TEN_CARDS.map((card, i) => (i === 4 ? PICK_FORM : card)));
 
-  it('asks a gap item with the blank taken from the saved example, and keeps that gap on the card', async () => {
+  // Phase 62 (spec D1): a gap item writes its own sentence, as a typed cloze's does.
+  it('asks a gap item for a sentence of its own, and keeps that sentence and its gap on the card', async () => {
     const probe = world({ context: EXAMPLES, reply: 'nope' });
     await expect(probe.service.prepareSession(GAP_PAYLOAD)).rejects.toThrow();
     const gapItems = JSON.parse(probe.llm.calls[0].user).items.filter((item: { task: string }) => item.task === 'gap');
     expect(gapItems.length).toBeGreaterThan(0);
     for (const item of gapItems) {
-      expect(item.blank).toBe(item.word);
+      expect(item).not.toHaveProperty('blank');
+      expect(item.avoid).toEqual([item.example]);
     }
 
-    const reply = (items: { key: string; task: string }[]) =>
+    const reply = (items: { key: string; task: string; word: string }[]) =>
       JSON.stringify({
         items: items.map((item) =>
           item.task === 'gap'
-            ? { key: item.key, distractors: ['один', 'два', 'три'] }
+            ? { key: item.key, distractors: ['один', 'два', 'три'], sentence: `Мы видим ${item.word} здесь.`, gap: item.word, translation: 'אנחנו רואים את זה כאן.' }
             : item.task === 'meaning'
               ? { key: item.key, distractors: ['דלת', 'קיר', 'תקרה'] }
               : item.task === 'word'
@@ -657,6 +659,7 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
     const cloze = input.questions.filter((q) => q.type === 'cloze_choice');
     expect(cloze.length).toBeGreaterThan(0);
     for (const q of cloze) {
+      expect(q.sentence).toMatch(/^Мы видим [а-яё]+ здесь\.$/u);
       expect(q.sentence!.slice(q.gapStart!, q.gapEnd!)).toMatch(/^[а-яё]+$/u);
       expect(q.options!.find((o) => o.is_correct)!.text).toBe(q.sentence!.slice(q.gapStart!, q.gapEnd!));
     }
@@ -1752,7 +1755,7 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     const GAP_WRONG = ['eat', 'sleep', 'sing', 'dance', 'swim'];
     const batch = JSON.stringify({
       items: [
-        { key: 'q2', distractors: GAP_WRONG },
+        { key: 'q2', distractors: GAP_WRONG, sentence: 'I download the new file.', gap: 'download', translation: 'אני מוריד את הקובץ החדש.' },
         { key: 'q3', distractors: [], sentence: 'We combine the two plans today.', gap: 'combine', translation: 'אנחנו משלבים את שתי התוכניות היום.', alternatives: [] },
         { key: 'q4', distractors: ['table', 'door', 'wall'] },
         { key: 'q5', distractors: [], alternatives: [] },
@@ -1760,12 +1763,12 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     });
     const natural = { q3: { natural_translation: 'We combine the two plans today.' } };
 
-    it('sends the checker the saved example with its gap written ___, and every usable option', async () => {
+    it('sends the checker the generated sentence with its gap written ___, and every usable option (phase 62 D1)', async () => {
       const { service, calls, checkerLlm } = world({ enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural) });
       await service.prepareSession(payloadOf(rows, cards));
       expect(insertedOf(calls).map((q) => q.type)).toEqual(['typed_meaning', 'cloze_choice', 'cloze_typed', 'reverse_choice', 'typed_translation']);
       expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q2')).toEqual({
-        key: 'q2', task: 'gap', sentence: 'I need to ___ the file first.', options: GAP_WRONG,
+        key: 'q2', task: 'gap', sentence: 'I ___ the new file.', options: GAP_WRONG,
       });
       expect(optionTexts(insertedOf(calls)[1])).toEqual(['download', 'eat', 'sleep', 'sing']);
     });

@@ -51,7 +51,6 @@ const WORDS = [
   word('варежка', 'כפפה', 'mitten', 'Варежка лежит на полу.', 'הכפפה שוכבת על הרצפה.'),
 ];
 const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.meaning, w.form]));
-const FORMS = WORDS.map((w) => w.form);
 /** Phase 34 (spec D8). STUB_GAP's word in STUB_SENTENCE_HEBREW, which a sentence card marks. */
 const MARKED = 'קראה';
 /** Five picks of one card each and a new word's ladder of five (phase 55: its
@@ -174,16 +173,14 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
     const card = await readCard(page, position, CARDS);
     kinds.push(card.kind);
     if (card.kind === 'cloze-choice') {
-      // The saved example with its word blanked; no Hebrew until it is answered.
+      // Phase 62 (spec D1): a sentence written for the session (the stub's) with its word
+      // blanked; no Hebrew until it is answered.
       await expect(page.getByText('איזו מילה חסרה?')).toBeVisible();
-      const blanked = stripIsolates(await page.getByTestId('sentence-gap').textContent());
-      expect(blanked).toContain('_____');
-      expect(FORMS.some((form) => blanked.toLowerCase().includes(form)), blanked).toBe(false);
+      expect(stripIsolates(await page.getByTestId('sentence-gap').textContent())).toBe('Вчера она _____ эту книгу');
       await expect(page.getByTestId('sentence-translation')).toHaveCount(0);
-      // The right option is the text at the gap, so a sentence-initial word keeps its capital.
-      expect(card.options.filter((text) => FORMS.includes(text.toLowerCase()))).toHaveLength(1);
+      // The right option is the text at the gap.
       const right = rightOption(card);
-      expect(FORMS).toContain(right.toLowerCase());
+      expect(right).toBe(STUB_GAP);
       await answerChoice(page, card, true);
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
       await expect(page.getByTestId('sentence-translation')).toHaveText(/\p{Script=Hebrew}/u);

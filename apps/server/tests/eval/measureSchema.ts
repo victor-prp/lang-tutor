@@ -110,11 +110,18 @@ const ROWS: { row: GenerationContext; task: Task }[] = [
   { task: 'gap', row: row('prenotare', 'prenotare', 'verb', 'להזמין', 'Voglio prenotare un tavolo per due.', 'אני רוצה להזמין שולחן לשניים.') },
   { task: 'sentence', row: row('pianta', 'pianta', 'noun', 'צמח', 'Questa pianta ha bisogno di luce.', 'הצמח הזה צריך אור.') },
   { task: 'translate', row: row('campo', 'campo', 'noun', 'שדה', 'Il contadino lavora nel campo.', 'האיכר עובד בשדה.') },
-  { task: 'meaning', row: row('bella', 'bello', 'adjective', 'יפה', 'Che bella giornata!', 'איזה יום יפה!') },
+  // Phase 62 (spec D1): two gap and two sentence items, each writing a sentence from the learner's words.
+  { task: 'sentence', row: row('bella', 'bello', 'adjective', 'יפה', 'Che bella giornata!', 'איזה יום יפה!') },
   { task: 'word', row: row('finestra', 'finestra', 'noun', 'חלון', 'Apri la finestra, per favore.', 'פתח את החלון, בבקשה.') },
   { task: 'gap', row: row('compro', 'comprare', 'verb', 'לקנות', 'Compro il pane ogni mattina.', 'אני קונה לחם כל בוקר.') },
   { task: 'translate', row: row('parla', 'parlare', 'verb', 'לדבר', 'Lei parla tre lingue.', 'היא מדברת בשלוש שפות.') },
 ];
+
+/** Phase 59, 62. The learner's practised words, as the prompts are sent them. */
+const LEARNER_WORDS = ['contadino:איכר', 'lavora:עובד', 'tre:שלוש', 'lingue:שפות', 'madre:אמא', 'casa:בית'].map((pair, index) => {
+  const [word, meaning] = pair.split(':');
+  return { key: `w${index + 1}`, glossId: `g-w${index + 1}`, word, meaning };
+});
 
 /** The card each row's context item is for, with --context: every kind the call
  *  answers, a target sentence, a Hebrew one and a sentence card's mark. */
@@ -187,7 +194,7 @@ async function main(): Promise<number> {
     ROWS.map((entry) => entry.task),
     recent,
   );
-  const prompt = buildDistractorPrompt({ items, from: 'it', to: 'he', others: [] });
+  const prompt = buildDistractorPrompt({ items, from: 'it', to: 'he', others: [], learnerWords: LEARNER_WORDS });
 
   // The provider throws only `responded 400`; the reason is in the body, so a
   // wrapping fetch prints it. The body never carries the key (it travels in a header).
@@ -251,6 +258,11 @@ async function main(): Promise<number> {
       return Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value !== '';
     }).length;
   console.log(`parse     ok, ${answer.items.length} items`);
+  // Phase 62 (spec D1): what each sentence-writing item wrote, to read by eye.
+  for (const item of items.filter((asked) => asked.task === 'gap' || asked.task === 'sentence' || asked.task === 'translate')) {
+    const got = answer.items.find((found) => found.key === item.key);
+    console.log(`  ${item.key} ${item.task.padEnd(9)} ${got?.sentence ?? '(none)'} | gap ${got?.gap ?? '-'} | ${got?.translation ?? '-'}${item.task === 'gap' ? ` | wrong ${got?.distractors.join(', ')}` : ''}`);
+  }
   console.log(`distractors per item  ${answer.items.map((item) => item.distractors.length).join(' ')}`);
   for (const field of ['alternatives', 'sentence', 'gap', 'translation']) {
     console.log(`filled    ${field.padEnd(20)} ${filled(field)} of ${answer.items.length}`);

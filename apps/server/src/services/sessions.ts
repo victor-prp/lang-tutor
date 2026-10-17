@@ -38,7 +38,6 @@ import {
 } from '../domain/check';
 import { chooseWords, dueGlosses, liveDimensions, type ChoiceInput } from '../domain/choose';
 import { DAY_NEW_CAP, NEW_PER_SESSION } from '../domain/chooseConstants';
-import { findGap } from '../domain/cloze';
 import {
   buildContextPrompt,
   contextColumns,
@@ -1544,9 +1543,6 @@ export function createSessionService({
       // (spec D7): a meet card's row is not another word: its practice cards are items.
       const itemRows = new Set(ordered.filter((_, index) => tasks[index]));
       const others = [...rows.filter((row) => !itemRows.has(row)), ...siblingRows];
-      // Where each pick's form sits in its saved example: the same search that
-      // made the gap item's blank and the plan's eligibility.
-      const gaps = ordered.map((row) => findGap(row.example ?? '', [row.form, row.lemma]));
 
       const started = now();
       let modelMs = 0;
@@ -1759,9 +1755,10 @@ export function createSessionService({
           checkItems.push({ key, task: 'choice', word: row.answerForm ?? row.form, options: candidatesOf(card.index) });
         } else if (type === 'reverse_choice') {
           checkItems.push({ key, task: 'choice', word: row.translation, options: candidatesOf(card.index) });
-        } else if (type === 'cloze_choice') {
-          const gap = gaps[card.index]!;
-          const sentence = `${row.example!.slice(0, gap.start)}___${row.example!.slice(gap.end)}`;
+        } else if (type === 'cloze_choice' && card.answered.sentence) {
+          // Phase 62 (spec D1): the sentence written for the card, its gap written ___.
+          const { sentence: written, gap } = card.answered.sentence;
+          const sentence = `${written.slice(0, gap.start)}___${written.slice(gap.end)}`;
           checkItems.push({ key, task: 'gap', sentence, options: candidatesOf(card.index) });
         } else if (type === 'matching' && boardCandidates.length > 0) {
           checkItems.push({ key, task: 'choice', word: row.form, options: boardCandidates });
@@ -2022,7 +2019,6 @@ export function createSessionService({
             ...generatedContent(row, generatedAs(type), answered, {
               tiles: type === 'letter_tiles' ? tilesFor(row.answerForm ?? row.form, LANGUAGES[target].alphabet, rng) : null,
               board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
-              gap: gaps[index],
             }),
             // Phase 34 (spec D6, D8, D12): stored as shown.
             ...contextColumns(generatedAs(type), context, sentence),

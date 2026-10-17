@@ -86,13 +86,14 @@ export const STUB_GAP_LEMMA = 'прочитать';
  *  (domain/distractors.ts taskFor), whichever position asks it: Hebrew wrong
  *  options for a choice of meanings (and a board's), Russian ones for a choice
  *  of words or of a gap, `alternatives` for a typed card, and the one stub
- *  sentence for a gap to type and a sentence to translate. Phase 38:
+ *  sentence for a gap to choose (phase 62), a gap to type and a sentence to translate. Phase 38:
  *  `gapAlternatives`, the words that also fit the typed gap. */
 export function generationStub(alternatives: string[] = [], gapAlternatives: string[] = []): Record<string, Record<string, unknown>> {
   return {
     meaning: { distractors: WRONG_HEBREW },
     word: { distractors: WRONG_RUSSIAN },
-    gap: { distractors: WRONG_RUSSIAN },
+    // Phase 62 (spec D1): a gap to choose writes its own sentence, the stub's.
+    gap: { distractors: WRONG_RUSSIAN, sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW },
     typed: { distractors: [], alternatives },
     sentence: { distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: gapAlternatives },
     translate: { distractors: [], sentence: STUB_SENTENCE_HEBREW, gap: STUB_GAP, translation: STUB_SENTENCE },

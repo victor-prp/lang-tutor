@@ -9,8 +9,14 @@ import { LANGUAGES, type LanguageCode } from './languages';
  * to a typed translation, and services/sessions.ts logs it.
  */
 
-/** Spec D5: a gap sentence stays short enough to read at a glance. */
+/** Spec D5: a gap sentence stays short enough to read at a glance. Phase 62: now
+ *  the Hebrew context line's alone (domain/context.ts's `explanation` task). */
 export const SENTENCE_MAX_WORDS = 12;
+/** Phase 62 (spec D1). A target-language gap sentence or context line: short, so
+ *  that its other words can come from the learner's list (Italian spends a word
+ *  on an article where Hebrew attaches a prefix, so one more than a translate
+ *  sentence's five). */
+export const SHORT_SENTENCE_MAX_WORDS = 6;
 /** Spec D6: a sentence to translate stays short enough to translate in one go.
  *  Phase 59 (spec D1): five, so that its other words can come from the learner's list. */
 export const TRANSLATE_MAX_WORDS = 5;
@@ -72,7 +78,7 @@ export function validateSentenceItem(
   if (hasAstral(sentence, translation, gap)) return fail('the sentence holds a character outside the basic plane');
 
   const words = wordCount(sentence);
-  if (words < SENTENCE_MIN_WORDS || words > SENTENCE_MAX_WORDS) return fail(`the sentence has ${words} words`);
+  if (words < SENTENCE_MIN_WORDS || words > SHORT_SENTENCE_MAX_WORDS) return fail(`the sentence has ${words} words`);
 
   if (hasExplanation(input, sentence) || !LANGUAGES[input.target].letters.test(sentence)) {
     return fail(`the sentence is not written in ${LANGUAGES[input.target].name}`);

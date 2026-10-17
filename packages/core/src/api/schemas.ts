@@ -1380,6 +1380,12 @@ export const LlmTranslationJudgeSchema = z.object({
 // schema for LlmContextSchema's call (spec D4a's first fallback), and six stays
 // six. A new field here, or a larger cap, means measuring first, for a 400 and
 // for the wait: a 400 fails every list session, with nothing in the diff to say so.
+//
+// Phase 62 (spec D1). No new field: a gap item now fills `sentence`, `gap` and
+// `translation` too, beside its six distractors. Measured as above with two gap,
+// two sentence and two translate items and the learner's words, gemini-2.5-flash,
+// 2026-10-17: accepted, answered in 21.3, 19.3 and 20.5 s (2,400 to 2,600
+// characters), every item answered.
 export const LlmDistractorsSchema = z.object({
   items: z
     .array(

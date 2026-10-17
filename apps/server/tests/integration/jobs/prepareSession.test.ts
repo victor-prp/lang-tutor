@@ -338,7 +338,7 @@ describe('a ladder through the queue (phase 54, spec D3, D7; phase 55, spec D2, 
 describe('sentence cards through the queue', () => {
   const EXAMPLE_HEBREW = 'ראינו את זה שם.';
 
-  it('stores a cloze choice from the saved example and a typed cloze from the model, each with its sentence and gap', async () => {
+  it('stores a cloze choice and a typed cloze from the model, each with its sentence and gap (phase 62 D1)', async () => {
     // Two forms picked: the first a reverse choice, the second, its example
     // holding the form, a cloze choice. The board, typed translation q5, tiles
     // q6, typed cloze q7, listen and choose q8, reverse choice q9, cloze choice q10.
@@ -359,13 +359,14 @@ describe('sentence cards through the queue', () => {
     ]);
 
     const choice = questions[9] as ClozeChoiceQuestion;
-    expect(choice.translation).toBe(EXAMPLE_HEBREW);
+    // Phase 62 (spec D1): the sentence the model wrote for the card, not the saved example;
+    // the blank is its gap's text, and the right option is that text.
+    expect(choice.sentence).toBe(STUB_SENTENCE);
+    expect(choice.translation).toBe(STUB_SENTENCE_HEBREW);
     const answer = choice.sentence.slice(choice.gap.start, choice.gap.end);
-    // The blank is the saved example's own text for the word; the right option is that text.
-    expect(choice.sentence).toBe(`We saw the ${answer} there.`);
+    expect(answer).toBe(STUB_GAP);
     expect(choice.options[choice.correct_option]).toBe(answer);
-    expect(Object.keys(TEN_WORDS)).toContain(answer);
-    expect(choice.meaning).toBe(TEN_WORDS[answer]);
+    expect(Object.values(TEN_WORDS)).toContain(choice.meaning);
     expect([...choice.options].sort()).toEqual([answer, ...STUB_WRONG_ENGLISH].sort());
 
     const typed = questions[6] as ClozeTypedQuestion;

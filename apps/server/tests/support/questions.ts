@@ -48,30 +48,30 @@ const HEBREW_SENTENCE = 'משפט לדוגמה';
 
 /**
  * Phase 27. The content of one position, with a sentence card's sentence made
- * from its word: 'We use <form> here today.' (cloze_choice reads it as the
- * saved example). `build` receives the saved example, what the model made, and
- * the gap, as generatedContent wants them.
+ * from its word: 'We use <form> here today.'. `build` receives the saved
+ * example and what the model made, as generatedContent wants them.
  */
 function sentenceCard(
   sense: AskedGloss,
   type: QuestionType,
   alternatives: string[],
-  build: (example: string | null, generated: Generated, gap: { start: number; end: number } | null) => QuestionContent,
+  build: (example: string | null, generated: Generated) => QuestionContent,
 ): QuestionContent {
   const sentence = `We use ${sense.form} here today.`;
   const gap = findGap(sentence, [sense.form])!;
   switch (type) {
     case 'cloze_choice':
-      return build(sentence, { ...NOTHING_GENERATED, distractors: ['wrong1', 'wrong2', 'wrong3'] }, gap);
+      // Phase 62 (spec D1): written for the session, as a typed cloze's is.
+      return build(sentence, { ...NOTHING_GENERATED, distractors: ['wrong1', 'wrong2', 'wrong3'], sentence: { sentence, translation: HEBREW_SENTENCE, gap, alternatives: [] } });
     case 'cloze_typed':
-      return build(null, { ...NOTHING_GENERATED, sentence: { sentence, translation: HEBREW_SENTENCE, gap, alternatives } }, null);
+      return build(null, { ...NOTHING_GENERATED, sentence: { sentence, translation: HEBREW_SENTENCE, gap, alternatives } });
     case 'sentence_translation':
-      return build(null, { ...NOTHING_GENERATED, translate: { hebrew: HEBREW_SENTENCE, reference: sentence, gap } }, null);
+      return build(null, { ...NOTHING_GENERATED, translate: { hebrew: HEBREW_SENTENCE, reference: sentence, gap } });
     case 'multiple_choice':
     case 'listen_choice':
-      return build(null, { ...NOTHING_GENERATED, distractors: ['שגוי1', 'שגוי2', 'שגוי3'] }, null);
+      return build(null, { ...NOTHING_GENERATED, distractors: ['שגוי1', 'שגוי2', 'שגוי3'] });
     default:
-      return build(null, { ...NOTHING_GENERATED, distractors: ['wrong1', 'wrong2', 'wrong3'], alternatives }, null);
+      return build(null, { ...NOTHING_GENERATED, distractors: ['wrong1', 'wrong2', 'wrong3'], alternatives });
   }
 }
 
@@ -109,7 +109,7 @@ export async function insertListSession(
         partOfSpeech: 'noun',
         lexemeId: sense.lexemeId,
         type: types[index],
-        ...sentenceCard(sense, types[index], input.alternatives ?? [], (example, generated, gap) =>
+        ...sentenceCard(sense, types[index], input.alternatives ?? [], (example, generated) =>
           generatedContent(
             // generatedContent reads neither id; a list session's card names its gloss alone.
             { ...sense, senseId: '', partOfSpeech: 'noun', example, exampleTranslation: example ? HEBREW_SENTENCE : null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
@@ -118,7 +118,6 @@ export async function insertListSession(
             {
               tiles: types[index] === 'letter_tiles' ? tilesFor(sense.form, LANGUAGES.en.alphabet, testRng(1)) : null,
               board: types[index] === 'matching' ? { meanings, own: index - boardStart } : null,
-              gap,
             },
           ),
         ),

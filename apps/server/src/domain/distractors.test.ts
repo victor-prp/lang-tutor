@@ -640,6 +640,9 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(distractorItems([ROW], ['sentence'], NO_RECENT)[0].avoid).toEqual(['Mi piace parlare con te.']);
       expect(distractorItems([{ ...ROW, example: null }], ['sentence'], NO_RECENT)[0].avoid).toEqual([]);
     });
+    it('avoids on a gap item what a sentence item avoids: it writes its sentence too (phase 62 D1)', () => {
+      expect(distractorItems([ROW], ['gap'], recent)[0].avoid).toEqual(['Mi piace parlare con te.', 'A uno.', 'B due.', 'C tre.']);
+    });
     it('avoids the three newest recent translations on a translate item', () => {
       expect(distractorItems([{ ...ROW, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null }], ['translate'], recent)[0].avoid).toEqual(['אחת', 'שתיים', 'שלוש']);
     });
@@ -648,7 +651,7 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
     });
     it('avoids nothing on any other item, and finds a gap item its blank', () => {
       expect(distractorItems([ROW], ['meaning'], recent)[0].avoid).toEqual([]);
-      expect(distractorItems([ROW], ['gap'], recent)[0]).toMatchObject({ avoid: [], blank: 'parlare' });
+      expect(distractorItems([ROW], ['gap'], recent)[0]).toMatchObject({ blank: 'parlare' });
       expect(distractorItems([ROW], ['word'], recent)[0].blank).toBeNull();
     });
   });
@@ -664,7 +667,8 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(prompt.system).toContain('- "gap":');
       expect(prompt.system).toContain('- "sentence":');
       expect(prompt.system).toContain('- "translate":');
-      expect(prompt.system).toContain('3 to 12 words');
+      expect(prompt.system).toContain('3 to 6 words');
+      expect(prompt.system).not.toContain('3 to 12 words');
       expect(prompt.system).toContain('3 to 5 words');
       expect(prompt.system).toContain(DISTRACTOR_MARKER);
     });
@@ -687,6 +691,22 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       ]);
       expect(withWords.system).toContain('learner_words');
     });
+    it('sends the learner\'s words with a gap or sentence item alone, and asks those sentences to use them (phase 62 D1)', () => {
+      const learnerWords = [{ key: 'w1', glossId: 'g-a', word: 'amico', meaning: 'חבר' }];
+      for (const task of ['gap', 'sentence'] as const) {
+        const alone = buildDistractorPrompt({ items: distractorItems([ROW], [task], NO_RECENT), from: 'it', to: 'he', others: [], learnerWords });
+        expect((JSON.parse(alone.user) as { learner_words?: unknown }).learner_words).toEqual([{ key: 'w1', word: 'amico', meaning: 'חבר' }]);
+      }
+      const sentenceRule = prompt.system.split('\n').find((line) => line.startsWith('- "sentence":'))!;
+      expect(sentenceRule).toContain('learner_words');
+      // R5: pointing to the word comes before the learner's words.
+      expect(sentenceRule.indexOf('point to the word')).toBeLessThan(sentenceRule.indexOf('learner_words'));
+    });
+    it('asks a gap item for its own new sentence, as a sentence item writes, and wrong words for its gap (phase 62 D1)', () => {
+      const gapRule = prompt.system.split('\n').find((line) => line.startsWith('- "gap":'))!;
+      expect(gapRule).toContain('as a "sentence" item');
+      expect(gapRule).toContain(DISTRACTOR_MARKER);
+    });
     it('sends no learner words when no item translates (phase 59 D1)', () => {
       const plain = distractorItems([ROW], ['meaning'], NO_RECENT);
       const learnerWords = [{ key: 'w1', glossId: 'g-a', word: 'amico', meaning: 'חבר' }];
@@ -700,9 +720,11 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
     it('sends the example, its translation and the sentences to avoid', () => {
       const sent = JSON.parse(prompt.user) as { items: Record<string, unknown>[] };
       expect(sent.items[0]).toMatchObject({
-        key: 'q1', task: 'gap', example: ROW.example, example_translation: ROW.exampleTranslation, sentence: ROW.example, blank: 'parlare',
+        key: 'q1', task: 'gap', example: ROW.example, example_translation: ROW.exampleTranslation, avoid: ['Mi piace parlare con te.'],
       });
-      expect(sent.items[0]).not.toHaveProperty('avoid');
+      // Phase 62 (spec D1): a gap item writes its own sentence, so it is sent no blanked one.
+      expect(sent.items[0]).not.toHaveProperty('sentence');
+      expect(sent.items[0]).not.toHaveProperty('blank');
       expect(sent.items[1]).toMatchObject({ task: 'sentence', avoid: ['Mi piace parlare con te.'] });
       expect(sent.items[2]).toMatchObject({ task: 'translate', avoid: [ROW.exampleTranslation, 'אחת'] });
     });
@@ -723,12 +745,25 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
 
   describe('validateDistractors', () => {
     const gapItem = distractorItems([ROW], ['gap'], NO_RECENT);
-    const gapReply = (wrong: string[]) => ({ items: [{ key: 'q1', distractors: wrong }] });
-    it('takes a gap item as three wrong target words', () => {
+    // Phase 62 (spec D1): a gap item writes its own sentence, and wrong words for its gap.
+    const written = { sentence: 'Voglio parlare con lei.', gap: 'parlare', translation: 'אני רוצה לדבר איתה.' };
+    const gapReply = (wrong: string[], sentence: Record<string, string> = written) => ({ items: [{ key: 'q1', distractors: wrong, ...sentence }] });
+    it('takes a gap item as its sentence and three wrong target words', () => {
       const verdict = validateDistractors(gapItem, gapReply(['parlai', 'parlato', 'parlò']), 'he', [], 'it', NONE);
       expect(verdict.byKey.get('q1')).toEqual({
-        distractors: ['parlai', 'parlato', 'parlò'], spares: [], alternatives: [], sentence: null, translate: null, degraded: null,
+        distractors: ['parlai', 'parlato', 'parlò'], spares: [], alternatives: [], translate: null, degraded: null,
+        sentence: { sentence: 'Voglio parlare con lei.', translation: 'אני רוצה לדבר איתה.', gap: { start: 7, end: 14 }, alternatives: [] },
       });
+    });
+    it('refuses a gap item whose sentence is unusable, with the reason (ruling R7)', () => {
+      const verdict = validateDistractors(gapItem, gapReply(['parlai', 'parlato', 'parlò'], { ...written, sentence: 'Oggi voglio parlare a lungo con mamma.' }), 'he', [], 'it', NONE);
+      expect(verdict.byKey.has('q1')).toBe(false);
+      expect(verdict.refused.get('q1')).toBe('the sentence has 7 words');
+    });
+    it('drops a wrong word that is the generated gap\'s own text', () => {
+      const inflected = { sentence: 'Ieri parlavamo per ore.', gap: 'parlavamo', translation: 'אתמול דיברנו שעות.' };
+      const verdict = validateDistractors(gapItem, gapReply(['parlai', 'parlavamo', 'parlò', 'parlasti'], inflected), 'he', [], 'it', NONE);
+      expect(verdict.byKey.get('q1')?.distractors).toEqual(['parlai', 'parlò', 'parlasti']);
     });
     it('refuses a gap item that offers the form, the lemma, a Hebrew word or too few', () => {
       expect(validateDistractors(gapItem, gapReply(['parlai', 'Parlare', 'parlò']), 'he', [], 'it', NONE).refused.size).toBeGreaterThan(0);
@@ -783,24 +818,26 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
   describe('generatedContent', () => {
     const nothing = { prompt: null, options: null, alternatives: null, tiles: null, ...NO_SENTENCE };
     const extras = { ...NO_EXTRAS, gap: { start: 9, end: 16 } };
-    it('stores a cloze choice from the saved example, the gap text correct first', () => {
-      const content = generatedContent(ROW, 'cloze_choice', { ...NOTHING_GENERATED, distractors: ['parlai', 'parlato', 'parlò'] }, extras);
+    // Phase 62 (spec D1): a cloze choice's sentence is written for the session, as a typed cloze's is.
+    const written = { sentence: 'Ieri parlavamo per ore.', translation: 'אתמול דיברנו שעות.', gap: { start: 5, end: 14 }, alternatives: [] };
+    it('stores a cloze choice from its generated sentence, the gap text correct first', () => {
+      const content = generatedContent(ROW, 'cloze_choice', { ...NOTHING_GENERATED, sentence: written, distractors: ['parlai', 'parlato', 'parlò'] }, NO_EXTRAS);
       expect(content).toEqual({
         ...nothing,
         prompt: 'לדבר',
-        options: optionsFor('parlare', ['parlai', 'parlato', 'parlò']),
-        sentence: ROW.example,
-        sentenceTranslation: ROW.exampleTranslation,
-        gapStart: 9,
-        gapEnd: 16,
+        options: optionsFor('parlavamo', ['parlai', 'parlato', 'parlò']),
+        sentence: 'Ieri parlavamo per ore.',
+        sentenceTranslation: 'אתמול דיברנו שעות.',
+        gapStart: 5,
+        gapEnd: 14,
       });
     });
     it('gives the wrong words the capital of the blank, so the right one is no tell', () => {
-      const opening = { ...ROW, example: 'Parlare è bello.', exampleTranslation: 'לדבר זה יפה.' };
-      const upper = generatedContent(opening, 'cloze_choice', { ...NOTHING_GENERATED, distractors: ['parlai', 'Parlato', 'parlò'] }, { ...NO_EXTRAS, gap: { start: 0, end: 7 } });
+      const opening = { sentence: 'Parlare è bello.', translation: 'לדבר זה יפה.', gap: { start: 0, end: 7 }, alternatives: [] };
+      const upper = generatedContent(ROW, 'cloze_choice', { ...NOTHING_GENERATED, sentence: opening, distractors: ['parlai', 'Parlato', 'parlò'] }, NO_EXTRAS);
       expect(upper.options!.map((o) => o.text)).toEqual(['Parlare', 'Parlai', 'Parlato', 'Parlò']);
-      const lower = generatedContent(ROW, 'cloze_choice', { ...NOTHING_GENERATED, distractors: ['Parlai', 'parlato', 'Parlò'] }, extras);
-      expect(lower.options!.map((o) => o.text)).toEqual(['parlare', 'parlai', 'parlato', 'parlò']);
+      const lower = generatedContent(ROW, 'cloze_choice', { ...NOTHING_GENERATED, sentence: written, distractors: ['Parlai', 'parlato', 'Parlò'] }, NO_EXTRAS);
+      expect(lower.options!.map((o) => o.text)).toEqual(['parlavamo', 'parlai', 'parlato', 'parlò']);
     });
     it('stores a cloze typed card from its generated sentence', () => {
       const sentence = { sentence: 'Ieri parlavamo per ore.', translation: 'אתמול דיברנו שעות.', gap: { start: 5, end: 14 }, alternatives: ['chiacchieravamo'] };
@@ -968,7 +1005,7 @@ describe('the answer form (phase 34, spec D2, D12)', () => {
       expect(generatedContent(ORA, type, generated, NO_EXTRAS).answerForm).toBeNull();
     }
     expect(generatedContent(ORA, 'matching', generated, { ...NO_EXTRAS, board: { meanings: ['שעות', 'a', 'b', 'c', 'd'], own: 0 } }).answerForm).toBeNull();
-    expect(generatedContent(ORA, 'cloze_choice', generated, { ...NO_EXTRAS, gap: { start: 0, end: 3 } }).answerForm).toBeNull();
+    expect(generatedContent(ORA, 'cloze_choice', { ...generated, sentence }, NO_EXTRAS).answerForm).toBeNull();
     expect(generatedContent(ORA, 'cloze_typed', { ...NOTHING_GENERATED, sentence }, NO_EXTRAS).answerForm).toBeNull();
     expect(generatedContent(ORA, 'sentence_translation', { ...NOTHING_GENERATED, translate }, NO_EXTRAS).answerForm).toBeNull();
   });
