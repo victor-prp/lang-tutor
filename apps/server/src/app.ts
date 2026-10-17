@@ -16,6 +16,7 @@ import { createInternalRemindersRouter } from './routes/internalReminders';
 import { createMeRouter } from './routes/me';
 import { createPhotoImportsRouter } from './routes/photoImports';
 import { createRemindersRouter } from './routes/reminders';
+import { createQuestionTypesRouter } from './routes/questionTypes';
 import { createSessionsRouter } from './routes/sessions';
 import { createTargetsRouter } from './routes/targets';
 import { createTranslationsRouter } from './routes/translations';
@@ -124,6 +125,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api', createTargetsRouter(deps.targets));
   app.route('/api', createTranslationsRouter(deps.translations, deps.logger));
   app.route('/api', createSessionsRouter(deps.sessions));
+  app.route('/api', createQuestionTypesRouter(deps.questionTypes));
 
   // Registered after the routes they describe, so the document is generated
   // from a fully-populated router. Always on: no auth, no secrets, and an

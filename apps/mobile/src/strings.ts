@@ -1,5 +1,5 @@
-import type { PartOfSpeech, TargetKind, TargetReadiness } from '@lang-tutor/core/api';
-import type { Dimension } from '@lang-tutor/core/domain';
+import type { PartOfSpeech, TargetKind, TargetReadiness, UnavailableReason } from '@lang-tutor/core/api';
+import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
 
 // U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
 //
@@ -79,6 +79,36 @@ const TARGET_MONTH_NAMES = [
   'בנובמבר',
   'בדצמבר',
 ];
+
+// Phase 61 (spec D6). Each question type as a tester's screen names it.
+const QUESTION_TYPE_NAMES: Record<QuestionType, string> = {
+  meet: 'היכרות',
+  multiple_choice: 'בחירת פירוש',
+  new_meaning: 'פירוש חדש',
+  typed_meaning: 'הקלדת פירוש',
+  reverse_choice: 'בחירת מילה',
+  cloze_choice: 'השלמה בבחירה',
+  letter_tiles: 'אריחי אותיות',
+  typed_translation: 'הקלדת מילה',
+  cloze_typed: 'השלמה בהקלדה',
+  sentence_translation: 'תרגום משפט',
+  listen_choice: 'האזנה ובחירה',
+  dictation: 'הכתבה',
+  read_aloud: 'הקראה',
+  say_translation: 'אמירת תרגום',
+  matching: 'התאמה',
+};
+
+// Phase 61 (spec D2). Why the word cannot have a type, as the screen says it.
+const UNAVAILABLE_REASONS: Record<UnavailableReason, string> = {
+  no_voice: 'אין במכשיר קול לשפה',
+  no_microphone: 'אי אפשר להקליט במכשיר',
+  too_long: 'המילה ארוכה מדי לאמירה',
+  no_tiles: 'המילה לא מתאימה לאריחים',
+  no_example_gap: 'אין לפירוש הזה משפט לדוגמה להשלמה',
+  no_other_meaning: 'אין למילה פירוש שמור נוסף',
+  needs_more_words: 'צריך לפחות 7 מילים',
+};
 
 export const strings = {
   appTitle: 'lang tutor',
@@ -486,4 +516,19 @@ export const strings = {
   targetEmpty: 'אין מילים בהכנה הזו.',
   targetLoadFailed: 'טעינת ההכנה נכשלה. אפשר לנסות שוב.',
   targetActionFailed: 'הפעולה נכשלה. נסו שוב.',
+  // Phase 61 (spec D6). A tester's session of one meaning's question types.
+  questionTypesLink: 'בדיקת סוגי שאלות',
+  questionTypesTitle: 'סוגי שאלות',
+  questionTypesStart: 'התחלה',
+  questionTypesPreparing: 'מכינים את השאלות…',
+  questionTypesLoadFailed: 'הטעינה נכשלה. אפשר לנסות שוב.',
+  questionTypesNoneChosen: 'בחרו לפחות סוג שאלה אחד.',
+  questionTypesFailed: 'לא נוצרה אף שאלה.',
+  questionTypesSkipped: 'לא נוצרו שאלות מהסוגים:',
+  questionTypesContinue: 'המשך לתרגול',
+  questionTypesSessionOpen: 'יש תרגול פתוח. סיימו אותו קודם.',
+  questionTypesSeedPending: 'סיימו קודם את התרגול הראשון.',
+  questionTypesStartFailed: 'ההתחלה נכשלה. נסו שוב.',
+  questionTypeName: (type: QuestionType): string => QUESTION_TYPE_NAMES[type],
+  questionTypeUnavailable: (reason: UnavailableReason): string => UNAVAILABLE_REASONS[reason],
 } as const;

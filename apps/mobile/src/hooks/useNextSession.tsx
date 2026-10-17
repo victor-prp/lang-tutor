@@ -35,6 +35,8 @@ export type NextSessionValue = {
    *  throws, since a session's first answer starts it too. */
   start: (sessionId: string) => Promise<void>;
   skip: (sessionId: string) => Promise<void>;
+  /** Phase 61 (spec D6). What this device can do for the target: a voice, and a microphone. */
+  devices: (targetLanguage: string) => Promise<{ listening: boolean; speaking: boolean }>;
 };
 
 const NextSessionContext = createContext<NextSessionValue | null>(null);
@@ -118,8 +120,8 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
   );
 
   const value = useMemo(
-    () => ({ current, loadFailed, reload, create, start, skip }),
-    [current, loadFailed, reload, create, start, skip],
+    () => ({ current, loadFailed, reload, create, start, skip, devices }),
+    [current, loadFailed, reload, create, start, skip, devices],
   );
   return <NextSessionContext.Provider value={value}>{children}</NextSessionContext.Provider>;
 }

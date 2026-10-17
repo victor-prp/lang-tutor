@@ -212,6 +212,46 @@ export class SessionOpen extends Error {
   }
 }
 
+/** Phase 61 (spec D1). A question-types read or session, asked by an account that is not a tester. */
+export class NotATester extends Error {
+  constructor(readonly userId: string) {
+    super(`user ${userId} is not a tester`);
+    this.name = 'NotATester';
+  }
+}
+
+/** Phase 61 (spec D2). The gloss is not saved in the enrollment's list. */
+export class GlossNotSaved extends Error {
+  constructor(readonly glossId: string) {
+    super(`gloss ${glossId} is not saved in this list`);
+    this.name = 'GlossNotSaved';
+  }
+}
+
+/** Phase 61 (spec D3). A question type the word, or the device, cannot have. */
+export class QuestionTypeUnavailable extends Error {
+  constructor(readonly type: string, readonly reason: string) {
+    super(`question type ${type} is unavailable: ${reason}`);
+    this.name = 'QuestionTypeUnavailable';
+  }
+}
+
+/** Phase 61 (spec D2, builder check). The session asked for a rendering the read did not answer. */
+export class RenderingMismatch extends Error {
+  constructor(readonly senseId: string) {
+    super(`sense ${senseId} is not the rendering a question-types session of this gloss uses`);
+    this.name = 'RenderingMismatch';
+  }
+}
+
+/** Phase 61 (D7). The enrollment's first, seeded session waits in stock, which nothing retires. */
+export class SeedPending extends Error {
+  constructor(readonly enrollmentId: string) {
+    super(`enrollment ${enrollmentId} has its seeded first session waiting`);
+    this.name = 'SeedPending';
+  }
+}
+
 /** Phase 19. The next session is built from the saved list, and it is empty. */
 export class NoSavedWords extends Error {
   constructor(readonly enrollmentId: string) {

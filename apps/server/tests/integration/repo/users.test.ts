@@ -84,6 +84,7 @@ describe('createUserRepo', () => {
       age: 34,
       native_language: 'he',
       time_zone: 'UTC',
+      tester: false,
     });
   });
 

@@ -132,6 +132,9 @@ export const users = pgTable(
     // every launch (PUT /api/me/time-zone). The default is UTC, which is what
     // the day was before and what a learner who never reports one keeps.
     timeZone: text('time_zone').notNull().default('UTC'),
+    // Phase 61 (spec D1). A tester may start a session of one word's question types. Set
+    // only by `npm run db:tester` (repo/users.ts setTester); off for every new account.
+    tester: boolean('tester').notNull().default(false),
   },
   (t) => [
     check('users_kind_known', sql`${t.kind} in ('learner', 'bot')`),
@@ -1057,6 +1060,13 @@ export const sessions = pgTable(
     // earlier day is replaced when the day's split no longer matches the one in
     // session_targets. Null for a seed and for every session before this phase.
     chosenOn: date('chosen_on', { mode: 'string' }),
+    // Phase 61 (spec D3). What the session is: the practice the picker chose, or a
+    // tester's one card per chosen question type of one word. The default is for the
+    // code before this phase, which the old container still runs for a minute (ADR 0010).
+    kind: text('kind').notNull().default('practice'),
+    // Phase 61 (spec D5). A question-types session's chosen types no card could be
+    // generated for, as [{type, reason}]; null for every other session.
+    skippedTypes: jsonb('skipped_types').$type<{ type: string; reason: 'not_generated' }[]>(),
   },
   (t) => [
     foreignKey({
@@ -1069,6 +1079,7 @@ export const sessions = pgTable(
       sql`${t.status} in ('preparing', 'ready', 'completed', 'skipped', 'failed')`,
     ),
     check('sessions_source_known', sql`${t.source} in ('seed', 'list')`),
+    check('sessions_kind_known', sql`${t.kind} in ('practice', 'question_types')`),
     check(
       'sessions_completed_consistent',
       sql`(${t.status} = 'completed') = (${t.completedAt} is not null)`,

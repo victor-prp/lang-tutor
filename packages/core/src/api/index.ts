@@ -127,4 +127,8 @@ export type {
   VocabularyWord,
   VocabularyWordDetail,
   VocabularyWordQuery,
+  UnavailableReason,
+  QuestionTypesResponse,
+  CreateQuestionTypeSessionRequest,
+  CreateQuestionTypeSessionResponse,
 } from './types';

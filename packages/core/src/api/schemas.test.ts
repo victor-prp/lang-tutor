@@ -2,6 +2,10 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   AddTargetWordsRequestSchema,
+  CreateQuestionTypeSessionRequestSchema,
+  QuestionTypeSchema,
+  QuestionTypesResponseSchema,
+  SessionViewSchema,
   ChangeTargetDateRequestSchema,
   CreateTargetRequestSchema,
   LearnerDaySchema,
@@ -634,6 +638,12 @@ describe('UserSchema', () => {
     expect(UserSchema.parse(dana).time_zone).toBe('UTC');
     const { time_zone: _omitted, ...without } = dana;
     expect(UserSchema.safeParse(without).success).toBe(false);
+  });
+
+  // Phase 61 (spec D1). A server from before the flag sends none: not a tester.
+  it('reads a missing tester flag as false', () => {
+    expect(UserSchema.parse(dana).tester).toBe(false);
+    expect(UserSchema.parse({ ...dana, tester: true }).tester).toBe(true);
   });
 });
 
@@ -1459,5 +1469,36 @@ describe('TargetRefusalSchema', () => {
   it('rejects a reason it does not name, and a body with no error', () => {
     expect(TargetRefusalSchema.safeParse({ error: 'invalid target', reason: 'because' }).success).toBe(false);
     expect(TargetRefusalSchema.safeParse({ reason: 'due_date' }).success).toBe(false);
+  });
+});
+
+// Phase 61 (spec D2, D3, D5).
+describe('question-types sessions', () => {
+  const body = { gloss_id: 'g1', variant_id: 'v1', sense_id: 's1', types: ['meet', 'dictation'], listening: true, speaking: false };
+
+  it('QuestionTypeSchema names every type of QuestionSchema', () => {
+    expect(QuestionTypeSchema.options).toHaveLength(15);
+    expect(QuestionTypeSchema.safeParse('matching').success).toBe(true);
+    expect(QuestionTypeSchema.safeParse('essay').success).toBe(false);
+  });
+
+  it('a session request takes one or more types, none twice', () => {
+    expect(CreateQuestionTypeSessionRequestSchema.safeParse(body).success).toBe(true);
+    expect(CreateQuestionTypeSessionRequestSchema.safeParse({ ...body, types: [] }).success).toBe(false);
+    expect(CreateQuestionTypeSessionRequestSchema.safeParse({ ...body, types: ['meet', 'meet'] }).success).toBe(false);
+  });
+
+  it('an unavailable type carries one of the known reasons', () => {
+    const read = { sense_id: 's1', types: [{ type: 'matching', available: false, reason: 'needs_more_words' }] };
+    expect(QuestionTypesResponseSchema.safeParse(read).success).toBe(true);
+    expect(QuestionTypesResponseSchema.safeParse({ ...read, types: [{ type: 'matching', available: false, reason: 'tired' }] }).success).toBe(false);
+  });
+
+  it("a session read may name the types no card was generated for, and need not", () => {
+    const view = { session_id: 's', status: 'failed', source: 'list', position: { position: 0, total: 0 }, question: null, pending_retry: null, progress: [] };
+    expect(SessionViewSchema.parse(view).skipped_types).toBeUndefined();
+    expect(SessionViewSchema.parse({ ...view, skipped_types: [{ type: 'cloze_typed', reason: 'not_generated' }] }).skipped_types).toEqual([
+      { type: 'cloze_typed', reason: 'not_generated' },
+    ]);
   });
 });

@@ -12,6 +12,11 @@ export async function seedIdentity(db: Db, id: string): Promise<void> {
     .onConflictDoNothing();
 }
 
+/** Phase 61 (spec D1). Makes a profile a tester, or not, as db:tester would. */
+export async function setTester(db: Db, id: string, on = true): Promise<void> {
+  await db.update(users).set({ tester: on }).where(eq(users.id, id));
+}
+
 /** The id seedUser gives its learner's English enrollment. */
 export function enrollmentOf(userId: string): string {
   return `e_${userId}`;

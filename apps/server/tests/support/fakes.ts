@@ -21,6 +21,7 @@ import type { ReminderService } from '../../src/services/reminders';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { LlmAudioRequest, SpeechTranscriber } from '../../src/services/speech';
 import type { SessionService } from '../../src/services/sessions';
+import type { QuestionTypesService } from '../../src/services/questionTypes';
 import type { TargetService } from '../../src/services/targets';
 import type { Repos, Transaction } from '../../src/services/transaction';
 import type { TranslationService } from '../../src/services/translations';
@@ -126,8 +127,10 @@ export function createFakeAppDeps(): AppDeps {
     changeDate: unreachable,
     end: unreachable,
   };
+  const questionTypes: QuestionTypesService = { read: unreachable, create: unreachable };
   return {
     sessions,
+    questionTypes,
     users,
     enrollments,
     translations,
@@ -334,6 +337,7 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
         age: input.age,
         native_language: input.native_language,
         time_zone: 'UTC', // the column's default, until the app reports one
+        tester: false, // the column's default, until db:tester sets it
       };
       rows.push(user);
       return user;

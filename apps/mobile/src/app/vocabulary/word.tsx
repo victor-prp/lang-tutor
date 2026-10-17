@@ -19,7 +19,7 @@ export default function VocabularyWordScreen() {
   const { loadWord, save, unsave } = useVocabulary();
   // Phase 23. Every lexeme here is in the active enrollment's target language,
   // and so is each example's source (spec §1 D3).
-  const { active } = useCurrentUser();
+  const { active, user } = useCurrentUser();
   const language = active?.target_language ?? null;
   const [word, setWord] = useState<VocabularyWordDetail | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -167,6 +167,21 @@ export default function VocabularyWordScreen() {
                   {sense.saved ? strings.translateSaved : strings.translateSave}
                 </Text>
               </Pressable>
+              {/* Phase 61 (spec D6). A tester's session of this meaning's question types: saved ones only. */}
+              {user?.tester && sense.saved ? (
+                <Pressable
+                  accessibilityRole="button"
+                  testID="question-types-link"
+                  onPress={() =>
+                    router.push({
+                      pathname: '/vocabulary/question-types',
+                      params: { glossId: sense.gloss_id, variantId: sense.variant_id, translation: sense.translation },
+                    })
+                  }
+                >
+                  <Text style={styles.link}>{strings.questionTypesLink}</Text>
+                </Pressable>
+              ) : null}
             </View>
           ))}
         </ScrollView>

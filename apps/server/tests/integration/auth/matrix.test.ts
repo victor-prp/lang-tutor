@@ -10,6 +10,7 @@ import { clearNamespace, expectEmails, mailBaseUrlFor, mockNamespace } from '../
 import { seedPhotoImport } from '../../support/photoImportRows';
 import { countRows } from '../../support/rowCounts';
 import { createTestServerDeps } from '../../support/serverDeps';
+import { setTester } from '../../support/seedUser';
 import { seedTarget } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
@@ -110,6 +111,15 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
   }),
   'get /api/enrollments/{id}/vocabulary/word': () => ({
     url: `/api/enrollments/${ids.enrollment}/vocabulary/word?lemma=${LEMMA}`,
+  }),
+  // Phase 61 (spec D1). The stranger and the tutor are testers, so what refuses them is the
+  // owner's check, not the flag. A session that got through would show in the count of sessions.
+  'get /api/enrollments/{id}/vocabulary/question-types': () => ({
+    url: `/api/enrollments/${ids.enrollment}/vocabulary/question-types?gloss_id=${ids.saved.gloss_id}&variant_id=${ids.saved.variant_id}`,
+  }),
+  'post /api/enrollments/{id}/question-type-sessions': () => ({
+    url: `/api/enrollments/${ids.enrollment}/question-type-sessions`,
+    body: { ...ids.saved, sense_id: 's', types: ['meet'], listening: false, speaking: false },
   }),
   'post /api/enrollments/{id}/photo-imports': () => ({
     url: `/api/enrollments/${ids.enrollment}/photo-imports`,
@@ -215,6 +225,8 @@ beforeAll(async () => {
   owner = await signUpWithProfile(app, ns, { email: 'owner@example.com', username: 'matrix_owner' });
   stranger = await signUpWithProfile(app, ns, { email: 'stranger@example.com', username: 'matrix_stranger' });
   tutor = await signUpWithProfile(app, ns, { email: 'tutor@example.com', username: 'matrix_tutor' });
+  await setTester(t.db, stranger.userId);
+  await setTester(t.db, tutor.userId);
 
   // The owner's things: through the API where it is cheap, through support helpers otherwise.
   const enrolled = await call('post', '/api/enrollments', owner.cookie, { source_language: 'he', target_language: 'en' });

@@ -1,4 +1,4 @@
-import { and, count, eq, gte, lt, ne } from 'drizzle-orm';
+import { and, count, eq, gte, inArray, lt, ne } from 'drizzle-orm';
 
 import type { Db, Tx } from '../db/client';
 import { authCodeSends, authUsers, users } from '../db/schema';
@@ -74,6 +74,17 @@ export function createAuthRepo(db: Db) {
         if (isUniqueViolation(error)) return 'email_taken';
         throw error;
       }
+    },
+
+    /**
+     * Phase 61 (spec D1). Turns the tester flag on or off for the profile of the sign-in
+     * identity with this email, compared as stored. The one writer of `users.tester`,
+     * run by `npm run db:tester`; idempotent.
+     */
+    setTester: async (email: string, on: boolean): Promise<'set' | 'no_such_account'> => {
+      const identity = db.select({ id: authUsers.id }).from(authUsers).where(eq(authUsers.email, normalizeEmail(email)));
+      const changed = await db.update(users).set({ tester: on }).where(inArray(users.id, identity)).returning({ id: users.id });
+      return changed.length > 0 ? 'set' : 'no_such_account';
     },
   };
 }
