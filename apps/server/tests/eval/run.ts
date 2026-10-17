@@ -758,18 +758,9 @@ function sentenceTier2(kase: SentenceCase, answer: LlmDistractors): Check[] {
   const items = sentenceItemsOf(kase);
   return kase.items.flatMap((item, index): Check[] => {
     const got = answer.items.find((answered) => answered.key === items[index].key);
-    if (kase.task === 'gap') {
-      const offered = got?.distractors ?? [];
-      const fits = (item.fits ?? []).map(comparable);
-      const offenders = offered.filter((text) => fits.includes(comparable(text)));
-      return [
-        {
-          name: `${item.form}: no wrong option also fits the blank`,
-          ok: offenders.length === 0,
-          detail: offenders.length ? offenders.join(', ') : offered.join(' | '),
-        },
-      ];
-    }
+    // Phase 62 (spec D1): a gap item's sentence is its own, so its wrong options are
+    // the checker's to read against it (survivesChecker), not a list made beforehand.
+    if (kase.task === 'gap') return [];
     // Phase 38 (spec D2). The typed gap hides its Hebrew, so its alternatives are the
     // words that fit the sentence read alone; an everyday sentence admits one.
     const fits: Check[] =
@@ -797,7 +788,8 @@ function sentenceTier2(kase: SentenceCase, answer: LlmDistractors): Check[] {
 }
 
 /** Phase 59 (spec D1). The share of a translation's words, its practised word left
- *  out, that come from the learner's list: a word counts when it is a list word or
+ *  out, that come from the learner's list (phase 62: of the target-language side,
+ *  a gap or sentence item's `sentence`, a translate item's `translation`): a word counts when it is a list word or
  *  shares its first four letters with one (fratelli, ora), or is a list word of up to
  *  three letters exactly (io, ho, qui, con). Words of one or two letters that are
  *  not on the list (e, a, il, la) are grammar and left out of the count. */
@@ -812,16 +804,17 @@ function listShare(kase: SentenceCase, answer: LlmDistractors): Check[] {
   return kase.items.map((item, index): Check => {
     const got = answer.items.find((answered) => answered.key === items[index].key);
     const gap = new Set((got?.gap ?? '').toLowerCase().split(/[^\p{L}\p{M}]+/u).filter(Boolean));
-    const tokens = (got?.translation ?? '')
+    const target = kase.task === 'translate' ? got?.translation : got?.sentence;
+    const tokens = (target ?? '')
       .toLowerCase()
       .split(/[^\p{L}\p{M}]+/u)
       .filter((token) => token !== '' && !gap.has(token))
       .filter((token) => token.length > 2 || fromList(token));
     const share = tokens.length === 0 ? 1 : tokens.filter(fromList).length / tokens.length;
     return {
-      name: `${item.form}: the translation is built from the learner's list`,
+      name: kase.task === 'translate' ? `${item.form}: the translation is built from the learner's list` : `${item.form}: the sentence is built from the learner's list`,
       ok: share >= LIST_SHARE_THRESHOLD,
-      detail: `${(share * 100).toFixed(0)}%: ${got?.translation ?? '(none)'} / ${got?.sentence ?? ''}`,
+      detail: `${(share * 100).toFixed(0)}%: ${target ?? '(none)'}`,
     };
   });
 }
@@ -831,7 +824,7 @@ const writtenBy = (kase: SentenceCase, answer: LlmDistractors): string[] => {
   return kase.items.map((item, index) => {
     const got = answer.items.find((answered) => answered.key === items[index].key);
     return kase.task === 'gap'
-      ? `${item.form}: ${(got?.distractors ?? []).join(' / ')}`
+      ? `${item.form}: ${got?.sentence ?? '(none)'} [${got?.gap ?? ''}] = ${got?.translation ?? '(none)'} | wrong ${(got?.distractors ?? []).join(' / ')}`
       : `${item.form}: ${got?.sentence ?? '(none)'} [${got?.gap ?? ''}] = ${got?.translation ?? '(none)'}${got?.alternatives?.length ? ` +${got.alternatives.join('/')}` : ''}`;
   });
 };
@@ -1168,6 +1161,8 @@ async function main(): Promise<void> {
         tier2: [
           ...sentenceTier2(kase, answer),
           ...listShare(kase, answer),
+          // Phase 62 (spec D1, ruling R5): today's checks, unchanged: the probe on a typed
+          // gap's sentence, the checker on a gap to choose's (every gap case is `checked`).
           ...(kase.task === 'sentence' ? await pointsToWord(kase, answer) : []),
           ...(kase.checked ? await survivesChecker(kase.from, 'he', sentenceItemsOf(kase), answer) : []),
         ],
@@ -1194,12 +1189,14 @@ async function main(): Promise<void> {
     for (const [index, item] of kase.items.entries()) {
       const name = `${item.form}: the sentence points to its word`;
       const got = answer.items.find((answered) => answered.key === items[index].key);
-      const at = got?.sentence && got.gap ? got.sentence.indexOf(got.gap) : -1;
-      if (!got?.sentence || !got.gap || at < 0) {
+      // Found as production finds it (findGap): whole words, any case, so a gap that
+      // opens its sentence (Compro for compro) is found too.
+      const at = got?.sentence && got.gap ? findGap(got.sentence, [got.gap]) : null;
+      if (!got?.sentence || !got.gap || !at) {
         checks.push({ name, ok: false, detail: 'no sentence' });
         continue;
       }
-      const gapped = `${got.sentence.slice(0, at)}___${got.sentence.slice(at + got.gap.length)}`;
+      const gapped = `${got.sentence.slice(0, at.start)}___${got.sentence.slice(at.end)}`;
       try {
         const guesses = await askGapGuesses(judgeLlm, { language: kase.from as LanguageCode, sentence: gapped });
         const target = { answer: got.gap, lemma: item.lemma, alternatives: [item.form] };
@@ -1220,9 +1217,10 @@ async function main(): Promise<void> {
       const options = made ? [...made.distractors, ...made.spares].slice(0, ASKED_DISTRACTORS) : [];
       if (options.length === 0) return [];
       if (item.task === 'gap') {
-        const gap = findGap(item.example ?? '', [item.blank ?? item.form]);
-        if (!gap) return [];
-        return [{ key: item.key, task: 'gap', sentence: `${item.example!.slice(0, gap.start)}___${item.example!.slice(gap.end)}`, options }];
+        // Phase 62 (spec D1): the sentence the item wrote, as prepareSession checks it.
+        const written = made?.sentence;
+        if (!written) return [];
+        return [{ key: item.key, task: 'gap', sentence: `${written.sentence.slice(0, written.gap.start)}___${written.sentence.slice(written.gap.end)}`, options }];
       }
       if (item.task === 'meaning') return [{ key: item.key, task: 'choice', word: item.form, options }];
       if (item.task === 'word') return [{ key: item.key, task: 'choice', word: item.translation, options }];

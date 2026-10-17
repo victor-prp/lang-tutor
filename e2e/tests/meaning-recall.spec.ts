@@ -78,7 +78,7 @@ test('a meaning card: a synonym is judged right, and the saved meaning is shown'
   const report = () => diagnosticReport(diagnostics);
   const { card, position } = await reachMeaningCard(page, request, 'e2e_meaning_ru', report);
 
-  await expect(page.getByText('כתבו את הפירוש בעברית')).toBeVisible();
+  await expect(page.getByText('תרגמו את המילה לעברית')).toBeVisible();
   expect(Object.keys(MEANINGS_OF)).toContain(card.prompt);
   await expect(page.getByTestId('typed-input')).toHaveCSS('direction', 'rtl');
 

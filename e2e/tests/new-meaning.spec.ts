@@ -16,6 +16,14 @@ test.setTimeout(180_000);
 const SENTENCE = 'Мой лук и стрелы лежат дома';
 const SENTENCE_HEBREW = 'הקשת והחצים שלי נמצאים בבית';
 const SENTENCE_WORD = 'лук';
+// Phase 62 (spec D2). The line's map, as the context call answers it: Hebrew word by word.
+const SENTENCE_WORDS = [
+  { hebrew: 'שלי', translation: 'Мой', word: '' },
+  { hebrew: 'הקשת', translation: 'лук', word: '' },
+  { hebrew: 'והחצים', translation: 'и стрелы', word: '' },
+  { hebrew: 'נמצאים', translation: 'лежат', word: '' },
+  { hebrew: 'בבית', translation: 'дома', word: '' },
+];
 
 // Phase 39 (spec D6). лук has two saved meanings, a family. בצל is known in every skill
 // (stability 30, reviewed yesterday), so קשת, never asked, is the family's current gloss and
@@ -45,7 +53,7 @@ test('a new meaning of a known word: the card names what is known and shows the 
   const keys = Array.from({ length: 10 }, (_, i) => `q${i + 1}`);
   await expectContext(
     request,
-    keys.map((key) => ({ key, context: SENTENCE, context_translation: SENTENCE_HEBREW, context_word: SENTENCE_WORD })),
+    keys.map((key) => ({ key, context: SENTENCE, context_translation: SENTENCE_HEBREW, context_word: SENTENCE_WORD, sentence_words: SENTENCE_WORDS })),
   );
   await expectCheck(request, Object.fromEntries(keys.map((key) => [`${key}c`, { context_meaning: 'קשת' }])));
   // Phase 43 (spec D7). Home makes the session itself, so the memory and the
@@ -63,13 +71,28 @@ test('a new meaning of a known word: the card names what is known and shows the 
   expect(stripIsolates(await page.getByTestId('known-meanings').textContent())).toBe('כבר למדתם: בצל');
   await expect(page.getByTestId('context-line')).toHaveText(SENTENCE);
   await expect(page.getByTestId('context-line-mark')).toHaveText(SENTENCE_WORD);
-  await expect(page.getByTestId('new-meaning-question')).toHaveText('מה עוד זה אומר?');
+  await expect(page.getByTestId('new-meaning-question')).toHaveText('מה עוד המילה אומרת?');
   // The context sentence is drawn once, in the prompt.
   await expect(page.getByTestId('context-line')).toHaveCount(1);
   expect(card.options).toContain('קשת');
   expect(card.options).not.toContain('בצל');
 
+  // Phase 62 (spec D3, D5, D7). The line is an example, tapped word by word for its
+  // Hebrew; the word itself is the question and is never tapped. Once answered, every
+  // word shows its Hebrew, and the whole sentence's.
+  await expect(page.getByTestId('context-label')).toHaveText('משפט לדוגמה:');
+  await expect(page.getByText('הקישו על מילה כדי לראות אותה בעברית')).toBeVisible();
+  await expect(page.getByTestId('context-line-word-0-text')).toHaveCount(0);
+  await page.getByTestId('context-line-word-0').click();
+  await expect(page.getByTestId('context-line-word-0-text')).toHaveText('שלי');
+  await expect(page.getByTestId('context-line-mark-text')).toHaveCount(0);
+  const sent = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/next-step'));
   await answerChoice(page, card, true);
+  expect((await sent).postDataJSON()).toMatchObject({ tapped: [0] });
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
+  await expect(page.getByTestId('context-line-word-2-text')).toHaveText('והחצים');
+  await expect(page.getByTestId('context-line-mark-text')).toHaveText('הקשת');
+  await expect(page.getByTestId('context-translation')).toContainText('המשפט בעברית:');
+  await expect(page.getByTestId('context-translation')).toContainText(SENTENCE_HEBREW);
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

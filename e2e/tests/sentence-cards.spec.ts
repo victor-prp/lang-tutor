@@ -207,7 +207,7 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       await page.getByTestId('continue-button').click();
     } else if (card.kind === 'translate') {
       // Translate the Hebrew sentence; a different order is the judge's to accept.
-      await expect(page.getByText('תרגמו את המשפט לרוסית')).toBeVisible();
+      await expect(page.getByText('תרגמו את כל המשפט לרוסית')).toBeVisible();
       // Phase 34 (spec D8): the sentence marks the practised word.
       await expect(page.getByTestId('sentence-translation')).toHaveText(STUB_SENTENCE_HEBREW);
       await expect(page.getByTestId('sentence-translation-mark')).toHaveText(MARKED);
@@ -458,6 +458,48 @@ test('a tap shows a word of the sentence to translate, and the practised word\'s
     }
   }
   expect(seen).toEqual(['translate']);
+
+  await expect(page.getByTestId('results-score')).toBeVisible();
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 62 (spec D3, D5). A gap to choose is tapped word by word for its Hebrew, its
+// blank never; the answer carries the taps, and then every word shows its Hebrew,
+// the practised word's too, with the Hebrew sentence under it.
+test('a tap shows a word of a gap sentence, and the answer shows every word', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  await reachSentenceSession(page, request, 'e2e_sentences_gap_taps_ru', [], [
+    { hebrew: 'אתמול', translation: 'Вчера', word: '' },
+    { hebrew: 'היא', translation: 'она', word: '' },
+    { hebrew: MARKED, translation: STUB_GAP, word: '' },
+    { hebrew: 'הספר', translation: 'книгу', word: '' },
+  ]);
+
+  const seen: string[] = [];
+  for (let position = 1; position <= CARDS; position++) {
+    const card = await readCard(page, position, CARDS);
+    if (card.kind === 'cloze-choice') {
+      seen.push(card.kind);
+      await expect(page.getByText('הקישו על מילה כדי לראות אותה בעברית')).toBeVisible();
+      await expect(page.getByTestId('sentence-gap-mark')).toHaveText('_____');
+      await page.getByTestId('sentence-gap-word-0').click();
+      await expect(page.getByTestId('sentence-gap-word-0-text')).toHaveText('אתמול');
+      await expect(page.getByTestId('sentence-gap-word-1-text')).toHaveCount(0);
+      const sent = nextStepSent(page);
+      await answerChoice(page, card, true);
+      expect((await sent).postDataJSON()).toMatchObject({ tapped: [0] });
+      await expect(page.getByTestId('feedback-correct')).toBeVisible();
+      await expect(page.getByTestId('sentence-gap-mark')).toHaveText(STUB_GAP);
+      await expect(page.getByTestId('sentence-gap-mark-text')).toHaveText(MARKED);
+      await expect(page.getByTestId('sentence-gap-word-1-text')).toHaveText('היא');
+      await expect(page.getByTestId('sentence-translation')).toHaveText(/\p{Script=Hebrew}/u);
+      await page.getByTestId('continue-button').click();
+    } else {
+      await pass(page, card);
+    }
+  }
+  expect(seen).toEqual(['cloze-choice']);
 
   await expect(page.getByTestId('results-score')).toBeVisible();
   expect(diagnostics.pageErrors, report()).toEqual([]);
