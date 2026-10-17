@@ -136,9 +136,8 @@ up to 8 words, and never lowers `TIER2_THRESHOLD`.
   match that form (*my call*).
 - **When generation fails:** "fails" means anything that today degrades or refuses a gap sentence:
   batch validation, the checker's `translate` check, or its `gap` test calling too many options
-  right (phase 48). The card then falls back entirely to today's `cloze_choice`: the saved example,
-  today's options, and no map. It shows what it shows today (D3) (*my call*: falling back keeps the
-  card, where swapping it for another type would change what the session practises).
+  right (phase 48). The card is then refused, as a choice card with too few usable options is
+  today (R7). It does not fall back to the saved example.
 
 `new_meaning` and the other word cards keep their own fallback (`fallbackContext`). They lose their
 map with it.
@@ -352,3 +351,7 @@ strings live in `apps/mobile/src/strings.ts`, and the UI is Hebrew only.
 - **R6 (Victor, after the builder check).** A tap on an Italian sentence (Italian shown, Hebrew
   revealed) is a recognition miss: written receptive Again. On translate sentence it stays a
   production miss.
+- **R7 (planning).** A `cloze_choice` whose generated sentence fails is refused (phase 48), and does
+  not fall back to the saved example. A fallback would need a second batch item per card for the
+  saved example's options, and the batch schema caps items at ten, a whole session, and once hung
+  on a change.
