@@ -1,6 +1,7 @@
 # Phase 62 — Tap the words on every sentence card
 
-- **Status:** draft, written after brainstorming on 2026-10-17; awaiting Victor's review.
+- **Status:** approved by Victor on 2026-10-17 ("Yes. Continue till PR", after the builder
+  check's two questions). Implemented inline on branch `phase-62-tap-every-sentence`.
 - **Date:** 2026-10-17
 - **Source:** `drafts/2026-10-17-tap-words-every-sentence-card-one-pager.md` (main checkout), and the
   brainstorming that followed it on 2026-10-17, which worked from mockups of every card before and
@@ -108,15 +109,36 @@ is shared with the context call's `explanation` task, which writes the out-of-sc
 so that task keeps today's limit: the builder splits the constant rather than tightening it for
 both.
 
+**When the rules clash** (R5, Victor). With a short list and a short sentence, the new rules can
+fight the existing quality rules. The order of priority is:
+
+1. **The sentence points to the word and its sense.** Today's checks stay unchanged: a gap sentence
+   points to its word (phase 41's `pointsToWord`), `cloze_choice`'s other words rule out its wrong
+   options (the checker's `gap` test), and a context line pins one sense (phase 34's `meaning`
+   check).
+2. **It is short.**
+3. **It uses the learner's words**, as much as it can.
+
+If the evals show the pointing checks dropping at 3–6 words, the builder raises the length limit,
+up to 8 words, and never lowers `TIER2_THRESHOLD`.
+
 **`cloze_choice` gets a generated sentence.**
 
 - **Today:** its sentence is the example saved with the learner's lookup (`dict_var_translations`),
   not written per session, so it can't use the learner's words.
 - **From this phase:** it is written per session by the batch's `sentence` task, as `cloze_typed`'s
   is.
-- **When generation fails:** the card falls back to today's saved example. With no map, it shows
-  what it shows today (D3) (*my call*: falling back keeps the card, where swapping it for another
-  type would change what the session practises).
+- **Its wrong options** are written for the generated sentence's gap, as the `gap` task writes them
+  today for the saved example's. The checker's `gap` test runs on the generated sentence.
+  *Builder's call:* a combined task or a second item per card. Either way it must fit the
+  schemas' item caps and be timed at full size.
+- **The gap word** takes the form the sentence needs, as `cloze_typed`'s does, and the options
+  match that form (*my call*).
+- **When generation fails:** "fails" means anything that today degrades or refuses a gap sentence:
+  batch validation, the checker's `translate` check, or its `gap` test calling too many options
+  right (phase 48). The card then falls back entirely to today's `cloze_choice`: the saved example,
+  today's options, and no map. It shows what it shows today (D3) (*my call*: falling back keeps the
+  card, where swapping it for another type would change what the session practises).
 
 `new_meaning` and the other word cards keep their own fallback (`fallbackContext`). They lose their
 map with it.
@@ -182,11 +204,20 @@ tap. On word cards it is the question itself, and its translation is the answer.
 
 ### D4. What a tap costs
 
-This is phase 59's D4 and R5, unchanged, now on every in-scope card:
+This is phase 59's D4 and R5, now on every in-scope card, with one change of skill (R6):
 
-- **A tap on a practised list word** writes a miss on that word: productive Again on its gloss, once
-  per word per card, whatever the card's verdict. It reaches memory and progress at the session's
-  end, and not the session score or the missed list.
+- **A tap on a practised list word** writes a miss on that word, once per word per card, whatever
+  the card's verdict. It reaches memory and progress at the session's end, and not the session
+  score or the missed list. Which skill the miss counts against depends on the direction of the
+  tap:
+  - **On the Italian cards** (cloze and the three Italian-context word cards), the tap shows the
+    Hebrew, so it is a failure to *recognise* the word. It writes **written receptive** Again, the
+    grade a wrong `multiple_choice` writes.
+  - **On `sentence_translation`**, the tap shows the Italian, so it stays a failure to *produce*
+    the word: written productive Again, as today.
+
+  Today `tappedMisses` treats every tap as `sentence_translation`. The card type, or the tap's
+  direction, has to reach it.
 - **Any other tap** is free.
 - **The target** can't be tapped on the new cards (D3). On `sentence_translation` it is help, as
   today.
@@ -207,8 +238,10 @@ When the card's answer is final (the banner shows: right, wrong or given up), th
   - **On the word cards:** a new line "המשפט בעברית:" with `context_translation`, which the app
     has never received.
 
-A first wrong try that leads to a second try is not final: nothing is unveiled until the card ends
-(*my call*: the second try would otherwise be answered with the sentence translated). A card with
+A first wrong try that leads to a second try is not final, so the per-word translations wait until
+the card ends (*my call*: the second try would otherwise be answered with every word translated).
+Phase 38's Hebrew line, which `cloze_typed` deliberately shows during a second try
+(`showsSentenceTranslation`), stays as it is. A card with
 no map shows only the whole-sentence line, where it has one. A gap word shown filled in after
 answering takes its translation like any other word.
 
@@ -313,3 +346,9 @@ strings live in `apps/mobile/src/strings.ts`, and the UI is Hebrew only.
   context".
 - **R4 (Victor, one-pager).** Sentences follow translate sentence's principle: short, and from the
   learner's words.
+- **R5 (Victor, after the builder check).** When short and from the learner's words clash with a
+  sentence pointing to its word and sense, the pointing wins, then short, then the learner's words.
+  The length may go up to 8 words if the evals need it, and the eval thresholds never drop.
+- **R6 (Victor, after the builder check).** A tap on an Italian sentence (Italian shown, Hebrew
+  revealed) is a recognition miss: written receptive Again. On translate sentence it stays a
+  production miss.
