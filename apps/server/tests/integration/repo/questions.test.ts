@@ -531,6 +531,8 @@ describe('phase 27 Part B: sentence cards', () => {
       meaning: 'לדבר',
       options: ['parlavamo', 'parlammo', 'parlate', 'parlano'],
       correct_option: 0,
+      // Phase 62 (spec D2): a gap card's word map, none here.
+      words: null,
     });
     expect(typed).toEqual({
       id: typed.id,
@@ -543,6 +545,7 @@ describe('phase 27 Part B: sentence cards', () => {
       answer: 'parlavamo',
       alternatives: ['parlammo'],
       mark: null,
+      words: null,
     });
     expect(translation).toEqual({
       id: translation.id,
@@ -780,8 +783,11 @@ describe('phase 34: context sentences, marks and part of speech', () => {
     for (const question of [...made, ...(await load(sessionId))]) {
       expect(question).toMatchObject({ context: { text: SAW_SENTENCE, mark: { start: 7, end: 10 } } });
     }
-    // The other half is the judge's, never the wire's.
-    expect(JSON.stringify(made)).not.toContain(SAW_HEBREW);
+    // The other half is the judge's, never the wire's, but on a target-language line
+    // it taps (phase 62, spec D5), which shows it once answered.
+    for (const question of made) {
+      expect([question.type, JSON.stringify(question).includes(SAW_HEBREW)]).toEqual([question.type, question.type === 'typed_meaning' || question.type === 'multiple_choice']);
+    }
     const stored = await t.db.execute<{ context_translation: string }>(sql`select context_translation from questions where enrollment_id = ${enrollmentOf('u_1')}`);
     expect(stored.rows.map((row) => row.context_translation)).toEqual(Array(5).fill(SAW_HEBREW));
   });

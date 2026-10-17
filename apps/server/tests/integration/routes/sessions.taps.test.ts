@@ -171,7 +171,7 @@ describe('taps on every sentence card (phase 62)', () => {
   it('stores a cloze choice\'s taps, and a list word\'s tap is a written receptive miss on it, never productive', async () => {
     const { sessionId, questions, anchor, post, right } = await startAs('cloze_choice');
     const result = await post('next-step', { question_id: questions[0].id, option_index: right, tapped: [2, 0] });
-    expect(result).toMatchObject({ next: { complete: true } });
+    expect(result).toMatchObject({ complete: true });
     expect(await readTaps(t.db, sessionId)).toEqual([
       { position: 0, wordIndex: 0, kind: 'free', glossId: null },
       { position: 0, wordIndex: 2, kind: 'list', glossId: anchor },
