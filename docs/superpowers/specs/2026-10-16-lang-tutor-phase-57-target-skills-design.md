@@ -540,4 +540,14 @@ under task ids (in brackets).
   (phase 60, merge 3).
 - **R43. A tapped list word's miss (phase 59) is evidence for target skills as for FSRS**: −2 in written
   productive in every active target holding the word, and it marks the word started (merge 3). Master's
-  0041_sentence_words keeps its number; this branch's migration is one 0042_target_skills.
+  0041_sentence_words keeps its number; this branch's migration is one 0042_target_skills (0043 since
+  merge 4, R44).
+- **R44. A tester's question-types session (phase 61) is the main path's** (target_id null), whatever
+  target holds its word (merge 4). Its create takes the main path's next-session lock alone (ADR 0014 R4:
+  one path lock, a stock retired under it, no progress lock), refuses only the main path's started
+  session and seeded stock, as create on the main path does, and leaves a target path's started session
+  and stock as they are; the seed check is create's (any session of any path puts the seed behind, R25).
+  Its answers count as any session's, target skills included (spec D4: whatever path the session is on);
+  R3 binds the main path's picker, not a word a tester chose. Master's
+  0042_tester_and_question_type_sessions keeps its number; this branch's migration is regenerated on top
+  as 0043_target_skills, statement for statement the old 0042.
