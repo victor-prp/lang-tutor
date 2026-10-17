@@ -18,8 +18,20 @@ type Props = {
   /** The Hebrew words' style. */
   style: StyleProp<TextStyle>;
   /** The sentence's `testID`; the practised word's is this with `-mark` after it,
-   *  each word's this with `-word-N`, and its Italian, once tapped, `-word-N-text`. */
+   *  each word's this with `-word-N`, and its Italian, once tapped, `-word-N-text`
+   *  (phase 62: the practised word's, once revealed, `-mark-text`). */
   testID: string;
+  /** Phase 62 (spec D3). The sentence's own direction: Hebrew right to left (the
+   *  default), a target-language sentence left to right, its Hebrew under it right to left. */
+  direction?: 'rtl' | 'ltr';
+  /** Phase 62 (spec D5). The card's answer is final: every word shows its
+   *  translation, the tapped ones still in the colour a tap gave them. */
+  reveal?: boolean;
+  /** Phase 62 (spec D3). A gap card: the practised word is a blank until revealed. */
+  gap?: boolean;
+  /** Phase 62 (spec D3). False where the practised word is the question itself (a
+   *  gap, a word card's word): it is shown, never tapped. */
+  targetTappable?: boolean;
 };
 
 /**
@@ -28,23 +40,31 @@ type Props = {
  * appears under it, until the card ends. Each word keeps a line for it from the
  * start, so a tap moves nothing. A tap on the practised word is help (the
  * session's); it is bold, with a solid line.
+ *
+ * Phase 62 (spec D3, D5). Any sentence a card taps, in its own direction: a gap
+ * card's, whose practised word is a blank, and a word card's context line, whose
+ * practised word is the question. Once the answer is final every word shows its
+ * translation, and none can be tapped.
  */
-export function TappableSentence({ text, words, mark, tapped, onTap, hint, style, testID }: Props) {
+export function TappableSentence({ text, words, mark, tapped, onTap, hint, style, testID, direction = 'rtl', reveal = false, gap = false, targetTappable = true }: Props) {
   const units = sentenceUnits(text, words, mark);
   // A card with no map shows no Italian, so it keeps no line for it.
   const roomForItalian = words !== null && words !== undefined;
   return (
     <View style={styles.block}>
-      <View style={styles.sentence} testID={testID}>
+      <View style={[styles.sentence, { direction }]} testID={testID}>
         {units.map((unit, at) => (
           <Word
             key={at}
             unit={unit}
             tapped={typeof unit.tap === 'number' && tapped.includes(unit.tap)}
-            onTap={onTap}
+            onTap={unit.target && !targetTappable ? null : onTap}
             roomForItalian={roomForItalian}
             style={style}
             testID={testID}
+            reveal={reveal}
+            blank={gap && unit.target && !reveal}
+            translationDirection={direction === 'rtl' ? 'ltr' : 'rtl'}
           />
         ))}
       </View>
@@ -60,6 +80,9 @@ function Word({
   roomForItalian,
   style,
   testID,
+  reveal,
+  blank,
+  translationDirection,
 }: {
   unit: Unit;
   tapped: boolean;
@@ -67,9 +90,17 @@ function Word({
   roomForItalian: boolean;
   style: StyleProp<TextStyle>;
   testID: string;
+  reveal: boolean;
+  blank: boolean;
+  translationDirection: 'rtl' | 'ltr';
 }) {
   const tap = unit.tap;
-  const line = tap === null ? null : tapped ? 'tapped' : unit.target ? 'target' : 'dotted';
+  // Phase 62 (spec D3): a gap is a blank, with no line of its own; once revealed,
+  // no word is dotted, since none can be tapped.
+  const line = tap === null || blank ? null : tapped ? 'tapped' : unit.target ? 'target' : reveal ? null : 'dotted';
+  // Phase 62 (spec D5): revealed, every word with a translation shows it.
+  const shown = tap !== null && unit.translation !== null && (tapped || reveal);
+  const translationStyle = tapped ? styles.italian : unit.target ? styles.revealedTarget : styles.revealed;
   const body = (
     <>
       <View style={styles.wordRow}>
@@ -79,25 +110,27 @@ function Word({
             style={[style, unit.target && styles.target]}
             testID={tap === null ? undefined : unit.target ? `${testID}-mark` : `${testID}-word-${tap}`}
           >
-            {unit.text}
+            {blank ? '_____' : unit.text}
           </Text>
           {line ? <Underline kind={line} /> : null}
         </View>
         {unit.after ? <Text style={style}>{unit.after}</Text> : null}
       </View>
       {roomForItalian ? (
-        <Text style={styles.italian} testID={tapped ? `${testID}-word-${tap}-text` : undefined}>
-          {tapped ? unit.translation : ' '}
+        <Text
+          style={[shown ? translationStyle : styles.italian, { writingDirection: translationDirection }]}
+          testID={shown ? (unit.target ? `${testID}-mark-text` : `${testID}-word-${tap}-text`) : undefined}
+        >
+          {shown ? unit.translation : ' '}
         </Text>
       ) : null}
     </>
   );
-  if (tap === null) return <View style={styles.word}>{body}</View>;
+  if (tap === null || !onTap) return <View style={styles.word}>{body}</View>;
   return (
     <Pressable
       style={styles.word}
-      onPress={onTap ? () => onTap(tap) : undefined}
-      disabled={!onTap}
+      onPress={() => onTap(tap)}
       accessibilityRole="button"
       hitSlop={spacing.xs}
     >
@@ -127,14 +160,17 @@ const styles = StyleSheet.create({
   target: { fontWeight: '700' },
   underline: { height: 2, marginTop: 1, overflow: 'hidden' },
   dots: { height: 6, borderWidth: 2, borderStyle: 'dotted', borderColor: colors.muted, borderRadius: 1 },
-  // The Italian, left to right, under its word.
+  // The other language's words under the word: a tapped one's in the primary
+  // colour (its direction is set per sentence).
   italian: {
     fontSize: fontSizes.sm,
     lineHeight: lineHeights.sm,
     color: colors.primary,
     fontWeight: '600',
     textAlign: 'center',
-    writingDirection: 'ltr',
   },
+  // Phase 62 (spec D5). Revealed once answered: muted, the practised word's in bold.
+  revealed: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, textAlign: 'center' },
+  revealedTarget: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.text, fontWeight: '700', textAlign: 'center' },
   hint: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, textAlign: 'center', writingDirection: 'rtl' },
 });

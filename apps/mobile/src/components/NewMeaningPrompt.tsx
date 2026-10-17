@@ -1,7 +1,7 @@
 import type { Question } from '@lang-tutor/core/api';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { ContextLine } from '@/components/ContextLine';
+import { ContextLine, type SentenceTaps } from '@/components/ContextLine';
 import { SpeakButton } from '@/components/SpeakButton';
 import { contextLanguage } from '@/context';
 import { strings } from '@/strings';
@@ -11,12 +11,14 @@ type Props = {
   question: Extract<Question, { type: 'new_meaning' }>;
   /** The enrollment's target language: the word and its example are written in it. */
   language: string;
+  /** Phase 62 (spec D3). Its context line is tapped word by word. */
+  taps?: SentenceTaps;
 };
 
 /** Phase 39 (spec D6). What a new-meaning card shows above its options: the
  *  word, the meanings the learner already has, the new meaning's example and
  *  the question. The root test id is the card's. */
-export function NewMeaningPrompt({ question, language }: Props) {
+export function NewMeaningPrompt({ question, language, taps }: Props) {
   return (
     <View style={styles.card} testID="new-meaning-card">
       <View style={styles.promptRow}>
@@ -28,7 +30,7 @@ export function NewMeaningPrompt({ question, language }: Props) {
       <Text style={styles.known} testID="known-meanings">
         {strings.knownMeanings(question.known_meanings)}
       </Text>
-      {question.context ? <ContextLine context={question.context} language={contextLanguage(question.type, language)} /> : null}
+      {question.context ? <ContextLine context={question.context} language={contextLanguage(question.type, language)} taps={taps} /> : null}
       <Text style={styles.question} testID="new-meaning-question">
         {strings.newMeaningQuestion}
       </Text>

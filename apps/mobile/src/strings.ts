@@ -136,14 +136,15 @@ export const strings = {
   homeLoadFailed: 'טעינת התרגול נכשלה. אפשר לנסות שוב.',
   preparationFailed: 'יצירת השאלות נכשלה. אפשר לנסות שוב.',
   homeSavedLabel: (count: number, language: string) => `${count} משמעויות שמורות ב${language}`,
-  questionInstruction: 'מה הפירוש?',
+  // Phase 62 (spec D7): every sentence card says what is translated, the word or the whole sentence.
+  questionInstruction: 'תרגמו את המילה לעברית',
   // Phase 39 (spec D6). A word the learner knows, asked for another meaning.
   questionInstructionNewMeaning: 'פירוש חדש למילה שאתם מכירים',
   knownMeanings: (meanings: readonly string[]) => `כבר למדתם: ${meanings.join(', ')}`,
-  newMeaningQuestion: 'מה עוד זה אומר?',
+  newMeaningQuestion: 'מה עוד המילה אומרת?',
   // Phase 23. The reversed and typed cards name the language they ask for.
-  questionInstructionReverse: (language: string) => `איך אומרים ב${languageName(language)}?`,
-  questionInstructionTyped: (language: string): Instruction => instruct('כתבו את המילה ב', language),
+  questionInstructionReverse: (language: string) => `תרגמו את המילה ל${languageName(language)}`,
+  questionInstructionTyped: (language: string): Instruction => instruct('תרגמו את המילה ל', language),
   typedPlaceholder: 'התשובה שלך…',
   typedCheck: 'בדיקה',
   typedShowAnswer: 'הצגת התשובה',
@@ -157,7 +158,7 @@ export const strings = {
   boardResult: (right: number, total: number) => `בניסיון הראשון: ${right} מתוך ${total}`,
   // Phase 27 (spec D12).
   // Phase 39 (spec D9): names the learner's language, not always Hebrew.
-  questionInstructionMeaning: (learner: string): Instruction => instruct('כתבו את הפירוש ב', learner),
+  questionInstructionMeaning: (learner: string): Instruction => instruct('תרגמו את המילה ל', learner),
   // Phase 39 (spec D8). A typed answer in the wrong alphabet is asked again, not sent.
   wrongScriptNotice: (language: string): Instruction => instruct('התשובה צריכה להיות ב', language),
   feedbackSavedMeaning: 'נכון! הפירוש השמור:',
@@ -168,12 +169,16 @@ export const strings = {
   // Phase 38 (spec D1). The typed gap's Hebrew sentence is a hint, named by what it shows.
   sentenceHint: 'רמז: הצגת המשפט בעברית',
   // The whole sentence, by name: the marked word invited typing it alone.
-  questionInstructionTranslate: (language: string): Instruction => instruct('תרגמו את המשפט ל', language),
+  questionInstructionTranslate: (language: string): Instruction => instruct('תרגמו את כל המשפט ל', language),
   // One word on a translation card is asked again, not sent.
   wordOnlyNotice: 'כתבו את כל המשפט, לא רק את המילה',
   translationReference: 'תרגום לדוגמה:',
   // Phase 59c (design A). Under a translation card's sentence, while a tap can show a word.
   tapWordHint: (language: string) => `הקישו על מילה כדי לראות אותה ב${languageName(language)}`,
+  // Phase 62 (spec D5, D7). Above a word card's context line, so it reads as an
+  // example and not the thing to translate; and the line's whole translation once answered.
+  exampleLabel: 'משפט לדוגמה:',
+  sentenceIn: (language: string) => `המשפט ב${languageName(language)}:`,
   // Phase 54 (spec D1). The meet card: a new word, shown before it is asked.
   meetTitle: 'מילה חדשה',
   // Phase 55 (spec D7). Help on the tiles and typed cards, a tile that is not
@@ -184,7 +189,7 @@ export const strings = {
   retypeNotice: 'הקלידו את המילה שוב',
   // Phase 25 (spec D7).
   questionInstructionReadAloud: 'קראו בקול',
-  questionInstructionSay: (language: string) => `אמרו ב${languageName(language)}`,
+  questionInstructionSay: (language: string) => `אמרו את המילה ב${languageName(language)}`,
   record: 'הקלטה',
   recordingSecondsLeft: (seconds: number) => `מקליטים… ${seconds}`,
   checking: 'בודקים…',

@@ -602,3 +602,51 @@ describe('taps on a sentence translation (phase 59 D3, D5)', () => {
     expect(tappedFor(SAY, [1])).toBeUndefined();
   });
 });
+
+// Phase 62 (spec D3, D6). Taps on every card that taps a sentence: a gap card's
+// sentence, a word card's target-language line. Their target is never tapped.
+describe('taps on every sentence card (phase 62 D3, D6)', () => {
+  const CLOZE: Question = {
+    id: 'c1', type: 'cloze_choice', vocab_term_id: 'l', sentence: 'La casa è grande.', gap: { start: 10, end: 16 }, translation: 'הבית גדול.', meaning: 'גדול',
+    options: ['grande', 'rossa', 'lenta', 'calda'], correct_option: 0,
+    words: [{ start: 0, end: 7, text: 'הבית', target: false }, { start: 10, end: 16, text: 'גדול', target: true }],
+  };
+  const CHOICE: Question = {
+    id: 'm1', type: 'multiple_choice', vocab_term_id: 'l', question: 'poi', options: ['אחר כך', 'כבר', 'תמיד', 'אף פעם'], correct_option: 0,
+    context: {
+      text: 'Mangiamo e poi usciamo.', mark: { start: 11, end: 14 }, translation: 'אוכלים ואחר כך יוצאים.',
+      words: [{ start: 0, end: 8, text: 'אוכלים', target: false }, { start: 11, end: 14, text: 'אחר כך', target: true }, { start: 15, end: 22, text: 'יוצאים', target: false }],
+    },
+  };
+  const REVERSE: Question = { id: 'r1', type: 'reverse_choice', vocab_term_id: 'l', question: 'אחר כך', part_of_speech: 'adverb', options: ['poi', 'già', 'mai', 'sempre'], correct_option: 0, context: { text: 'אוכלים ואחר כך יוצאים.', mark: null } };
+  const ON = (question: Question): QuizState => ({ ...enteredState('s'), question, position: 3 });
+
+  it('keeps a cloze\'s taps by index, once each, and never its target, the gap', () => {
+    const tapped = wordTappedState(wordTappedState(wordTappedState(ON(CLOZE), 0), 1), 0);
+    expect(tapped.tapped).toEqual([0]);
+    expect(tapped.help).toBe(0);
+  });
+
+  it('reads a word card\'s taps from its context line, never its target', () => {
+    expect(wordTappedState(wordTappedState(ON(CHOICE), 2), 1).tapped).toEqual([2]);
+  });
+
+  it('takes no tap once answered, nor on a Hebrew-context card', () => {
+    const answered = { ...ON(CLOZE), answer: { option_index: 0 } };
+    expect(wordTappedState(answered, 0)).toBe(answered);
+    expect(wordTappedState(ON(REVERSE), 0).tapped).toEqual([]);
+  });
+
+  it('sends the taps on every tapped card, and none on a Hebrew-context card', () => {
+    expect(tappedFor(CLOZE, [0])).toEqual([0]);
+    expect(tappedFor(CHOICE, [2, 0])).toEqual([2, 0]);
+    expect(tappedFor(REVERSE, [0])).toBeUndefined();
+    expect(tappedFor(CHOICE, [])).toBeUndefined();
+  });
+
+  it('carries the taps on a chosen option and a typed text, and nothing without them', () => {
+    expect(nextStepRequest('c1', { option_index: 0 }, null, undefined, false, [0])).toEqual({ question_id: 'c1', option_index: 0, tapped: [0] });
+    expect(nextStepRequest('c1', { text: 'grande' }, null, undefined, false, [0, 2])).toEqual({ question_id: 'c1', text: 'grande', tapped: [0, 2] });
+    expect(nextStepRequest('c1', { option_index: 0 }, null)).toEqual({ question_id: 'c1', option_index: 0 });
+  });
+});
