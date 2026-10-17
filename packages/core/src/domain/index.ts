@@ -2,6 +2,7 @@ export { normaliseHebrew } from './hebrew';
 export {
   MAX_JUDGED_TEXT,
   SESSION_LENGTH,
+  TAPPABLE_TYPES,
   answerFits,
   evaluate,
   evaluateRetry,

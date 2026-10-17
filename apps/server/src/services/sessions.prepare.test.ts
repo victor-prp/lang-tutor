@@ -185,6 +185,9 @@ function world(opts: {
         const markOf = (start?: number | null, end?: number | null) => (start != null && end != null ? { start, end } : null);
         const context = q.context ? { text: q.context, mark: markOf(q.contextMarkStart, q.contextMarkEnd) } : null;
         const mark = markOf(q.sentenceMarkStart, q.sentenceMarkEnd);
+        // Phase 62 (spec D2, D5): a tapped sentence's map, never its glosses, and a tapped line's Hebrew.
+        const words = q.words ? q.words.map(({ start, end, text, target }) => ({ start, end, text, target })) : null;
+        const tapped = context && { ...context, words, translation: q.contextTranslation ?? null };
         switch (q.type) {
           case 'typed_translation':
             return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, lemma: q.lemma, alternatives: q.alternatives!, context };
@@ -197,9 +200,9 @@ function world(opts: {
           case 'matching':
             return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, ...choice(), board };
           case 'multiple_choice':
-            return { ...base, type: q.type, question: q.answerForm ?? q.form, ...choice(), context };
+            return { ...base, type: q.type, question: q.answerForm ?? q.form, ...choice(), context: tapped };
           case 'new_meaning':
-            return { ...base, type: q.type, question: q.answerForm ?? q.form, known_meanings: q.knownMeanings!, ...choice(), context };
+            return { ...base, type: q.type, question: q.answerForm ?? q.form, known_meanings: q.knownMeanings!, ...choice(), context: tapped };
           case 'listen_choice':
             return { ...base, type: q.type, question: q.answerForm ?? q.form, part_of_speech: q.partOfSpeech, ...choice() };
           case 'read_aloud':
@@ -208,11 +211,11 @@ function world(opts: {
           case 'say_translation':
             return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, lemma: q.lemma, alternatives: q.alternatives!, context };
           case 'typed_meaning':
-            return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, meaning: q.prompt!, context };
+            return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, meaning: q.prompt!, context: tapped };
           case 'cloze_choice':
-            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, ...choice() };
+            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, ...choice(), words };
           case 'cloze_typed':
-            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, answer: gapText, alternatives: q.alternatives!, mark };
+            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, answer: gapText, alternatives: q.alternatives!, mark, words };
           case 'sentence_translation':
             return { ...base, type: q.type, question: q.sentenceTranslation!, meaning: q.prompt!, sentence: q.sentence!, gap, answer: gapText, mark, words: servedWords(q.words ?? null) };
         }
@@ -1346,6 +1349,61 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
     expect(JSON.stringify(calls.sessionQuestions[0][2])).not.toContain('g-forces');
   });
 
+  // Phase 62 (spec D2). The context line's map and the gap sentence's, each turned onto
+  // its target-language sentence: a span there, the Hebrew to show.
+  const MAPPED_CONTEXT = JSON.stringify({
+    items: [
+      { key: 'q1', context: 'Please saw the plank in half.', context_translation: 'בבקשה תנסר את הקרש לשניים.', context_word: 'saw', sentence_words: [
+        { hebrew: 'בבקשה', translation: 'Please', word: '' },
+        { hebrew: 'תנסר', translation: 'saw', word: '' },
+        { hebrew: 'את הקרש', translation: 'the plank', word: 'w1' },
+        { hebrew: 'לשניים', translation: 'in half', word: '' },
+      ] },
+      { key: 'q3', sentence_word: 'נשלב' },
+      { key: 'q5', sentence_word: 'לחם', sentence_words: [
+        { hebrew: 'אנחנו אופים', translation: 'We bake', word: '' },
+        { hebrew: 'לחם', translation: 'bread', word: '' },
+        { hebrew: 'כל בוקר', translation: 'every morning', word: '' },
+      ] },
+    ],
+  });
+  const PLANK = [{ glossId: 'g-plank', word: 'plank', meaning: 'קרש' }];
+
+  it('stores a typed meaning\'s context map and a typed cloze\'s sentence map, the Hebrew under each target-language word (phase 62 D2)', async () => {
+    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: MAPPED_CONTEXT, checkReply: SENTENCES_CHECK, practised: PLANK });
+    await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
+    expect(insertedOf(calls)[0]).toMatchObject({
+      type: 'typed_meaning',
+      words: [
+        { start: 0, end: 6, text: 'בבקשה', glossId: null, target: false },
+        { start: 7, end: 10, text: 'תנסר', glossId: null, target: true },
+        { start: 11, end: 20, text: 'את הקרש', glossId: 'g-plank', target: false },
+        { start: 21, end: 28, text: 'לשניים', glossId: null, target: false },
+      ],
+    });
+    expect(insertedOf(calls)[4]).toMatchObject({
+      type: 'cloze_typed',
+      words: [
+        { start: 0, end: 7, text: 'אנחנו אופים', glossId: null, target: false },
+        { start: 8, end: 13, text: 'לחם', glossId: null, target: true },
+        { start: 14, end: 27, text: 'כל בוקר', glossId: null, target: false },
+      ],
+    });
+    // Served without the list's glosses; the context line also with its Hebrew.
+    expect(calls.sessionQuestions[0][0]).toMatchObject({
+      context: { text: 'Please saw the plank in half.', translation: 'בבקשה תנסר את הקרש לשניים.', words: expect.arrayContaining([{ start: 11, end: 20, text: 'את הקרש', target: false }]) },
+    });
+    expect(calls.sessionQuestions[0][4]).toMatchObject({ words: expect.arrayContaining([{ start: 8, end: 13, text: 'לחם', target: true }]) });
+    expect(JSON.stringify(calls.sessionQuestions[0])).not.toContain('g-plank');
+  });
+
+  it('keeps no map on a context line the checker sends back to the saved example (phase 62 D2)', async () => {
+    const checkReply = checking({ q1c: { context_meaning: 'לראות' }, q3: { natural_translation: "Let's combine forces." }, q5: { natural_translation: 'We bake bread every morning.' } });
+    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: MAPPED_CONTEXT, checkReply, practised: PLANK });
+    await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
+    expect(insertedOf(calls)[0]).toMatchObject({ type: 'typed_meaning', context: 'He will saw the branch off.', words: null });
+  });
+
   it('stores no word map on a translation card the context call did not map', async () => {
     const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT, checkReply: SENTENCES_CHECK });
     await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
@@ -1986,11 +2044,11 @@ describe('prepareSession, phase 39 (spec D6): the new_meaning card', () => {
       { key: 'q3', distractors: [], alternatives: ['fetch'] },
     ],
   });
-  const SENTENCE = "She'll pick up the kids at five.";
+  const SENTENCE = "She'll pick up the kids now.";
   const contextReply = (sentence: string, word: string) =>
     JSON.stringify({
       items: [
-        { key: 'q1', context: sentence, context_translation: 'היא תאסוף את הילדים בחמש.', context_word: word },
+        { key: 'q1', context: sentence, context_translation: 'היא תאסוף את הילדים עכשיו.', context_word: word },
         { key: 'q2', context: 'השולחן במטבח עשוי מעץ.', context_translation: 'The kitchen table is made of wood.', context_word: 'השולחן' },
         { key: 'q3', context: 'אני רוצה להוריד את המשחק החדש הלילה.', context_translation: 'I want to download the new game tonight.', context_word: 'להוריד' },
       ],
@@ -2022,7 +2080,7 @@ describe('prepareSession, phase 39 (spec D6): the new_meaning card', () => {
       knownMeanings: ['להרים'],
       prompt: null,
       context: SENTENCE,
-      contextTranslation: 'היא תאסוף את הילדים בחמש.',
+      contextTranslation: 'היא תאסוף את הילדים עכשיו.',
       contextMarkStart: at,
       contextMarkEnd: at + 'pick up'.length,
     });

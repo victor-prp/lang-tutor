@@ -83,6 +83,19 @@ export function isSpeaking(question: Question): question is SpeakingQuestion {
   return question.type === 'read_aloud' || question.type === 'say_translation';
 }
 
+/** Phase 62 (spec D3, D6). The cards whose sentence a tap reads word by word:
+ *  the three sentence cards and the three word cards with a target-language
+ *  context line. `sentence_translation` shows Hebrew and reveals the target
+ *  language; every other one the reverse. */
+export const TAPPABLE_TYPES: ReadonlySet<QuestionType> = new Set<QuestionType>([
+  'cloze_choice',
+  'cloze_typed',
+  'sentence_translation',
+  'multiple_choice',
+  'typed_meaning',
+  'new_meaning',
+]);
+
 /** Phase 27 (spec D3). The cards whose text answer the server judges. */
 export function isJudged(question: Question): question is JudgedQuestion {
   return question.type === 'typed_meaning' || question.type === 'sentence_translation';

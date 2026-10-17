@@ -52,6 +52,7 @@ import { CHECKER_CALL_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, SESSION_GENERATION_THIN
 import {
   buildContextPrompt,
   contextItemFor,
+  italianWordMap,
   markFor,
   parseLlmContext,
   resolveContext,
@@ -67,6 +68,7 @@ import {
   type RecentSentences,
   type Task,
 } from '../../src/domain/distractors';
+import { findMarks } from '../../src/domain/marks';
 import { createGeminiClient, toGeminiSchema } from '../../src/providers/gemini';
 
 /** The session batch's production budget (composition.ts: sessionGenerationTimeoutMs). */
@@ -331,10 +333,15 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
     if (item.task === 'mark') {
       const mark = markFor(item, got);
       console.log(`${item.key} mark        ${got?.sentence_word ?? '(none)'} -> ${mark ? item.sentence.slice(mark.start, mark.end) : 'unmarked'}`);
-      if (item.map) {
+      if (item.map && item.sentence === ROWS[Number(item.key.slice(1)) - 1].row.exampleTranslation && CONTEXT_TYPES[ROWS[Number(item.key.slice(1)) - 1].task] === 'sentence_translation') {
         const map = wordMapFor(item, got, mark, learnerWords, 'g-own');
         console.log(`${item.key} map         ${JSON.stringify(got?.sentence_words ?? null)}`);
         console.log(`${item.key} kept        ${map ? map.map((word) => `${item.sentence.slice(word.start, word.end)}=${word.text}${word.target ? '*' : ''}${word.glossId ? `(${word.glossId})` : ''}`).join(' ') : 'none'}`);
+      } else if (item.map) {
+        // Phase 62 (spec D2): a gap card's map, turned onto its target-language sentence.
+        const gap = findMarks(item.translation, item.word)[0] ?? null;
+        const map = italianWordMap({ text: item.translation, translation: item.sentence, target: gap, meaning: item.meaning, entries: got?.sentence_words, learner: learnerWords, ownGlossId: 'g-own' });
+        console.log(`${item.key} gap map     ${map ? map.map((word) => `${item.translation.slice(word.start, word.end)}=${word.text}${word.target ? '*' : ''}${word.glossId ? `(${word.glossId})` : ''}`).join(' ') : 'none'}`);
       }
       continue;
     }
@@ -344,6 +351,12 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
       `${item.key} ${item.task.padEnd(11)} ${outcome.dropped ? `DROPPED (${outcome.dropped})` : 'kept'}: ${got?.context ?? '(none)'}` +
         ` [${got?.context_word ?? ''}${mark && outcome.context ? ` -> ${outcome.context.text.slice(mark.start, mark.end)}` : ''}] = ${got?.context_translation ?? ''}`,
     );
+    // Phase 62 (spec D2): a target-language line's map.
+    if (item.map && !outcome.dropped && outcome.context?.translation) {
+      const line = outcome.context;
+      const map = italianWordMap({ text: line.text, translation: line.translation!, target: line.mark, meaning: item.meaning, entries: got?.sentence_words, learner: learnerWords, ownGlossId: 'g-own' });
+      console.log(`${item.key} line map    ${map ? map.map((word) => `${line.text.slice(word.start, word.end)}=${word.text}${word.target ? '*' : ''}${word.glossId ? `(${word.glossId})` : ''}`).join(' ') : 'none'}`);
+    }
   }
   for (const field of CONTEXT_FIELDS) {
     console.log(`filled    ${field.padEnd(20)} ${answer.items.filter((item) => (item as Record<string, unknown>)[field]).length} of ${answer.items.length}`);

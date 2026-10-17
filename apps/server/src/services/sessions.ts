@@ -3,6 +3,7 @@ import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/sc
 import {
   LIVE_DIMENSIONS,
   MAX_JUDGED_TEXT,
+  TAPPABLE_TYPES,
   evaluate,
   gatesScript,
   isJudged,
@@ -44,6 +45,7 @@ import {
   contextItemFor,
   contextLanguageOf,
   fallbackContext,
+  italianWordMap,
   markFor,
   wordMapFor,
   type MapWord,
@@ -1712,7 +1714,20 @@ export function createSessionService({
         let words: MapWord[] | null = null;
         if (item?.task === 'mark') {
           sentence = { text: item.sentence, mark: contextAnswer ? markFor(item, found.get(item.key)) : null };
-          if (contextAnswer) words = wordMapFor(item, found.get(item.key), sentence.mark, read.learnerWords, card.row.glossId);
+          if (contextAnswer && card.type === 'sentence_translation') {
+            words = wordMapFor(item, found.get(item.key), sentence.mark, read.learnerWords, card.row.glossId);
+          } else if (contextAnswer && card.answered.sentence) {
+            // Phase 62 (spec D2): a gap card's map, turned onto its sentence, the gap its target.
+            words = italianWordMap({
+              text: item.translation,
+              translation: item.sentence,
+              target: card.answered.sentence.gap,
+              meaning: card.row.translation,
+              entries: found.get(item.key)?.sentence_words,
+              learner: read.learnerWords,
+              ownGlossId: card.row.glossId,
+            });
+          }
         } else if (item) {
           if (contextAnswer) {
             const outcome = resolveContext(item, found.get(item.key), languages);
@@ -1721,6 +1736,18 @@ export function createSessionService({
               events.push({ event: 'context_dropped', session_id: sessionId, index: card.index, type: card.type, reason: outcome.dropped });
             } else {
               checkable = item;
+              // Phase 62 (spec D2): a target-language line's map, its mark the target.
+              if (item.map && outcome.context?.translation) {
+                words = italianWordMap({
+                  text: outcome.context.text,
+                  translation: outcome.context.translation,
+                  target: outcome.context.mark,
+                  meaning: card.row.translation,
+                  entries: found.get(item.key)?.sentence_words,
+                  learner: read.learnerWords,
+                  ownGlossId: card.row.glossId,
+                });
+              }
             }
           } else {
             context = fallbackContext(card.row, item.task);
@@ -1905,7 +1932,7 @@ export function createSessionService({
       const final = shown.map((card) => {
         const key = keyOf(card.index);
         const { row } = card;
-        let { type, answered, context, sentence, degradedReason } = card;
+        let { type, answered, context, sentence, degradedReason, words } = card;
         const fate = fateOf.get(card.index)!;
         if (fate.fate === 'keep_refused' && fate.shownAs === 'typed_translation') {
           // Phase 48 (spec D3, ruling R1): no three showable options, so phase
@@ -1938,6 +1965,8 @@ export function createSessionService({
             const reading = contextFinding.task === 'meaning' ? contextFinding.meaning : contextFinding.task === 'words' ? contextFinding.words.join(', ') : '';
             events.push({ event: 'checker_dropped', session_id: sessionId, index: card.index, type, kind: 'context', text: context.text, reason: `the checker reads it as ${reading || 'nothing'}` });
             context = fallbackContext(row, card.checkable.task);
+            // Phase 62 (spec D2): the saved example has no map.
+            words = null;
           }
         }
         const sentenceFinding = findings.get(key);
@@ -1962,7 +1991,7 @@ export function createSessionService({
         if (!context && contextLanguageOf(generatedAs(type)) !== null) {
           events.push({ event: 'context_missing', session_id: sessionId, index: card.index, type });
         }
-        return { row, index: card.index, type, answered, context, sentence, words: card.words };
+        return { row, index: card.index, type, answered, context, sentence, words };
       });
       // Phase 48 (spec D4). The plan's order, a dropped card's place closed up:
       // a card's written position is its place here, while `index` stays its
@@ -2028,7 +2057,8 @@ export function createSessionService({
             // goes with the card past a dropped one; its answer writes no memory and no progress.
             intro: plan.intro[index],
             // Phase 59 (spec D2): a card degraded from a sentence translation keeps none.
-            words: type === 'sentence_translation' ? words : null,
+            // Phase 62: nor does any card that taps no sentence.
+            words: TAPPABLE_TYPES.has(type) ? words : null,
           })),
         });
         // Each choice shuffled on its own, a board's words once together; the

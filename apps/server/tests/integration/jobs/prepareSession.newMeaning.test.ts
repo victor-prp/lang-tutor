@@ -65,7 +65,7 @@ async function savedTwice(lemma: string, meanings: [string, string]) {
   return { gloss_id: word.glossIds[1], sense_id: word.senseIds[1], variant_id: word.variantId, known_meanings: [meanings[0]] };
 }
 
-const PICK_UP_SENTENCE = "She'll pick up the kids at five.";
+const PICK_UP_SENTENCE = "She'll pick up the kids now.";
 const RUN_SENTENCE = 'I run the shop with my brother.';
 
 describe('a new_meaning card, prepared, stored and answered', () => {
@@ -74,7 +74,7 @@ describe('a new_meaning card, prepared, stored and answered', () => {
     const run = await savedTwice('run', ['לרוץ', 'לנהל']);
     await expectDistractors(ns, { tasks: ['meaning', 'meaning'] });
     await expectContext(ns, [
-      { key: 'q1', context: PICK_UP_SENTENCE, context_translation: 'היא תאסוף את הילדים בחמש.', context_word: 'pick up' },
+      { key: 'q1', context: PICK_UP_SENTENCE, context_translation: 'היא תאסוף את הילדים עכשיו.', context_word: 'pick up' },
       { key: 'q2', context: RUN_SENTENCE, context_translation: 'אני מנהל את החנות עם אחי.', context_word: 'run' },
     ]);
     await expectCheck(ns, { overrides: { q1c: { context_meaning: 'לאסוף' }, q2c: { context_meaning: 'לנהל' } } });

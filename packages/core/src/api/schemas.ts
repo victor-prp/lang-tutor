@@ -9,13 +9,31 @@ import { z } from 'zod';
 // end), into the sentence it marks, as GapSchema's are.
 export const MarkSchema = z.object({ start: z.number().int(), end: z.number().int() });
 
+// Phase 59 (spec D2, D3). A sentence's word map as a card is served it: runs of the
+// sentence a tap shows the other language's words for, `target` the practised
+// word's; null on a card stored before it, or one the server could not map.
+// Phase 62 (spec D2): on every card that taps a sentence, not only a translation's.
+export const MapWordsSchema = z
+  .array(z.object({ start: z.number().int(), end: z.number().int(), text: z.string(), target: z.boolean() }))
+  .nullable();
+
 // Phase 34 (spec D6). The sentence a card that shows a bare word shows with it,
 // so the word has one sense: Hebrew on a typed translation, say the translation
 // and reverse choice; in the target language on a typed meaning and multiple
 // choice. `mark` is the word in it, or null when the server could not find it
 // (a Hebrew verb inflects), and the sentence is then shown unmarked. Its other
 // half is never sent: it goes to the judge (D7).
-export const ContextSchema = z.object({ text: z.string(), mark: MarkSchema.nullable() });
+//
+// Phase 62 (spec D2, D5). A target-language line, on the three cards that tap it,
+// also carries its word map (`words`, runs of `text`, each with the Hebrew a tap
+// shows) and its other half, the Hebrew the card shows once answered; null when
+// the server has none. A Hebrew line carries neither.
+export const ContextSchema = z.object({
+  text: z.string(),
+  mark: MarkSchema.nullable(),
+  words: MapWordsSchema.optional(),
+  translation: z.string().nullable().optional(),
+});
 
 // Today's card: the target word, four meanings in the learner's language.
 // Phase 34: with its context sentence (spec D6), or null for a saved sense
@@ -201,6 +219,8 @@ export const ClozeChoiceQuestionSchema = z.object({
   meaning: z.string(),
   options: z.array(z.string()),
   correct_option: z.number().int(),
+  // Phase 62 (spec D2, D3). Runs of `sentence` a tap shows the Hebrew of.
+  words: MapWordsSchema.optional(),
 });
 
 // Phase 27 (spec D5). A sentence written for this session, the word blanked in
@@ -219,6 +239,8 @@ export const ClozeTypedQuestionSchema = z.object({
   answer: z.string(),
   alternatives: z.array(z.string()),
   mark: MarkSchema.nullable(),
+  // Phase 62 (spec D2, D3). Runs of `sentence` a tap shows the Hebrew of.
+  words: MapWordsSchema.optional(),
 });
 
 // Phase 27 (spec D6). A Hebrew sentence to translate, judged by the server.
@@ -239,7 +261,7 @@ export const SentenceTranslationQuestionSchema = z.object({
   // Phase 59 (spec D2, D3). The runs of `question` a tap shows the reference's
   // words for, `target` the practised word's; null on a card stored before phase
   // 59, or one the server could not map. Only `mark` is tappable then.
-  words: z.array(z.object({ start: z.number().int(), end: z.number().int(), text: z.string(), target: z.boolean() })).nullable().optional(),
+  words: MapWordsSchema.optional(),
 });
 
 // A tagged union. Consumers switch on `type`, so adding a type is additive and
@@ -1418,6 +1440,14 @@ export const LlmDistractorsSchema = z.object({
 // 7.3, 7.1, 7.4 and 7.0 s, every item answered and kept by D6's rules. The batch beside it,
 // without the four strings, answered in 13.6 s the same day. A field more here
 // means measuring again, for a 400 and for the wait.
+//
+// Phase 62 (spec D2). No new field: every target sentence and every gap card now
+// fills `sentence_words` too, and the target rule names the learner's words.
+// Measured as above, gemini-2.5-flash, 2026-10-17: master's prompt (one mapped
+// item) answered in 9.5 and 11.4 s; this one (three mapped target lines, two
+// mapped gap cards, two translation cards) in 21.5 and 20.3 s, accepted, every
+// item answered and every map kept. Inside the 60 s budget; the job runs in the
+// background, so the wait is the stock's, not the learner's.
 export const LlmContextSchema = z.object({
   items: z
     .array(
