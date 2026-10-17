@@ -208,6 +208,22 @@ describe('italianWordMap (phase 62 D2)', () => {
     expect(map?.find((word) => word.text === 'אחר כך')).toMatchObject({ start: 11, end: 14, target: true });
   });
 
+  // Final review: a prefix hides the answer from a whole-word match (ואחר כך holds אחר כך).
+  it('drops a free entry whose Hebrew holds the answer behind a prefix, so a tap never shows it', () => {
+    // poi is the target; dopo, a word apart from it, would show ואחר כך.
+    const map = italianWordMap({
+      text: 'Mangiamo poi, e dopo usciamo.', translation: 'אוכלים אחר כך, ואחר כך יוצאים.', target: { start: 9, end: 12 }, meaning: 'אחר כך',
+      entries: [
+        { hebrew: 'אוכלים', translation: 'Mangiamo', word: '' },
+        { hebrew: 'אחר כך', translation: 'poi', word: '' },
+        { hebrew: 'ואחר כך', translation: 'e dopo', word: '' },
+        { hebrew: 'יוצאים', translation: 'usciamo', word: '' },
+      ],
+      learner: [], ownGlossId: 'g-poi',
+    });
+    expect(map?.map((word) => [word.text, word.target])).toEqual([['אוכלים', false], ['אחר כך', true], ['יוצאים', false]]);
+  });
+
   it('drops an entry whose Hebrew is not in the translation, or whose Italian is not in the sentence, or with an empty side', () => {
     const map = italianWordMap(input([
       { hebrew: 'בית', translation: 'casa', word: '' },
@@ -223,15 +239,16 @@ describe('italianWordMap (phase 62 D2)', () => {
     expect(map?.[0]).toMatchObject({ text: 'הבית', glossId: null });
   });
 
-  it('with no target, keeps every usable entry and marks none', () => {
-    const map = italianWordMap(input([{ hebrew: 'הבית', translation: 'casa', word: '' }], { target: null }));
-    expect(map).toEqual([{ start: 7, end: 11, text: 'הבית', glossId: null, target: false }]);
+  // Final review: a line whose word the server could not mark (it occurs twice) would
+  // tap that word, inflected, as a free word (ניסר on a saw card): no map at all.
+  it('maps nothing with no target: the practised word could not be found, so no tap is safe', () => {
+    expect(italianWordMap(input([{ hebrew: 'הבית', translation: 'casa', word: '' }], { target: null }))).toBeNull();
   });
 
   it('is null with no entries, or nothing usable and no target', () => {
     expect(italianWordMap(input([], {}))).toEqual([{ start: 20, end: 25, text: 'מאוד', glossId: null, target: true }]);
     expect(italianWordMap(input([], { entries: undefined }))).toBeNull();
-    expect(italianWordMap(input([{ hebrew: 'x', translation: 'y', word: '' }], { target: null }))).toBeNull();
+
   });
 });
 

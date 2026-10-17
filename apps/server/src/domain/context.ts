@@ -448,9 +448,10 @@ type MapEntry = { hebrew: string; translation: string; word: string };
  *   two languages order words differently, so each is looked for anywhere.
  * - `target` (the gap, or the context's mark) is the practised word's tap, exactly
  *   its span: its Hebrew is the first entry's over it, or `meaning`. Any other
- *   entry over it is dropped, so the gap stays the gap.
- * - A free entry whose Hebrew holds `meaning` is dropped: on a word card that is
- *   the answer, and a tap must never show it.
+ *   entry over it is dropped, so the gap stays the gap. With no target (a word the
+ *   line holds twice is not marked) there is no map: that word would be a free tap.
+ * - A free entry whose Hebrew holds `meaning`, as whole words or behind a prefix,
+ *   is dropped: on a word card that is the answer, and a tap must never show it.
  */
 export function italianWordMap(input: {
   text: string;
@@ -461,8 +462,10 @@ export function italianWordMap(input: {
   learner: readonly LearnerWord[];
   ownGlossId: string;
 }): MapWord[] | null {
-  if (!input.entries) return null;
+  // Final review: with no target the practised word could not be found in `text`,
+  // so it would be a free tap, its translation the answer: nothing is tapped.
   const { target } = input;
+  if (!input.entries || !target) return null;
   const glossOf = new Map(input.learner.map((word) => [word.key, word.glossId]));
   const kept: MapWord[] = [];
   let targetText: string | null = null;
@@ -472,15 +475,16 @@ export function italianWordMap(input: {
     if (hebrew === '' || words === '' || !holds(input.translation, hebrew)) continue;
     const at = findMarks(input.text, words).find((place) => !kept.some((word) => overlaps(word, place)));
     if (!at) continue;
-    if (target && overlaps(at, target)) {
+    if (overlaps(at, target)) {
       targetText ??= hebrew;
       continue;
     }
-    if (holds(hebrew, input.meaning)) continue;
+    // Whole words, or behind a Hebrew prefix (ואחר כך holds אחר כך), as findMarks reads it.
+    if (holds(hebrew, input.meaning) || findMarks(hebrew, input.meaning).length > 0) continue;
     const glossId = glossOf.get(entry.word.trim()) ?? null;
     kept.push({ start: at.start, end: at.end, text: hebrew, glossId: glossId === input.ownGlossId ? null : glossId, target: false });
   }
-  if (target) kept.push({ start: target.start, end: target.end, text: targetText ?? input.meaning, glossId: null, target: true });
+  kept.push({ start: target.start, end: target.end, text: targetText ?? input.meaning, glossId: null, target: true });
   kept.sort((a, b) => a.start - b.start);
   return kept.length > 0 ? kept : null;
 }

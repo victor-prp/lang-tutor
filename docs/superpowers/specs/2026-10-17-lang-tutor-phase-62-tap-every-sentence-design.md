@@ -135,8 +135,8 @@ up to 8 words, and never lowers `TIER2_THRESHOLD`.
 - **The gap word** takes the form the sentence needs, as `cloze_typed`'s does, and the options
   match that form (*my call*).
 - **When generation fails:** "fails" means anything that today degrades or refuses a gap sentence:
-  batch validation, the checker's `translate` check, or its `gap` test calling too many options
-  right (phase 48). The card is then refused, as a choice card with too few usable options is
+  batch validation, or the checker's `gap` test calling too many options right (phase 48). Its
+  `translate` check is not asked of a gap to choose (R10). The card is then refused, as a choice card with too few usable options is
   today (R7). It does not fall back to the saved example.
 
 `new_meaning` and the other word cards keep their own fallback (`fallbackContext`). They lose their
@@ -359,3 +359,10 @@ strings live in `apps/mobile/src/strings.ts`, and the UI is Hebrew only.
   target-language context lines alike. At 3–6 the sentence evals fell from master's 40/41 to 32/40,
   every failure a sentence that no longer pointed to its word ("La ___ è verde."). At 4–8, with a
   rule that shows a sentence that points, they are back at master's level on master's rows.
+- **R9 (final review).** A target-language line whose word the server could not mark (it occurs
+  twice) gets no map. Its word would otherwise be a free tap showing the answer (*ניסר* on a *saw*
+  card). The free-reveal check also catches the answer behind a Hebrew prefix (*ואחר כך*).
+- **R10 (final review).** The checker's `translate` check is not asked of a `cloze_choice`. That
+  check exists because a typed gap's Hebrew is its hint and must lead to the word. A gap to choose
+  is answered from the Italian alone, and its `gap` test reads that sentence with every option. An
+  unnatural Hebrew line under an answered card costs nothing it is graded on.

@@ -359,9 +359,10 @@ export function createQuestionRepo(tx: Tx) {
      * enrollment's last sessions asked, newest first by creation, so a new
      * sentence is never last time's: a typed cloze's `sentence`, and a
      * translation's Hebrew sentence (its `sentence_translation` column; its
-     * `sentence` is the reference). A cloze choice shows the saved example and
-     * is not a written sentence, so it is left out. At most `limit` of each; a
-     * gloss with none has no entry.
+     * `sentence` is the reference). Phase 62 (spec D1): a cloze choice's sentence
+     * is written for the session too, and is filed with the typed cloze's, the
+     * two gap cards' one list. At most `limit` of each list; a gloss with none
+     * has no entry.
      */
     findRecentSentences: async (input: {
       enrollmentId: string;
@@ -370,21 +371,22 @@ export function createQuestionRepo(tx: Tx) {
     }): Promise<RecentSentences> => {
       const recent: RecentSentences = new Map();
       if (input.glossIds.length === 0) return recent;
-      const rows = await tx.execute<{ gloss_id: string; type: string; sentence: string }>(sql`
-        SELECT gloss_id, type, sentence FROM (
-          SELECT q.gloss_id, q.type,
+      const rows = await tx.execute<{ gloss_id: string; kind: 'cloze' | 'translate'; sentence: string }>(sql`
+        SELECT gloss_id, kind, sentence FROM (
+          SELECT q.gloss_id, kind.kind,
                  CASE WHEN q.type = 'sentence_translation' THEN q.sentence_translation ELSE q.sentence END AS sentence,
-                 row_number() OVER (PARTITION BY q.gloss_id, q.type ORDER BY q.created_at DESC, q.id DESC) AS recency
+                 row_number() OVER (PARTITION BY q.gloss_id, kind.kind ORDER BY q.created_at DESC, q.id DESC) AS recency
           FROM questions q
+          CROSS JOIN LATERAL (SELECT CASE WHEN q.type = 'sentence_translation' THEN 'translate' ELSE 'cloze' END AS kind) kind
           WHERE q.enrollment_id = ${input.enrollmentId}
-            AND q.type IN ('cloze_typed', 'sentence_translation')
+            AND q.type IN ('cloze_choice', 'cloze_typed', 'sentence_translation')
             AND q.gloss_id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})
         ) ranked
         WHERE recency <= ${input.limit}
-        ORDER BY gloss_id, type, recency`);
+        ORDER BY gloss_id, kind, recency`);
       for (const row of rows.rows) {
         const entry = recent.get(row.gloss_id) ?? { cloze: [], translate: [] };
-        (row.type === 'cloze_typed' ? entry.cloze : entry.translate).push(row.sentence);
+        (row.kind === 'cloze' ? entry.cloze : entry.translate).push(row.sentence);
         recent.set(row.gloss_id, entry);
       }
       return recent;

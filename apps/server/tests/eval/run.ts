@@ -1327,7 +1327,9 @@ async function main(): Promise<void> {
   const scoreContext = async (kase: ContextCase): Promise<Row> => {
     const text = `${kase.form} (${kase.type})`;
     try {
-      const answer = await askContext(llm, { from: kase.target, to: 'he', items: [contextItemOf(kase)] });
+      // Phase 62 (spec D1): with the learner's list, when the case has one.
+      const learnerWords = kase.learner?.map((entry, index) => ({ key: `w${index + 1}`, glossId: `g-w${index + 1}`, ...entry }));
+      const answer = await askContext(llm, { from: kase.target, to: 'he', items: [contextItemOf(kase)], learnerWords });
       return { label: kase.label, text, tier1: contextTier1(kase, answer), tier2: contextTier2(kase, answer), written: contextWritten(kase, answer) };
     } catch (error) {
       return {

@@ -2,7 +2,7 @@ import type { Context, Mark } from '@lang-tutor/core/api';
 import { StyleSheet, Text, View, type StyleProp, type TextStyle } from 'react-native';
 
 import { TappableSentence } from '@/components/TappableSentence';
-import { markedParts } from '@/context';
+import { markedParts, wholeSentenceOf } from '@/context';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
@@ -64,36 +64,36 @@ type Props = {
  *  word by word, and once answered shows every word's translation and its own. */
 export function ContextLine({ context, language, taps }: Props) {
   const direction = strings.textDirection(language);
+  // Spec D5: the whole line's translation once answered, mapped or not.
+  const whole = taps ? wholeSentenceOf(context, taps.answered) : null;
   return (
     <View style={styles.block}>
       <Text style={styles.label} testID="context-label">
         {strings.exampleLabel}
       </Text>
       {taps && context.words ? (
-        <>
-          <TappableSentence
-            text={context.text}
-            words={context.words}
-            mark={context.mark}
-            tapped={taps.tapped}
-            onTap={taps.answered ? null : taps.onTap}
-            hint={taps.answered ? null : strings.tapWordHint(taps.learner)}
-            style={[styles.tapped, { writingDirection: direction }]}
-            testID="context-line"
-            direction={direction}
-            reveal={taps.answered}
-            targetTappable={false}
-          />
-          {taps.answered && context.translation ? (
-            <View style={styles.whole} testID="context-translation">
-              <Text style={styles.label}>{strings.sentenceIn(taps.learner)}</Text>
-              <Text style={[styles.wholeText, { writingDirection: strings.textDirection(taps.learner) }]}>{context.translation}</Text>
-            </View>
-          ) : null}
-        </>
+        <TappableSentence
+          text={context.text}
+          words={context.words}
+          mark={context.mark}
+          tapped={taps.tapped}
+          onTap={taps.answered ? null : taps.onTap}
+          hint={taps.answered ? null : strings.tapWordHint(taps.learner)}
+          style={[styles.tapped, { writingDirection: direction }]}
+          testID="context-line"
+          direction={direction}
+          reveal={taps.answered}
+          targetTappable={false}
+        />
       ) : (
         <MarkedText text={context.text} mark={context.mark} style={[styles.line, { writingDirection: direction }]} testID="context-line" />
       )}
+      {taps && whole ? (
+        <View style={styles.whole} testID="context-translation">
+          <Text style={styles.label}>{strings.sentenceIn(taps.learner)}</Text>
+          <Text style={[styles.wholeText, { writingDirection: strings.textDirection(taps.learner) }]}>{whole}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }

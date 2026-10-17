@@ -624,14 +624,14 @@ describe('phase 27 Part B: sentence cards', () => {
     const typedWith = (n: number): SentenceExtra => ({ type: 'cloze_typed', alternatives: [], sentence: `Ieri parlavamo ${n}.`, gapStart: 5, gapEnd: 14 });
     const translateWith = (n: number): SentenceExtra => ({ type: 'sentence_translation', sentence: `We parlavamo ${n}.`, sentenceTranslation: `דיברנו ${n}.`, gapStart: 3, gapEnd: 12 });
 
-    it('returns, per gloss, newest first, only this enrollment, only the two types, at most limit', async () => {
+    it('returns, per gloss, newest first, only this enrollment, only the sentence types, at most limit', async () => {
       await seedUser(t.db, 'u_2');
       const word = await savedWord();
       const enrollmentId = enrollmentOf('u_1');
       await ask(word, enrollmentId, 'u_1', [typedWith(1)]);
       await ask(word, enrollmentId, 'u_1', [translateWith(1)]);
       await ask(word, enrollmentId, 'u_1', [typedWith(2)]);
-      // A cloze_choice shows the saved example, which is not a written sentence.
+      // Phase 62 (spec D1): a cloze_choice's sentence is written for the session too, a gap's like a typed cloze's.
       await ask(word, enrollmentId, 'u_1', [{ type: 'cloze_choice', options: generatedOptions('parlavamo', ['a', 'b', 'c']), sentence: 'Ieri parlavamo 9.' }]);
       await ask(word, enrollmentId, 'u_1', [typedWith(3)]);
       // Another learner's question for the same gloss.
@@ -643,11 +643,12 @@ describe('phase 27 Part B: sentence cards', () => {
 
       const recent = await read(2);
       expect(recent.get(word.glossIds[0])).toEqual({
-        cloze: ['Ieri parlavamo 3.', 'Ieri parlavamo 2.'],
+        cloze: ['Ieri parlavamo 3.', 'Ieri parlavamo 9.'],
         // The Hebrew sentence asked, not the reference that follows the answer.
         translate: ['דיברנו 2.', 'דיברנו 1.'],
       });
-      expect((await read(10)).get(word.glossIds[0])!.cloze).toEqual(['Ieri parlavamo 3.', 'Ieri parlavamo 2.', 'Ieri parlavamo 1.']);
+      // The two gap cards share one list, at most limit in all.
+      expect((await read(10)).get(word.glossIds[0])!.cloze).toEqual(['Ieri parlavamo 3.', 'Ieri parlavamo 9.', 'Ieri parlavamo 2.', 'Ieri parlavamo 1.']);
       // A gloss with none has no entry; no glosses is an empty map.
       expect(recent.has('other')).toBe(false);
       expect((await read(2, [])).size).toBe(0);

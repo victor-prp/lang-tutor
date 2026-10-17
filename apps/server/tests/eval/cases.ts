@@ -1683,6 +1683,9 @@ export type ContextCase = {
   /** Phase 59. A translation card: Hebrew runs the word map must make tappable,
    *  each with the reference's words for it. */
   mapped?: { hebrew: string; translation: string }[];
+  /** Phase 62 (spec D1). The learner's practised words, which a target-language
+   *  line is built from as much as it can. */
+  learner?: { word: string; meaning: string }[];
 };
 
 /** לנסר's root in any form: לנסר, ינסר, מנסר, נוסר, ניסר, נסרתי. */
@@ -1720,6 +1723,20 @@ export const CONTEXT_CASES: ContextCase[] = [
     target: 'en', type: 'typed_translation', form: 'download', lemma: 'download', partOfSpeech: 'verb', translation: 'להוריד',
     example: 'I need to download the file before the meeting.', exampleTranslation: 'אני צריך להוריד את הקובץ לפני הפגישה.',
     acceptedAnswers: ['get'],
+  },
+  // Phase 62 (spec D1, D2). A target-language line from Victor's list, mapped word by
+  // word with poi its target; and a typed gap's sentence mapped the same way.
+  {
+    label: "context it, a learner's list: poi on a multiple choice",
+    target: 'it', type: 'multiple_choice', form: 'poi', lemma: 'poi', partOfSpeech: 'adverb', translation: 'אחר כך',
+    example: 'Mangiamo adesso, e poi andiamo.', exampleTranslation: 'נאכל עכשיו, ואחר כך נלך.',
+    learner: VICTOR_IT_LIST,
+  },
+  {
+    label: 'context it, a gap mapped: fratello in a typed cloze',
+    target: 'it', type: 'cloze_typed', form: 'fratello', lemma: 'fratello', partOfSpeech: 'noun', translation: 'אח',
+    example: null, exampleTranslation: null,
+    sentence: { hebrew: 'אחי גר כאן עם אמא.', target: 'Mio fratello abita qui con la mamma.', word: 'fratello', marked: 'אחי' },
   },
   // F, eb95d246: the practised word, named in the sentence the card shows.
   {
