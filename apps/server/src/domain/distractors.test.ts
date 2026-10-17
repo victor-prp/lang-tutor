@@ -667,7 +667,7 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(prompt.system).toContain('- "gap":');
       expect(prompt.system).toContain('- "sentence":');
       expect(prompt.system).toContain('- "translate":');
-      expect(prompt.system).toContain('3 to 6 words');
+      expect(prompt.system).toContain('4 to 8 words');
       expect(prompt.system).not.toContain('3 to 12 words');
       expect(prompt.system).toContain('3 to 5 words');
       expect(prompt.system).toContain(DISTRACTOR_MARKER);
@@ -756,9 +756,9 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       });
     });
     it('refuses a gap item whose sentence is unusable, with the reason (ruling R7)', () => {
-      const verdict = validateDistractors(gapItem, gapReply(['parlai', 'parlato', 'parlò'], { ...written, sentence: 'Oggi voglio parlare a lungo con mamma.' }), 'he', [], 'it', NONE);
+      const verdict = validateDistractors(gapItem, gapReply(['parlai', 'parlato', 'parlò'], { ...written, sentence: 'Oggi voglio parlare a lungo con mia madre e Tom.' }), 'he', [], 'it', NONE);
       expect(verdict.byKey.has('q1')).toBe(false);
-      expect(verdict.refused.get('q1')).toBe('the sentence has 7 words');
+      expect(verdict.refused.get('q1')).toBe('the sentence has 10 words');
     });
     it('drops a wrong word that is the generated gap\'s own text', () => {
       const inflected = { sentence: 'Ieri parlavamo per ore.', gap: 'parlavamo', translation: 'אתמול דיברנו שעות.' };

@@ -355,3 +355,7 @@ strings live in `apps/mobile/src/strings.ts`, and the UI is Hebrew only.
   not fall back to the saved example. A fallback would need a second batch item per card for the
   saved example's options, and the batch schema caps items at ten, a whole session, and once hung
   on a change.
+- **R8 (building, under R5).** The limit is 8 words, asked as 4 to 8, for gap sentences and
+  target-language context lines alike. At 3–6 the sentence evals fell from master's 40/41 to 32/40,
+  every failure a sentence that no longer pointed to its word ("La ___ è verde."). At 4–8, with a
+  rule that shows a sentence that points, they are back at master's level on master's rows.

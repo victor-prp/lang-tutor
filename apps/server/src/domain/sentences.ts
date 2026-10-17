@@ -13,10 +13,13 @@ import { LANGUAGES, type LanguageCode } from './languages';
  *  the Hebrew context line's alone (domain/context.ts's `explanation` task). */
 export const SENTENCE_MAX_WORDS = 12;
 /** Phase 62 (spec D1). A target-language gap sentence or context line: short, so
- *  that its other words can come from the learner's list (Italian spends a word
- *  on an article where Hebrew attaches a prefix, so one more than a translate
- *  sentence's five). */
-export const SHORT_SENTENCE_MAX_WORDS = 6;
+ *  that its other words can come from the learner's list. Ruling R5: eight, not
+ *  the six first planned: at six the sentences stopped pointing to their word
+ *  ("La ___ è verde."), and pointing comes first (the evals, 2026-10-17). */
+export const SHORT_SENTENCE_MAX_WORDS = 8;
+/** Phase 62 (spec D1, ruling R5). The fewest words a short sentence is asked for:
+ *  three words rarely point to the word. Validation still keeps three. */
+export const SHORT_SENTENCE_MIN_ASKED = 4;
 /** Spec D6: a sentence to translate stays short enough to translate in one go.
  *  Phase 59 (spec D1): five, so that its other words can come from the learner's list. */
 export const TRANSLATE_MAX_WORDS = 5;

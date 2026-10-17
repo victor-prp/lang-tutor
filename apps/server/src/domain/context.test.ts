@@ -121,11 +121,11 @@ describe('contextItemFor and buildContextPrompt: the context line, short and map
     expect(bare('typed_meaning', SAW)).toMatchObject({ task: 'target', map: true });
     expect(bare('reverse_choice', SAW)).not.toHaveProperty('map');
   });
-  it('asks a target sentence for 3 to 6 words from the learner\'s words and its map, and leaves the Hebrew rule as it was', () => {
+  it('asks a target sentence for 4 to 8 words from the learner\'s words and its map, and leaves the Hebrew rule as it was', () => {
     const prompt = buildContextPrompt({ items: [bare('multiple_choice', SAW), { ...bare('reverse_choice', DOWNLOAD), key: 'q2' }], from: 'en', to: 'he', learnerWords });
     const lines = prompt.system.split('\n');
     const target = lines.find((line) => line.startsWith('- "target":'))!;
-    expect(target).toContain('3 to 6 words');
+    expect(target).toContain('4 to 8 words');
     expect(target).toContain('learner_words');
     expect(target).toContain('fill sentence_words as a mark item');
     // R5: the sense comes before the learner's words.
@@ -138,11 +138,11 @@ describe('contextItemFor and buildContextPrompt: the context line, short and map
     expect(sent.items[1]).not.toHaveProperty('map');
     expect(sent.learner_words).toEqual([{ key: 'w1', word: 'amico', meaning: 'חבר' }]);
   });
-  it('refuses a target sentence of seven words, and keeps a Hebrew one of seven', () => {
-    const seven = resolveContext(bare('typed_meaning', SAW), { key: 'q1', context: 'Please saw the old plank in half.', context_translation: 'בבקשה תנסר את הקרש הישן לשניים.' }, LANGS);
-    expect(seven.dropped).toBe('the sentence has 7 words');
+  it('refuses a target sentence of nine words, and keeps a Hebrew one of nine', () => {
+    const nine = resolveContext(bare('typed_meaning', SAW), { key: 'q1', context: 'Please saw the old wooden plank in half now.', context_translation: 'בבקשה תנסר את קרש העץ הישן לשניים עכשיו.' }, LANGS);
+    expect(nine.dropped).toBe('the sentence has 9 words');
     const hebrew = resolveContext(bare('typed_translation', DOWNLOAD), {
-      key: 'q1', context: 'אני רוצה להוריד את הקובץ הזה היום.', context_translation: 'I want to download this file today.', context_word: 'להוריד',
+      key: 'q1', context: 'אני רוצה להוריד את הקובץ הזה היום בבוקר.', context_translation: 'I want to download this file this morning.', context_word: 'להוריד',
     }, LANGS);
     expect(hebrew.dropped).toBeNull();
   });
