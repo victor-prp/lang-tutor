@@ -34,3 +34,49 @@ export function tappableRuns(text: string, words: readonly ServedWord[] | null |
   if (at < text.length) runs.push({ text: text.slice(at), tap: null });
   return runs;
 }
+
+/** Phase 59c (design A). One word of the sentence as the card lays it out: its
+ *  text, what sits right before and after it (spaces, punctuation, a letter the
+ *  map left outside it) and, for a word a tap can show, its run's tap. */
+export type Unit = { before: string; text: string; after: string; tap: number | 'mark' | null; translation: string | null; target: boolean };
+
+const HAS_LETTER = /[\p{L}\p{N}]/u;
+
+/**
+ * Phase 59c (design A). The sentence as words laid out side by side, each with
+ * room for its Italian under it: every run a tap shows (tappableRuns) is one
+ * unit, and the plain text between them is cut into words. Spaces and
+ * punctuation stay with the word before them, or the first word when nothing
+ * comes before, so the units together are the sentence, letter for letter.
+ */
+export function sentenceUnits(text: string, words: readonly ServedWord[] | null | undefined, mark: Mark | null): Unit[] {
+  const units: Unit[] = [];
+  let pending = '';
+  const add = (unit: Omit<Unit, 'before' | 'after'>) => {
+    units.push({ before: pending, after: '', ...unit });
+    pending = '';
+  };
+  const trail = (piece: string) => {
+    const last = units[units.length - 1];
+    if (last) last.after += piece;
+    else pending += piece;
+  };
+  for (const run of tappableRuns(text, words, mark)) {
+    if (run.tap !== null) {
+      add({ text: run.text, tap: run.tap, translation: run.translation, target: run.target });
+      continue;
+    }
+    // Spaces, words (Hebrew's geresh and gershayim inside them), and the rest.
+    for (const token of run.text.match(/\s+|[\p{L}\p{M}\p{N}'׳״]+|[^\s\p{L}\p{M}\p{N}]+/gu) ?? []) {
+      const last = units[units.length - 1];
+      // A word starts a unit unless it is glued to the one before it.
+      if (HAS_LETTER.test(token) && !(last && last.after === '')) {
+        add({ text: token, tap: null, translation: null, target: false });
+      } else {
+        trail(token);
+      }
+    }
+  }
+  if (pending !== '') units.push({ before: pending, text: '', after: '', tap: null, translation: null, target: false });
+  return units;
+}
