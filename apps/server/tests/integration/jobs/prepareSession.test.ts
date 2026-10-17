@@ -124,7 +124,7 @@ async function enqueueSession(
     });
   }
   return withTx(t.db, async (tx) => {
-    const sessionId = await createSessionRepo(tx).insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON);
+    const sessionId = await createSessionRepo(tx).insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON, null);
     await createJobRepo(tx, boss).enqueue(PREPARE_SESSION, { session_id: sessionId, picks, listening: opts.listening, speaking: opts.speaking ?? false });
     return sessionId;
   });

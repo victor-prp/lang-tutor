@@ -69,7 +69,7 @@ async function prepared(
   if (tasks !== null) await expectDistractors(ns, { tasks, ...stub });
   await expectCheck(ns, check);
   const sessionId = await withTx(t.db, (tx) =>
-    createSessionRepo(tx).insertQuestionTypesSession('u_1', ENROLLMENT, { listening: true, speaking: true }),
+    createSessionRepo(tx).insertQuestionTypesSession('u_1', ENROLLMENT, { listening: true, speaking: true }, null),
   );
   await deps.sessions.prepareSession({
     session_id: sessionId,

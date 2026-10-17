@@ -10,13 +10,8 @@ import {
 
 import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useRecorder } from '@/hooks/useRecording';
-import { useSpeaker } from '@/hooks/useSpeech';
+import { useSessionDevices } from '@/hooks/useSessionDevices';
 import { currentFor, loadFailedFor, type StoredCurrent } from '@/nextSession';
-import { voicesRead } from '@/speech';
-
-/** Phase 43. The longest a session waits for the device's voices to be read. */
-const VOICES_WAIT_MS = 3_000;
 
 // Phase 19. The active enrollment's session state for the home screen: what
 // is current, where the next session comes from, and the two actions on it.
@@ -43,10 +38,8 @@ const NextSessionContext = createContext<NextSessionValue | null>(null);
 
 export function NextSessionProvider({ api, children }: { api: ApiClient; children: ReactNode }) {
   const { active } = useCurrentUser();
-  // Not useSpeech: that would re-render the provider, and every screen under
-  // it, on every utterance. The tags are read when a session is created.
-  const speaker = useSpeaker();
-  const recorder = useRecorder();
+  // The device's voices and recorder, read when a session is created or started.
+  const devices = useSessionDevices();
   // Keyed by the enrollment the read was about, not cleared on a switch: a
   // slow answer about Russian lands under Russian's id and is simply never
   // shown while English is active, and the newest read for the active
@@ -72,21 +65,6 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
       // again; with none shown, home offers a retry instead of a spinner.
       .catch(() => setFailedFor(enrollmentId));
   }, [api, active]);
-
-  // Phase 24 (spec D5): only the device knows whether it can speak the target,
-  // so only it can ask for listening cards. Phase 25 (spec D4): likewise, only
-  // it knows whether it can record. Read where a session is built for it, once
-  // the voices are read (phase 43): home builds one as soon as it shows.
-  const devices = useCallback(
-    async (targetLanguage: string, waitForVoices = true) => {
-      if (waitForVoices) await voicesRead(speaker, VOICES_WAIT_MS);
-      return {
-        listening: speaker.snapshot().tags.has(targetLanguage),
-        speaking: await recorder.canRecord().catch(() => false),
-      };
-    },
-    [speaker, recorder],
-  );
 
   const create = useCallback(async (options?: { waitForVoices?: boolean }) => {
     if (!active) throw new Error('cannot create a session with no active enrollment');

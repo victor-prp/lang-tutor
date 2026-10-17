@@ -12,6 +12,7 @@ import type {
   SnapshotRow,
   TextAnswerType,
 } from '../domain/progress';
+import { instantText } from './instants';
 import { canonicalOptions } from './questions';
 
 const TEXT_TYPES: ReadonlySet<string> = new Set([
@@ -27,6 +28,11 @@ const TEXT_TYPES: ReadonlySet<string> = new Set([
   'sentence_translation',
 ]);
 
+/** Phase 57 (spec D4). An answer as the rules read it, with what the target skills read
+ *  beyond its grade: whether help was used on it (phase 56; null on a card that takes none
+ *  reads false), and when it was given, as instantText. */
+export type SessionAnswer = AnsweredQuestion & { helped: boolean; answeredAt: string };
+
 /** A session's answers as the rule reads them. */
 export type SessionEvidence = {
   enrollmentId: string;
@@ -35,7 +41,7 @@ export type SessionEvidence = {
   /** The last answer's time as Postgres prints it. The recompute compares it with
    *  each entry's save time, and the `::text` round trip keeps microseconds. */
   lastAnsweredAt: string;
-  answers: AnsweredQuestion[];
+  answers: SessionAnswer[];
 };
 
 /** A stored answer as its question and answer rows give it. Phase 55 (spec D2, as
@@ -98,14 +104,23 @@ const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}
  * list's level aggregate lives in repo/vocabulary.ts.
  *
  * No row locks on progress: an enrollment's progress is written only when one
- * of its sessions ends, its sessions end one at a time (the session row is
- * locked by loadSession and findState, and at most one is open), and the
- * recompute holds a table lock on sessions (lockSessions) so no session ends
- * while it runs. The one lock here is on the dictionary: lockSessionGlosses,
+ * of its sessions ends, its sessions end one at a time (phase 57, ADR 0014: each
+ * path has a started session of its own, so lockEnrollment serializes their ends),
+ * and the recompute holds a table lock on sessions (lockSessions) so no session ends
+ * while it runs. The other lock here is on the dictionary: lockSessionGlosses,
  * which keeps a gloss merge out of a session's end (phase 31, spec D14).
  */
 export function createProgressRepo(tx: Tx) {
   return {
+    /** Phase 57 (rulings T4-i, T4-k). Serializes, per enrollment, the writes that read and
+     *  then write its memory, levels and target skills: a session's end, and a word taken out
+     *  of a target, whose skills that end would otherwise write after they are gone. Taken
+     *  before the dictionary's lock and every read of the evidence; held to the end of the
+     *  transaction. */
+    lockEnrollment: async (enrollmentId: string): Promise<void> => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`progress:${enrollmentId}`}, 0))`);
+    },
+
     /** Phase 31 (spec D14). FOR SHARE on the lexemes of every gloss this session's
      *  questions practise, in id order, before its evidence is read. A gloss never
      *  changes lexeme, so this holds the right rows even while a merge re-keys
@@ -131,19 +146,25 @@ export function createProgressRepo(tx: Tx) {
 
     findSessionEvidence: async (sessionId: string): Promise<SessionEvidence | undefined> => {
       // Phase 59 (spec D4). A tapped list word is one more miss, right after its
-      // card's answer: a written answer to it, wrong (TAPPED_MISS).
-      const rows = await tx.execute<AnswerRow & { enrollment_id: string; day: string; last_answered_at: string }>(sql`
+      // card's answer: a written answer to it, wrong (TAPPED_MISS), never helped, given
+      // when its card's answer was. Phase 57 (spec D4): the target skills read it too.
+      const rows = await tx.execute<
+        AnswerRow & { enrollment_id: string; day: string; last_answered_at: string; helped: boolean; answered_at: string }
+      >(sql`
         SELECT enrollment_id, gloss_id, type, options, selected_option_position, verdict, retry_verdict, intro, day,
-               (max(answered_at) OVER ())::text AS last_answered_at
+               (max(answered_at) OVER ())::text AS last_answered_at,
+               helped,
+               ${instantText(sql`answered_at`)} AS answered_at
         FROM (
           SELECT s.enrollment_id, q.gloss_id, q.type::text AS type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro,
-                 s.practice_day::text AS day, a.answered_at, a.position, -1 AS word_index
+                 s.practice_day::text AS day, a.answered_at, a.position, -1 AS word_index,
+                 coalesce(a.helped, false) AS helped
           FROM answers a
           JOIN sessions s  ON s.id = a.session_id
           JOIN questions q ON q.id = a.question_id
           WHERE a.session_id = ${sessionId}
           UNION ALL
-          ${tappedMisses(sql`tp.session_id = ${sessionId}`)}
+          SELECT tapped.*, false AS helped FROM (${tappedMisses(sql`tp.session_id = ${sessionId}`)}) tapped
         ) evidence
         ORDER BY position, word_index`);
       if (rows.rows.length === 0) return undefined;
@@ -152,7 +173,7 @@ export function createProgressRepo(tx: Tx) {
         enrollmentId: first.enrollment_id,
         day: first.day,
         lastAnsweredAt: first.last_answered_at,
-        answers: rows.rows.map(decodeAnswer),
+        answers: rows.rows.map((row) => ({ ...decodeAnswer(row), helped: row.helped, answeredAt: row.answered_at })),
       };
     },
 

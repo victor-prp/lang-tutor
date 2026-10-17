@@ -1,7 +1,7 @@
-import type { Target, TargetKind, TargetList, TargetReadiness, TargetSummary } from '@lang-tutor/core/api';
+import type { Target, TargetKind, TargetList, TargetSummary, TargetWord } from '@lang-tutor/core/api';
 
 import { ApiError } from '@/api/client';
-import { strings } from '@/strings';
+import { strings, type Countdown } from '@/strings';
 import type { WizardMode, WizardStep } from '@/targetWizard';
 
 /** Phase 53 (spec D10, D11). What home and the target screen say about a target,
@@ -13,9 +13,9 @@ export function targetTitle(kind: TargetKind): string {
   return strings.targetKindName(kind);
 }
 
-/** A word's readiness for the date, in the four words of spec D4. */
-export function readinessName(readiness: TargetReadiness): string {
-  return strings.targetReadinessName(readiness);
+/** A word's readiness, in percent (phase 57, spec D9). */
+export function readinessName(readinessPct: number): string {
+  return strings.targetReadinessName(readinessPct);
 }
 
 /** How soon a target is: tomorrow from one day left, "in N days" after. An active
@@ -135,9 +135,119 @@ export function withoutWord(target: Target, glossId: string): Target {
   return {
     ...target,
     word_count: target.word_count - 1,
-    ready_count: target.ready_count - (word.readiness === 'ready' ? 1 : 0),
+    ready_count: target.ready_count - (word.readiness_pct === 100 ? 1 : 0),
     words: target.words.filter((candidate) => candidate !== word),
   };
+}
+
+/** Phase 57 (spec D11). A card on home: the main path ("My words") or a target, by its id. */
+export type HomeCard = 'main' | string;
+
+const byDate = (a: TargetSummary, b: TargetSummary) =>
+  a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+
+/** Phase 57 (spec D10, D11). Home's cards by priority: a target on its date, then the
+ *  targets with work owed today, nearest date first, then My words, then the targets done
+ *  for today or resting, by date (a tie on the date by id, so the order never flickers).
+ *
+ *  `first` is the card whose button is filled, and the path a reminder opens: the first in
+ *  that order, past a target on its date already at 100%, whose last review is outlined
+ *  (D10), and past a target with no word, which has no button (final review M3). My words is
+ *  always a candidate, so there is always one. */
+export function homeOrder(targets: readonly TargetSummary[]): { first: HomeCard; order: HomeCard[] } {
+  const sorted = [...targets].sort(byDate);
+  const ids = (states: TargetSummary['today']['state'][]) =>
+    sorted.filter((target) => states.includes(target.today.state)).map((target) => target.id);
+  const order = [...ids(['due_today']), ...ids(['owed']), 'main', ...ids(['done', 'rest'])];
+  const outlined = new Set(
+    sorted
+      .filter((target) => (target.today.state === 'due_today' && target.readiness_pct >= 100) || target.word_count === 0)
+      .map((target) => target.id),
+  );
+  const first = order.find((card) => !outlined.has(card)) ?? 'main';
+  return { first, order };
+}
+
+/** Phase 57 (spec D10, D11). What a target's card shows: its title (the countdown, or the
+ *  date itself), the line under it, today's line, its readiness and its button's label.
+ *  Readiness shows in every state; the card draws it with its bar. */
+export type TargetCardState = {
+  title: Countdown;
+  /** The praise once today's work is done, the rest day's line, or good luck on the date. */
+  note: { kind: 'praise' | 'rest' | 'due-today'; text: string } | null;
+  /** Today's words: none on a rest day or on the date. `check` once all planned are done. */
+  today: { text: string; check: boolean; extra: string | null } | null;
+  readiness: string;
+  /** Null for a target with no word (final review M3): its path has nothing to ask. */
+  button: string | null;
+};
+
+export function targetCardState(target: TargetSummary): TargetCardState {
+  const card = cardOfDay(target);
+  return target.word_count === 0 ? { ...card, button: null } : card;
+}
+
+function cardOfDay(target: TargetSummary): TargetCardState & { button: string } {
+  const { kind, today } = target;
+  const title = strings.targetCountdown(kind, target.days_left);
+  const readiness = strings.targetReadinessPct(kind, target.readiness_pct);
+  const todayLine = {
+    text: strings.targetToday(today.done, today.planned),
+    check: today.state === 'done',
+    extra: today.extra > 0 ? strings.targetExtra(today.extra) : null,
+  };
+  switch (today.state) {
+    case 'owed':
+      return { title, note: null, today: todayLine, readiness, button: strings.practiceNow };
+    case 'done':
+      return {
+        title,
+        note: { kind: 'praise', text: strings.targetDonePraise },
+        today: todayLine,
+        readiness,
+        button: strings.practiceMore,
+      };
+    case 'rest':
+      return {
+        title,
+        note: { kind: 'rest', text: strings.targetRest(kind, today.next_practice_in) },
+        today: null,
+        readiness,
+        button: strings.practiceMore,
+      };
+    case 'due_today':
+      return {
+        title: strings.targetCountdown(kind, 0),
+        note: { kind: 'due-today', text: strings.targetGoodLuck },
+        today: null,
+        readiness,
+        button: strings.lastReview,
+      };
+  }
+}
+
+/** Phase 57 (spec D11, extra-words.html). The today bar's two parts, as shares of the
+ *  whole: the planned words done, then the day's extra words running past the plan. */
+export function todayBar(today: Pick<TargetSummary['today'], 'done' | 'planned' | 'extra'>): {
+  done: number;
+  extra: number;
+} {
+  const whole = Math.max(today.planned, today.done) + today.extra;
+  if (whole === 0) return { done: 0, extra: 0 };
+  return { done: today.done / whole, extra: today.extra / whole };
+}
+
+/** Phase 57 (spec D9). Readiness's colour: red at 0%, through orange and yellow, to green
+ *  at 100%, by hue alone. */
+export function readinessColor(pct: number): string {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return `hsl(${Math.round(clamped * 1.2)}, 65%, 42%)`;
+}
+
+/** Phase 57. Home reads the targets again while any target's session is being prepared,
+ *  as it does the main path's (nextSession's shouldPoll). */
+export function shouldPollTargets(list: TargetList | null): boolean {
+  return list?.targets.some((target) => target.session?.status === 'preparing') ?? false;
 }
 
 /** A read of the active targets, tagged with the enrollment it was about. */
@@ -150,4 +260,47 @@ export type StoredTargets = { enrollmentId: string; list: TargetList };
  *  discard the read that effect started. */
 export function targetsFor(stored: StoredTargets | null, activeId: string | undefined): TargetList | null {
   return stored !== null && stored.enrollmentId === activeId ? stored.list : null;
+}
+
+/** Phase 57 (spec D12). The target screen's groups, in the order they show. */
+export type WordGroup = { today: TargetWord['today']; words: TargetWord[] };
+
+const GROUP_ORDER: TargetWord['today'][] = ['owed', 'done', 'extra', 'later'];
+
+/** The words by what today holds for them, an empty group left out, each keeping the
+ *  order the server sent. */
+export function wordGroups(words: readonly TargetWord[]): WordGroup[] {
+  return GROUP_ORDER.map((today) => ({ today, words: words.filter((word) => word.today === today) })).filter(
+    (group) => group.words.length > 0,
+  );
+}
+
+export function groupTitle(today: TargetWord['today']): string {
+  return strings.targetGroupTitle[today];
+}
+
+/** Final review M1. The target screen's word list: before the date, the day's groups (spec
+ *  D12), each titled and each row with its line for today; on the date, when nothing is owed
+ *  (D10), and after it, the words alone, with no title and no line. */
+export type ScreenGroup = { key: TargetWord['today'] | 'all'; title: string | null; lines: boolean; words: TargetWord[] };
+
+export function screenGroups(target: Pick<Target, 'days_left' | 'words'>): ScreenGroup[] {
+  if (target.words.length === 0) return [];
+  if (dateHasCome(target)) return [{ key: 'all', title: null, lines: false, words: [...target.words] }];
+  return wordGroups(target.words).map((group) => ({ key: group.today, title: groupTitle(group.today), lines: true, words: group.words }));
+}
+
+/** A word's line for today under its row: what it still owes, that it is done, a bonus,
+ *  or when it starts. Null when there is nothing to say (a later word with no start). */
+export function wordTodayLine(word: TargetWord): string | null {
+  switch (word.today) {
+    case 'owed':
+      return strings.targetWordOwed(word.owed.map((dimension) => strings.dimensionName(dimension)));
+    case 'done':
+      return strings.targetWordDone;
+    case 'extra':
+      return strings.targetWordExtra;
+    case 'later':
+      return word.starts_in === null ? null : strings.targetWordStartsIn(word.starts_in);
+  }
 }

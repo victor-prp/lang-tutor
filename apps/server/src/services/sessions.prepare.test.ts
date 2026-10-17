@@ -28,7 +28,7 @@ import type { SessionRepo } from '../repo/sessions';
 import { createSessionService } from './sessions';
 
 const SESSION = '11111111-1111-1111-1111-111111111111';
-const STATE: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'preparing', source: 'list' };
+const STATE: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'preparing', source: 'list', targetId: null };
 const ENROLLMENT: Enrollment = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'ru', created_at: '' };
 const CONTEXT: GenerationContext[] = [
   { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },

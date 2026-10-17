@@ -31,3 +31,16 @@ export async function seedPastSession(db: Db, userId: string, enrollmentId: stri
   );
   return rows.rows[0].id;
 }
+
+/** Phase 57 (ADR 0014). Each of one enrollment's sessions with the path it belongs to (a
+ *  target's id, or null for the main path) and whether it was started, oldest first. */
+export async function readSessionPaths(
+  db: Db,
+  enrollmentId: string,
+): Promise<{ id: string; status: string; kind: string; target_id: string | null; started: boolean }[]> {
+  const rows = await db.execute<{ id: string; status: string; kind: string; target_id: string | null; started: boolean }>(
+    sql`select id, status, kind, target_id, started_at is not null as started from sessions
+        where enrollment_id = ${enrollmentId} order by created_at`,
+  );
+  return rows.rows;
+}

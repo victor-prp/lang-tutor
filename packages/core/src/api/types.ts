@@ -18,6 +18,7 @@ import type {
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   CreateUserRequestSchema,
+  CurrentSessionQuerySchema,
   CurrentSessionResponseSchema,
   CurrentSessionSchema,
   EnrollmentSchema,
@@ -127,7 +128,6 @@ import type {
   VocabularyWordQuerySchema,
   VocabularyWordSchema,
   TargetKindSchema,
-  TargetReadinessSchema,
   TargetSummarySchema,
   TargetListSchema,
   TargetWordSchema,
@@ -209,7 +209,6 @@ export type VocabularySense = z.infer<typeof VocabularySenseSchema>;
 export type VocabularyWordDetail = z.infer<typeof VocabularyWordDetailSchema>;
 export type VocabularyWordQuery = z.infer<typeof VocabularyWordQuerySchema>;
 export type TargetKind = z.infer<typeof TargetKindSchema>;
-export type TargetReadiness = z.infer<typeof TargetReadinessSchema>;
 export type TargetSummary = z.infer<typeof TargetSummarySchema>;
 export type TargetList = z.infer<typeof TargetListSchema>;
 export type TargetWord = z.infer<typeof TargetWordSchema>;
@@ -226,6 +225,7 @@ export type LlmCheck = z.infer<typeof LlmCheckSchema>;
 export type SessionView = z.infer<typeof SessionViewSchema>;
 export type PendingRetry = z.infer<typeof PendingRetrySchema>;
 export type CurrentSession = z.infer<typeof CurrentSessionSchema>;
+export type CurrentSessionQuery = z.infer<typeof CurrentSessionQuerySchema>;
 export type CurrentSessionResponse = z.infer<typeof CurrentSessionResponseSchema>;
 export type KnowledgeDimension = z.infer<typeof KnowledgeDimensionSchema>;
 export type GlossProgress = z.infer<typeof GlossProgressSchema>;

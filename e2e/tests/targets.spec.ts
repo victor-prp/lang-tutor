@@ -11,11 +11,33 @@ import {
 } from '@playwright/test';
 
 import { API_URL } from '../urls';
+import { expectGeneration } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapUntil } from './support/interactions';
+import { BOARD_WORDS } from './support/lexemes';
 import { clearGemini, expectGeminiMatching, userText } from './support/mockServer';
-import { enrollmentIdOf } from './support/sessions';
+import { answerSessionRight, enrollmentIdOf, readCurrent, readyPathSession, skipSeed } from './support/sessions';
+import {
+  EVERY_WORD,
+  FILLED,
+  HOMEWORK_WORDS,
+  OUTLINED,
+  addDays,
+  createTarget,
+  expectLabel,
+  formsOf,
+  homeOrder,
+  homework,
+  lookUpEntries,
+  moveDueDateToToday,
+  moveTargetBack,
+  playSessionRight,
+  readTarget,
+  readTargets,
+  saveEntries,
+} from './support/targets';
 import { openApp, signUpLearner } from './support/users';
+import { withVoices } from './support/voices';
 
 // Phase 53 (spec D10, D11). The target wizard end to end on the web build. The first test is the
 // walk: New, an exam, one photo of a word list, its review, a typed word and a date, then Done;
@@ -24,6 +46,11 @@ import { openApp, signUpLearner } from './support/users';
 //
 // Everything is stubbed at the model, as photo-import.spec.ts does it: the read of the photo,
 // the lookup of each row, and the one typed lookup.
+//
+// Phase 57 (spec D1, D10–D12). The rest are a target's own path, made over the API: its card
+// on home, first while work is owed; its session, of its words alone; the praise once the day
+// is done, with My words first again; practice more; the target screen's groups and a word's
+// skills; and the due date's good luck.
 test.setTimeout(240_000);
 test.beforeEach(async ({ request }) => {
   await clearGemini(request);
@@ -151,12 +178,6 @@ function acceptDialogs(page: Page): string[] {
 const END_CONFIRM = 'לסיים את ההכנה?\n\nהמילים יישארו שמורות ברשימה שלך.';
 const LEAVE_CONFIRM = 'לצאת בלי לשמור?\n\nהתמונות והמילים שנבחרו לא יישמרו.';
 
-// The labels draw their numbers inside Unicode isolates, so a label is matched by a regex where
-// its numbers are, each one not part of a longer number.
-const num = (value: number) => `(?<!\\d)${value}(?!\\d)`;
-const readyOf = (ready: number, total: number) => new RegExp(`${num(ready)}\\D*מתוך\\D*${num(total)}\\D*מוכנות`);
-const inDays = (days: number) => new RegExp(`בעוד\\D*${num(days)}\\D*ימים`);
-
 /** The days the date step offers, tomorrow first: `wizard-date-YYYY-MM-DD`. Only those on
  *  show, so a screen kept hidden under another is not counted. */
 const dateButtons = (page: Page) => page.locator('[data-testid^="wizard-date-"]:visible');
@@ -269,21 +290,29 @@ test('an exam is prepared from a photo and a typed word; a word goes, the date m
     if (!word) throw new Error(`the target holds no ${form}: ${JSON.stringify(target.words)}`);
     return word;
   };
+  // Phase 57 (spec D12): the header is the card's, and an exam due tomorrow plans every word
+  // for today, so all three are owed.
   await expect(page.getByTestId('target-title'), report()).toHaveText('בוחן');
   await expect(page.getByTestId('target-due')).toHaveText(first.label);
-  await expect(page.getByTestId('target-days-left')).toHaveText('מחר');
-  await expect(page.getByTestId('target-ready')).toHaveText(readyOf(0, 3));
+  await expectLabel(page.getByTestId('target-countdown'), 'בוחן מחר');
+  await expectLabel(page.getByTestId('target-today'), 'היום: 0 מתוך 3 מילים');
+  await expectLabel(page.getByTestId('target-readiness'), 'מוכנות לבוחן: 0%');
   await expect(page.getByTestId('target-word-readiness')).toHaveCount(3);
+  await expect(page.getByTestId('target-group-owed')).toContainText('נשאר להיום');
+  for (const form of ['campo', 'sedia', 'tavolo']) {
+    await expect(page.getByTestId('target-group-owed').getByTestId(`target-word-${wordOf(form).gloss_id}`)).toBeVisible();
+  }
   await expect(page.getByTestId(`target-word-${wordOf('sedia').gloss_id}`)).toContainText('כיסא');
   await expect(page.getByTestId(`target-word-${wordOf('campo').gloss_id}`)).toContainText('מחנה');
   await expect(page.getByTestId(`target-word-${wordOf('tavolo').gloss_id}`)).toContainText('שולחן');
 
-  // 6. Home shows the target: its kind, how soon, and how many words are ready.
+  // 6. Home shows the target's card: its kind, how soon, today's words and its readiness.
   await page.getByTestId('target-back').click();
   const row = page.getByTestId(`target-row-${target.id}`);
   await expect(row, report()).toContainText('בוחן');
   await expect(row).toContainText('מחר');
-  await expect(row).toContainText(readyOf(0, 3));
+  await expectLabel(page.getByTestId(`target-today-${target.id}`), 'היום: 0 מתוך 3 מילים');
+  await expectLabel(page.getByTestId(`target-readiness-${target.id}`), 'מוכנות לבוחן: 0%');
 
   // 7. Back on its screen, a word goes. It stays in the learner's list.
   await row.click();
@@ -291,7 +320,7 @@ test('an exam is prepared from a photo and a typed word; a word goes, the date m
   await expect(page.getByTestId(`target-word-${sedia.gloss_id}`)).toBeVisible();
   await tapAndWaitForResponse(page, page.getByTestId(`target-word-remove-${sedia.gloss_id}`), WORD_REMOVE);
   await expect(page.getByTestId(`target-word-${sedia.gloss_id}`)).toHaveCount(0);
-  await expect(page.getByTestId('target-ready')).toHaveText(readyOf(0, 2));
+  await expectLabel(page.getByTestId('target-today'), 'היום: 0 מתוך 2 מילים');
   const removed = await read<Target>(page.request, `/api/targets/${target.id}`);
   expect(removed.words.map((word) => word.form).sort()).toEqual(['campo', 'tavolo']);
   expect(await savedLemmas(page.request, enrollmentId)).toEqual(['campo', 'sedia', 'tavolo']);
@@ -303,7 +332,7 @@ test('an exam is prepared from a photo and a typed word; a word goes, the date m
   const moved = await tapAndWaitForResponse(page, page.getByTestId('wizard-done'), DATE_CHANGE);
   expect(((await moved.json()) as Target).due_on).toBe(later.day);
   await expect(page.getByTestId('target-due'), report()).toHaveText(later.label);
-  await expect(page.getByTestId('target-days-left')).toHaveText(inDays(4));
+  await expectLabel(page.getByTestId('target-countdown'), 'בוחן בעוד 4 ימים');
 
   // 9. Ending it asks first. Home no longer lists it, and its words stay saved.
   await tapAndWaitForResponse(page, page.getByTestId('target-end'), TARGET_END);
@@ -375,5 +404,239 @@ test('leaving the wizard by the browser’s back, not its Cancel, discards the p
   expect(await openImports(page.request, enrollmentId)).toEqual([]);
   expect((await activeTargets(page.request, enrollmentId)).targets).toEqual([]);
   expect(await savedLemmas(page.request, enrollmentId)).toEqual([]);
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+/** Final review C1. The creates the app sent: a target's button goes through one before it
+ *  enters an unstarted stock, so the server can replace a stock that no longer serves the day. */
+const createsSent = (diagnostics: { apiRequests: string[] }) =>
+  diagnostics.apiRequests.filter((sent) => /^POST \S+\/api\/sessions$/.test(sent)).length;
+
+/** Results lead home, where every card is read again. */
+async function backHome(page: Page) {
+  await page.getByTestId('results-next-session').click();
+  await expect(page.getByTestId('results-score')).toBeHidden();
+}
+
+test('a new homework comes first with practice now, which asks its words alone; once they are done My words leads', async ({
+  page,
+  request,
+}) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const { enrollmentId, target } = await homework(page, request, 'e2e_paths_practise');
+  const stock = await readyPathSession(page.request, enrollmentId, target.id);
+  await openApp(page, `target-card-${target.id}`);
+
+  // 1. Work is owed today: the homework's card is first, its button filled, My words' outlined.
+  const practice = page.getByTestId(`target-practice-${target.id}`);
+  await expect.poll(() => homeOrder(page), { message: report() }).toEqual([target.id, 'main']);
+  await expectLabel(page.getByTestId(`target-countdown-${target.id}`), 'שיעורי בית בעוד 40 ימים');
+  await expectLabel(page.getByTestId(`target-today-${target.id}`), 'היום: 0 מתוך 2 מילים');
+  await expectLabel(page.getByTestId(`target-readiness-${target.id}`), 'מוכנות לשיעורי הבית: 0%');
+  await expect(page.getByTestId(`target-praise-${target.id}`)).toHaveCount(0);
+  await expectLabel(practice, 'לתרגל עכשיו');
+  await expect(practice).toHaveCSS('background-color', FILLED);
+  await expect(page.getByTestId('start-button'), report()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('start-button')).toHaveCSS('background-color', OUTLINED);
+
+  // 2. Practice now enters the homework's own session, through create (final review C1), which
+  // answers the stock as it is: it asks the two words owed today, each a new word's ladder, and
+  // no word of the learner's own list.
+  const before = createsSent(diagnostics);
+  await tapUntil(page, `target-practice-${target.id}`, 'progress-label');
+  expect(createsSent(diagnostics), report()).toBeGreaterThan(before);
+  expect((await readCurrent(page.request, enrollmentId, target.id)).current?.session_id).toBe(stock);
+
+  // Final review N1. Left before any answer, once its start has landed: started with none. Home
+  // resumes it on the next tap, with no create (which would answer session_open).
+  await expect
+    .poll(async () => (await readCurrent(page.request, enrollmentId, target.id)).current?.started, { message: report() })
+    .toBe(true);
+  await page.getByTestId('session-back').click();
+  await expect(practice, report()).toBeVisible();
+  const resumed = createsSent(diagnostics);
+  await tapUntil(page, `target-practice-${target.id}`, 'progress-label');
+  expect(createsSent(diagnostics), report()).toBe(resumed);
+  expect((await readCurrent(page.request, enrollmentId, target.id)).current).toMatchObject({ session_id: stock, answered: 0, started: true });
+  const asked = await playSessionRight(page, request, EVERY_WORD);
+  expect([...new Set(asked)].sort(), asked.join(', ')).toEqual(formsOf(target, 'owed'));
+
+  // 3. Every owed word is done: the card praises, its today line is ticked, and it moves below
+  // My words, whose button is now the filled one; its own offers practice more, outlined.
+  await backHome(page);
+  await expect(page.getByTestId(`target-praise-${target.id}`), report()).toBeVisible();
+  await expectLabel(page.getByTestId(`target-praise-${target.id}`), 'כל הכבוד! סיימת להיום. נתראה מחר');
+  await expectLabel(page.getByTestId(`target-today-${target.id}`), 'היום: 2 מתוך 2 מילים ✓');
+  await expect.poll(() => homeOrder(page)).toEqual(['main', target.id]);
+  await expect(page.getByTestId('start-button')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('start-button')).toHaveCSS('background-color', FILLED);
+  await expectLabel(practice, 'לתרגל עוד');
+  await expect(practice).toHaveCSS('background-color', OUTLINED);
+  const done = await readTarget(page.request, target.id);
+  expect(done.today).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 0 });
+  expect(done.readiness_pct).toBeGreaterThan(0);
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+test('practice more starts the next words early, and the target screen groups them and opens a word’s skills', async ({
+  page,
+  request,
+}) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const { enrollmentId, target } = await homework(page, request, 'e2e_paths_more');
+
+  // Today's owed work, answered over the API; the path's next session is practice more.
+  await answerSessionRight(page.request, await readyPathSession(page.request, enrollmentId, target.id));
+  const before = await readTarget(page.request, target.id);
+  expect(before.today).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 0 });
+  const more = await readyPathSession(page.request, enrollmentId, target.id);
+  await openApp(page, `target-card-${target.id}`);
+
+  // 1. Done for today: the card is below My words, and its button starts another session of
+  // the homework, which starts later words early and asks only the homework's words. It goes
+  // through create, which keeps the practice-more stock: the day owes nothing it would serve.
+  const practice = page.getByTestId(`target-practice-${target.id}`);
+  await expect.poll(() => homeOrder(page), { message: report() }).toEqual(['main', target.id]);
+  await expectLabel(practice, 'לתרגל עוד');
+  await tapUntil(page, `target-practice-${target.id}`, 'progress-label');
+  expect(createsSent(diagnostics), report()).toBeGreaterThan(0);
+  expect((await readCurrent(page.request, enrollmentId, target.id)).current?.session_id).toBe(more);
+  const asked = await playSessionRight(page, request, EVERY_WORD);
+  const homeworkForms = HOMEWORK_WORDS.map((word) => word.form);
+  for (const form of asked) expect(homeworkForms, asked.join(', ')).toContain(form);
+
+  // 2. The words it started are today's extra: home says so after the tick.
+  await backHome(page);
+  const after = await readTarget(page.request, target.id);
+  expect(after.today, report()).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 2 });
+  const extra = formsOf(after, 'extra');
+  for (const form of extra) expect(asked).toContain(form);
+  await expectLabel(page.getByTestId(`target-today-${target.id}`), 'היום: 2 מתוך 2 מילים ✓ +2 נוספות');
+  await expect(page.getByTestId(`target-praise-${target.id}`)).toBeVisible();
+
+  // 3. The target screen: the card's header, then its words in groups, each with its line.
+  await page.getByTestId(`target-row-${target.id}`).click();
+  await expectLabel(page.getByTestId('target-countdown'), 'שיעורי בית בעוד 40 ימים');
+  await expectLabel(page.getByTestId('target-today'), 'היום: 2 מתוך 2 מילים ✓ +2 נוספות');
+  await expectLabel(page.getByTestId('target-readiness'), `מוכנות לשיעורי הבית: ${after.readiness_pct}%`);
+  await expect(page.getByTestId('target-group-owed')).toHaveCount(0);
+  const groups = { done: 'סיימת להיום', extra: 'נוספו היום', later: 'בהמשך' } as const;
+  for (const [today, title] of Object.entries(groups)) {
+    const group = page.getByTestId(`target-group-${today}`);
+    await expect(group, report()).toContainText(title);
+    const words = after.words.filter((word) => word.today === today);
+    expect(words, today).toHaveLength(2);
+    for (const word of words) {
+      await expect(group.getByTestId(`target-word-${word.gloss_id}`)).toContainText(word.form);
+      const line =
+        today === 'done' ? 'היום ✓' : today === 'extra' ? 'בונוס ✓' : `נתחיל בעוד ${word.starts_in} ימים`;
+      await expectLabel(page.getByTestId(`target-word-today-${word.gloss_id}`), line);
+    }
+  }
+
+  // 4. A tapped word opens its live skills, the written three on a device with no voice and no
+  // microphone, each a bar to its cap; tapped again, they close.
+  const [word] = after.words.filter((candidate) => candidate.today === 'done');
+  const skills = page.getByTestId(`target-word-skills-${word.gloss_id}`);
+  await expect(skills).toHaveCount(0);
+  await page.getByTestId(`target-word-toggle-${word.gloss_id}`).click();
+  await expect(skills).toBeVisible();
+  for (const name of ['זיהוי בכתב', 'כתיבה', 'איות']) await expect(skills).toContainText(name);
+  for (const name of ['הבנת הנשמע', 'דיבור']) await expect(skills).not.toContainText(name);
+  expect(word.skills.map((skill) => skill.dimension).sort()).toEqual(['spelling', 'written_productive', 'written_receptive']);
+  for (const skill of word.skills) expect(skill.value, skill.dimension).toBe(skill.cap);
+  await page.getByTestId(`target-word-toggle-${word.gloss_id}`).click();
+  await expect(skills).toHaveCount(0);
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+test('home orders its paths: the exam due today first with good luck, then work owed, My words, then done and resting', async ({
+  page,
+  request,
+}) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  await withVoices(page, []);
+  await signUpLearner(page, 'e2e_paths_order', 'ru');
+  const enrollmentId = await enrollmentIdOf(page.request);
+  await skipSeed(page.request, enrollmentId);
+  // One word each: My words', the exam's, and three homeworks'.
+  const [mine, examWord, owedWord, doneWord, restWord] = await lookUpEntries(page.request, enrollmentId, BOARD_WORDS.slice(0, 5));
+  await expectGeneration(request);
+  await saveEntries(page.request, enrollmentId, mine);
+  const { today } = await readTargets(page.request, enrollmentId);
+  const make = (kind: 'exam' | 'homework', days: number, entries: typeof mine) =>
+    createTarget(page.request, enrollmentId, { kind, due_on: addDays(today, days), entries });
+  const exam = await make('exam', 1, examWord);
+  const owed = await make('homework', 40, owedWord);
+  const done = await make('homework', 41, doneWord);
+  const resting = await make('homework', 42, restWord);
+  // Done: its one word is today's, answered right. Resting: the same, two days ago, so
+  // nothing is owed today and nothing was practised (spec D6: not a practice day).
+  for (const target of [done, resting]) {
+    await answerSessionRight(page.request, await readyPathSession(page.request, enrollmentId, target.id));
+  }
+  await moveTargetBack(resting.id, 2);
+  // The exam was due tomorrow; now it is today (spec D10: active through its date).
+  await readyPathSession(page.request, enrollmentId, exam.id);
+  await moveDueDateToToday(exam.id, today);
+  const { targets } = await readTargets(page.request, enrollmentId);
+  const stateOf = (id: string) => targets.find((target) => target.id === id)?.today;
+  expect(targets.map((target) => [target.id, target.today.state]), report()).toEqual(
+    expect.arrayContaining([
+      [exam.id, 'due_today'],
+      [owed.id, 'owed'],
+      [done.id, 'done'],
+      [resting.id, 'rest'],
+    ]),
+  );
+  await openApp(page, `target-card-${exam.id}`);
+
+  // 1. The order (spec D11), the date first (D10): only the first card's button is filled.
+  await expect.poll(() => homeOrder(page), { message: report() }).toEqual([exam.id, owed.id, 'main', done.id, resting.id]);
+  const practice = (id: string) => page.getByTestId(`target-practice-${id}`);
+  await expect(page.getByTestId('start-button'), report()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('start-button')).toHaveCSS('background-color', OUTLINED);
+  for (const id of [owed.id, done.id, resting.id]) await expect(practice(id)).toHaveCSS('background-color', OUTLINED);
+
+  // 2. On its date the exam says so and wishes good luck; nothing is owed, so there is no
+  // today line, and its button is the optional last review, filled while not yet ready.
+  await expectLabel(page.getByTestId(`target-countdown-${exam.id}`), 'הבוחן היום');
+  await expectLabel(page.getByTestId(`target-due-today-${exam.id}`), 'בהצלחה!');
+  await expect(page.getByTestId(`target-today-${exam.id}`)).toHaveCount(0);
+  await expectLabel(page.getByTestId(`target-readiness-${exam.id}`), 'מוכנות לבוחן: 0%');
+  await expectLabel(practice(exam.id), 'חזרה אחרונה');
+  await expect(practice(exam.id)).toHaveCSS('background-color', FILLED);
+
+  // 3. The owed homework calls to practise now; the done one praises; the resting one says
+  // when it practises next, with no today line. Both offer practice more.
+  await expectLabel(practice(owed.id), 'לתרגל עכשיו');
+  await expectLabel(page.getByTestId(`target-today-${owed.id}`), 'היום: 0 מתוך 1 מילים');
+  await expectLabel(page.getByTestId(`target-praise-${done.id}`), 'כל הכבוד! סיימת להיום. נתראה מחר');
+  await expectLabel(page.getByTestId(`target-today-${done.id}`), 'היום: 1 מתוך 1 מילים ✓');
+  await expectLabel(practice(done.id), 'לתרגל עוד');
+  const next = stateOf(resting.id)?.next_practice_in;
+  expect(next, report()).toBeGreaterThan(1);
+  await expectLabel(
+    page.getByTestId(`target-rest-${resting.id}`),
+    `היום אין תרגול לשיעורי הבית. התרגול הבא בעוד ${next} ימים`,
+  );
+  await expect(page.getByTestId(`target-today-${resting.id}`)).toHaveCount(0);
+  await expectLabel(practice(resting.id), 'לתרגל עוד');
+
+  // 4. The exam's screen says the same, and offers no change: the date has come. Nothing is
+  // owed on it (final review M1): its word is listed with no group title and no line for today.
+  await page.getByTestId(`target-row-${exam.id}`).click();
+  await expectLabel(page.getByTestId('target-countdown'), 'הבוחן היום');
+  await expect(page.getByTestId('target-today')).toHaveCount(0);
+  const [examOnly] = exam.words;
+  await expect(page.getByTestId('target-group-all').getByTestId(`target-word-${examOnly.gloss_id}`), report()).toBeVisible();
+  await expect(page.getByTestId('target-group-owed')).toHaveCount(0);
+  await expect(page.getByText('נשאר להיום')).toHaveCount(0);
+  await expect(page.getByTestId(`target-word-today-${examOnly.gloss_id}`)).toHaveCount(0);
+  await expect(page.getByTestId('target-change-date')).toHaveCount(0);
+  await expect(page.getByTestId('target-end')).toHaveCount(0);
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

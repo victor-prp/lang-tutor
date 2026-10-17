@@ -48,6 +48,8 @@ const TABLES = [
   'target_words',
   'target_events',
   'session_targets',
+  'target_skills',
+  'target_skill_events',
   'enrollments',
   'dict_lexemes',
   'dict_variants',
@@ -381,7 +383,7 @@ describe('sessions status (phase 19)', () => {
     await expect(
       db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking)
                      values ('u_open', ${first}, 'preparing', 'list', false, false)`),
-    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_stock_per_enrollment' } });
+    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_stock_per_path' } });
   });
 
   it('allows one started session per enrollment, beside the one in stock', async () => {
@@ -393,7 +395,31 @@ describe('sessions status (phase 19)', () => {
     await expect(
       db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking, started_at)
                      values ('u_started', ${first}, 'ready', 'list', false, false, now())`),
-    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_started_per_enrollment' } });
+    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_started_per_path' } });
+  });
+
+  // Phase 57 (spec D1, D2, ADR 0014): per path. The main path is target_id null, read as the nil
+  // uuid, which no target has (targets.id is generated), so it is a path of its own.
+  it("allows one stock and one started session per path: the main path's and each target's", async () => {
+    const { first } = await learner('u_paths');
+    const target = async () =>
+      (await db.execute<{ id: string }>(sql`
+        insert into targets (enrollment_id, kind, due_on) values (${first}, 'exam', '2030-01-10') returning id`)).rows[0].id;
+    const [exam, homework] = [await target(), await target()];
+    const open = (targetId: string | null, started: boolean) => sql`
+      insert into sessions (user_id, enrollment_id, status, source, listening, speaking, target_id, started_at)
+      values ('u_paths', ${first}, 'ready', 'list', false, false, ${targetId}, ${started ? sql`now()` : null})`;
+    for (const path of [null, exam, homework]) {
+      await db.execute(open(path, false));
+      await db.execute(open(path, true));
+    }
+    await expect(db.execute(open(exam, false))).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_stock_per_path' } });
+    await expect(db.execute(open(exam, true))).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_started_per_path' } });
+    // The code before this phase names no target_id (ADR 0010): its sessions are the main path's.
+    await expect(
+      db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking)
+                     values ('u_paths', ${first}, 'preparing', 'list', false, false)`),
+    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_stock_per_path' } });
   });
 
   it('does not count skipped, failed or completed sessions as open', async () => {
@@ -420,5 +446,108 @@ describe('sessions status (phase 19)', () => {
                        values ${values}`),
       ).rejects.toMatchObject({ cause: { code: '23514' } });
     }
+  });
+});
+
+// Phase 57 (spec D3, D4). A path's column on sessions, a target's skills and their log, the day
+// a target word started, and session_targets' columns for a target path's stock. Every column
+// added to a table that existed is nullable (ADR 0010): the old container writes those tables
+// for its minute. The per-path indexes are Task 5's, and its test's.
+describe('target skills (phase 57)', () => {
+  it('adds the columns, nullable on the tables that existed', async () => {
+    const result = await db.execute<{ table_name: string; column_name: string; data_type: string; is_nullable: string }>(sql`
+      select table_name, column_name, data_type, is_nullable
+      from information_schema.columns
+      where table_schema = 'public'
+        and (table_name in ('target_skills', 'target_skill_events')
+             or (table_name = 'sessions' and column_name = 'target_id')
+             or (table_name = 'target_words' and column_name = 'started_on')
+             or (table_name = 'session_targets'
+                 and column_name in ('wish', 'slots', 'picked', 'reason', 'cap_halves', 'readiness_pct', 'fsrs_ready_count')))
+      order by table_name, column_name`);
+    expect(result.rows.map((row) => `${row.table_name}.${row.column_name} ${row.data_type} ${row.is_nullable}`)).toEqual([
+      'session_targets.cap_halves integer YES',
+      'session_targets.fsrs_ready_count integer YES',
+      'session_targets.picked integer YES',
+      'session_targets.readiness_pct integer YES',
+      'session_targets.reason text YES',
+      'session_targets.slots integer YES',
+      'session_targets.wish integer YES',
+      'sessions.target_id uuid YES',
+      'target_skill_events.after smallint NO',
+      'target_skill_events.before smallint NO',
+      'target_skill_events.created_at timestamp with time zone NO',
+      'target_skill_events.dimension text NO',
+      'target_skill_events.gloss_id text NO',
+      'target_skill_events.id uuid NO',
+      'target_skill_events.session_id uuid NO',
+      'target_skill_events.target_id uuid NO',
+      'target_skill_events.why text NO',
+      'target_skills.day date YES',
+      'target_skills.dimension text NO',
+      'target_skills.gloss_id text NO',
+      'target_skills.halves smallint NO',
+      'target_skills.session_id uuid YES',
+      'target_skills.target_id uuid NO',
+      'target_words.started_on date YES',
+    ]);
+  });
+
+  /** A target of a learner of its own holding two glosses of one lexeme: answers its id. */
+  async function targetWithWords(id: string): Promise<string> {
+    await seedUser(db, id);
+    await db.execute(sql`insert into dict_lexemes (id, language_code, lemma, part_of_speech) values (${`${id}-lex`}, 'en', ${id}, 'noun')`);
+    await db.execute(sql`
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values
+        (${`${id}-a`}, ${`${id}-lex`}, 'he', 'אחד'), (${`${id}-b`}, ${`${id}-lex`}, 'he', 'שניים')`);
+    const target = await db.execute<{ id: string }>(sql`
+      insert into targets (enrollment_id, kind, due_on) values (${enrollmentOf(id)}, 'exam', '2030-01-10') returning id`);
+    const targetId = target.rows[0].id;
+    await db.execute(sql`insert into target_words (target_id, gloss_id) values (${targetId}, ${`${id}-a`}), (${targetId}, ${`${id}-b`})`);
+    return targetId;
+  }
+
+  const skill = (targetId: string, glossId: string, halves: number) =>
+    db.execute(sql`insert into target_skills (target_id, gloss_id, dimension, halves) values (${targetId}, ${glossId}, 'spelling', ${halves})`);
+
+  it("keeps a target word's skills with the word: a removal takes them, a merge moves them", async () => {
+    const targetId = await targetWithWords('u_ts_fk');
+    await skill(targetId, 'u_ts_fk-a', 4);
+    await skill(targetId, 'u_ts_fk-b', 6);
+
+    await db.execute(sql`delete from target_words where target_id = ${targetId} and gloss_id = 'u_ts_fk-b'`);
+    await db.execute(sql`update target_words set gloss_id = 'u_ts_fk-b' where target_id = ${targetId} and gloss_id = 'u_ts_fk-a'`);
+
+    const rows = await db.execute<{ gloss_id: string; halves: number }>(sql`select gloss_id, halves from target_skills where target_id = ${targetId}`);
+    expect(rows.rows).toEqual([{ gloss_id: 'u_ts_fk-b', halves: 4 }]);
+    // A skill of a gloss the target does not hold has no word to belong to.
+    await expect(skill(targetId, 'u_ts_fk-a', 2)).rejects.toMatchObject({ cause: { code: '23503' } });
+  });
+
+  it("takes a target path's session_targets row, with no wish, slots, picks or reason", async () => {
+    const targetId = await targetWithWords('u_ts_path');
+    const session = await db.execute<{ id: string }>(sql`
+      insert into sessions (user_id, enrollment_id, status, source, listening, speaking, target_id)
+      values ('u_ts_path', ${enrollmentOf('u_ts_path')}, 'preparing', 'list', false, false, ${targetId}) returning id`);
+    await db.execute(sql`
+      insert into session_targets (session_id, target_id, days_left, ready_count, word_count, cap_halves, readiness_pct, fsrs_ready_count)
+      values (${session.rows[0].id}, ${targetId}, 3, 0, 2, 10, 0, 0)`);
+    const rows = await db.execute<{ reason: string | null }>(sql`select reason from session_targets where target_id = ${targetId}`);
+    expect(rows.rows).toEqual([{ reason: null }]);
+  });
+
+  it('refuses a value outside 0 to 20 and an unknown skill or reason', async () => {
+    const targetId = await targetWithWords('u_ts_checks');
+    for (const halves of [-1, 21]) {
+      await expect(skill(targetId, 'u_ts_checks-a', halves)).rejects.toMatchObject({ cause: { code: '23514' } });
+    }
+    await expect(
+      db.execute(sql`insert into target_skills (target_id, gloss_id, dimension, halves) values (${targetId}, 'u_ts_checks-a', 'reading', 2)`),
+    ).rejects.toMatchObject({ cause: { code: '23514' } });
+    await expect(
+      db.execute(sql`
+        insert into target_skill_events (target_id, gloss_id, dimension, session_id, before, after, why)
+        values (${targetId}, 'u_ts_checks-a', 'spelling', gen_random_uuid(), 0, 4, 'luck')`),
+    ).rejects.toMatchObject({ cause: { code: '23514' } });
   });
 });

@@ -4,7 +4,7 @@ import { MIN_LEVEL, type QuestionType } from '@lang-tutor/core/domain';
 import { usableAnswerForm } from '../domain/answerForm';
 import { PREPARE_SESSION } from '../domain/jobs';
 import { QUESTION_TYPE_ORDER, fixedRendering, questionTypesFor, renderingFlags } from '../domain/questionTypes';
-import type { Devices, GlossRendering, SavedGloss } from '../domain/session';
+import type { Devices, GlossRendering, Path, SavedGloss } from '../domain/session';
 import {
   GlossNotSaved,
   NotATester,
@@ -16,6 +16,9 @@ import {
 import type { Logger } from '../logger';
 import { authorizeEnrollment } from './access';
 import type { Repos, Transaction } from './transaction';
+
+/** Phase 57 (ADR 0014). A tester's question-types session is the main path's. */
+const MAIN: Path = null;
 
 export type QuestionTypesQuery = { glossId: string; variantId: string } & Devices;
 
@@ -65,6 +68,12 @@ export function createQuestionTypesService({ transaction, logger }: { transactio
      * is written; any other stock is retired. The job carries the types in
      * QUESTION_TYPE_ORDER and the one pick, with the word's other saved meanings for a
      * new_meaning card.
+     *
+     * Phase 57 (ADR 0014). The session is the main path's (target_id null), whatever target
+     * holds the word: it takes the main path's stock place under the main path's lock alone,
+     * and only the main path's started session refuses it, as create on the main path does. A
+     * target's started session or stock is another path's and is left as it is. The seed
+     * check is create's: any session of any path puts the seed behind (spec D2, R25).
      */
     create: async (
       actorUserId: string,
@@ -85,14 +94,14 @@ export function createQuestionTypesService({ transaction, logger }: { transactio
         }
         const ordered = QUESTION_TYPE_ORDER.filter((type) => request.types.includes(type));
 
-        await repos.session.lockNextSession(enrollmentId);
-        const open = await repos.session.findOpen(enrollmentId);
+        await repos.session.lockNextSession(enrollmentId, MAIN);
+        const open = await repos.session.findOpen(enrollmentId, MAIN);
         if (open.started) throw new SessionOpen(enrollmentId);
-        // The seed comes first: waiting in stock, or not yet made (no session at all).
-        if (open.stock?.source === 'seed' || !(await repos.session.findLatest(enrollmentId))) throw new SeedPending(enrollmentId);
+        // The seed comes first: waiting in stock, or not yet made (no session at all, of any path).
+        if (open.stock?.source === 'seed' || !(await repos.session.findLatest(enrollmentId, 'any'))) throw new SeedPending(enrollmentId);
         const retired = open.stock && (await repos.session.retireStock(open.stock.id)) ? open.stock.id : null;
 
-        const sessionId = await repos.session.insertQuestionTypesSession(enrolled.user_id, enrollmentId, devices);
+        const sessionId = await repos.session.insertQuestionTypesSession(enrolled.user_id, enrollmentId, devices, MAIN);
         await repos.jobs.enqueue(PREPARE_SESSION, {
           session_id: sessionId,
           picks: [

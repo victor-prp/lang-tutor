@@ -3,7 +3,7 @@ import { PgBoss, fromDrizzle } from 'pg-boss';
 
 import type { Db } from '../../src/db/client';
 import { JOB_SCHEMA } from '../../src/db/jobs';
-import { STOCK_SESSION } from '../../src/domain/jobs';
+import { STOCK_SESSION, type StockSessionPayload } from '../../src/domain/jobs';
 
 // The test composition root's pg-boss (ADR 0004 R6): on the test's own cloned
 // database, through the same adapter installJobs uses, so no second pool.
@@ -78,4 +78,13 @@ export async function waitFor(check: () => Promise<boolean>, timeoutMs = 20_000)
     if (Date.now() > deadline) throw new Error(`condition not met within ${timeoutMs} ms`);
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
+}
+
+/** Phase 57 (spec D2). The stock jobs queued, oldest first: each one's singleton key (its path's)
+ *  and payload. A service test may not name the job schema itself. */
+export async function stockJobKeys(db: Db): Promise<{ key: string | null; data: StockSessionPayload }[]> {
+  const rows = await db.execute<{ key: string | null; data: StockSessionPayload }>(
+    sql`select singleton_key as key, data from ${sql.raw(JOB_SCHEMA)}.job where name = ${STOCK_SESSION} order by created_on, singleton_key`,
+  );
+  return rows.rows;
 }

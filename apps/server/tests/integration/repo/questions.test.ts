@@ -563,7 +563,7 @@ describe('phase 27 Part B: sentence cards', () => {
     // loadSession reads the same shapes from the stored rows.
     const sessionId = await withTx(t.db, async (tx) => {
       const sessions = createSessionRepo(tx);
-      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES, CHOSEN_ON);
+      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES, CHOSEN_ON, null);
       await sessions.insertSessionQuestions(id, [choice, typed, translation]);
       await sessions.transition(id, ['preparing'], 'ready');
       return id;
@@ -683,7 +683,7 @@ describe('phase 34: the answer form a card asks for', () => {
         })),
       });
       const sessions = createSessionRepo(tx);
-      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES, CHOSEN_ON);
+      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES, CHOSEN_ON, null);
       await sessions.insertSessionQuestions(id, made);
       await sessions.transition(id, ['preparing'], 'ready');
       return { sessionId: id };
@@ -761,7 +761,7 @@ describe('phase 34: context sentences, marks and part of speech', () => {
         userId: 'u_1', enrollmentId: enrollmentOf('u_1'), targetLanguage: 'en', userLanguageCode: 'he', questions: rows,
       });
       const sessions = createSessionRepo(tx);
-      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES, CHOSEN_ON);
+      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES, CHOSEN_ON, null);
       await sessions.insertSessionQuestions(id, made);
       await sessions.transition(id, ['preparing'], 'ready');
       return { sessionId: id, made };

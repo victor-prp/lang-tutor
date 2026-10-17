@@ -15,6 +15,7 @@ import {
   sessionQuestions,
   sessions,
 } from '../../src/db/schema';
+import { createSessionRepo } from '../../src/repo/sessions';
 import { createVocabularyRepo } from '../../src/repo/vocabulary';
 import { ownerOf } from './vocabularyRows';
 import { withTx } from './withTx';
@@ -276,7 +277,10 @@ export async function insertAnsweredSession(
  * Makes every insert into `table` fail, to prove a write is all-or-nothing.
  * The database is the test's own clone, so the trigger goes with it.
  */
-export async function failInsertsInto(db: Db, table: 'session_progress' | 'gloss_progress' | 'gloss_memory'): Promise<void> {
+export async function failInsertsInto(
+  db: Db,
+  table: 'session_progress' | 'gloss_progress' | 'gloss_memory' | 'target_skills' | 'target_skill_events',
+): Promise<void> {
   await db.execute(
     sql.raw(`
       create function fail_insert() returns trigger language plpgsql as $$
@@ -293,4 +297,21 @@ export async function setReachedOn(db: Db, input: { enrollmentId: string; glossI
     .update(glossMemory)
     .set({ reachedOn: input.reachedOn })
     .where(and(eq(glossMemory.enrollmentId, input.enrollmentId), eq(glossMemory.glossId, input.glossId)));
+}
+
+/** Final review I1. What a learner `day` reads as answered and as met, as a choice reads it
+ *  (findAnswersOn, findIntroducedOn): the sessions that count for it, and every open one. */
+export async function readLearnerDay(db: Db, enrollmentId: string, day: string): Promise<{ answered: string[]; met: string[] }> {
+  return withTx(db, async (tx) => {
+    const repo = createSessionRepo(tx);
+    return {
+      answered: (await repo.findAnswersOn(enrollmentId, day)).map((answer) => answer.glossId),
+      met: await repo.findIntroducedOn(enrollmentId, day),
+    };
+  });
+}
+
+/** Final review I1-c. Moves every answer of a session `days` days back, as if given then. */
+export async function moveAnswersBack(db: Db, sessionId: string, days: number): Promise<void> {
+  await db.execute(sql`update answers set answered_at = answered_at - make_interval(days => ${days}) where session_id = ${sessionId}`);
 }

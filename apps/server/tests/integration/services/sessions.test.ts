@@ -193,16 +193,18 @@ describe('currentSession', () => {
   const E = enrollmentOf('u_1');
 
   it('is empty before any session, and points at the seed', async () => {
-    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'seed', savedCount: 0 });
+    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'seed', savedCount: 0, dueCount: 0 });
   });
 
   it('shows the open session with its progress', async () => {
     const { sessionId, record } = await startSeed(E);
     await service.submitAnswer('u_1', sessionId, record.questions[0].id, { option_index: 0 });
     expect(await service.currentSession('u_1', E)).toEqual({
-      current: { id: sessionId, status: 'ready', source: 'seed', answered: 1, total: SESSION_LENGTH },
+      // Its first answer started it (final review N1: started is on the read).
+      current: { id: sessionId, status: 'ready', source: 'seed', answered: 1, total: SESSION_LENGTH, started: true },
       nextSource: 'list',
       savedCount: 0,
+      dueCount: 0,
     });
   });
 
@@ -216,7 +218,7 @@ describe('currentSession', () => {
   it("keeps one enrollment's session out of another's", async () => {
     await seedEnrollment(t.db, { id: 'e_ru', userId: 'u_1', targetLanguage: 'ru' });
     await service.createNextSession('u_1', E, { listening: false, speaking: false });
-    expect(await service.currentSession('u_1', 'e_ru')).toEqual({ current: null, nextSource: 'seed', savedCount: 0 });
+    expect(await service.currentSession('u_1', 'e_ru')).toEqual({ current: null, nextSource: 'seed', savedCount: 0, dueCount: 0 });
   });
 
   it('refuses an enrollment that does not exist', async () => {

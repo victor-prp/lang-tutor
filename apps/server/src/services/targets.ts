@@ -6,19 +6,20 @@ import type {
   Target,
   TargetList,
 } from '@lang-tutor/core/api';
-import { speakable, type Dimension, type MemoryState } from '@lang-tutor/core/domain';
 
-import { liveDimensions } from '../domain/choose';
 import { daysBetween } from '../domain/progress';
-import { readinessOf, recallOnDue } from '../domain/targets';
+import { targetDay } from '../domain/targetDay';
+import { openOn } from '../domain/targets';
 import { InvalidTarget, TargetClosed, TargetNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { TargetRow } from '../repo/targets';
 import { authorizeEnrollment } from './access';
 import { learnerDay } from './learnerDay';
+import { readTargetDay } from './targetDayRead';
 import { logImportSaved, saveImportsInTx, type ImportSaved } from './photoImports';
-import { logTargetRetired, restockAfterTargetChange } from './stock';
+import { lockPaths, logTargetRetired, requestStocks, restockAfterTargetChange, retireStocks } from './stock';
 import type { Repos, Transaction } from './transaction';
+import { lastAnswerDay, skipOpenSession } from './sessionEnd';
 import { saveEntriesInTx } from './vocabulary';
 
 /** A target with its words, in the order they were added. */
@@ -31,24 +32,23 @@ type WordsInput = Pick<CreateTargetRequest, 'photo_import_ids' | 'entries'>;
  *  transaction commits, and the photos not read (ruling R-D9). */
 type SavedWords = { glossIds: string[]; imports: ImportSaved[]; unreadPhotos: number };
 
-/** Spec D1. Active while its date is still to come and it was not ended early. */
-const isActive = (target: TargetRow, today: string): boolean => target.endedAt === null && today < target.dueOn;
-
 /**
  * Phase 53 (spec D1, D2, D4, D8, D10–D12). A learner's targets: a kind, a due date and
  * saved words that sessions serve until the date. Each use case is the list owner's alone
  * (`targets.manage`, in no role) and one transaction (ADR 0001 R8).
  *
  * A change to targets changes what the next session should hold, so each one, in its own
- * transaction, retires the unstarted list stock and asks the stock job for the next (ruling
- * R-D12b). It takes the enrollment's next-session lock first, before it locks a target or a
- * photo import: a stock being written holds that lock and references the active targets'
- * rows, so taking a target's row first could deadlock against it. One that changes nothing
- * (a word the target holds already, or does not hold, the date it has, an end of an ended
- * target) records nothing and keeps the stock.
+ * transaction, retires the unstarted list stock of the target's path and of the main path,
+ * whose words change with it, and asks the stock job for the next of each (ruling R-D12b;
+ * phase 57, spec D2). It takes those paths' next-session locks first (lockPaths), before it
+ * locks a target or a photo import: a stock being written holds its path's lock and
+ * references the targets' rows, so taking a target's row first could deadlock against it.
+ * One that changes nothing (a word the target holds already, or does not hold, the date it
+ * has, an end of an ended target) records nothing and keeps the stocks.
  *
- * The learner's today is learnerDay's (ADR 0013): a due date must come after it, and a target
- * is active, so open to change, until it does.
+ * The learner's today is learnerDay's (ADR 0013): a due date must come after it. A target is
+ * active through its due date (phase 57, spec D10: listed, and its path on home), and open to
+ * change until the date comes.
  */
 export function createTargetService({
   transaction,
@@ -75,18 +75,19 @@ export function createTargetService({
   }
 
   /**
-   * A change to one target: authorized, then the next-session lock, then the target's row,
-   * locked and read again, which is the row the change goes by, and whether it is active on
-   * the learner's today. Each change says what a closed target gets (TargetClosed, or for
-   * an end of an ended one, nothing).
+   * A change to one target: authorized, then the next-session locks of the main path and the
+   * target's (lockPaths), then the target's row, locked and read again, which is the row the
+   * change goes by, and whether it is open to change on the learner's today (before its
+   * date). Each change says what a closed target gets (TargetClosed, or for an end of an
+   * ended one, nothing).
    */
   async function lockTarget(repos: Repos, actorUserId: string, targetId: string) {
     const { enrolled } = await authorizeTarget(repos, actorUserId, targetId);
-    await repos.session.lockNextSession(enrolled.id);
+    await lockPaths(repos, enrolled.id, [targetId]);
     const target = await repos.target.findTargetForUpdate(targetId);
     if (!target) throw new TargetNotFound(targetId);
     const today = await learnerDay(repos, enrolled.user_id, now());
-    return { enrolled, target, today, active: isActive(target, today) };
+    return { enrolled, target, today, open: openOn(target, today) };
   }
 
   /**
@@ -114,41 +115,72 @@ export function createTargetService({
   }
 
   /**
-   * Spec D4, D11, rulings R-D4, R-D11. Targets as the learner reads them on `today`: each
-   * word with the form it was saved from, as written (final review M3), its key, and its
-   * readiness for the target's date — its recall then in its weakest skill live in the
-   * enrollment's newest session (both spoken ones off when there is none), speaking skipped
-   * for a word that cannot be said, read against the kind's bars. A target's words are saved
-   * ones (unsaving takes a word out of every target), so a word the list does not hold is not
-   * shown.
+   * Phase 57 (spec D9, D10, D13, rulings T6-a, T6-b). Targets as the learner reads them on
+   * `today`: each word with the form it was saved from, as written (final review M3), its key,
+   * and its day (the day's state of it, its readiness in percent, its skills in points); and the
+   * target's own day (today's work, readiness, the words at 100) and its path's session as the
+   * home read gives it (started, else stock, else a failed newest). The day is readTargetDay's,
+   * the one the target's path plans by. A target's words are saved ones (unsaving takes a word
+   * out of every target), so a word the list does not hold is not shown.
    */
   async function view(repos: Repos, enrolled: Enrollment, today: string, targets: readonly TargetWithWords[]): Promise<Target[]> {
     if (targets.length === 0) return [];
     const glossIds = [...new Set(targets.flatMap((target) => target.glossIds))];
-    const saved = new Map((await repos.vocabulary.findSavedWords({ enrollmentId: enrolled.id, glossIds })).map((word) => [word.glossId, word]));
+    const saved = await repos.vocabulary.findSavedWords({ enrollmentId: enrolled.id, glossIds });
+    const savedOf = new Map(saved.map((word) => [word.glossId, word]));
     const devices = (await repos.session.findNewestDevices(enrolled.id)) ?? { listening: false, speaking: false };
-    const live = liveDimensions(devices.listening, devices.speaking);
-    const memory = await repos.memory.findRows({ enrollmentId: enrolled.id, glossIds });
-    const rowsOf = new Map<string, { dimension: Dimension; state: MemoryState }[]>();
-    for (const row of memory) rowsOf.set(row.glossId, [...(rowsOf.get(row.glossId) ?? []), row]);
 
-    return targets.map((target) => {
+    const out: Target[] = [];
+    for (const target of targets) {
+      const read = await readTargetDay(repos, enrolled, target, devices, today, saved);
+      const day =
+        read?.day ??
+        targetDay({ today, createdOn: today, dueOn: target.dueOn, words: [], skills: [], rightToday: new Set(), answeredToday: false });
+      const dayOf = new Map(day.words.map((word) => [word.glossId, word]));
       const words = target.glossIds.flatMap((glossId) => {
-        const gloss = saved.get(glossId);
-        if (!gloss) return [];
-        const recall = recallOnDue(rowsOf.get(glossId) ?? [], live, speakable(gloss.form), target.dueOn);
-        return [{ gloss_id: glossId, form: gloss.form, meaning: gloss.key, readiness: readinessOf(target.kind, recall) }];
+        const gloss = savedOf.get(glossId);
+        const word = dayOf.get(glossId);
+        if (!gloss || !word) return [];
+        return [
+          {
+            gloss_id: glossId,
+            form: gloss.form,
+            meaning: gloss.key,
+            readiness_pct: word.readinessPct,
+            today: word.state,
+            owed: word.owed,
+            starts_in: word.startsIn,
+            skills: word.skills.map((skill) => ({ dimension: skill.dimension, value: skill.halves / 2, cap: day.capHalves / 2 })),
+          },
+        ];
       });
-      return {
+      const { started, stock } = await repos.session.findOpen(enrolled.id, target.id);
+      const latest = started || stock ? undefined : await repos.session.findLatest(enrolled.id, target.id);
+      const current = started ?? stock ?? (latest?.status === 'failed' ? latest : null);
+      out.push({
         id: target.id,
         kind: target.kind,
         due_on: target.dueOn,
         days_left: daysBetween(today, target.dueOn),
         word_count: words.length,
-        ready_count: words.filter((word) => word.readiness === 'ready').length,
+        ready_count: day.readyCount,
+        readiness_pct: day.readinessPct,
+        today: { state: day.state, done: day.done, planned: day.planned, extra: day.extra, next_practice_in: day.nextPracticeIn },
+        session: current
+          ? {
+              session_id: current.id,
+              status: current.status,
+              source: current.source,
+              answered: current.answered,
+              total: current.total,
+              // Final review N1: a session left before any answer is started with none.
+              started: current === started,
+            }
+          : null,
         words,
-      };
-    });
+      });
+    }
+    return out;
   }
 
   /** One target as view reads it, its words as they are now in this transaction. */
@@ -158,7 +190,8 @@ export function createTargetService({
   }
 
   return {
-    /** The active targets, nearest date first, and the learner's today. */
+    /** The active targets (phase 57: through their due date), nearest date first, and the
+     *  learner's today. */
     list: (actorUserId: string, enrollmentId: string): Promise<TargetList> =>
       transaction(async (repos) => {
         const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'targets.manage' });
@@ -166,14 +199,7 @@ export function createTargetService({
         const targets = await view(repos, enrolled, today, await repos.target.listActive(enrolled.id, today));
         return {
           today,
-          targets: targets.map(({ id, kind, due_on, days_left, word_count, ready_count }) => ({
-            id,
-            kind,
-            due_on,
-            days_left,
-            word_count,
-            ready_count,
-          })),
+          targets: targets.map(({ words, ...summary }) => summary),
         };
       }),
 
@@ -195,7 +221,8 @@ export function createTargetService({
         const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'targets.manage' });
         const today = await learnerDay(repos, enrolled.user_id, now());
         if (request.due_on <= today) throw new InvalidTarget('due_date');
-        await repos.session.lockNextSession(enrolled.id);
+        // The new target's path has no stock to race until this commits: the main path's lock.
+        await lockPaths(repos, enrolled.id, []);
         const saved = await saveWords(repos, enrolled, actorUserId, request);
         const { glossIds } = saved;
         if (glossIds.length === 0) throw new InvalidTarget('no_words');
@@ -209,7 +236,7 @@ export function createTargetService({
           actorUserId,
           sessionId: null,
         });
-        const retired = await restockAfterTargetChange(repos, enrolled.id);
+        const retired = await restockAfterTargetChange(repos, enrolled.id, [row.id]);
         return { target: await viewOne(repos, enrolled, today, row), wordCount: glossIds.length, retired, saved };
       });
       logImportsSaved(created.saved, created.target.id);
@@ -231,11 +258,11 @@ export function createTargetService({
      */
     addWords: async (actorUserId: string, targetId: string, request: AddTargetWordsRequest): Promise<Target> => {
       const changed = await transaction(async (repos) => {
-        const { enrolled, target, today, active } = await lockTarget(repos, actorUserId, targetId);
-        if (!active) throw new TargetClosed(targetId);
+        const { enrolled, target, today, open } = await lockTarget(repos, actorUserId, targetId);
+        if (!open) throw new TargetClosed(targetId);
         const saved = await saveWords(repos, enrolled, actorUserId, request);
         const added = await repos.target.addWords(target.id, saved.glossIds);
-        let retired: string | null = null;
+        let retired: string[] = [];
         if (added.length > 0) {
           await repos.target.insertEvent({
             targetId: target.id,
@@ -245,7 +272,7 @@ export function createTargetService({
             actorUserId,
             sessionId: null,
           });
-          retired = await restockAfterTargetChange(repos, enrolled.id);
+          retired = await restockAfterTargetChange(repos, enrolled.id, [target.id]);
         }
         return { target: await viewOne(repos, enrolled, today, target), enrollmentId: enrolled.id, added, retired, saved };
       });
@@ -264,12 +291,20 @@ export function createTargetService({
     },
 
     /** Spec D1, D11. Out of the target, still saved. Idempotent: a word it does not hold
-     *  changes nothing. Removing every word leaves an empty target (ruling R-D10). */
+     *  changes nothing. Removing every word leaves an empty target (ruling R-D10). Phase 57
+     *  (ruling T4-k, ADR 0014 R4): the word's target skills go with it, so the removal waits
+     *  for a session end that would write them (the progress lock), taken once the stocks are
+     *  retired (a skip of the stock holds its row, then that lock) and before the next stocks
+     *  are asked for (a session end holds that lock, then enqueues its path's stock). */
     removeWord: async (actorUserId: string, targetId: string, glossId: string): Promise<void> => {
       const changed = await transaction(async (repos) => {
-        const { enrolled, target, active } = await lockTarget(repos, actorUserId, targetId);
-        if (!active) throw new TargetClosed(targetId);
-        if (!(await repos.target.removeWord(target.id, glossId))) return null;
+        const { enrolled, target, open } = await lockTarget(repos, actorUserId, targetId);
+        if (!open) throw new TargetClosed(targetId);
+        // Under the target's lock and its paths', its words cannot change before the removal.
+        if (!(await repos.target.listWordIds(target.id)).includes(glossId)) return null;
+        const retired = await retireStocks(repos, enrolled.id, [target.id]);
+        await repos.progress.lockEnrollment(enrolled.id);
+        await repos.target.removeWord(target.id, glossId);
         await repos.target.insertEvent({
           targetId: target.id,
           kind: 'words_removed',
@@ -278,7 +313,8 @@ export function createTargetService({
           actorUserId,
           sessionId: null,
         });
-        return { enrollmentId: enrolled.id, retired: await restockAfterTargetChange(repos, enrolled.id) };
+        await requestStocks(repos, enrolled.id, [target.id]);
+        return { enrollmentId: enrolled.id, retired };
       });
       if (changed === null) return;
       logger.info({ event: 'target_changed', target_id: targetId, change: 'words_removed', count: 1 });
@@ -288,8 +324,8 @@ export function createTargetService({
     /** Spec D1. To any day after today; the date it has already changes nothing. */
     changeDate: async (actorUserId: string, targetId: string, request: ChangeTargetDateRequest): Promise<Target> => {
       const changed = await transaction(async (repos) => {
-        const { enrolled, target, today, active } = await lockTarget(repos, actorUserId, targetId);
-        if (!active) throw new TargetClosed(targetId);
+        const { enrolled, target, today, open } = await lockTarget(repos, actorUserId, targetId);
+        if (!open) throw new TargetClosed(targetId);
         if (request.due_on <= today) throw new InvalidTarget('due_date');
         if (request.due_on === target.dueOn) return { target: await viewOne(repos, enrolled, today, target), change: null };
         await repos.target.setDueOn(target.id, request.due_on);
@@ -301,7 +337,7 @@ export function createTargetService({
           actorUserId,
           sessionId: null,
         });
-        const retired = await restockAfterTargetChange(repos, enrolled.id);
+        const retired = await restockAfterTargetChange(repos, enrolled.id, [target.id]);
         const moved = { ...target, dueOn: request.due_on };
         return { target: await viewOne(repos, enrolled, today, moved), change: { enrollmentId: enrolled.id, retired } };
       });
@@ -313,12 +349,17 @@ export function createTargetService({
     },
 
     /** Spec D1, D8. Ended now, before its date. Idempotent on a target ended already; one
-     *  whose date has come ended on it, so it is closed. */
+     *  whose date has come is closed to change (phase 57, spec D10: it is active through the
+     *  date and ends by itself the day after). Final review I1: its path's started session, which
+     *  nothing could resume or skip once the path is closed, is skipped in the same transaction,
+     *  its answers counted once as a skip's; so, as a removal does (ADR 0014 R4), the stocks are
+     *  retired and that session's row changed before the progress lock, and the next stocks are
+     *  asked for after it. */
     end: async (actorUserId: string, targetId: string): Promise<void> => {
       const ended = await transaction(async (repos) => {
-        const { enrolled, target, active } = await lockTarget(repos, actorUserId, targetId);
+        const { enrolled, target, today, open } = await lockTarget(repos, actorUserId, targetId);
         if (target.endedAt !== null) return null;
-        if (!active) throw new TargetClosed(targetId);
+        if (!open) throw new TargetClosed(targetId);
         if (!(await repos.target.end(target.id, new Date(now())))) return null;
         await repos.target.insertEvent({
           targetId: target.id,
@@ -328,10 +369,16 @@ export function createTargetService({
           actorUserId,
           sessionId: null,
         });
-        return { enrollmentId: enrolled.id, retired: await restockAfterTargetChange(repos, enrolled.id) };
+        const retired = await retireStocks(repos, enrolled.id, [target.id]);
+        const { started } = await repos.session.findOpen(enrolled.id, target.id);
+        const day = started ? await lastAnswerDay(repos, enrolled.user_id, started.id, today) : today;
+        const skipped = started && (await skipOpenSession(repos, started.id, enrolled.id, day)) ? started.id : null;
+        await requestStocks(repos, enrolled.id, [target.id]);
+        return { enrollmentId: enrolled.id, retired, skipped };
       });
       if (ended === null) return;
       logger.info({ event: 'target_ended', target_id: targetId, how: 'early' });
+      if (ended.skipped) logger.info({ event: 'session_skipped', session_id: ended.skipped, reason: 'target_ended' });
       logTargetRetired(logger, ended.enrollmentId, ended.retired);
     },
   };

@@ -150,7 +150,7 @@ describe('0011_session_status', () => {
 
     // And the next session afterwards is `list`: the enrollment's newest
     // session is a closed one, so the seed is behind it.
-    const latest = await db.transaction((tx) => createSessionRepo(tx).findLatest('e_1'));
+    const latest = await db.transaction((tx) => createSessionRepo(tx).findLatest('e_1', 'any'));
     expect(latest).toMatchObject({ status: 'skipped', source: 'seed' });
     expect(nextSource(latest !== undefined)).toBe('list');
   });
@@ -1260,13 +1260,13 @@ describe('0031_always_ready_session', () => {
       values (${id}, 'u_1', 'e_1', 'preparing', 'list', false, false)`;
     await db.execute(stock('00000000-0000-4000-8000-00000000003c'));
     await expect(db.execute(stock('00000000-0000-4000-8000-00000000003d'))).rejects.toMatchObject({
-      cause: { constraint: 'sessions_one_stock_per_enrollment' },
+      cause: { constraint: 'sessions_one_stock_per_path' },
     });
     // And one started session: a second cannot start beside it.
     await db.execute(sql`update sessions set status = 'ready' where id = '00000000-0000-4000-8000-00000000003c'`);
     await expect(
       db.execute(sql`update sessions set started_at = now() where id = '00000000-0000-4000-8000-00000000003c'`),
-    ).rejects.toMatchObject({ cause: { constraint: 'sessions_one_started_per_enrollment' } });
+    ).rejects.toMatchObject({ cause: { constraint: 'sessions_one_started_per_path' } });
   });
 
   // Final review M1. ADR 0010: the old container serves for about a minute after

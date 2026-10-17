@@ -13,6 +13,7 @@ import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { TargetRepo } from '../repo/targets';
+import type { TargetSkillRepo } from '../repo/targetSkills';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
 import type { UserRepo } from '../repo/users';
@@ -55,6 +56,9 @@ describe('repos', () => {
       findOpen: notStubbed,
       findSessionGlosses: notStubbed,
       findNewestDevices: notStubbed,
+      // Phase 57 (spec D2, ruling T3-j).
+      findSessionCards: notStubbed,
+      findLastAnswerAt: notStubbed,
       // Phase 53 (spec D12).
       findStockChoice: notStubbed,
       retireStock: notStubbed,
@@ -275,6 +279,7 @@ describe('repos', () => {
     throw new Error('this case must not touch the progress tables');
   };
   const progressRepo: ProgressRepo = {
+    lockEnrollment: unreachableProgress,
     lockSessionGlosses: unreachableProgress,
     findSessionEvidence: unreachableProgress,
     findRows: unreachableProgress,
@@ -287,6 +292,7 @@ describe('repos', () => {
   };
 
   const memoryRepo: MemoryRepo = {
+    findEnrollmentRows: unreachableProgress,
     findRows: unreachableProgress,
     findPractisedWords: unreachableProgress,
     upsertRows: unreachableProgress,
@@ -328,6 +334,7 @@ describe('repos', () => {
         pronunciation: stub<PronunciationRepo>({}),
         reminders: stub<ReminderRepo>({}),
         target: stub<TargetRepo>({}),
+        targetSkills: stub<TargetSkillRepo>({}),
         // Phase 43 (spec D3). The one job an answer may ask for: the next session in stock.
         jobs,
       });
@@ -392,6 +399,8 @@ describe('repos', () => {
           },
           // Phase 43 (spec D2). No start call came first: this answer starts it.
           markStarted: async () => true,
+          // Phase 57 (spec D2). The main path's, whose next stock it asks for.
+          findState: async () => ({ id: 's1', userId: 'u1', enrollmentId: 'e1', status: 'ready', source: 'list', targetId: null }),
         }),
       ),
       rng: testRng(7),
@@ -492,7 +501,7 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
           insertPreparingSession: async () => 's1',
           findAnswersOn: async (enrollmentId, day) => {
             reads.answers = [enrollmentId, day];
-            return [{ glossId: 'g_asked', sessionId: 's0', type: 'multiple_choice', correct: false }];
+            return [{ glossId: 'g_asked', sessionId: 's0', type: 'multiple_choice', correct: false, targetId: null }];
           },
           findIntroducedOn: async (enrollmentId, day) => {
             reads.introduced = [enrollmentId, day];

@@ -127,7 +127,7 @@ async function prepared(
   await expectDistractors(ns, batch);
   if (context !== null) await expectContext(ns, context, contextOpts);
   await expectCheck(ns, { overrides: check });
-  const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', EN, NO_DEVICES, CHOSEN_ON));
+  const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', EN, NO_DEVICES, CHOSEN_ON, null));
   await deps.sessions.prepareSession({ session_id: sessionId, picks: steered(picks, cards), listening: false, speaking: false });
   const record = await deps.sessions.getSession('u_1', sessionId);
   expect(record.status).toBe('ready');

@@ -1,4 +1,4 @@
-import type { PartOfSpeech, TargetKind, TargetReadiness, UnavailableReason } from '@lang-tutor/core/api';
+import type { PartOfSpeech, TargetKind, UnavailableReason } from '@lang-tutor/core/api';
 import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
 
 // U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
@@ -54,13 +54,20 @@ const PART_OF_SPEECH_LOOKUP: Record<string, string> = { ...PART_OF_SPEECH_NAMES,
 const REMINDER_DAY_NAMES = ['ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳', 'א׳'];
 
 // Phase 53 (spec D4, D11). Records over the closed wire sets, so the compiler refuses
-// a third kind or a fifth level that has no Hebrew name.
+// a third kind that has no Hebrew name.
 const TARGET_KIND_NAMES: Record<TargetKind, string> = { homework: 'שיעורי בית', exam: 'בוחן' };
-const TARGET_READINESS_NAMES: Record<TargetReadiness, string> = {
-  not_started: 'עוד לא התחלנו',
-  on_the_way: 'בדרך',
-  almost: 'כמעט מוכנה',
-  ready: 'מוכנה',
+// Phase 57 (spec D10, D11). The kind with its article, for the date itself ("הבוחן היום"),
+// and with ל, for what the card's lines are about ("מוכנות לבוחן").
+const TARGET_DUE_TODAY: Record<TargetKind, string> = { homework: 'שיעורי הבית היום', exam: 'הבוחן היום' };
+const TARGET_FOR: Record<TargetKind, string> = { homework: 'לשיעורי הבית', exam: 'לבוחן' };
+
+/** Phase 57 (spec D11, option B). A countdown title in three parts, so the card can draw
+ *  the number large in the accent colour. `number` is null when the title has none. */
+export type Countdown = { before: string; number: string | null; after: string };
+const countdown = (kind: TargetKind, daysLeft: number): Countdown => {
+  if (daysLeft < 1) return { before: TARGET_DUE_TODAY[kind], number: null, after: '' };
+  if (daysLeft === 1) return { before: `${TARGET_KIND_NAMES[kind]} מחר`, number: null, after: '' };
+  return { before: `${TARGET_KIND_NAMES[kind]} בעוד `, number: isolateLtr(String(daysLeft)), after: ' ימים' };
 };
 // The weekday as JavaScript numbers it, 0 (Sunday) to 6 (Saturday), and each month
 // with its ב, which is how a date reads: "16 באוקטובר".
@@ -122,6 +129,10 @@ export const strings = {
   skipConfirmTitle: 'לדלג על התרגול?',
   skipConfirmMessage: 'התרגול יסתיים, והתשובות שנתת בו לא ייספרו.',
   saveWordsFirst: 'כדי לתרגל, שמרו קודם מילים במסך התרגום.',
+  // Final review M2. My words when every saved word is in an active target, which practises it:
+  // the kinds that hold them, the exam's first.
+  allWordsInTargets: (kinds: readonly TargetKind[]): string =>
+    `כל המילים שלך כבר בהכנה ${(['exam', 'homework'] as const).filter((kind) => kinds.includes(kind)).map((kind) => TARGET_FOR[kind]).join(' ו')}.`,
   homeLoadFailed: 'טעינת התרגול נכשלה. אפשר לנסות שוב.',
   preparationFailed: 'יצירת השאלות נכשלה. אפשר לנסות שוב.',
   homeSavedLabel: (count: number, language: string) => `${count} משמעויות שמורות ב${language}`,
@@ -447,7 +458,8 @@ export const strings = {
   homePhotoSeveral: (count: number) => `${isolateLtr(String(count))} רשימות מתמונות מחכות לסקירה`,
   // Phase 53 (spec D10, D11). Preparing for homework or a test.
   targetKindName: (kind: TargetKind): string => TARGET_KIND_NAMES[kind],
-  targetReadinessName: (readiness: TargetReadiness): string => TARGET_READINESS_NAMES[readiness],
+  // Phase 57 (spec D9, D12). A word's readiness is a percent, and "ready" at 100%.
+  targetReadinessName: (readinessPct: number): string => (readinessPct >= 100 ? 'מוכנה' : isolateLtr(`${readinessPct}%`)),
   targetTomorrow: 'מחר',
   targetInDays: (days: number) => `בעוד ${isolateLtr(String(days))} ימים`,
   // A target read after its date has come is no longer counted down to.
@@ -516,6 +528,40 @@ export const strings = {
   targetEmpty: 'אין מילים בהכנה הזו.',
   targetLoadFailed: 'טעינת ההכנה נכשלה. אפשר לנסות שוב.',
   targetActionFailed: 'הפעולה נכשלה. נסו שוב.',
+  // Phase 57 (spec D10, D11). Home's cards: a target's countdown, its day and readiness,
+  // and the My words card.
+  targetCountdown: (kind: TargetKind, daysLeft: number): Countdown => countdown(kind, daysLeft),
+  targetDueToday: (kind: TargetKind): string => TARGET_DUE_TODAY[kind],
+  targetGoodLuck: 'בהצלחה!',
+  lastReview: 'חזרה אחרונה',
+  targetToday: (done: number, planned: number) =>
+    `היום: ${isolateLtr(String(done))} מתוך ${isolateLtr(String(planned))} מילים`,
+  // After today's line once every planned word is done.
+  targetTodayCheck: '✓',
+  // The words started early today, after the check (extra-words.html).
+  targetExtra: (count: number) => `${isolateLtr(`+${count}`)} נוספות`,
+  // The target screen's word groups and each word's line for today (spec D12).
+  targetGroupTitle: { owed: 'נשאר להיום', done: 'סיימת להיום', extra: 'נוספו היום', later: 'בהמשך' } as const,
+  targetWordOwed: (names: string[]) => `היום נשאר: ${names.join(', ')}`,
+  targetWordDone: 'היום ✓',
+  targetWordExtra: 'בונוס ✓',
+  targetWordStartsIn: (days: number) =>
+    days === 1 ? 'נתחיל מחר' : `נתחיל בעוד ${isolateLtr(String(days))} ימים`,
+  targetReadinessPct: (kind: TargetKind, pct: number) => `מוכנות ${TARGET_FOR[kind]}: ${isolateLtr(`${pct}%`)}`,
+  practiceNow: 'לתרגל עכשיו',
+  practiceMore: 'לתרגל עוד',
+  targetDonePraise: 'כל הכבוד! סיימת להיום. נתראה מחר',
+  /** A rest day. `nextIn` is the days to the next practice day, null when none is known. */
+  targetRest: (kind: TargetKind, nextIn: number | null): string => {
+    const today = `היום אין תרגול ${TARGET_FOR[kind]}.`;
+    if (nextIn === null) return today;
+    return nextIn === 1
+      ? `${today} התרגול הבא מחר`
+      : `${today} התרגול הבא בעוד ${isolateLtr(String(nextIn))} ימים`;
+  },
+  myWords: 'המילים שלי',
+  wordsWaiting: (count: number) =>
+    count === 1 ? 'מילה אחת מחכה לחזרה' : `${isolateLtr(String(count))} מילים מחכות לחזרה`,
   // Phase 61 (spec D6). A tester's session of one meaning's question types.
   questionTypesLink: 'בדיקת סוגי שאלות',
   questionTypesTitle: 'סוגי שאלות',

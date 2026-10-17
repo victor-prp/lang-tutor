@@ -10,7 +10,8 @@ import { jobPayloads } from '../../support/jobs';
 import { insertListSession } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, seedUser, setTester } from '../../support/seedUser';
-import { markSeed, markStarted, readSessionRows, seedPastSession } from '../../support/sessionRows';
+import { markSeed, markStarted, readSessionPaths, readSessionRows, seedPastSession } from '../../support/sessionRows';
+import { seedTarget } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -177,6 +178,26 @@ describe('POST question-type-sessions', () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'session_open' });
     expect((await sessionRows()).length).toBe(1);
+  });
+
+  // Phase 57 (ADR 0014). The session is the main path's: a target's started session and its
+  // stock are another path's, neither refuses it nor is retired, and it never reads as theirs.
+  it("is the main path's, leaving a target path's started session and stock as they are", async () => {
+    const target = await seedTarget(t.db, { enrollmentId: ENROLLMENT, kind: 'exam', dueOn: '2030-01-13', glossIds: [word.glossIds[1]] });
+    const asked = [{ glossId: word.glossIds[1], variantId: word.variantId, lexemeId: word.lexemeId, form: 'house', lemma: 'house', translation: 'משכן' }];
+    const { sessionId: started } = await insertListSession(t.db, { userId: OWNER, enrollmentId: ENROLLMENT, asked, targetId: target });
+    await markStarted(t.db, started);
+    const { sessionId: stock } = await insertListSession(t.db, { userId: OWNER, enrollmentId: ENROLLMENT, asked, targetId: target });
+
+    const res = await create(body(['meet']));
+    expect(res.status).toBe(201);
+    const created = ((await res.json()) as { session_id: string }).session_id;
+    const rows = (await readSessionPaths(t.db, ENROLLMENT)).filter((row) => row.id !== past);
+    expect(rows).toEqual([
+      { id: started, status: 'ready', kind: 'practice', target_id: target, started: true },
+      { id: stock, status: 'ready', kind: 'practice', target_id: target, started: false },
+      { id: created, status: 'preparing', kind: 'question_types', target_id: null, started: false },
+    ]);
   });
 
   it('is 409 seed_pending while the first, seeded session waits in stock', async () => {

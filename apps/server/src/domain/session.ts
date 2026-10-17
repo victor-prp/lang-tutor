@@ -250,8 +250,8 @@ export function missedQuestions(record: SessionRecord): MissedQuestion[] {
 }
 
 /** An open session. Phase 43 (spec D1): at most one started and one in stock
- *  per enrollment (sessions_one_started_per_enrollment,
- *  sessions_one_stock_per_enrollment). */
+ *  per path (phase 57, ADR 0014: sessions_one_started_per_path,
+ *  sessions_one_stock_per_path). */
 export const OPEN_STATUSES: readonly SessionStatus[] = ['preparing', 'ready'];
 
 export function isOpen(status: SessionStatus): boolean {
@@ -281,7 +281,13 @@ export type SessionState = {
   enrollmentId: string;
   status: SessionStatus;
   source: SessionSource;
+  /** Phase 57 (spec D1). The path the session belongs to. */
+  targetId: Path;
 };
+
+/** Phase 57 (spec D1, ADR 0014). A path: a target's id, or null for the main path ("My
+ *  words"). Every session belongs to one; each path has its own stock and started session. */
+export type Path = string | null;
 
 /** Phase 43 (spec D1). What a session is built for: whether the device has a
  *  voice for the target (phase 24) and whether it can record (phase 25). */

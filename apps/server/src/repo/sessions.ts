@@ -1,9 +1,9 @@
 import type { AnswerRecord, AnswerVerdict, Question, SessionSource, SessionStatus } from '@lang-tutor/core/api';
-import { verdictCorrect } from '@lang-tutor/core/domain';
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { verdictCorrect, type QuestionType } from '@lang-tutor/core/domain';
+import { and, asc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import type { Devices, SessionRecord, SessionState, SessionSummary, SkippedType } from '../domain/session';
+import type { Devices, Path, SessionRecord, SessionState, SessionSummary, SkippedType } from '../domain/session';
 import type { Tap } from '../domain/taps';
 import type { DayAnswer } from '../domain/today';
 import {
@@ -28,10 +28,14 @@ import { canonicalOptions, questionColumns, questionFrom, withBoards } from './q
 // id is indistinguishable from an id that is merely absent.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Phase 57 (spec D1, ADR 0014). The sessions of one path: a target's, or the main path's
+ *  (target_id null). */
+const onPath = (path: Path): SQL => (path === null ? sql`s.target_id IS NULL` : sql`s.target_id = ${path}::uuid`);
+
 export function createSessionRepo(tx: Tx) {
-  // The two open-session indexes (phase 43: one in stock, one started) are the
-  // only unique constraints on this table, so a unique violation here means
-  // exactly "this enrollment already has an open session of that kind".
+  // The two open-session indexes (phase 43: one in stock, one started; phase 57: per
+  // path) are the only unique constraints on this table, so a unique violation here
+  // means exactly "this path already has an open session of that kind".
   async function insertSessionRow(values: {
     userId: string;
     enrollmentId: string;
@@ -40,6 +44,7 @@ export function createSessionRepo(tx: Tx) {
     listening: boolean;
     speaking: boolean;
     chosenOn?: string;
+    targetId?: string | null;
     kind?: 'practice' | 'question_types';
   }): Promise<string> {
     try {
@@ -94,7 +99,8 @@ export function createSessionRepo(tx: Tx) {
 
   return {
     /** A seed session: ready at once, its questions drawn from the shared pool.
-     *  Phase 43 (spec D1): every session records what it was built for. */
+     *  Phase 43 (spec D1): every session records what it was built for. Phase 57 (spec
+     *  D2): the seed is the main path's. */
     insertSession: async (
       userId: string,
       enrollmentId: string,
@@ -107,31 +113,35 @@ export function createSessionRepo(tx: Tx) {
     },
 
     /** A list session: no questions until prepare-session writes them. Phase 53 (spec
-     *  D12): `chosenOn` is the learner day its words were chosen. */
-    insertPreparingSession: (userId: string, enrollmentId: string, devices: Devices, chosenOn: string): Promise<string> =>
-      insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', chosenOn, ...devices }),
+     *  D12): `chosenOn` is the learner day its words were chosen. Phase 57 (spec D1): on
+     *  `path`. */
+    insertPreparingSession: (userId: string, enrollmentId: string, devices: Devices, chosenOn: string, path: Path): Promise<string> =>
+      insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', chosenOn, targetId: path, ...devices }),
 
     /** Phase 61 (spec D3). A tester's session of one word's question types, preparing. A list
-     *  session to every reader of `source`, chosen on no day, so no stale check replaces it. */
-    insertQuestionTypesSession: (userId: string, enrollmentId: string, devices: Devices): Promise<string> =>
-      insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', kind: 'question_types', ...devices }),
+     *  session to every reader of `source`, chosen on no day, so no stale check replaces it.
+     *  Phase 57 (ADR 0014): on `path`, which its one caller names as the main path. */
+    insertQuestionTypesSession: (userId: string, enrollmentId: string, devices: Devices, path: Path): Promise<string> =>
+      insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', kind: 'question_types', targetId: path, ...devices }),
 
     /** Phase 61 (spec D5). The chosen types a question-types session has no card for. */
     setSkippedTypes: async (sessionId: string, skipped: SkippedType[]): Promise<void> => {
       await tx.update(sessions).set({ skippedTypes: skipped }).where(eq(sessions.id, sessionId));
     },
 
-    /** Phase 43 (review C1). Serializes, per enrollment, the use cases that make
+    /** Phase 43 (review C1). Serializes, per path (phase 57), the use cases that make
      *  its next session, create and the stock job: the second waits for the
      *  first to commit, then reads what it made rather than racing it into the
-     *  index. Held to the end of the transaction. */
-    lockNextSession: async (enrollmentId: string): Promise<void> => {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`next-session:${enrollmentId}`}, 0))`);
+     *  index. Held to the end of the transaction. A use case that takes more than one
+     *  takes the main path's first, then the targets' in id order (services/stock.ts
+     *  lockPaths), so two never wait on each other. */
+    lockNextSession: async (enrollmentId: string, path: Path): Promise<void> => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`next-session:${enrollmentId}:${path ?? 'main'}`}, 0))`);
     },
 
     /** Phase 43 (spec D2). Starts a ready session: true when this call started
      *  it, false when it was started already, is not ready, or is unknown. A
-     *  second started session of the enrollment is SessionOpen. */
+     *  second started session of its path (phase 57) is SessionOpen. */
     markStarted: async (sessionId: string): Promise<boolean> => {
       if (!UUID_RE.test(sessionId)) return false;
       // Read first: a failed statement aborts the transaction, so the error's
@@ -151,9 +161,9 @@ export function createSessionRepo(tx: Tx) {
       }
     },
 
-    /** Phase 43 (spec D1, D6). The enrollment's open sessions: the started one
+    /** Phase 43 (spec D1, D6). A path's open sessions (phase 57): the started one
      *  and the one in stock, each when there is one. */
-    findOpen: async (enrollmentId: string): Promise<{ started?: SessionSummary; stock?: SessionSummary }> => {
+    findOpen: async (enrollmentId: string, path: Path): Promise<{ started?: SessionSummary; stock?: SessionSummary }> => {
       const rows = await tx.execute<{
         id: string;
         status: string;
@@ -166,7 +176,7 @@ export function createSessionRepo(tx: Tx) {
                (SELECT count(*) FROM answers a WHERE a.session_id = s.id)::int AS answered,
                (SELECT count(*) FROM session_questions q WHERE q.session_id = s.id)::int AS total
         FROM sessions s
-        WHERE s.enrollment_id = ${enrollmentId} AND s.status IN ('preparing', 'ready')`);
+        WHERE s.enrollment_id = ${enrollmentId} AND ${onPath(path)} AND s.status IN ('preparing', 'ready')`);
       const open: { started?: SessionSummary; stock?: SessionSummary } = {};
       for (const { started, ...row } of rows.rows) {
         const summary = { ...row, status: row.status as SessionStatus, source: row.source as SessionSource };
@@ -185,6 +195,30 @@ export function createSessionRepo(tx: Tx) {
         .innerJoin(questions, eq(questions.id, sessionQuestions.questionId))
         .where(eq(sessionQuestions.sessionId, sessionId));
       return rows.map((row) => row.glossId);
+    },
+
+    /** Phase 57 (spec D2, ruling T3-j). A session's cards, in position order: the gloss each
+     *  asks, its type, and whether it is one of a ladder's intro stage. */
+    /** Final review I1-c. When a session's last answer was given, or null with none: a target's
+     *  end skips its started session on that answer's learner day. */
+    findLastAnswerAt: async (sessionId: string): Promise<Date | null> => {
+      if (!UUID_RE.test(sessionId)) return null;
+      const [row] = await tx
+        .select({ ms: sql<number | null>`(extract(epoch from max(${answers.answeredAt})) * 1000)::float8` })
+        .from(answers)
+        .where(eq(answers.sessionId, sessionId));
+      return row?.ms === null || row?.ms === undefined ? null : new Date(Number(row.ms));
+    },
+
+    findSessionCards: async (sessionId: string): Promise<{ glossId: string; type: QuestionType; intro: boolean }[]> => {
+      if (!UUID_RE.test(sessionId)) return [];
+      const rows = await tx
+        .select({ glossId: questions.glossId, type: questions.type, intro: questions.intro })
+        .from(sessionQuestions)
+        .innerJoin(questions, eq(questions.id, sessionQuestions.questionId))
+        .where(eq(sessionQuestions.sessionId, sessionId))
+        .orderBy(asc(sessionQuestions.position));
+      return rows.map((row) => ({ glossId: row.glossId, type: row.type as QuestionType, intro: row.intro }));
     },
 
     /** Phase 43 (spec D3). What the enrollment's newest session was built for:
@@ -243,11 +277,13 @@ export function createSessionRepo(tx: Tx) {
      *  from before the save is no evidence, as it writes no memory (phase 35 D4).
      *  In answer order: sessions as they were created (one is answered at a time,
      *  and a stock is always created after the session it waits behind), each in
-     *  its positions' order. */
-    findAnswersOn: async (enrollmentId: string, day: string): Promise<DayAnswer[]> => {
+     *  its positions' order. Phase 57 (spec D1): each with the path of its session.
+     *  Sessions of two paths can be answered at once, so "answer order" is now creation
+     *  order across paths, which dayState's returns read, as before. */
+    findAnswersOn: async (enrollmentId: string, day: string): Promise<(DayAnswer & { targetId: Path })[]> => {
       // Phase 59 (spec D4): a tapped list word's miss, right after its card's answer.
-      const rows = await tx.execute<AnswerRow & { session_id: string }>(sql`
-        SELECT e.session_id, e.gloss_id, e.type, e.options, e.selected_option_position, e.verdict, e.retry_verdict, e.intro
+      const rows = await tx.execute<AnswerRow & { session_id: string; target_id: string | null }>(sql`
+        SELECT e.session_id, s.target_id::text AS target_id, e.gloss_id, e.type, e.options, e.selected_option_position, e.verdict, e.retry_verdict, e.intro
         FROM (
           SELECT a.session_id, q.gloss_id, q.type::text AS type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro,
                  a.answered_at, a.position, -1 AS word_index
@@ -266,7 +302,7 @@ export function createSessionRepo(tx: Tx) {
           AND e.answered_at >= ve.created_at
           AND (s.practice_day = ${day}::date OR s.status IN ('preparing', 'ready'))
         ORDER BY s.created_at, s.id, e.position, e.word_index`);
-      return rows.rows.map((row) => ({ ...decodeAnswer(row), sessionId: row.session_id }));
+      return rows.rows.map((row) => ({ ...decodeAnswer(row), sessionId: row.session_id, targetId: row.target_id }));
     },
 
     /** Phase 35 (spec D5, D10), phase 37 (D7). The glosses `day` introduced: saved
@@ -312,6 +348,7 @@ export function createSessionRepo(tx: Tx) {
           enrollmentId: sessions.enrollmentId,
           status: sessions.status,
           source: sessions.source,
+          targetId: sessions.targetId,
         })
         .from(sessions)
         .where(eq(sessions.id, sessionId))
@@ -341,8 +378,9 @@ export function createSessionRepo(tx: Tx) {
 
     /** The enrollment's newest session: whether there has been any, and
      *  (phase 43, spec D6) whether the newest failed. Served by
-     *  sessions_enrollment_created_idx. */
-    findLatest: async (enrollmentId: string): Promise<SessionSummary | undefined> => {
+     *  sessions_enrollment_created_idx. Phase 57 (spec D1): the newest of `path`'s sessions,
+     *  or of any path's. */
+    findLatest: async (enrollmentId: string, path: Path | 'any'): Promise<SessionSummary | undefined> => {
       const rows = await tx.execute<{
         id: string;
         status: string;
@@ -354,7 +392,7 @@ export function createSessionRepo(tx: Tx) {
                (SELECT count(*) FROM answers a WHERE a.session_id = s.id)::int AS answered,
                (SELECT count(*) FROM session_questions q WHERE q.session_id = s.id)::int AS total
         FROM sessions s
-        WHERE s.enrollment_id = ${enrollmentId}
+        WHERE s.enrollment_id = ${enrollmentId} AND ${path === 'any' ? sql`true` : onPath(path)}
         ORDER BY s.created_at DESC, s.id DESC
         LIMIT 1`);
       const row = rows.rows[0];

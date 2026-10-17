@@ -6,7 +6,7 @@ import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
 import type { PrepareSessionPayload } from '../../../src/domain/jobs';
-import { createFakeLogger } from '../../support/fakes';
+import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { CHOSEN_ON, NO_DEVICES } from '../../support/questions';
 import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import {
@@ -33,6 +33,7 @@ import { createSessionRepo } from '../../../src/repo/sessions';
 let t: TestDb;
 let boss: PgBoss;
 let deps: AppDeps;
+let logger: FakeLogger;
 let ns: string;
 const IT = 'e_it';
 
@@ -43,7 +44,8 @@ beforeEach(async () => {
   await seedEnrollment(t.db, { id: IT, userId: 'u_1', targetLanguage: 'it' });
   ns = mockNamespace(expect.getState().currentTestName ?? 'prepare-session-cards');
   boss = await startTestBoss(t.db);
-  deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7), boss, geminiBaseUrl: geminiBaseUrlFor(ns) });
+  logger = createFakeLogger();
+  deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7), boss, geminiBaseUrl: geminiBaseUrlFor(ns) });
 });
 
 afterEach(async () => {
@@ -93,7 +95,7 @@ async function prepared(picks: ReturnType<typeof pick>[], alternatives?: string[
   await clearNamespace(ns);
   await expectDistractors(ns, { tasks: ['meaning', 'word', 'typed'], ...(alternatives ? { alternatives } : {}) });
   await expectCheck(ns);
-  const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', IT, NO_DEVICES, CHOSEN_ON));
+  const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', IT, NO_DEVICES, CHOSEN_ON, null));
   await deps.sessions.prepareSession({ session_id: sessionId, picks: steered(picks, THREE), listening: false, speaking: false });
   const record = await deps.sessions.getSession('u_1', sessionId);
   expect(record.status).toBe('ready');
@@ -199,5 +201,58 @@ describe('the cards read the rendering’s stored accepted answers', () => {
     const typed = typedOf(questions);
     expect(typed.answer).toBe('ho');
     expect(typed.alternatives).toEqual(['io ho']);
+  });
+});
+
+// Phase 57 (spec D7, ruling T3-l). A target path's session is planned with its payload's `target`
+// flag: no type held to MAX_PER_TYPE, and no one-word speaking rule, so a card never falls back
+// to one that serves none of the target's owed work.
+describe("a target path's session (phase 57, ruling T3-l)", () => {
+  /** A target pick, recall at R 1, as the target picker makes one. */
+  const owed = (word: Saved, dimension: PrepareSessionPayload['picks'][number]['dimension']) => ({
+    ...pick(word),
+    dimension,
+    rung: 2 as const,
+    level: 1,
+    r: 1,
+    step: false,
+  });
+
+  async function preparedTarget(
+    picks: PrepareSessionPayload['picks'],
+    tasks: ('typed' | 'meaning')[],
+    devices: { listening: boolean; speaking: boolean },
+  ): Promise<string[]> {
+    await clearNamespace(ns);
+    await expectDistractors(ns, { tasks });
+    await expectCheck(ns);
+    const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', IT, devices, CHOSEN_ON, null));
+    await deps.sessions.prepareSession({ session_id: sessionId, picks, ...devices, target: true });
+    const record = await deps.sessions.getSession('u_1', sessionId);
+    expect(record.status).toBe('ready');
+    await deps.sessions.skipSession('u_1', sessionId);
+    // Each card was planned as the type it is asked as: none fell back and was refused for the
+    // model's answer to another task (phase 48's degraded typed translation would hide it).
+    expect(logger.events.filter((line) => line.event === 'card_kept_refused' || line.event === 'card_dropped')).toEqual([]);
+    return record.questions.map((question) => question.type);
+  }
+
+  it('asks a session of one speaking pick its say-translation card', async () => {
+    const parola = await saved({ lemma: 'parola', translations: ['מילה'] });
+    expect(await preparedTarget([owed(parola, 'spoken_productive')], ['typed'], { listening: false, speaking: true })).toEqual(['say_translation']);
+  });
+
+  it('keeps five typed picks typed: no type is held to four', async () => {
+    // Five words to a form: too long to say, so no sentence card is eligible and typed translation
+    // is the rung's only written card.
+    const lemmas = ['uno due tre quattro cinque', 'sei sette otto nove dieci', 'alfa beta gamma delta epsilon', 'rosso blu verde giallo nero', 'mare monte lago fiume valle'];
+    const words: Saved[] = [];
+    for (const [i, lemma] of lemmas.entries()) words.push(await saved({ lemma, translations: [`ביטוי${i}`] }));
+    const types = await preparedTarget(
+      words.map((word) => owed(word, 'written_productive')),
+      ['typed', 'typed', 'typed', 'typed', 'typed'],
+      NO_DEVICES,
+    );
+    expect(types).toEqual(Array(5).fill('typed_translation'));
   });
 });

@@ -29,8 +29,11 @@ import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
 import type { MemoryRepo } from '../repo/memory';
 import type { PhotoImportItemRow, PhotoImportRepo, PhotoImportRow } from '../repo/photoImports';
+import type { ProgressRepo } from '../repo/progress';
 import type { SessionRepo } from '../repo/sessions';
 import type { TargetEventInput, TargetRow } from '../repo/targets';
+import type { TargetSkillRepo } from '../repo/targetSkills';
+import type { TargetSkillRow } from '../domain/targetSkills';
 import type { UserRepo } from '../repo/users';
 import type { VocabularyRepo } from '../repo/vocabulary';
 import { createTargetService, type TargetService } from './targets';
@@ -114,7 +117,14 @@ const solid: MemoryState = { stability: 1000, difficulty: 5, lastDay: TODAY, rep
 const fading: MemoryState = { stability: 10, difficulty: 5, lastDay: '2026-09-30', reps: 3, lapses: 0, params: FSRS6_DEFAULT.id };
 
 const listStock = (id = 's_stock'): SessionSummary => ({ id, status: 'ready', source: 'list', answered: 0, total: 10 });
-const TARGET_STOCK = { name: STOCK_SESSION, data: { enrollment_id: 'e1', reason: 'target' }, options: { singletonKey: 'e1' } };
+/** Phase 57 (spec D2). A change asks for the main path's next stock, then for its target's. */
+const MAIN_STOCK = { name: STOCK_SESSION, data: { enrollment_id: 'e1', reason: 'target' }, options: { singletonKey: 'e1' } };
+const targetStock = (targetId: string) => ({
+  name: STOCK_SESSION,
+  data: { enrollment_id: 'e1', reason: 'target', target_id: targetId },
+  options: { singletonKey: `e1:${targetId}` },
+});
+const restocked = (targetId: string) => [MAIN_STOCK, targetStock(targetId)];
 
 type DayContext = NonNullable<Awaited<ReturnType<UserRepo['findDayContext']>>>;
 
@@ -131,7 +141,18 @@ function world(
     targets?: StoredTarget[];
     memory?: MemoryRow[];
     devices?: Devices;
+    /** The main path's open sessions. */
     open?: { started?: SessionSummary; stock?: SessionSummary };
+    /** Phase 57. Each target path's open sessions, by target id; none when not given. */
+    openOn?: Record<string, { started?: SessionSummary; stock?: SessionSummary }>;
+    /** Phase 57 (spec D13). Each target path's newest session, by target id. */
+    latestOn?: Record<string, SessionSummary>;
+    /** Phase 58. The saved glosses a level's removal finds at its level. */
+    atLevel?: string[];
+    /** Phase 57. The target skills rows read. */
+    skills?: TargetSkillRow[];
+    /** Final review I1-c. When each session was last answered; none when not given. */
+    lastAnswerAt?: Record<string, Date>;
     /** Whether retireStock finds the stock still unstarted; false when a start took it first. */
     retires?: boolean;
     gloss?: Repos['gloss'];
@@ -158,6 +179,13 @@ function world(
     deleteEntry: async ({ glossId }) => {
       calls.push(`deleteEntry ${glossId}`);
       if (saved.includes(glossId)) saved.splice(saved.indexOf(glossId), 1);
+    },
+    findGlossIdsAtLevel: async () => (setup.atLevel ?? []).map((glossId) => ({ lemma: WORDS[glossId].lemma, glossId })),
+    // Phase 58b (R2). Every saved gloss, as removing every word reads them.
+    findAllSavedGlossIds: async () => saved.map((glossId) => ({ lemma: WORDS[glossId].lemma, glossId })),
+    deleteEntries: async ({ glossIds }) => {
+      calls.push(`deleteEntries ${glossIds.join(' ')}`);
+      for (const glossId of glossIds) if (saved.includes(glossId)) saved.splice(saved.indexOf(glossId), 1);
     },
     // A target's words, as the repository reads them, keep the form as saved (final review M3).
     // The saved list (listSavedGlosses), which lowercases it, is not stubbed: a target is read
@@ -207,10 +235,17 @@ function world(
     },
     listActive: async (enrollmentId, today) =>
       [...stored.values()]
-        .filter((row) => row.enrollmentId === enrollmentId && row.dueOn > today && row.endedAt === null)
+        .filter((row) => row.enrollmentId === enrollmentId && row.dueOn >= today && row.endedAt === null)
         .sort((a, b) => a.dueOn.localeCompare(b.dueOn) || a.id.localeCompare(b.id))
         .map((row) => ({ ...plain(row), glossIds: [...row.words] })),
     listWordIds: async (id) => [...(stored.get(id)?.words ?? [])],
+    listWords: async (id) =>
+      (stored.get(id)?.words ?? []).map((glossId) => ({ glossId, addedAt: stored.get(id)!.createdAt, startedOn: null })),
+    listHolding: async (enrollmentId, glossId) =>
+      [...stored.values()]
+        .filter((row) => row.enrollmentId === enrollmentId && row.words.includes(glossId))
+        .map((row) => row.id)
+        .sort(),
     addWords: async (id, glossIds) => {
       calls.push('addWords');
       const row = stored.get(id)!;
@@ -230,6 +265,17 @@ function world(
       for (const row of left) row.words = row.words.filter((word) => word !== glossId);
       return left.map((row) => row.id).sort();
     },
+    removeGlossesFromTargets: async (enrollmentId, glossIds) => {
+      calls.push(`removeGlossesFromTargets ${glossIds.join(' ')}`);
+      const lost = new Map<string, string[]>();
+      for (const row of [...stored.values()].sort((a, b) => a.id.localeCompare(b.id))) {
+        const gone = row.words.filter((word) => glossIds.includes(word));
+        if (row.enrollmentId !== enrollmentId || gone.length === 0) continue;
+        row.words = row.words.filter((word) => !glossIds.includes(word));
+        lost.set(row.id, gone.sort());
+      }
+      return lost;
+    },
     setDueOn: async (id, dueOn) => {
       stored.get(id)!.dueOn = dueOn;
     },
@@ -247,16 +293,27 @@ function world(
 
   const retired: string[] = [];
   const session = stub<SessionRepo>({
-    lockNextSession: async () => {
-      calls.push('lockNextSession');
+    lockNextSession: async (_enrollmentId, path) => {
+      calls.push(`lockNextSession ${path ?? 'main'}`);
     },
-    findOpen: async () => setup.open ?? {},
+    // Final review I1. A started session skipped: its row changes, then its answers count.
+    transition: async (sessionId, from, to, day) => {
+      calls.push(`transition ${sessionId} ${from.join('|')} ${to} ${day}`);
+      return true;
+    },
+    resolvePendingRetry: async (sessionId) => {
+      calls.push(`resolvePendingRetry ${sessionId}`);
+    },
+    findLastAnswerAt: async (sessionId) => setup.lastAnswerAt?.[sessionId] ?? null,
+    findOpen: async (_enrollmentId, path) => (path === null ? (setup.open ?? {}) : (setup.openOn?.[path] ?? {})),
     retireStock: async (sessionId) => {
       calls.push('retireStock');
       retired.push(sessionId);
       return setup.retires ?? true;
     },
     findNewestDevices: async () => setup.devices,
+    findAnswersOn: async () => [],
+    findLatest: async (_enrollmentId, path) => (path === null ? undefined : setup.latestOn?.[path]),
   });
 
   const transaction = createFakeTransaction({
@@ -267,15 +324,36 @@ function world(
     photoImport,
     target,
     session,
+    // Phase 57 (ruling T4-k). A removal waits for a session end.
+    progress: stub<ProgressRepo>({
+      lockEnrollment: async () => {
+        calls.push('lockEnrollment');
+      },
+      lockSessionGlosses: async () => {},
+      // A skipped session with no answer writes no progress.
+      findSessionEvidence: async (sessionId) => {
+        calls.push(`findSessionEvidence ${sessionId}`);
+        return undefined;
+      },
+    }),
+    targetSkills: stub<TargetSkillRepo>({ findRows: async () => setup.skills ?? [] }),
     memory: stub<MemoryRepo>({
       findRows: async ({ glossIds }) => (setup.memory ?? []).filter((row) => glossIds.includes(row.glossId)),
     }),
     gloss: setup.gloss ?? createFakeGlossRepo(),
     dict: stub<DictRepo>({ claimLemmaRenders: async () => [] }),
-    jobs,
+    // Phase 57 (ADR 0014 R4). Each enqueue named in `calls` by its key, so a test can check
+    // that a removal asks for stocks only after the progress lock.
+    jobs: {
+      ...jobs,
+      enqueue: async (name, data, options) => {
+        calls.push(`enqueue ${options?.singletonKey ?? name}`);
+        await jobs.enqueue(name, data, options);
+      },
+    },
   });
   const service = createTargetService({ transaction, logger, now: createFakeClock(NOW), stockSaveDelaySeconds: 30 });
-  const vocabularyService = createVocabularyService({ transaction, logger, stockSaveDelaySeconds: 30 });
+  const vocabularyService = createVocabularyService({ transaction, logger, now: createFakeClock(NOW), stockSaveDelaySeconds: 30 });
   return { service, vocabularyService, logger, jobs, calls, saved, inserted, transitions, stored, events, created, retired };
 }
 
@@ -286,7 +364,8 @@ const createRequest = (over: Partial<CreateTargetRequest> = {}): CreateTargetReq
   entries: [entry('g_casa')],
   ...over,
 });
-const word = (glossId: string, readiness: string) => ({ gloss_id: glossId, form: WORDS[glossId].form, meaning: WORDS[glossId].key, readiness });
+const word = (glossId: string, over: Record<string, unknown> = {}) =>
+  expect.objectContaining({ gloss_id: glossId, form: WORDS[glossId].form, meaning: WORDS[glossId].key, ...over });
 const logged = (logger: { events: Record<string, unknown>[] }, event: string) => logger.events.filter((line) => line.event === event);
 /** Final review I3. A photo import saved through a target, logged as its own save logs it (phase
  *  26 D14), with the target named. */
@@ -307,6 +386,8 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
 
     const made = await service.create(OWNER, 'e1', createRequest({ photo_import_ids: ['i_a', 'i_b'], entries: [entry('g_cane'), entry('g_sole')] }));
 
+    // Phase 57 (spec D6): five days, two of the four words planned for today (the words added
+    // together go by gloss id), the others later.
     expect(made).toEqual({
       id: 't_new',
       kind: 'exam',
@@ -314,7 +395,15 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
       days_left: 5,
       word_count: 4,
       ready_count: 0,
-      words: [word('g_casa', 'not_started'), word('g_gatto', 'not_started'), word('g_cane', 'not_started'), word('g_sole', 'not_started')],
+      readiness_pct: 0,
+      today: { state: 'owed', done: 0, planned: 2, extra: 0, next_practice_in: 1 },
+      session: null,
+      words: [
+        word('g_casa', { today: 'owed', starts_in: null }),
+        word('g_gatto', { today: 'later', starts_in: 1 }),
+        word('g_cane', { today: 'owed', starts_in: null }),
+        word('g_sole', { today: 'later', starts_in: 2 }),
+      ],
     });
     // The photos are one review, so i_b's gatto is i_a's: saved once. Then the typed words.
     expect(inserted).toEqual([
@@ -337,7 +426,7 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
         sessionId: null,
       },
     ]);
-    expect(jobs.enqueued.at(-1)).toEqual(TARGET_STOCK);
+    expect(jobs.enqueued.slice(-2)).toEqual(restocked('t_new'));
     // Each photo's save as its own logs it, counting the words it gave: gatto is i_a's.
     expect(logger.events).toEqual([
       importSaved('i_a', 2),
@@ -420,7 +509,7 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
     await expect(refusal).rejects.toMatchObject({ reason: 'due_date' });
     expect(saved).toEqual([]);
     expect(created).toEqual([]);
-    expect(calls).not.toContain('lockNextSession');
+    expect(calls.filter((call) => call.startsWith('lockNextSession'))).toEqual([]);
   });
 
   it('counts from the learner’s own day: in Honolulu the 15th is still a day off', async () => {
@@ -455,7 +544,7 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
   it('takes the next-session lock before it locks an import or writes anything', async () => {
     const { service, calls } = world({ imports: [photo('i_a', ['g_casa'])] });
     await service.create(OWNER, 'e1', createRequest({ photo_import_ids: ['i_a'] }));
-    expect(calls.indexOf('lockNextSession')).toBeLessThan(calls.indexOf('findImportForUpdate i_a'));
+    expect(calls.indexOf('lockNextSession main')).toBeLessThan(calls.indexOf('findImportForUpdate i_a'));
     expect(calls.indexOf('findImportForUpdate i_a')).toBeLessThan(calls.indexOf('insertTarget'));
   });
 });
@@ -468,7 +557,7 @@ describe('the stock a change leaves (ruling R-D12b, Review Focus 3)', () => {
 
     expect(retired).toEqual(['s_stock']);
     expect(calls.indexOf('insertTarget')).toBeLessThan(calls.indexOf('retireStock'));
-    expect(jobs.enqueued.at(-1)).toEqual(TARGET_STOCK);
+    expect(jobs.enqueued.slice(-2)).toEqual(restocked('t_new'));
     expect(logged(logger, 'session_retired')).toEqual([
       { event: 'session_retired', enrollment_id: 'e1', session_id: 's_stock', reason: 'target_changed' },
     ]);
@@ -482,7 +571,7 @@ describe('the stock a change leaves (ruling R-D12b, Review Focus 3)', () => {
     const { service, retired, jobs, logger } = world({ open });
     await service.create(OWNER, 'e1', createRequest());
     expect(retired).toEqual([]);
-    expect(jobs.enqueued.at(-1)).toEqual(TARGET_STOCK);
+    expect(jobs.enqueued.slice(-2)).toEqual(restocked('t_new'));
     expect(logged(logger, 'session_retired')).toEqual([]);
   });
 
@@ -490,7 +579,7 @@ describe('the stock a change leaves (ruling R-D12b, Review Focus 3)', () => {
     const { service, retired, jobs, logger } = world({ open: { stock: listStock() }, retires: false });
     await service.create(OWNER, 'e1', createRequest());
     expect(retired).toEqual(['s_stock']);
-    expect(jobs.enqueued.at(-1)).toEqual(TARGET_STOCK);
+    expect(jobs.enqueued.slice(-2)).toEqual(restocked('t_new'));
     expect(logged(logger, 'session_retired')).toEqual([]);
   });
 });
@@ -512,7 +601,7 @@ describe('addWords', () => {
       { targetId: 't1', kind: 'words_added', before: null, after: { gloss_ids: ['g_gatto', 'g_cane'] }, actorUserId: OWNER, sessionId: null },
     ]);
     expect(retired).toEqual(['s_stock']);
-    expect(jobs.enqueued.at(-1)).toEqual(TARGET_STOCK);
+    expect(jobs.enqueued.slice(-2)).toEqual(restocked('t1'));
     expect(logger.events).toEqual([
       importSaved('i_a', 2, 0, 0, 't1'),
       { event: 'target_changed', target_id: 't1', change: 'words_added', count: 2, unread_photo_count: 0 },
@@ -573,19 +662,20 @@ describe('addWords', () => {
     await expect(service.addWords(OWNER, 't_none', { photo_import_ids: [], entries: [entry('g_casa')] })).rejects.toBeInstanceOf(TargetNotFound);
   });
 
-  it('takes the next-session lock before it locks the target: a stock being written holds the one and references the other', async () => {
+  it("takes the next-session locks, the main path's then the target's, before it locks the target: a stock being written holds the one and references the other", async () => {
     const { service, calls } = world({ targets: [target()] });
     await service.addWords(OWNER, 't1', { photo_import_ids: [], entries: [entry('g_gatto')] });
-    expect(calls.slice(0, 3)).toEqual(['findTarget', 'lockNextSession', 'findTargetForUpdate']);
+    expect(calls.slice(0, 4)).toEqual(['findTarget', 'lockNextSession main', 'lockNextSession t1', 'findTargetForUpdate']);
   });
 });
 
 describe('removeWord', () => {
-  it('takes the word out, keeps it saved, logs words_removed, and retires the stock', async () => {
-    const { service, stored, saved, events, retired, logger } = world({
+  it("takes the word out, keeps it saved, logs words_removed, and retires the stocks: the main path's and the target's", async () => {
+    const { service, stored, saved, events, retired, logger, calls } = world({
       saved: ['g_casa', 'g_gatto'],
       targets: [target({ words: ['g_casa', 'g_gatto'] })],
       open: { stock: listStock() },
+      openOn: { t1: { stock: listStock('s_own') } },
     });
 
     await service.removeWord(OWNER, 't1', 'g_casa');
@@ -595,7 +685,18 @@ describe('removeWord', () => {
     expect(events).toEqual([
       { targetId: 't1', kind: 'words_removed', before: { gloss_ids: ['g_casa'] }, after: { reason: 'removed' }, actorUserId: OWNER, sessionId: null },
     ]);
-    expect(retired).toEqual(['s_stock']);
+    expect(retired).toEqual(['s_stock', 's_own']);
+    // Ruling T4-k, ADR 0014 R4: the progress lock once the stocks are retired (a skip of one
+    // holds its row, then that lock), before the word goes, and before the next stocks are
+    // asked for (a session end holds that lock, then enqueues its path's stock).
+    expect(calls.slice(calls.indexOf('findTargetForUpdate') + 1)).toEqual([
+      'retireStock',
+      'retireStock',
+      'lockEnrollment',
+      'insertEvent words_removed',
+      'enqueue e1',
+      'enqueue e1:t1',
+    ]);
     expect(logged(logger, 'target_changed')).toEqual([{ event: 'target_changed', target_id: 't1', change: 'words_removed', count: 1 }]);
   });
 
@@ -672,11 +773,61 @@ describe('end', () => {
       { targetId: 't1', kind: 'ended_early', before: null, after: { due_on: DUE }, actorUserId: OWNER, sessionId: null },
     ]);
     expect(retired).toEqual(['s_stock']);
-    expect(jobs.enqueued.at(-1)).toEqual(TARGET_STOCK);
+    expect(jobs.enqueued.slice(-2)).toEqual(restocked('t1'));
     expect(logger.events).toEqual([
       { event: 'target_ended', target_id: 't1', how: 'early' },
       { event: 'session_retired', enrollment_id: 'e1', session_id: 's_stock', reason: 'target_changed' },
     ]);
+  });
+
+  // Final review I1, ADR 0014 R4. Its path's started session would otherwise stay open forever,
+  // its words answered and met "today" every day: it is skipped in the end's transaction, its
+  // answers counted once as a skip's, in R4's order: the paths' locks, the target's row, the
+  // stocks retired and the session's row, the progress lock, then the stocks asked for.
+  it("skips its path's started session, its answers counted once, in ADR 0014 R4's order", async () => {
+    const { service, calls, retired, logger } = world({
+      targets: [target()],
+      open: { stock: listStock() },
+      openOn: { t1: { started: { ...listStock('s_started'), answered: 3 }, stock: listStock('s_t1') } },
+    });
+
+    await service.end(OWNER, 't1');
+
+    expect(retired).toEqual(['s_stock', 's_t1']);
+    expect(calls).toEqual([
+      'findTarget',
+      'lockNextSession main',
+      'lockNextSession t1',
+      'findTargetForUpdate',
+      'insertEvent ended_early',
+      'retireStock',
+      'retireStock',
+      `transition s_started preparing|ready skipped ${TODAY}`,
+      'resolvePendingRetry s_started',
+      'lockEnrollment',
+      'findSessionEvidence s_started',
+      'enqueue e1',
+      'enqueue e1:t1',
+    ]);
+    expect(logged(logger, 'session_skipped')).toEqual([{ event: 'session_skipped', session_id: 's_started', reason: 'target_ended' }]);
+  });
+
+  // Correction (ruling I1-c). The skip counts for the learner day of its last answer, so the
+  // reviews it writes are dated when they were given: here, the day before.
+  it("counts the skip for the day of the session's last answer", async () => {
+    const { service, calls } = world({
+      targets: [target()],
+      openOn: { t1: { started: { ...listStock('s_started'), answered: 2 } } },
+      lastAnswerAt: { s_started: new Date('2026-10-14T20:00:00Z') },
+    });
+    await service.end(OWNER, 't1');
+    expect(calls).toContain('transition s_started preparing|ready skipped 2026-10-14');
+  });
+
+  it('skips nothing when its path has no started session', async () => {
+    const { service, calls } = world({ targets: [target()], openOn: { t1: { stock: listStock('s_t1') } } });
+    await service.end(OWNER, 't1');
+    expect(calls.filter((call) => call.startsWith('transition') || call === 'lockEnrollment')).toEqual([]);
   });
 
   it('is a no-op on a target ended already', async () => {
@@ -706,43 +857,84 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
     ...memory('g_sole', ALL_SKILLS, fading),
   ];
 
-  it('reads each word’s readiness for the date in its weakest live skill, with the form saved and the key', async () => {
+  const skillRows = (glossId: string, halves: number, dims: readonly Dimension[] = ALL_SKILLS): TargetSkillRow[] =>
+    dims.map((dimension) => ({ targetId: 't1', glossId, dimension, halves, sessionId: null, day: null }));
+
+  it('reads each word’s day: readiness in percent, its state, what it owes, and its skills in points under the cap', async () => {
     const { service } = world({
-      saved: READ,
-      targets: [target({ words: READ })],
-      memory: MEMORY,
+      saved: ['g_casa', 'g_gatto', 'g_cane'],
+      targets: [target({ words: ['g_casa', 'g_gatto', 'g_cane'] })],
+      // g_casa at 10 points in every skill, g_gatto at 7 in one skill of five.
+      skills: [
+        ...skillRows('g_casa', 20),
+        ...skillRows('g_gatto', 0).map((row, i) => (i === 0 ? { ...row, halves: 14 } : row)),
+      ],
       devices: { listening: true, speaking: true },
     });
 
-    expect(await service.getTarget(OWNER, 't1')).toEqual({
-      id: 't1',
-      kind: 'exam',
-      due_on: DUE,
-      days_left: 5,
-      word_count: 5,
-      ready_count: 2,
-      words: [
-        word('g_casa', 'ready'),
-        word('g_lupo', 'ready'),
-        word('g_gatto', 'on_the_way'),
-        word('g_cane', 'not_started'),
-        word('g_sole', 'almost'),
-      ],
-    });
-  });
-
-  it('reads the bars of the target’s kind: what is "almost" for an exam is ready for homework', async () => {
-    const { service } = world({ saved: READ, targets: [target({ kind: 'homework', words: READ })], memory: MEMORY, devices: { listening: true, speaking: true } });
-    const homework = await service.getTarget(OWNER, 't1');
-    expect(homework.words.find((kept) => kept.gloss_id === 'g_sole')?.readiness).toBe('ready');
-    expect(homework.ready_count).toBe(3);
-  });
-
-  it('reads the live skills of the newest session: with no device to speak or listen, the spoken ones do not count', async () => {
-    const { service } = world({ saved: READ, targets: [target({ words: READ })], memory: MEMORY });
     const read = await service.getTarget(OWNER, 't1');
-    expect(read.words.find((kept) => kept.gloss_id === 'g_gatto')?.readiness).toBe('ready');
-    expect(read.ready_count).toBe(3);
+
+    expect(read.words[0]).toEqual({
+      gloss_id: 'g_casa',
+      form: 'casa',
+      meaning: WORDS.g_casa.key,
+      readiness_pct: 100,
+      today: 'owed',
+      owed: [],
+      starts_in: null,
+      skills: ALL_SKILLS.map((dimension) => ({ dimension, value: 10, cap: expect.any(Number) })),
+    });
+    expect(read.words[1]).toMatchObject({ gloss_id: 'g_gatto', readiness_pct: 14 });
+    expect(read.words[1].skills[0]).toMatchObject({ dimension: 'written_receptive', value: 7 });
+    // Points, never halves: a cap of 20 halves is 10 points.
+    expect(read.words.every((w) => w.skills.every((skill) => skill.cap <= 10))).toBe(true);
+  });
+
+  it('counts a word ready only at 100: ready_count is 0 while none is, whatever FSRS says of the date', async () => {
+    const none = world({
+      saved: READ,
+      targets: [target({ words: READ })],
+      memory: MEMORY,
+      skills: skillRows('g_casa', 19),
+      devices: { listening: true, speaking: true },
+    });
+    const first = await none.service.getTarget(OWNER, 't1');
+    expect(first.ready_count).toBe(0);
+    expect(first.words.find((w) => w.gloss_id === 'g_casa')?.readiness_pct).toBe(95);
+
+    const some = world({
+      saved: READ,
+      targets: [target({ words: READ })],
+      memory: MEMORY,
+      skills: skillRows('g_casa', 20),
+      devices: { listening: true, speaking: true },
+    });
+    const second = await some.service.getTarget(OWNER, 't1');
+    expect(second.ready_count).toBe(1);
+    expect(second.readiness_pct).toBe(Math.floor(100 / 5));
+  });
+
+  it('answers the target path’s session: the started one, else the stock, else a failed newest, else none', async () => {
+    const started = { ...listStock('s_started'), status: 'ready' as const, answered: 2 };
+    const failed: SessionSummary = { id: 's_failed', status: 'failed', source: 'list', answered: 0, total: 0 };
+    const done: SessionSummary = { id: 's_done', status: 'completed', source: 'list', answered: 5, total: 5 };
+    const sessionOf = async (setup: Parameters<typeof world>[0]) =>
+      (await world({ saved: ['g_casa'], targets: [target()], ...setup }).service.getTarget(OWNER, 't1')).session;
+
+    expect(await sessionOf({ openOn: { t1: { started, stock: listStock() } } })).toEqual({
+      session_id: 's_started',
+      status: 'ready',
+      source: 'list',
+      answered: 2,
+      total: 10,
+      started: true,
+    });
+    // Final review N1: started though nothing is answered yet, so the app resumes it.
+    expect(await sessionOf({ openOn: { t1: { started: { ...started, answered: 0 } } } })).toMatchObject({ answered: 0, started: true });
+    expect(await sessionOf({ openOn: { t1: { stock: listStock() } } })).toMatchObject({ session_id: 's_stock', started: false });
+    expect(await sessionOf({ latestOn: { t1: failed } })).toMatchObject({ session_id: 's_failed', status: 'failed', started: false });
+    expect(await sessionOf({ latestOn: { t1: done } })).toBeNull();
+    expect(await sessionOf({})).toBeNull();
   });
 
   it('lists the active targets nearest date first, with today, and leaves out the ended, the past and another list’s', async () => {
@@ -753,7 +945,9 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
         target({ id: 't_far', kind: 'homework', dueOn: '2026-11-01', words: ['g_casa', 'g_gatto'] }),
         target({ id: 't_near', dueOn: '2026-10-18', words: ['g_gatto'] }),
         target({ id: 't_ended', endedAt: new Date(NOW - 60_000) }),
-        target({ id: 't_past', dueOn: TODAY }),
+        // Phase 57 (spec D10): active through its due date, and gone the day after.
+        target({ id: 't_today', dueOn: TODAY }),
+        target({ id: 't_past', dueOn: '2026-10-14' }),
         target({ id: 't_other', enrollmentId: 'e2' }),
       ],
     });
@@ -761,8 +955,10 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
     expect(await service.list(OWNER, 'e1')).toEqual({
       today: TODAY,
       targets: [
-        { id: 't_near', kind: 'exam', due_on: '2026-10-18', days_left: 3, word_count: 1, ready_count: 0 },
-        { id: 't_far', kind: 'homework', due_on: '2026-11-01', days_left: 17, word_count: 2, ready_count: 1 },
+        // A target on its due date is listed, due_today (phase 57, spec D10).
+        expect.objectContaining({ id: 't_today', kind: 'exam', due_on: TODAY, days_left: 0, word_count: 1, ready_count: 0, today: expect.objectContaining({ state: 'due_today' }) }),
+        expect.objectContaining({ id: 't_near', kind: 'exam', due_on: '2026-10-18', days_left: 3, word_count: 1 }),
+        expect.objectContaining({ id: 't_far', kind: 'homework', due_on: '2026-11-01', days_left: 17, word_count: 2 }),
       ],
     });
   });
@@ -823,7 +1019,17 @@ describe('vocabulary.unsave (spec D1, Review Focus 2)', () => {
 
     await vocabularyService.unsave(OWNER, 'e1', 'g_old_casa');
 
-    expect(calls).toEqual(['lockNextSession', 'deleteEntry g_casa', 'removeGlossFromTargets g_casa', 'insertEvent words_removed']);
+    expect(calls).toEqual([
+      'lockNextSession main',
+      'lockNextSession main',
+      'lockNextSession t1',
+      'lockEnrollment',
+      'deleteEntry g_casa',
+      'removeGlossFromTargets g_casa',
+      'insertEvent words_removed',
+      'enqueue e1',
+      'enqueue e1:t1',
+    ]);
     expect(events.map((event) => event.before)).toEqual([{ gloss_ids: ['g_casa'] }]);
   });
 
@@ -846,19 +1052,173 @@ describe('vocabulary.unsave (spec D1, Review Focus 2)', () => {
     await vocabularyService.unsave(OWNER, 'e1', 'g_casa');
 
     expect(retired).toEqual(['s_stock']);
-    expect(jobs.enqueued).toEqual([TARGET_STOCK]);
+    expect(jobs.enqueued).toEqual([MAIN_STOCK, targetStock('t1'), targetStock('t2')]);
     expect(logged(logger, 'session_retired')).toEqual([
       { event: 'session_retired', enrollment_id: 'e1', session_id: 's_stock', reason: 'target_changed' },
     ]);
-    // The next-session lock before the entry is deleted, as every change to a target takes it.
+    // The next-session locks before the entry is deleted, as every change to a target takes them:
+    // the main path's, then its targets' (lockPaths); the stocks retired, then the progress lock,
+    // then the next stocks asked for (ADR 0014 R4).
     expect(calls).toEqual([
-      'lockNextSession',
+      'lockNextSession main',
+      'lockNextSession main',
+      'lockNextSession t1',
+      'lockNextSession t2',
+      'retireStock',
+      'lockEnrollment',
       'deleteEntry g_casa',
       'removeGlossFromTargets g_casa',
       'insertEvent words_removed',
       'insertEvent words_removed',
-      'retireStock',
+      'enqueue e1',
+      'enqueue e1:t1',
+      'enqueue e1:t2',
     ]);
+  });
+});
+
+// Phase 58 meets phase 57 (ruling M1). Removing a level is an unsave of every word at it, by
+// path: the main path's stock and the stock of each active target that held a removed word are
+// retired before the progress lock and asked for again after it (ADR 0014 R4).
+describe('vocabulary.removeWords (phase 58, ruling M1; 58b, ruling M2)', () => {
+  const wordsRemoved = (job: { name: string; data: object; options: object }) => ({ ...job, data: { ...job.data, reason: 'words_removed' } });
+
+  it('locks the main path and the active targets holding a removed word, retires their stocks, and asks for them after the progress lock', async () => {
+    const { vocabularyService, calls, retired, jobs, logger, events, stored, saved } = world({
+      saved: ['g_casa', 'g_gatto', 'g_cane'],
+      atLevel: ['g_casa', 'g_gatto'],
+      targets: [
+        target({ words: ['g_casa', 'g_cane'] }),
+        target({ id: 't2', words: ['g_cane'] }),
+        // Ended: it loses the word, but has no path to restock.
+        target({ id: 't3', words: ['g_gatto'], endedAt: new Date(NOW - 60_000) }),
+      ],
+      open: { stock: listStock() },
+      openOn: { t1: { stock: listStock('s_t1') }, t2: { stock: listStock('s_t2') } },
+    });
+
+    expect(await vocabularyService.removeWords(OWNER, 'e1', { level: 1 })).toEqual({ removed_words: 2, removed_glosses: 2 });
+
+    expect(saved).toEqual(['g_cane']);
+    expect([...stored.values()].map((row) => [row.id, row.words])).toEqual([
+      ['t1', ['g_cane']],
+      ['t2', ['g_cane']],
+      ['t3', []],
+    ]);
+    expect(events.map((event) => [event.targetId, event.kind, event.before, event.after])).toEqual([
+      ['t1', 'words_removed', { gloss_ids: ['g_casa'] }, { reason: 'unsaved' }],
+      ['t3', 'words_removed', { gloss_ids: ['g_gatto'] }, { reason: 'unsaved' }],
+    ]);
+    // t2 held no word at the level: its stock stays.
+    expect(retired).toEqual(['s_stock', 's_t1']);
+    expect(jobs.enqueued).toEqual([wordsRemoved(MAIN_STOCK), wordsRemoved(targetStock('t1'))]);
+    expect(logged(logger, 'session_retired')).toEqual([
+      { event: 'session_retired', enrollment_id: 'e1', session_id: 's_stock', reason: 'words_removed' },
+      { event: 'session_retired', enrollment_id: 'e1', session_id: 's_t1', reason: 'words_removed' },
+    ]);
+    expect(calls).toEqual([
+      'lockNextSession main',
+      'lockNextSession main',
+      'lockNextSession t1',
+      'retireStock',
+      'retireStock',
+      'lockEnrollment',
+      'deleteEntries g_casa g_gatto',
+      'removeGlossesFromTargets g_casa g_gatto',
+      'insertEvent words_removed',
+      'insertEvent words_removed',
+      'enqueue e1',
+      'enqueue e1:t1',
+    ]);
+  });
+
+  it("retires and asks for the main path's stock alone when no target held a removed word (final review I1)", async () => {
+    const { vocabularyService, calls, retired, jobs, events } = world({
+      saved: ['g_casa', 'g_gatto'],
+      atLevel: ['g_gatto'],
+      targets: [target()],
+      open: { stock: listStock() },
+      openOn: { t1: { stock: listStock('s_t1') } },
+    });
+
+    await vocabularyService.removeWords(OWNER, 'e1', { level: 1 });
+
+    expect(events).toEqual([]);
+    expect(retired).toEqual(['s_stock']);
+    expect(jobs.enqueued).toEqual([wordsRemoved(MAIN_STOCK)]);
+    expect(calls).toEqual([
+      'lockNextSession main',
+      'lockNextSession main',
+      'retireStock',
+      'lockEnrollment',
+      'deleteEntries g_gatto',
+      'removeGlossesFromTargets g_gatto',
+      'enqueue e1',
+    ]);
+  });
+
+  it('takes no lock past the main path and touches no stock when nothing is at the level', async () => {
+    const { vocabularyService, calls, retired, jobs } = world({ saved: ['g_casa'], targets: [target()], open: { stock: listStock() } });
+
+    expect(await vocabularyService.removeWords(OWNER, 'e1', { level: 3 })).toEqual({ removed_words: 0, removed_glosses: 0 });
+
+    expect(calls).toEqual(['lockNextSession main']);
+    expect(retired).toEqual([]);
+    expect(jobs.enqueued).toEqual([]);
+  });
+
+  // Phase 58b (ruling M2). Every word is the same removal, whatever the level: each active
+  // target holding a word goes by its path. One holding none can only be empty, which has no
+  // stock (NoSavedWords): it is neither locked nor retired nor restocked.
+  it('removes every saved word on all, by path in the same order', async () => {
+    const { vocabularyService, calls, retired, jobs, events, stored, saved } = world({
+      saved: ['g_casa', 'g_gatto', 'g_cane'],
+      targets: [target({ words: ['g_casa'] }), target({ id: 't2', words: [] }), target({ id: 't3', words: ['g_cane', 'g_gatto'] })],
+      open: { stock: listStock() },
+      openOn: { t1: { stock: listStock('s_t1') }, t3: { stock: listStock('s_t3') } },
+    });
+
+    expect(await vocabularyService.removeWords(OWNER, 'e1', { all: true })).toEqual({ removed_words: 3, removed_glosses: 3 });
+
+    expect(saved).toEqual([]);
+    expect([...stored.values()].map((row) => [row.id, row.words])).toEqual([
+      ['t1', []],
+      ['t2', []],
+      ['t3', []],
+    ]);
+    expect(events.map((event) => [event.targetId, event.before])).toEqual([
+      ['t1', { gloss_ids: ['g_casa'] }],
+      ['t3', { gloss_ids: ['g_cane', 'g_gatto'] }],
+    ]);
+    expect(retired).toEqual(['s_stock', 's_t1', 's_t3']);
+    expect(jobs.enqueued).toEqual([wordsRemoved(MAIN_STOCK), wordsRemoved(targetStock('t1')), wordsRemoved(targetStock('t3'))]);
+    expect(calls).toEqual([
+      'lockNextSession main',
+      'lockNextSession main',
+      'lockNextSession t1',
+      'lockNextSession t3',
+      'retireStock',
+      'retireStock',
+      'retireStock',
+      'lockEnrollment',
+      'deleteEntries g_casa g_gatto g_cane',
+      'removeGlossesFromTargets g_casa g_gatto g_cane',
+      'insertEvent words_removed',
+      'insertEvent words_removed',
+      'enqueue e1',
+      'enqueue e1:t1',
+      'enqueue e1:t3',
+    ]);
+  });
+
+  it('takes no lock past the main path and touches no stock when the list is empty', async () => {
+    const { vocabularyService, calls, retired, jobs } = world({ saved: [], targets: [target({ words: [] })], open: { stock: listStock() } });
+
+    expect(await vocabularyService.removeWords(OWNER, 'e1', { all: true })).toEqual({ removed_words: 0, removed_glosses: 0 });
+
+    expect(calls).toEqual(['lockNextSession main']);
+    expect(retired).toEqual([]);
+    expect(jobs.enqueued).toEqual([]);
   });
 });
 

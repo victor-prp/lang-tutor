@@ -87,10 +87,10 @@ describe('create (spec D10, ruling R-D9)', () => {
     const union = [apple.gloss_id, bread.gloss_id, cheese.gloss_id, dates.gloss_id];
     expect(made).toMatchObject({ kind: 'exam', due_on: DUE, days_left: 5, word_count: 4, ready_count: 0 });
     expect(made.words).toEqual([
-      { gloss_id: apple.gloss_id, form: 'apple', meaning: 'תפוח', readiness: 'not_started' },
-      { gloss_id: bread.gloss_id, form: 'bread', meaning: 'לחם', readiness: 'not_started' },
-      { gloss_id: cheese.gloss_id, form: 'cheese', meaning: 'גבינה', readiness: 'not_started' },
-      { gloss_id: dates.gloss_id, form: 'dates', meaning: 'תמרים', readiness: 'not_started' },
+      expect.objectContaining({ gloss_id: apple.gloss_id, form: 'apple', meaning: 'תפוח', readiness_pct: 0, today: expect.any(String) }),
+      expect.objectContaining({ gloss_id: bread.gloss_id, form: 'bread', meaning: 'לחם', readiness_pct: 0, today: expect.any(String) }),
+      expect.objectContaining({ gloss_id: cheese.gloss_id, form: 'cheese', meaning: 'גבינה', readiness_pct: 0, today: expect.any(String) }),
+      expect.objectContaining({ gloss_id: dates.gloss_id, form: 'dates', meaning: 'תמרים', readiness_pct: 0, today: expect.any(String) }),
     ]);
     expect(await readSavedGlossIds(t.db, E)).toEqual([...union].sort());
     expect((await deps.photoImports.getImport('u_1', first)).status).toBe('saved');
@@ -116,7 +116,7 @@ describe('create (spec D10, ruling R-D9)', () => {
   it('shows a word in the form it was saved from, capitals kept (final review M3)', async () => {
     const monday = await word('Monday', 'יום שני');
     const made = await deps.targets.create('u_1', E, { kind: 'homework', due_on: DUE, photo_import_ids: [], entries: [typed(monday)] });
-    expect(made.words).toEqual([{ gloss_id: monday.gloss_id, form: 'Monday', meaning: 'יום שני', readiness: 'not_started' }]);
+    expect(made.words).toEqual([expect.objectContaining({ gloss_id: monday.gloss_id, form: 'Monday', meaning: 'יום שני', readiness_pct: 0, today: expect.any(String) })]);
     expect((await deps.targets.getTarget('u_1', made.id)).words.map((shown) => shown.form)).toEqual(['Monday']);
   });
 
@@ -179,7 +179,7 @@ describe('the stock removing a level leaves (phase 58)', () => {
 
     await deps.vocabulary.removeWords('u_1', E, { level: 1 });
 
-    expect(await readStockRow(t.db, stock)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY });
+    expect(await readStockRow(t.db, stock)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY, targetId: null });
     expect(await jobPayloads(t.db, STOCK_SESSION)).toContainEqual({ enrollment_id: E, reason: 'words_removed' });
     expect(logger.events).toContainEqual({ event: 'session_retired', enrollment_id: E, session_id: stock, reason: 'words_removed' });
   });
@@ -212,7 +212,7 @@ describe('the stock a change leaves (ruling R-D12b)', () => {
 
     await deps.targets.create('u_1', E, { kind: 'exam', due_on: DUE, photo_import_ids: [], entries: words.slice(0, 2) });
 
-    expect(await readStockRow(t.db, stock)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY });
+    expect(await readStockRow(t.db, stock)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY, targetId: null });
     expect(await jobPayloads(t.db, STOCK_SESSION)).toContainEqual({ enrollment_id: E, reason: 'target' });
     expect(logger.events).toContainEqual({ event: 'session_retired', enrollment_id: E, session_id: stock, reason: 'target_changed' });
   });
@@ -232,7 +232,7 @@ describe('the stock a change leaves (ruling R-D12b)', () => {
 
     await deps.vocabulary.unsave('u_1', E, words[0].gloss_id);
 
-    expect(await readStockRow(t.db, stock)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY });
+    expect(await readStockRow(t.db, stock)).toEqual({ status: 'skipped', practiceDay: null, chosenOn: DAY, targetId: null });
     expect(logger.events).toContainEqual({ event: 'session_retired', enrollment_id: E, session_id: stock, reason: 'target_changed' });
   });
 
@@ -247,7 +247,7 @@ describe('the stock a change leaves (ruling R-D12b)', () => {
 
     await deps.vocabulary.unsave('u_1', E, glossIds[0]);
 
-    expect(await readStockRow(t.db, stock)).toEqual({ status: 'preparing', practiceDay: null, chosenOn: DAY });
+    expect(await readStockRow(t.db, stock)).toEqual({ status: 'preparing', practiceDay: null, chosenOn: DAY, targetId: null });
     expect(logger.events.filter((line) => line.event === 'session_retired')).toEqual([]);
   });
 });

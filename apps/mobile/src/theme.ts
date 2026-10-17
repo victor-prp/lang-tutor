@@ -10,6 +10,12 @@ export const colors = {
   correctSurface: '#E7F6EC',
   wrong: '#C92A2A',
   wrongSurface: '#FCEBEB',
+  // Phase 57 (spec D11). A target's today bar past the plan (extra-words.html), its rest
+  // day's line, and its date's good luck.
+  correctLight: '#7FD3A0',
+  primarySurface: '#EEF2FB',
+  warmSurface: '#FFF6E0',
+  warmText: '#7A5200',
 } as const;
 
 export const spacing = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 } as const;

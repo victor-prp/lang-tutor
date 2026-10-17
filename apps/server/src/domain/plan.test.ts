@@ -390,6 +390,27 @@ describe('planCards: same-day returns (phase 37 D6)', () => {
   });
 });
 
+// Phase 57 (spec D7, ruling T3-l).
+describe("planCards: a target path's session", () => {
+  const TARGET: PlanInput = { ...ALL, target: true };
+  /** A target pick: recall at R 1, as the target picker makes one. */
+  const owed = (n: number, dimension: Dimension, over: Partial<PlanPick> = {}): PlanPick =>
+    pick(n, { dimension, rung: 2, level: 1, r: 1, ...over });
+
+  it('holds no type to MAX_PER_TYPE: every pick keeps the card of its rung', () => {
+    const list = Array.from({ length: 6 }, (_, i) => owed(i, SP, { speakable: false }));
+    expect(count(typesByPick(list), 'typed_translation')).toBe(MAX_PER_TYPE);
+    expect(typesByPick(list, TARGET)).toEqual(Array(6).fill('typed_translation'));
+  });
+
+  it("asks a session of one word its speaking card: the target's only owed work can be speaking", () => {
+    expect(typesByPick([owed(0, SK)], ALL)).not.toContain('say_translation');
+    expect(typesByPick([owed(0, SK)], TARGET)).toEqual(['say_translation']);
+    // Still only when the device records.
+    expect(typesByPick([owed(0, SK)], { ...NONE, target: true })).not.toContain('say_translation');
+  });
+});
+
 // Phase 55 (spec D2).
 describe('ladderCards', () => {
   it('opens with meet, read aloud and letter tiles when the session can speak and the form takes tiles', () => {

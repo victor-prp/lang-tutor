@@ -39,15 +39,15 @@ const record = (count: number): SessionRecord => ({
   status: count === QUESTIONS.length ? 'completed' : 'ready',
   source: 'list',
 });
-const READY: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'ready', source: 'list' };
+const READY: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'ready', source: 'list', targetId: null };
 const ENROLLMENT: Enrollment = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'en', created_at: '' };
 const EVIDENCE: SessionEvidence = {
   enrollmentId: 'e1',
   day: DAY,
   lastAnsweredAt: '2026-10-05 12:00:00+00',
   answers: [
-    { glossId: 's1', type: 'multiple_choice', correct: true },
-    { glossId: 'sX', type: 'multiple_choice', correct: true },
+    { glossId: 's1', type: 'multiple_choice', correct: true, helped: false, answeredAt: '2026-10-05T11:59:00.000000Z' },
+    { glossId: 'sX', type: 'multiple_choice', correct: true, helped: false, answeredAt: '2026-10-05T12:00:00.000000Z' },
   ],
 };
 const ROWS: ProgressRow[] = DIMENSIONS.map((dimension) => ({
@@ -123,6 +123,10 @@ function world(opts: {
   });
   const jobs = createFakeJobRepo();
   const progress = stub<ProgressRepo>({
+    // Phase 57 (rulings T4-i, T4-k). The enrollment's ends one at a time, before anything else.
+    lockEnrollment: async () => {
+      calls.steps.push('progress');
+    },
     lockSessionGlosses: async () => {
       calls.steps.push('lock');
     },
@@ -233,10 +237,10 @@ describe('progress when a session ends', () => {
     ]);
   });
 
-  it('share-locks the practised glosses before it reads the evidence', async () => {
+  it("takes the enrollment's progress lock, then share-locks the practised glosses, before it reads the evidence", async () => {
     const { service, calls } = world({ record: record(9) });
     await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
-    expect(calls.steps).toEqual(['lock', 'evidence']);
+    expect(calls.steps).toEqual(['progress', 'lock', 'evidence']);
   });
 
   it('an answer that does not complete the session writes no progress', async () => {
@@ -399,7 +403,7 @@ describe('progress and the second try', () => {
     const { service, calls } = world({ record: pendingLast() });
     const result = await service.submitAnswer('u1', SESSION, 'q9', { text: 'lantern' }, { retry: true });
     expect(calls.completed).toBe(1);
-    expect(calls.steps).toEqual(['resolve', 'lock', 'evidence']);
+    expect(calls.steps).toEqual(['resolve', 'progress', 'lock', 'evidence']);
     expect(calls.snapshots).toHaveLength(1);
     expect(result).toMatchObject({ complete: true, status: 'completed' });
   });
@@ -407,7 +411,7 @@ describe('progress and the second try', () => {
   it('a skip gives a pending retry up before it reads the evidence, and writes progress once', async () => {
     const { service, calls } = world({ record: pendingLast() });
     await service.skipSession('u1', SESSION);
-    expect(calls.steps).toEqual(['give up', 'lock', 'evidence']);
+    expect(calls.steps).toEqual(['give up', 'progress', 'lock', 'evidence']);
     expect(calls.updated).toHaveLength(1);
     expect(calls.snapshots).toHaveLength(1);
   });

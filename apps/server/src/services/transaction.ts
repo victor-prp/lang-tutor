@@ -12,6 +12,7 @@ import type { ReminderRepo } from '../repo/reminders';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { TargetRepo } from '../repo/targets';
+import type { TargetSkillRepo } from '../repo/targetSkills';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
 import type { VocabularyRepo } from '../repo/vocabulary';
@@ -41,6 +42,8 @@ export type Repos = {
   reminders: ReminderRepo;
   // Phase 53 (spec D1, D8). Targets, their words, their log and each session's split.
   target: TargetRepo;
+  // Phase 57 (spec D3, D4). Target skills and their log, written when a session ends.
+  targetSkills: TargetSkillRepo;
 };
 
 /**

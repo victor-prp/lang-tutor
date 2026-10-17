@@ -20,6 +20,40 @@ export async function skipSession(request: APIRequestContext, sessionId: string)
   expect((await request.post(`${API_URL}/api/sessions/${sessionId}/skip`)).ok()).toBe(true);
 }
 
+/** An enrollment's first session is the seed: made and skipped unplayed, so a spec starts
+ *  past it. */
+export async function skipSeed(request: APIRequestContext, enrollmentId: string): Promise<void> {
+  const made = await request.post(`${API_URL}/api/sessions`, { data: { enrollment_id: enrollmentId } });
+  expect(made.ok(), await made.text()).toBe(true);
+  await skipSession(request, ((await made.json()) as CreateSessionResponse).session_id);
+}
+
+/** Phase 57 (spec D1). A path's current session: a target's with `targetId`, else My
+ *  words' (the main path). */
+export async function readCurrent(
+  request: APIRequestContext,
+  enrollmentId: string,
+  targetId?: string,
+): Promise<CurrentSessionResponse> {
+  const query = targetId ? `?target_id=${targetId}` : '';
+  const res = await request.get(`${API_URL}/api/enrollments/${enrollmentId}/sessions/current${query}`);
+  expect(res.ok(), await res.text()).toBe(true);
+  return (await res.json()) as CurrentSessionResponse;
+}
+
+/** Phase 57 (spec D2). A path's session once it is ready to play, a target's with
+ *  `targetId`, else My words': its stock, made as its words came or as its last session
+ *  started. Needs a generation stub registered (cards.ts' expectGeneration). */
+export async function readyPathSession(request: APIRequestContext, enrollmentId: string, targetId?: string): Promise<string> {
+  let sessionId = '';
+  await expect(async () => {
+    const { current } = await readCurrent(request, enrollmentId, targetId);
+    expect(current?.status, JSON.stringify(current)).toBe('ready');
+    sessionId = current!.session_id;
+  }).toPass({ timeout: 60_000 });
+  return sessionId;
+}
+
 /**
  * Phase 54. Skips a list session stocked before every word of a burst of saves
  * was in, so the next one holds them all. The seed's start asks for a stock
@@ -27,10 +61,7 @@ export async function skipSession(request: APIRequestContext, sessionId: string)
  * then holds only the first word. A learner never saves that fast; a spec does.
  */
 export async function retireStock(request: APIRequestContext): Promise<void> {
-  const enrollmentId = await enrollmentIdOf(request);
-  const res = await request.get(`${API_URL}/api/enrollments/${enrollmentId}/sessions/current`);
-  expect(res.ok(), await res.text()).toBe(true);
-  const { current } = (await res.json()) as CurrentSessionResponse;
+  const { current } = await readCurrent(request, await enrollmentIdOf(request));
   if (current && current.source === 'list' && current.answered === 0) await skipSession(request, current.session_id);
 }
 
@@ -99,6 +130,16 @@ export async function answerLadderRight(
     if (next.complete) return next;
     question = next.question;
   }
+}
+
+/** Phase 57. Answers a whole ready session right over the API: every card is one of a new
+ *  word's ladder, which is all a session of new words asks (a target's first, spec D7). */
+export async function answerSessionRight(request: APIRequestContext, sessionId: string): Promise<void> {
+  const res = await request.get(`${API_URL}/api/sessions/${sessionId}`);
+  expect(res.ok(), await res.text()).toBe(true);
+  const view = (await res.json()) as SessionView;
+  expect(view.question, JSON.stringify(view)).not.toBeNull();
+  expect((await answerLadderRight(request, sessionId, view.question!)).complete).toBe(true);
 }
 
 /**

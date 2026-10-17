@@ -11,6 +11,7 @@ import { createFakeLogger } from '../../support/fakes';
 import { jobPayloads, startTestBoss, stopTestBoss } from '../../support/jobs';
 import { insertListSession } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
+import { seedTarget } from '../../support/targetRows';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
@@ -107,6 +108,39 @@ describe('the stock job', () => {
     // A second run finds the stock there and builds nothing.
     await sessions.stockSession({ enrollment_id: E, reason: 'complete' });
     expect(await jobPayloads(t.db, PREPARE_SESSION)).toHaveLength(1);
+  });
+
+  // Phase 57 (spec D2, ADR 0014). One key per path: a start on each path is a job of its own,
+  // and each builds its own path's stock.
+  it("keys a stock per path, and builds each path's stock beside its started session", async () => {
+    const dog = await savedWord('dog', 'כלב');
+    const cat = await savedWord('cat', 'חתול');
+    const owl = await savedWord('owl', 'ינשוף');
+    const exam = await seedTarget(t.db, { enrollmentId: E, kind: 'exam', dueOn: '2099-01-01', glossIds: [dog.glossId, cat.glossId] });
+    const main = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [owl], types: ['multiple_choice'] });
+    const own = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [dog], types: ['multiple_choice'], targetId: exam });
+
+    await sessions.startSession('u_1', main.sessionId, { listening: false, speaking: false });
+    await sessions.startSession('u_1', own.sessionId, { listening: false, speaking: false });
+
+    expect(await stockJobs()).toEqual([
+      { singleton_key: E, held: false },
+      { singleton_key: `${E}:${exam}`, held: false },
+    ]);
+    const [forMain, forExam] = (await jobPayloads(t.db, STOCK_SESSION)) as StockSessionPayload[];
+    expect(forExam).toEqual({ enrollment_id: E, reason: 'start', listening: false, speaking: false, target_id: exam });
+    await sessions.stockSession(forMain);
+    await sessions.stockSession(forExam);
+
+    const prepared = (await jobPayloads(t.db, PREPARE_SESSION)) as PrepareSessionPayload[];
+    expect(prepared).toHaveLength(2);
+    const [mainStock, examStock] = prepared;
+    // The main path asks only the word no target holds; the exam's, only its own.
+    expect(mainStock.picks.map((pick) => pick.gloss_id)).toEqual([owl.glossId]);
+    expect(examStock).toMatchObject({ target: true });
+    expect([dog.glossId, cat.glossId]).toEqual(expect.arrayContaining(examStock.picks.map((pick) => pick.gloss_id)));
+    expect((await sessions.currentSession('u_1', E)).current?.id).toBe(main.sessionId);
+    expect((await sessions.currentSession('u_1', E, exam)).current?.id).toBe(own.sessionId);
   });
 
   it('holds a save back half a minute under a key of its own, and a burst of saves is one job, held past the last', async () => {

@@ -37,6 +37,8 @@ describe('POST /api/sessions in the published document', () => {
     const doc = await openApiDocument();
     const body = doc.paths['/api/sessions'].post.requestBody;
     expect(body.content['application/json'].schema.required).toEqual(['enrollment_id']);
+    // Phase 57 (spec D1, D13): the path, optional, so a request that names none is the main path's.
+    expect(body.content['application/json'].schema.properties.target_id).toEqual({ type: 'string', minLength: 1 });
   });
 
   // The published 400 must describe the body the server actually returns, which
@@ -598,7 +600,9 @@ describe('the target endpoints in the published document (phase 53)', () => {
     const doc = await openApiDocument();
     const list = doc.paths[TARGETS].get.responses['200'].content['application/json'].schema;
     expect(list.required.sort()).toEqual(['targets', 'today']);
-    expect(list.properties.targets.items.required.sort()).toEqual(['days_left', 'due_on', 'id', 'kind', 'ready_count', 'word_count']);
+    const SUMMARY = ['days_left', 'due_on', 'id', 'kind', 'readiness_pct', 'ready_count', 'session', 'today', 'word_count'];
+    expect(list.properties.targets.items.required.sort()).toEqual(SUMMARY);
+    expect(list.properties.targets.items.properties.today.properties.state.enum).toEqual(['owed', 'done', 'rest', 'due_today']);
     for (const [path, method, status] of [
       [TARGETS, 'post', '201'],
       [TARGET, 'get', '200'],
@@ -606,9 +610,12 @@ describe('the target endpoints in the published document (phase 53)', () => {
       [WORDS, 'post', '200'],
     ]) {
       const target = doc.paths[path][method].responses[status].content['application/json'].schema;
-      expect(target.required.sort()).toEqual(['days_left', 'due_on', 'id', 'kind', 'ready_count', 'word_count', 'words']);
-      expect(target.properties.words.items.required.sort()).toEqual(['form', 'gloss_id', 'meaning', 'readiness']);
-      expect(target.properties.words.items.properties.readiness.enum).toEqual(['not_started', 'on_the_way', 'almost', 'ready']);
+      expect(target.required.sort()).toEqual([...SUMMARY, 'words'].sort());
+      expect(target.properties.words.items.required.sort()).toEqual(
+        ['form', 'gloss_id', 'meaning', 'owed', 'readiness_pct', 'skills', 'starts_in', 'today'],
+      );
+      expect(target.properties.words.items.properties.today.enum).toEqual(['owed', 'done', 'extra', 'later']);
+      expect(target.properties.words.items.properties.readiness).toBeUndefined();
     }
   });
 
@@ -644,8 +651,20 @@ describe('phase 19 paths in the published document', () => {
     const doc = await openApiDocument();
     expect(doc.paths['/api/sessions/{id}'].get).toBeDefined();
     expect(Object.keys(doc.paths['/api/sessions/{id}/skip'].post.responses).sort()).toEqual(['200', '401', '403', '404', '409']);
-    expect(Object.keys(doc.paths['/api/enrollments/{id}/sessions/current'].get.responses).sort()).toEqual(['200', '401', '403', '404']);
+    expect(Object.keys(doc.paths['/api/enrollments/{id}/sessions/current'].get.responses).sort()).toEqual(['200', '400', '401', '403', '404']);
     expect(Object.keys(doc.paths[NEXT_STEP].post.responses)).toContain('409');
+  });
+});
+
+// Phase 57 (spec D1, D11, D13).
+describe('GET /api/enrollments/{id}/sessions/current in the published document', () => {
+  it("takes the path as an optional target_id, and answers the path's words waiting", async () => {
+    const doc = await openApiDocument();
+    const op = doc.paths['/api/enrollments/{id}/sessions/current'].get;
+    expect(op.parameters).toContainEqual(expect.objectContaining({ in: 'query', name: 'target_id', required: false }));
+    const schema = op.responses['200'].content['application/json'].schema;
+    expect(schema.required).toContain('due_count');
+    expect(schema.properties.due_count.type).toBe('integer');
   });
 });
 

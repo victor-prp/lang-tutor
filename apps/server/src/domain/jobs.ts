@@ -100,6 +100,10 @@ export const PrepareSessionPayloadSchema = z.object({
   question_types: z.array(QuestionTypeSchema).min(1).optional(),
   // Phase 24's `ordinal`, the rotation's step, is gone with the rotation (phase
   // 35, spec D6). A job enqueued before the deploy still parses: the key is dropped.
+  // Phase 57 (spec D7, ruling T3-l). A target path's session: its picks are planned with no
+  // type held to MAX_PER_TYPE and with no one-word speaking rule, so a card never falls back
+  // to one that serves no owed work. Absent in a job enqueued before the deploy: the main path.
+  target: z.boolean().optional(),
 });
 export type PrepareSessionPayload = z.infer<typeof PrepareSessionPayloadSchema>;
 
@@ -178,7 +182,8 @@ export const acceptRenderingKey = (payload: AcceptRenderingPayload): string =>
   `${payload.variant_id}:${payload.sense_id}:${payload.user_language_code}`;
 
 /** Phase 43 (spec D3). Builds an enrollment's next session in stock, when it
- *  has none: the list branch of create, run beside the session in progress. */
+ *  has none: the list branch of create, run beside the session in progress.
+ *  Phase 57 (spec D2): one path's, the main path's or a target's. */
 export const STOCK_SESSION = 'stock-session';
 /** One transaction of reads, a few writes and an enqueue: a minute is generous. */
 export const STOCK_SESSION_EXPIRY_SECONDS = 60;
@@ -198,6 +203,9 @@ export const StockSessionPayloadSchema = z.object({
   // enrollment's newest session's.
   listening: z.boolean().optional(),
   speaking: z.boolean().optional(),
+  // Phase 57 (spec D2, ADR 0014). The target whose path the stock is for; absent for the
+  // main path, as in every job enqueued before the deploy.
+  target_id: z.string().min(1).optional(),
 });
 export type StockSessionPayload = z.infer<typeof StockSessionPayloadSchema>;
 

@@ -32,11 +32,37 @@ const TARGET: Target = {
   days_left: 5,
   word_count: 1,
   ready_count: 0,
-  words: [{ gloss_id: 'g1', form: 'apple', meaning: 'תפוח', readiness: 'not_started' }],
+  readiness_pct: 0,
+  today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1 },
+  session: null,
+  words: [
+    {
+      gloss_id: 'g1',
+      form: 'apple',
+      meaning: 'תפוח',
+      readiness_pct: 0,
+      today: 'owed',
+      owed: [],
+      starts_in: null,
+      skills: [{ dimension: 'written_receptive', value: 0, cap: 3.5 }],
+    },
+  ],
 };
 const LIST: TargetList = {
   today: '2030-01-08',
-  targets: [{ id: T, kind: 'exam', due_on: '2030-01-13', days_left: 5, word_count: 1, ready_count: 0 }],
+  targets: [
+    {
+      id: T,
+      kind: 'exam',
+      due_on: '2030-01-13',
+      days_left: 5,
+      word_count: 1,
+      ready_count: 0,
+      readiness_pct: 0,
+      today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1 },
+      session: { session_id: 's1', status: 'ready', source: 'list', answered: 0, total: 10, started: false },
+    },
+  ],
 };
 
 const ENTRY = { gloss_id: 'g1', variant_id: 'v1' };

@@ -1,19 +1,13 @@
-import { SESSION_LENGTH, retrievability, type Dimension, type MemoryState } from '@lang-tutor/core/domain';
+import { retrievability, type Dimension, type MemoryState } from '@lang-tutor/core/domain';
 
-import {
-  EXAM_RUN_UP_DAYS,
-  HOMEWORK_LAST_DAY_SLOTS,
-  TARGET_ALMOST,
-  TARGET_READY,
-  TARGET_STEADY_SLOTS,
-} from './chooseConstants';
+import { TARGET_ALMOST, TARGET_READY } from './chooseConstants';
 
 /**
- * Phase 53 (spec D4-D7). The rules that split a practice session between a learner's
- * targets (a word list with a due date) and their normal practice: how ready a word is
- * for the date, how many slots a target asks for, how the slots are shared, and how
- * many new words a target owes today. Pure: the days are passed in as text and no clock
- * is read (ADR 0001 R3).
+ * Phase 53 (spec D1, D4). A learner's targets (a word list with a due date): when one is
+ * active, and how ready a word is for the date by its FSRS memory. Phase 57 (spec D1, D9,
+ * §8): the split of a session between targets is gone with paths, and FSRS readiness is
+ * the recorded yardstick beside the target skills (session_targets.fsrs_ready_count), never
+ * shown. Pure: the days are passed in as text and no clock is read (ADR 0001 R3).
  */
 
 export const TARGET_KINDS = ['homework', 'exam'] as const;
@@ -23,8 +17,17 @@ export type TargetKind = (typeof TARGET_KINDS)[number];
 export const READINESS = ['not_started', 'on_the_way', 'almost', 'ready'] as const;
 export type Readiness = (typeof READINESS)[number];
 
-/** Spec D5, D8. Why a target asked for the slots it did. */
-export type ShareReason = 'exclusive' | 'run_up' | 'not_ready' | 'steady';
+/** Phase 57 (spec D10, ruling P2). A target is active from its creation through its due
+ *  date, unless ended early: its path is on home and its words leave the main path. */
+export function activeOn(target: { endedAt: unknown; dueOn: string }, today: string): boolean {
+  return target.endedAt === null && today <= target.dueOn;
+}
+
+/** Phase 53 (spec D1), phase 57 (spec D10). A target is open to change while it is active and
+ *  its date is still to come: on the date it is refused, as before. */
+export function openOn(target: { endedAt: unknown; dueOn: string }, today: string): boolean {
+  return target.endedAt === null && today < target.dueOn;
+}
 
 const SPEAKING: Dimension = 'spoken_productive';
 
@@ -58,93 +61,4 @@ export function readinessOf(kind: TargetKind, recall: number | null): Readiness 
   if (recall >= TARGET_READY[kind]) return 'ready';
   if (recall >= TARGET_ALMOST[kind]) return 'almost';
   return 'on_the_way';
-}
-
-/**
- * Spec D5, as amended (the graded wish). The slots a target asks of a session, out of
- * SESSION_LENGTH, and why. An exam with one day left takes every slot from everything else
- * (exclusive, D6), and within its run-up asks for every slot, ready or not. Otherwise the wish
- * falls from SESSION_LENGTH toward the kind's steady share as the share of ready words rises:
- * the slots above the steady share in proportion to the words not yet ready, rounded up, so
- * one word not ready still asks for one slot more. On a homework's last day the wish is at
- * least HOMEWORK_LAST_DAY_SLOTS. A target with no words asks for its steady share; its pool
- * has nothing to pick, so the slots pass on, to the main path too (phase 55, spec D5: unlike a
- * target's leftovers). daysLeft is at least 1 while the target is active.
- */
-export function targetWish(
-  kind: TargetKind,
-  daysLeft: number,
-  readyCount: number,
-  wordCount: number,
-): { wish: number; exclusive: boolean; reason: ShareReason } {
-  if (kind === 'exam') {
-    if (daysLeft <= 1) return { wish: SESSION_LENGTH, exclusive: true, reason: 'exclusive' as const };
-    if (daysLeft <= EXAM_RUN_UP_DAYS) return { wish: SESSION_LENGTH, exclusive: false, reason: 'run_up' as const };
-  }
-  const steady = TARGET_STEADY_SLOTS[kind];
-  // An integer numerator, divided once: 1 − readyCount / wordCount in floating point can land a
-  // hair above a whole number and round up a slot too many.
-  const graded = wordCount === 0 ? steady : steady + Math.ceil(((SESSION_LENGTH - steady) * (wordCount - readyCount)) / wordCount);
-  if (kind === 'homework' && daysLeft <= 1) {
-    return {
-      wish: Math.max(HOMEWORK_LAST_DAY_SLOTS, graded),
-      exclusive: false,
-      reason: graded > HOMEWORK_LAST_DAY_SLOTS ? ('not_ready' as const) : ('run_up' as const),
-    };
-  }
-  return { wish: graded, exclusive: false, reason: readyCount < wordCount ? ('not_ready' as const) : ('steady' as const) };
-}
-
-export type SplitInput = { targetId: string; dueOn: string; wish: number; exclusive: boolean };
-
-const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-/** The order every tie in splitSlots resolves by: the nearer dueOn, then the smaller targetId. */
-const nearer = (a: SplitInput, b: SplitInput) => compare(a.dueOn, b.dueOn) || compare(a.targetId, b.targetId);
-
-/**
- * Spec D6. Any exclusive: the exclusive ones share total evenly, the rest 0. Else wishes
- * summing to at most total are granted; else proportional by largest remainder. Every tie
- * (remainder, even share) goes to the nearer dueOn, then the smaller targetId. Every input
- * id is a key of the result. Wishes and total are whole numbers.
- */
-export function splitSlots(wishes: readonly SplitInput[], total: number): Map<string, number> {
-  const slots = new Map<string, number>(wishes.map((input) => [input.targetId, 0]));
-
-  const exclusive = wishes.filter((input) => input.exclusive).sort(nearer);
-  if (exclusive.length > 0) {
-    const each = Math.floor(total / exclusive.length);
-    const odd = total - each * exclusive.length;
-    exclusive.forEach((input, i) => slots.set(input.targetId, each + (i < odd ? 1 : 0)));
-    return slots;
-  }
-
-  const asked = wishes.reduce((sum, input) => sum + input.wish, 0);
-  if (asked <= total) {
-    for (const input of wishes) slots.set(input.targetId, input.wish);
-    return slots;
-  }
-
-  // Largest remainder. A target's exact share is wish * total / asked: it gets the whole part,
-  // and the slots left over go one each to the largest remainders. In integers, so two equal
-  // remainders are exactly equal and the tie rule decides.
-  const shares = wishes.map((input) => ({
-    input,
-    whole: Math.floor((input.wish * total) / asked),
-    remainder: (input.wish * total) % asked,
-  }));
-  const odd = total - shares.reduce((sum, share) => sum + share.whole, 0);
-  shares.sort((a, b) => b.remainder - a.remainder || nearer(a.input, b.input));
-  shares.forEach((share, i) => slots.set(share.input.targetId, share.whole + (i < odd ? 1 : 0)));
-  return slots;
-}
-
-/**
- * Spec D7, ruling R-D7. The new words a target still owes today so that all its words are
- * met before its last day: today's even share of the unmet words and those already met
- * today, over the days left before the last day (at least one), less those already met
- * today. A floor for the target's run, not a cap.
- */
-export function owedNew(unmet: number, metToday: number, daysLeft: number): number {
-  const days = Math.max(1, daysLeft - 1);
-  return Math.max(0, Math.ceil((unmet + metToday) / days) - metToday);
 }

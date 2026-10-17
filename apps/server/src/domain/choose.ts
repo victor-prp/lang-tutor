@@ -59,8 +59,10 @@ export type ChoiceInput = {
 };
 
 /** Phase 37 (spec D3). `SPEAK` is a gloss the speaking pick moved to spoken
- *  production (D4); a return or a due word it takes keeps its class. */
-export type ChoiceClass = 'STEP' | 'NEW' | 'DUE' | 'EXPAND' | 'NOT_DUE' | 'DONE' | 'SPEAK';
+ *  production (D4); a return or a due word it takes keeps its class. Phase 57 (spec D7):
+ *  `TARGET`, a target session's pick chosen from target skills (targetPicker.ts), whose
+ *  ladders are `NEW`. */
+export type ChoiceClass = 'STEP' | 'NEW' | 'DUE' | 'EXPAND' | 'NOT_DUE' | 'DONE' | 'SPEAK' | 'TARGET';
 
 /** `level` and `r` are the chosen dimension's, for the job's card choice; `r` is
  *  null for a dimension with no memory yet. Phase 54 (spec D2, D3): `ladder`, a NEW pick
@@ -114,6 +116,25 @@ export function expectedSuccess(r: number | null, fourOption: boolean, rung: 1 |
  *  does not decide. A return is recall whatever this says (D1). */
 export function rungFor(r: number | null): 1 | 2 {
   return r !== null && r >= RUNG_R ? 2 : 1;
+}
+
+/**
+ * Phase 57 (spec D11). The glosses chooseWords calls due on `today`, by their memory alone: a
+ * gloss whose weakest live skill with memory is at or below R_TARGET, as its DUE class reads
+ * it. Sorted. Home's "words waiting" on the main path.
+ */
+export function dueGlosses(
+  memory: readonly { glossId: string; dimension: Dimension; state: MemoryState }[],
+  live: readonly Dimension[],
+  today: string,
+): string[] {
+  const weakest = new Map<string, number>();
+  for (const row of memory) {
+    if (!live.includes(row.dimension)) continue;
+    const r = retrievability(row.state, today);
+    weakest.set(row.glossId, Math.min(weakest.get(row.glossId) ?? 1, r));
+  }
+  return [...weakest].filter(([, r]) => r <= R_TARGET).map(([glossId]) => glossId).sort();
 }
 
 /** Ruling 3: the rung's best card is four-option at rung 1, typed at rung 2. */

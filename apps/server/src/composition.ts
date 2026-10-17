@@ -21,6 +21,7 @@ import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
 import { createTargetRepo } from './repo/targets';
+import { createTargetSkillRepo } from './repo/targetSkills';
 import { createEnrollmentRepo } from './repo/enrollments';
 import { createGrantRepo } from './repo/grants';
 import { createUserRepo } from './repo/users';
@@ -135,6 +136,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     pronunciation: createPronunciationRepo(tx),
     reminders: createReminderRepo(tx),
     target: createTargetRepo(tx),
+    targetSkills: createTargetSkillRepo(tx),
   };
 }
 
@@ -361,7 +363,7 @@ export function createServerDeps(io: {
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations,
-    vocabulary: createVocabularyService({ transaction, logger: io.logger, stockSaveDelaySeconds: io.stockSaveDelaySeconds }),
+    vocabulary: createVocabularyService({ transaction, logger: io.logger, now: io.now, stockSaveDelaySeconds: io.stockSaveDelaySeconds }),
     grants: createGrantService({ transaction, logger: io.logger }),
     reminders,
     // Phase 26. Handed the lookup use case itself, so a row is looked up exactly

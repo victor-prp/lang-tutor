@@ -1,8 +1,12 @@
 import { sql } from 'drizzle-orm';
+import type { PgBoss } from 'pg-boss';
 
 import type { Db, Tx } from '../../src/db/client';
 import { createDictRepo } from '../../src/repo/dictionary';
 import { createGlossRepo } from '../../src/repo/glosses';
+import { createJobRepo } from '../../src/repo/jobs';
+import { createProgressRepo } from '../../src/repo/progress';
+import { STOCK_SESSION } from '../../src/domain/jobs';
 
 /**
  * Phase 31. Runs `work` in a transaction that stays open until `release()`, so a
@@ -76,4 +80,60 @@ export async function waitForBlockedQuery(db: Db, timeoutMs = 10_000): Promise<v
     if (Date.now() > deadline) throw new Error(`no query blocked on a lock within ${timeoutMs} ms`);
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+}
+
+/** Phase 57 (rulings T4-i, T4-k). An enrollment's progress lock held open: a session end, paused
+ *  before it reads its evidence. */
+export function holdProgressLock(db: Db, enrollmentId: string) {
+  return holdOpen(db, async (tx) => {
+    await createProgressRepo(tx).lockEnrollment(enrollmentId);
+  });
+}
+
+/** Phase 57 (ADR 0014 R4). A session end paused after its progress lock: `finish()` lets it ask
+ *  for its path's next stock (the main path's, under the enrollment's key), as an ending does,
+ *  and commit. `ready` resolves once the lock is held; `done` settles with the transaction. */
+export function holdSessionEnd(db: Db, boss: PgBoss, enrollmentId: string): { ready: Promise<void>; finish: () => void; done: Promise<void> } {
+  let finish!: () => void;
+  let markReady!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    markReady = resolve;
+  });
+  const done = db.transaction(async (tx) => {
+    try {
+      await createProgressRepo(tx).lockEnrollment(enrollmentId);
+    } finally {
+      markReady();
+    }
+    await gate;
+    await createJobRepo(tx, boss).enqueue(STOCK_SESSION, { enrollment_id: enrollmentId, reason: 'complete' }, { singletonKey: enrollmentId });
+  });
+  return { ready, finish, done };
+}
+
+/** Final review N2 (ADR 0014 R4). A session end paused between its two locks: it holds the
+ *  session's row, as completing it does, and `finish()` lets it take the enrollment's progress
+ *  lock and commit. `ready` resolves once the row is held; `done` settles with the transaction. */
+export function holdSessionRowEnd(db: Db, sessionId: string, enrollmentId: string): { ready: Promise<void>; finish: () => void; done: Promise<void> } {
+  let finish!: () => void;
+  let markReady!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    markReady = resolve;
+  });
+  const done = db.transaction(async (tx) => {
+    try {
+      await tx.execute(sql`update sessions set status = status where id = ${sessionId}`);
+    } finally {
+      markReady();
+    }
+    await gate;
+    await createProgressRepo(tx).lockEnrollment(enrollmentId);
+  });
+  return { ready, finish, done };
 }

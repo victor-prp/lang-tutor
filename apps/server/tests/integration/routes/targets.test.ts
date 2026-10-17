@@ -136,10 +136,13 @@ describe('POST /api/enrollments/{id}/targets', () => {
         days_left: 5,
         word_count: 3,
         ready_count: 0,
+        readiness_pct: 0,
+        today: expect.objectContaining({ state: 'owed' }),
+        session: null,
         words: [
-          { gloss_id: apple.gloss_id, form: 'apple', meaning: 'תפוח', readiness: 'not_started' },
-          { gloss_id: bread.gloss_id, form: 'bread', meaning: 'לחם', readiness: 'not_started' },
-          { gloss_id: cheese.gloss_id, form: 'cheese', meaning: 'גבינה', readiness: 'not_started' },
+          expect.objectContaining({ gloss_id: apple.gloss_id, form: 'apple', meaning: 'תפוח', readiness_pct: 0, today: expect.any(String) }),
+          expect.objectContaining({ gloss_id: bread.gloss_id, form: 'bread', meaning: 'לחם', readiness_pct: 0, today: expect.any(String) }),
+          expect.objectContaining({ gloss_id: cheese.gloss_id, form: 'cheese', meaning: 'גבינה', readiness_pct: 0, today: expect.any(String) }),
         ],
       },
     });
@@ -245,8 +248,28 @@ describe('GET /api/enrollments/{id}/targets', () => {
       body: {
         today: DAY,
         targets: [
-          { id: sooner.id, kind: 'exam', due_on: DUE, days_left: 5, word_count: 2, ready_count: 0 },
-          { id: later.id, kind: 'homework', due_on: '2030-01-20', days_left: 12, word_count: 1, ready_count: 0 },
+          {
+            id: sooner.id,
+            kind: 'exam',
+            due_on: DUE,
+            days_left: 5,
+            word_count: 2,
+            ready_count: 0,
+            readiness_pct: 0,
+            today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1 },
+            session: null,
+          },
+          {
+            id: later.id,
+            kind: 'homework',
+            due_on: '2030-01-20',
+            days_left: 12,
+            word_count: 1,
+            ready_count: 0,
+            readiness_pct: 0,
+            today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 3 },
+            session: null,
+          },
         ],
       },
     });
@@ -256,14 +279,17 @@ describe('GET /api/enrollments/{id}/targets', () => {
     expect(await call('GET', createUrl)).toEqual({ status: 200, body: { today: DAY, targets: [] } });
   });
 
-  it('leaves out a target that was ended and one whose date has come', async () => {
+  it('leaves out a target that was ended and one whose date has passed, and keeps one due today (phase 57, spec D10)', async () => {
     const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
     const kept = await made('exam', DUE, apple);
     const ended = await made('exam', '2030-01-15', apple);
     expect(await call('POST', '/targets/' + ended.id + '/end')).toEqual({ status: 204, body: '' });
-    await seedTarget(t.db, { enrollmentId: E, kind: 'homework', dueOn: DAY, glossIds: [bread.gloss_id] });
+    await seedTarget(t.db, { enrollmentId: E, kind: 'homework', dueOn: '2030-01-07', glossIds: [bread.gloss_id] });
+    const dueToday = await seedTarget(t.db, { enrollmentId: E, kind: 'homework', dueOn: DAY, glossIds: [bread.gloss_id] });
 
-    expect((await listed()).targets.map((target) => target.id)).toEqual([kept.id]);
+    expect((await listed()).targets.map((target) => target.id)).toEqual([dueToday, kept.id]);
+    // On its date a target is due_today: the day's work is the due-date exam, nothing owed.
+    expect((await listed()).targets[0]).toMatchObject({ id: dueToday, days_left: 0, ready_count: 0, today: { state: 'due_today' } });
   });
 
   it('answers 404 for an enrollment that does not exist', async () => {
@@ -300,13 +326,15 @@ describe('PATCH /api/targets/{id}', () => {
     const apple = await word('apple', 'תפוח');
     const created = await made('exam', DUE, apple);
 
-    expect(await call('PATCH', '/targets/' + created.id, { due_on: '2030-01-20' })).toEqual({
+    // The date moves the whole day (cap, plan), so only what names the target is compared.
+    expect(await call('PATCH', '/targets/' + created.id, { due_on: '2030-01-20' })).toMatchObject({
       status: 200,
-      body: { ...created, due_on: '2030-01-20', days_left: 12 },
+      body: { id: created.id, kind: 'exam', due_on: '2030-01-20', days_left: 12, word_count: 1 },
     });
-    expect(await call('PATCH', '/targets/' + created.id, { due_on: '2030-01-10' })).toEqual({
+    // The date moves the whole day (cap, plan), so only what names the target is compared.
+    expect(await call('PATCH', '/targets/' + created.id, { due_on: '2030-01-10' })).toMatchObject({
       status: 200,
-      body: { ...created, due_on: '2030-01-10', days_left: 2 },
+      body: { id: created.id, kind: 'exam', due_on: '2030-01-10', days_left: 2, word_count: 1 },
     });
     expect(await read(created.id)).toMatchObject({ due_on: '2030-01-10' });
     expect(await eventKinds(created.id)).toEqual(['created', 'date_changed', 'date_changed']);

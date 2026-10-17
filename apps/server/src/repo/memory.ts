@@ -11,7 +11,32 @@ import type { MemoryRow } from '../domain/memoryUpdate';
  * the vocabulary entry) and only once that dimension has been answered.
  */
 export function createMemoryRepo(tx: Tx) {
+  const asRow = (row: typeof glossMemory.$inferSelect): MemoryRow => ({
+    glossId: row.glossId,
+    dimension: row.dimension as Dimension,
+    state: {
+      stability: row.stability,
+      difficulty: row.difficulty,
+      lastDay: row.lastDay,
+      reps: row.reps,
+      lapses: row.lapses,
+      params: row.params,
+    },
+    reachedOn: row.reachedOn,
+  });
+
   return {
+    /** Phase 57 (spec D11). Every row of the enrollment: its saved glosses' memory, which home
+     *  counts the words due from without reading the saved list. */
+    findEnrollmentRows: async (enrollmentId: string): Promise<MemoryRow[]> => {
+      const rows = await tx
+        .select()
+        .from(glossMemory)
+        .where(eq(glossMemory.enrollmentId, enrollmentId))
+        .orderBy(glossMemory.glossId, glossMemory.dimension);
+      return rows.map(asRow);
+    },
+
     findRows: async (input: { enrollmentId: string; glossIds: string[] }): Promise<MemoryRow[]> => {
       if (input.glossIds.length === 0) return [];
       const rows = await tx
