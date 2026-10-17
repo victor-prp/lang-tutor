@@ -1682,6 +1682,9 @@ export type ContextCase = {
   /** A sentence card: its Hebrew, its target sentence and the practised word,
    *  and the Hebrew word that stands for it. */
   sentence?: { hebrew: string; target: string; word: string; marked: string };
+  /** Phase 59. A translation card: Hebrew runs the word map must make tappable,
+   *  each with the reference's words for it. */
+  mapped?: { hebrew: string; translation: string }[];
 };
 
 /** לנסר's root in any form: לנסר, ינסר, מנסר, נוסר, ניסר, נסרתי. */
@@ -1690,6 +1693,15 @@ const SAW_ROOT = /נ[יו]?סר/u;
 const SEE_FORMS = ['ראה', 'ראיתי', 'ראית', 'ראתה', 'ראינו', 'ראיתם', 'ראו', 'רואה', 'רואים', 'רואות', 'יראה', 'תראה', 'אראה', 'לראות'];
 
 export const CONTEXT_CASES: ContextCase[] = [
+  // Phase 59 follow-up, Victor's card of 2026-10-16: יש לי came back as two
+  // entries with no Italian, so neither could be tapped; it is one run, Ho.
+  {
+    label: 'context map: יש לי is one run rendered by Ho',
+    target: 'it', type: 'sentence_translation', form: 'fratello', lemma: 'fratello', partOfSpeech: 'noun', translation: 'אח',
+    example: null, exampleTranslation: null,
+    sentence: { hebrew: 'יש לי אח.', target: 'Ho un fratello.', word: 'fratello', marked: 'אח' },
+    mapped: [{ hebrew: 'יש לי', translation: 'Ho' }],
+  },
   // E, 71b0b407: `saw` is the tool's verb here, never the past of see.
   {
     label: 'context E: saw/לנסר in a sentence that shows saw, never see',

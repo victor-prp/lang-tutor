@@ -189,7 +189,7 @@ export function buildContextPrompt(input: {
     'Each item has a task:',
     `- "target": the card shows the ${learned.name} word in word, which means meaning in ${explained.name}. In context, write a short, natural, everyday ${learned.name} sentence of ${ASKED_WORDS} words that uses word exactly as it is written there, once, in the sense of meaning and of the example, never in another sense. In context_word, write word as it appears in context. In context_translation, write the whole sentence in natural ${explained.name}.`,
     `- "explanation": the card shows the ${explained.name} word in word, which translates the ${learned.name} word in translates. In context, write a short, natural, everyday ${explained.name} sentence of ${ASKED_WORDS} words that uses word once, in whatever form the sentence needs, in the sense in which it translates translates and the example shows, never in another sense. Never write a ${learned.name} word in it. In context_word, write that ${explained.name} word exactly as it is written in context, with any prefix it takes. In context_translation, write the whole sentence in natural ${learned.name}.`,
-    `- "mark": sentence is a ${explained.name} sentence, and translation is a ${learned.name} translation of it that uses word, which means meaning. In sentence_word, write the ${explained.name} word or words of sentence that stand for word, exactly as they are written in sentence, with any prefix. Leave context, context_translation and context_word empty. When the item has map, also fill sentence_words with one entry for each word of sentence, in order: in hebrew, that word exactly as written in sentence, with any prefix; in translation, the words of translation that render it, exactly as written in translation, or empty when none does; in word, the key of the learner_words entry it renders, in any form, or empty.`,
+    `- "mark": sentence is a ${explained.name} sentence, and translation is a ${learned.name} translation of it that uses word, which means meaning. In sentence_word, write the ${explained.name} word or words of sentence that stand for word, exactly as they are written in sentence, with any prefix. Leave context, context_translation and context_word empty. When the item has map, also fill sentence_words, in the order of sentence, with every word of sentence in exactly one entry. An entry is one word of sentence, or several words of sentence that the translation renders together, such as יש לי rendered by a single word for "I have": never split those into entries with an empty translation. In hebrew, write the entry's words exactly as written in sentence, with any prefix; in translation, the words of translation that render them, exactly as written in translation, empty only when translation renders them with nothing at all; in word, the key of the learner_words entry they render, in any form, or empty.`,
     'A sentence must differ from every sentence in avoid.',
     'Answer every item, using its key exactly as given.',
     ...explained.writing,
@@ -379,7 +379,7 @@ const overlaps = (a: Mark, b: Mark) => a.start < b.end && b.start < a.end;
  * that word its tap. Each Hebrew word is found after the one before it; an entry
  * whose Italian is not in the reference, or that overlaps one already kept, is
  * dropped. The target is every entry over the mark, or with no mark the entry
- * whose Italian is the gap; with a mark no entry covers, the mark itself, with
+ * whose Italian holds every word of the gap; with a mark no entry covers, the mark itself, with
  * the gap's text. Any other entry sharing a word with the gap is dropped, so a
  * free tap never shows the answer.
  */
@@ -402,7 +402,8 @@ export function wordMapFor(
     const at = findMarks(item.sentence, hebrew).find((place) => place.start >= cursor);
     if (!at || kept.some((word) => overlaps(word, at))) continue;
     cursor = at.end;
-    const target = mark ? overlaps(at, mark) : comparable(text) === comparable(item.word);
+    // With no mark, the entry that holds every word of the gap (un fratello for fratello).
+    const target = mark ? overlaps(at, mark) : gapWords.size > 0 && [...gapWords].every((word) => wordsOf(text).includes(word));
     if (!target && wordsOf(text).some((word) => gapWords.has(word))) continue;
     const glossId = target ? null : (glossOf.get(entry.word.trim()) ?? null);
     kept.push({ start: at.start, end: at.end, text, glossId: glossId === ownGlossId ? null : glossId, target });
