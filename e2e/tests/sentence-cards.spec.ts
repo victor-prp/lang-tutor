@@ -440,9 +440,11 @@ test('a tap shows a word of the sentence to translate, and the practised word\'s
     const card = await readCard(page, position, CARDS);
     if (card.kind === 'translate') {
       seen.push(card.kind);
+      // Phase 59c (design A): a line says what a tap does, and the Russian appears under the word.
+      await expect(page.getByText('הקישו על מילה כדי לראות אותה ברוסית')).toBeVisible();
       await expect(page.getByTestId('sentence-translation-word-0-text')).toHaveCount(0);
       await page.getByTestId('sentence-translation-word-0').click();
-      await expect(page.getByTestId('sentence-translation-word-0-text')).toHaveText(' (Вчера)');
+      await expect(page.getByTestId('sentence-translation-word-0-text')).toHaveText('Вчера');
       await page.getByTestId('sentence-translation-mark').click();
       await expect(page.getByTestId('typed-hint')).toContainText(STUB_GAP);
       await expectJudge(request, 'right');
@@ -450,8 +452,9 @@ test('a tap shows a word of the sentence to translate, and the practised word\'s
       await answerTyped(page, 'Она прочитала эту книгу вчера');
       expect((await judged).postDataJSON()).toMatchObject({ helped: true, tapped: [0, 2] });
       await expect(page.getByTestId('feedback-title')).toHaveText('נכון, עם עזרה');
-      // The word tapped stays shown once the card is answered.
-      await expect(page.getByTestId('sentence-translation-word-0-text')).toHaveText(' (Вчера)');
+      // The word tapped stays shown once the card is answered, and the line is gone.
+      await expect(page.getByTestId('sentence-translation-word-0-text')).toHaveText('Вчера');
+      await expect(page.getByText('הקישו על מילה כדי לראות אותה ברוסית')).toHaveCount(0);
       await page.getByTestId('continue-button').click();
     } else {
       await pass(page, card);

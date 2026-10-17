@@ -172,6 +172,8 @@ export const strings = {
   // One word on a translation card is asked again, not sent.
   wordOnlyNotice: 'כתבו את כל המשפט, לא רק את המילה',
   translationReference: 'תרגום לדוגמה:',
+  // Phase 59c (design A). Under a translation card's sentence, while a tap can show a word.
+  tapWordHint: (language: string) => `הקישו על מילה כדי לראות אותה ב${languageName(language)}`,
   // Phase 54 (spec D1). The meet card: a new word, shown before it is asked.
   meetTitle: 'מילה חדשה',
   // Phase 55 (spec D7). Help on the tiles and typed cards, a tile that is not

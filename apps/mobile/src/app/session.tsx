@@ -65,13 +65,15 @@ function translatePrompt(question: SentenceTranslationQuestion, session: Session
   const { before, word, after } = splitAtGap(question.sentence, question.gap);
   return (
     <View style={styles.gapCard}>
-      {/* Phase 59 (spec D3): each word a tap shows the Italian of; the practised word's is help. */}
+      {/* Phase 59 (spec D3): each word a tap shows the Italian of; the practised word's is help.
+          Phase 59c (design A): the Italian under the word, and a line saying so until the answer. */}
       <TappableSentence
         text={question.question}
         words={question.words}
         mark={question.mark}
         tapped={session.tapped}
         onTap={answered ? null : session.pressWord}
+        hint={answered || !question.words ? null : strings.tapWordHint(language)}
         style={styles.hebrewPrompt}
         testID="sentence-translation"
       />
