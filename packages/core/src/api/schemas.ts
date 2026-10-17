@@ -477,6 +477,7 @@ export const SessionViewSchema = z.object({
 // there is never stored as skipped). Absent, a request for the held card
 // replays its first answer.
 // Phase 59 (spec D5). Taps on a sentence translation's words: at most one per word.
+// Phase 62 (spec D6): on every card that taps a sentence, sent with its answer.
 const TappedSchema = z.array(z.number().int().nonnegative()).max(20);
 
 export const NextStepRequestSchema = z.union([
@@ -484,6 +485,7 @@ export const NextStepRequestSchema = z.union([
     question_id: z.string().min(1),
     option_index: z.number().int().nonnegative(),
     retry: z.boolean().optional(),
+    tapped: TappedSchema.optional(),
   }),
   z.object({
     question_id: z.string().min(1),
@@ -501,6 +503,8 @@ export const NextStepRequestSchema = z.union([
     // wrong: the app waits while the server asks the model whether the word fits
     // the gap. Optional, so an older app is graded as before.
     check_fit: z.boolean().optional(),
+    // Phase 62 (spec D6). The words tapped on a typed cloze, as a judged answer's are.
+    tapped: TappedSchema.optional(),
   }),
   // Phase 25 (spec D5). A speaking card answered without audio: passed, or
   // "show me the answer".

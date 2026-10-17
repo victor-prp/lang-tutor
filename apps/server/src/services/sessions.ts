@@ -947,13 +947,17 @@ export function createSessionService({
 
         // Phase 59 (spec D4, D5). The words tapped on a sentence translation, by
         // its stored map; a tap on the target is help, so it reaches `step` as such.
+        // Phase 62 (spec D3, D4): on every card that taps a sentence. Only a
+        // translation's target can be tapped, so only there is a tap help.
         const tappedAt = retry ? loaded.answers.length - 1 : loaded.answers.length;
         const tappedOn = loaded.questions[tappedAt];
         const taps =
-          tapped.length > 0 && tappedOn?.id === questionId && tappedOn.type === 'sentence_translation'
+          tapped.length > 0 && tappedOn?.id === questionId && TAPPABLE_TYPES.has(tappedOn.type)
             ? classifyTaps(await repos.question.findWords(questionId), tapped)
             : [];
-        if (taps.some((tap) => tap.kind === 'target') && ('text' in answer || 'pass' in answer)) answer = { ...answer, helped: true };
+        if (tappedOn?.type === 'sentence_translation' && taps.some((tap) => tap.kind === 'target') && ('text' in answer || 'pass' in answer)) {
+          answer = { ...answer, helped: true };
+        }
 
         // Phase 19. Preparing, skipped and failed sessions take no answers. A
         // completed one still reaches `step`, whose replay path answers a retry.
@@ -1212,7 +1216,7 @@ export function createSessionService({
     answerText: async (
       actorUserId: string,
       sessionId: string,
-      input: { questionId: string; text: string; hintOpened?: boolean; helped?: boolean; checkFit?: boolean; retry?: boolean },
+      input: { questionId: string; text: string; hintOpened?: boolean; helped?: boolean; checkFit?: boolean; retry?: boolean; tapped?: readonly number[] },
     ): Promise<SessionResult> => {
       const retry = input.retry ?? false;
       const card =
@@ -1253,7 +1257,7 @@ export function createSessionService({
       // Phase 55 (spec D6). `helped` travels with the text, so `step` grades a helped
       // tiles or typed answer wrong, first try or second.
       const answer = input.helped === undefined ? { text: input.text } : { text: input.text, helped: input.helped };
-      return service.submitAnswer(actorUserId, sessionId, input.questionId, answer, { retry, hintOpened: input.hintOpened, fits });
+      return service.submitAnswer(actorUserId, sessionId, input.questionId, answer, { retry, hintOpened: input.hintOpened, fits, tapped: input.tapped });
     },
 
     /**

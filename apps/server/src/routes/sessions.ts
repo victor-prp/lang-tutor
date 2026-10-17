@@ -382,6 +382,7 @@ export function createSessionsRouter(sessions: SessionService) {
               helped: body.helped,
               checkFit: body.check_fit,
               retry: body.retry ?? false,
+              tapped: body.tapped,
             })
           : await sessions.submitAnswer(
               c.var.actor,
@@ -396,7 +397,8 @@ export function createSessionsRouter(sessions: SessionService) {
                     ? { pass: body.pass }
                     : { pass: body.pass, helped: body.helped }
                   : { option_index: body.option_index },
-              { retry: 'seen' in body ? false : body.retry ?? false },
+              // Phase 62 (spec D6): a choice card's taps travel with its option.
+              { retry: 'seen' in body ? false : body.retry ?? false, tapped: 'option_index' in body ? body.tapped : undefined },
             );
       return c.json(buildNextStepResponse(id, record), 200);
     } catch (error) {

@@ -62,19 +62,27 @@ export type AnswerRow = {
  *  with this too, so the returns and the evidence never disagree. Phase 55 (spec D2,
  *  as ruled): an intro card's answer carries `intro`, which both read as no evidence;
  *  any other is read as before, without it. */
+/** Phase 62 (spec D4, ruling R6). What a list word's tap missed, by the card it
+ *  was on (`q`): a translation's tap shows the Italian, a production miss graded
+ *  as its own card is; every other card's shows the Hebrew, a recognition miss,
+ *  graded as a typed meaning is (written receptive). */
+export const tapMissType = sql`CASE WHEN q.type = 'sentence_translation' THEN 'sentence_translation' ELSE 'typed_meaning' END`;
+
 /**
  * Phase 59 (spec D4). The rows of answer_taps that are misses (a tapped list
  * word), shaped as an answer row: a written answer to a sentence translation
- * about that gloss, wrong, so `gradesFor` reads written productive Again. Each
+ * about that gloss, wrong, so `gradesFor` reads written productive Again (phase
+ * 62: a typed meaning's on any other card, written receptive Again). Each
  * carries its card's answer time, position and its own word index, which orders
  * it after the card's answer (word_index -1). `where` scopes the taps (`tp`).
  */
 export const tappedMisses = (where: SQL) => sql`
-  SELECT s.enrollment_id, tp.gloss_id, 'sentence_translation' AS type, NULL::jsonb AS options,
+  SELECT s.enrollment_id, tp.gloss_id, ${tapMissType} AS type, NULL::jsonb AS options,
          NULL::integer AS selected_option_position, 'wrong' AS verdict, NULL::text AS retry_verdict, false AS intro,
          s.practice_day::text AS day, a.answered_at, tp.position, tp.word_index
   FROM answer_taps tp
   JOIN answers a  ON a.session_id = tp.session_id AND a.position = tp.position
+  JOIN questions q ON q.id = a.question_id
   JOIN sessions s ON s.id = tp.session_id
   WHERE tp.kind = 'list' AND ${where}`;
 
