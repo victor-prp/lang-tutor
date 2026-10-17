@@ -136,6 +136,7 @@ function depsWithPing(ok: boolean, logger = createFakeLogger()): AppDeps {
     grants: unreachableGrants,
     reminders: createFakeAppDeps().reminders,
     sessions: unreachableSessions,
+    questionTypes: createFakeAppDeps().questionTypes,
     users: unreachableUsers,
     enrollments: unreachableEnrollments,
     translations: unreachableTranslations,

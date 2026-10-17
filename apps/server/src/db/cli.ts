@@ -274,6 +274,25 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Phase 61 (spec D1). The only writer of the tester flag. Run by Victor, against
+    // production with DATABASE_URL set to it; idempotent.
+    if (process.argv.includes('--set-tester')) {
+      const email = argValue('--email');
+      if (!email) {
+        console.error('usage: npm run db:tester -- --email <address> [--off]');
+        process.exitCode = 1;
+        return;
+      }
+      const on = !process.argv.includes('--off');
+      const outcome = await createAuthRepo(db).setTester(email, on);
+      if (outcome === 'set') console.log(`${email.trim().toLowerCase()} is ${on ? 'now a tester' : 'no longer a tester'}`);
+      else {
+        console.error(`no profile signs in with ${email.trim().toLowerCase()}; nothing changed`);
+        process.exitCode = 1;
+      }
+      return;
+    }
+
     // Phase 35 (spec D11). The only way a bot profile comes to exist. Run by
     // Victor against production; idempotent, so a name that already is a bot is
     // reported and left alone, its day included. The day is given rather than

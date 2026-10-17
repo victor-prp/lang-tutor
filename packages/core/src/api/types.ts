@@ -68,6 +68,10 @@ import type {
   SessionSourceSchema,
   SessionStatusSchema,
   SessionViewSchema,
+  UnavailableReasonSchema,
+  QuestionTypesResponseSchema,
+  CreateQuestionTypeSessionRequestSchema,
+  CreateQuestionTypeSessionResponseSchema,
   PendingRetrySchema,
   SkipSessionResponseSchema,
   StartSessionRequestSchema,
@@ -274,3 +278,7 @@ export type MeResponse = z.infer<typeof MeResponseSchema>;
 export type BotSignInRequest = z.infer<typeof BotSignInRequestSchema>;
 export type BotSignInResponse = z.infer<typeof BotSignInResponseSchema>;
 export type BotDayRequest = z.infer<typeof BotDayRequestSchema>;
+export type UnavailableReason = z.infer<typeof UnavailableReasonSchema>;
+export type QuestionTypesResponse = z.infer<typeof QuestionTypesResponseSchema>;
+export type CreateQuestionTypeSessionRequest = z.infer<typeof CreateQuestionTypeSessionRequestSchema>;
+export type CreateQuestionTypeSessionResponse = z.infer<typeof CreateQuestionTypeSessionResponseSchema>;

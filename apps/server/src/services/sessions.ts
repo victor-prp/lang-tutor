@@ -87,9 +87,10 @@ import {
 import { dropLoneMeets, keepCards, type CardUnit, type Refusal } from '../domain/keepCards';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planCards } from '../domain/plan';
+import { keepQuestionTypeCards, questionTypesPlan, renderingFlags } from '../domain/questionTypes';
 import { dayState, withSessionInFlight } from '../domain/today';
 import { progressChanges, type ProgressChange } from '../domain/progress';
-import type { Devices, Path, SavedGloss, SessionRecord, SessionSummary } from '../domain/session';
+import type { Devices, Path, SavedGloss, SessionRecord, SessionSummary, SkippedType } from '../domain/session';
 import {
   SESSION_LENGTH,
   askableRenderings,
@@ -1497,35 +1498,35 @@ export function createSessionService({
         enrollmentId: read.enrolled.id,
         userId: read.enrolled.user_id,
       });
-      const plan = planCards(
-        read.context.map((row, index) => {
-          const { dimension, rung, level, r, step, known_meanings, ladder } = read.picked[index];
-          return {
-            form: row.form,
-            translation: row.translation,
-            // Phase 34 (spec D2): tiles build the form the card asks for.
-            tiles: tileEligible(row.answerForm ?? row.form),
-            // read_aloud and the sentence cards use the saved form, say_translation the asked one.
-            speakable: speakable(row.form) && speakable(row.answerForm ?? row.form),
-            // Phase 27 (spec D7): a cloze choice needs the form, or its lemma, once in the saved example.
-            clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
-            // Phase 34 (spec D3): no board word's meaning is one the dictionary knows for another.
-            meanings: knownMeanings(read.known, row.lexemeId),
-            dimension,
-            rung,
-            level,
-            r,
-            step,
-            // Phase 39 (spec D6): a pick with them is a new_meaning card.
-            knownMeanings: known_meanings,
-            // Phase 54 (spec D3, D7): a ladder pick is its four cards; a pick stored without the flag is none.
-            ladder: ladder ?? false,
-          };
-        }),
-        // Phase 57 (ruling T3-l): a target path's session plans its picks with no MAX_PER_TYPE and
-        // no one-word speaking rule, so no pick falls back to a card that serves no owed work.
-        { listening: payload.listening, speaking: payload.speaking, target: payload.target ?? false },
-      );
+      // Phase 61 (spec D4). A question-types session's cards are the chosen types, as given.
+      const qt = payload.question_types;
+      const plan = qt
+        ? questionTypesPlan(qt)
+        : planCards(
+            read.context.map((row, index) => {
+              const { dimension, rung, level, r, step, known_meanings, ladder } = read.picked[index];
+              return {
+                form: row.form,
+                translation: row.translation,
+                // Phase 61: tiles, speakable and the cloze gap, as the question-types read finds them.
+                ...renderingFlags(row),
+                // Phase 34 (spec D3): no board word's meaning is one the dictionary knows for another.
+                meanings: knownMeanings(read.known, row.lexemeId),
+                dimension,
+                rung,
+                level,
+                r,
+                step,
+                // Phase 39 (spec D6): a pick with them is a new_meaning card.
+                knownMeanings: known_meanings,
+                // Phase 54 (spec D3, D7): a ladder pick is its four cards; a pick stored without the flag is none.
+                ladder: ladder ?? false,
+              };
+            }),
+            // Phase 57 (ruling T3-l): a target path's session plans its picks with no MAX_PER_TYPE and
+            // no one-word speaking rule, so no pick falls back to a card that serves no owed work.
+            { listening: payload.listening, speaking: payload.speaking, target: payload.target ?? false },
+          );
       const ordered = plan.order.map((index) => read.context[index]);
       const tasks = tasksFor({ ...plan, types: plan.types.map(generatedAs) });
       const items = distractorItems(ordered, tasks, read.recent);
@@ -1549,32 +1550,36 @@ export function createSessionService({
 
       const started = now();
       let modelMs = 0;
-      let verdict: DistractorVerdict;
+      // Phase 61 (final review): a question-types session may ask the model nothing at all (a
+      // meet, tiles, dictation…); then no call is paid for, and none can fail it.
+      let verdict: DistractorVerdict = { byKey: new Map(), refused: new Map() };
       const board = plan.board;
-      try {
-        const raw = await llm({
-          ...buildDistractorPrompt({ items, from: target, to: read.enrolled.source_language, others, learnerWords: read.learnerWords }),
-          record: record('session_generation'),
-        });
-        modelMs = now() - started;
-        // An empty string is the provider's "no content" (a safety block). Here,
-        // unlike a lookup, there is nothing useful to serve without it.
-        const answer = raw === '' ? null : parseLlmDistractors(raw);
-        if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
-        // Phase 34 (spec D3, D4): the first three usable of six, none known right.
-        // Phase 48 (spec D1): a card with fewer is refused, not the batch.
-        verdict = validateDistractors(items, answer, read.enrolled.source_language, others, target, read.known);
-      } catch (error) {
-        // Spec D16: a failed attempt is a measurement too, not only the
-        // dead-letter fifteen minutes on.
-        logger.info({
-          event: 'session_preparation_attempt_failed',
-          session_id: sessionId,
-          item_count: items.length,
-          model_ms: now() - started,
-          reason: error instanceof Error ? error.message : String(error),
-        });
-        throw error;
+      if (items.length > 0) {
+        try {
+          const raw = await llm({
+            ...buildDistractorPrompt({ items, from: target, to: read.enrolled.source_language, others, learnerWords: read.learnerWords }),
+            record: record('session_generation'),
+          });
+          modelMs = now() - started;
+          // An empty string is the provider's "no content" (a safety block). Here,
+          // unlike a lookup, there is nothing useful to serve without it.
+          const answer = raw === '' ? null : parseLlmDistractors(raw);
+          if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
+          // Phase 34 (spec D3, D4): the first three usable of six, none known right.
+          // Phase 48 (spec D1): a card with fewer is refused, not the batch.
+          verdict = validateDistractors(items, answer, read.enrolled.source_language, others, target, read.known);
+        } catch (error) {
+          // Spec D16: a failed attempt is a measurement too, not only the
+          // dead-letter fifteen minutes on.
+          logger.info({
+            event: 'session_preparation_attempt_failed',
+            session_id: sessionId,
+            item_count: items.length,
+            model_ms: now() - started,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
       }
 
       // Phase 48 (spec D1, D2). Why each refused card was refused, by plan index.
@@ -1625,6 +1630,15 @@ export function createSessionService({
         const answered: Generated = type === 'typed_translation' || type === 'say_translation' ? typedAnswered(row, content) : content;
         return { row, index, planned, type, answered, degradedReason: degraded ? (made.degraded ?? 'no sentence') : null };
       });
+      // Phase 61 (spec D5). A question-types session has no fallback: a sentence card with
+      // no usable sentence is refused, and dropped below, not asked as a typed translation.
+      if (qt) {
+        for (const card of cards) {
+          if (card.degradedReason === null) continue;
+          refusals.set(card.index, { stage: 'validation', reason: card.degradedReason });
+          card.type = card.planned;
+        }
+      }
 
       // Phase 34 (spec D6, D7, D8; rulings R8, R11). One more call, after the
       // batch's answer is validated (a sentence card's mark needs its Hebrew)
@@ -1863,9 +1877,17 @@ export function createSessionService({
       }
       // Phase 54 (spec D7). A meet card is never refused, and never the only card
       // of its word: one whose practice cards were all dropped goes with them.
+      // Phase 61 (spec D5): a question-types session keeps no refused card but an ambiguous
+      // choice card, and a meet card alone.
       const fateOf = new Map(
-        dropLoneMeets(keepCards(units, rng), (index) => ordered[index].glossId, (index) => plan.types[index]).map((fate) => [fate.index, fate]),
+        (qt
+          ? keepQuestionTypeCards(units, (index) => CHOSEN.has(generatedAs(plan.types[index])))
+          : dropLoneMeets(keepCards(units, rng), (index) => ordered[index].glossId, (index) => plan.types[index])
+        ).map((fate) => [fate.index, fate]),
       );
+      // Phase 61 (spec D5). A question-types sentence card the checker finds unnatural is not
+      // generated, with why.
+      const notGenerated = new Map<number, Refusal>();
       for (const fate of fateOf.values()) {
         if (fate.fate !== 'keep_refused' || fate.shownAs !== 'as_generated' || !CHOSEN.has(generatedAs(plan.types[fate.index]))) continue;
         // An ambiguous card, Victor's call: the survivors first, then the
@@ -1928,6 +1950,7 @@ export function createSessionService({
           if (!translationUses(sentenceFinding.translation, practised)) {
             const reason = `the checker says it "${sentenceFinding.translation}", using neither ${made.word} nor an answer the card accepts`;
             events.push({ event: 'checker_dropped', session_id: sessionId, index: card.index, type, kind: 'sentence', text: made.hebrew, reason });
+            if (qt) notGenerated.set(card.index, { stage: 'checker', reason });
             type = 'typed_translation';
             answered = typedAnswered(row, NOTHING_GENERATED);
             degradedReason = reason;
@@ -1947,7 +1970,34 @@ export function createSessionService({
       // Phase 48 (spec D4). The plan's order, a dropped card's place closed up:
       // a card's written position is its place here, while `index` stays its
       // plan index for everything that indexes the plan.
-      const kept = final.filter((card) => fateOf.get(card.index)!.fate !== 'drop');
+      const kept = final.filter((card) => fateOf.get(card.index)!.fate !== 'drop' && !notGenerated.has(card.index));
+      // Phase 61 (spec D5). The chosen types with no card, in the session's order.
+      const skipped: SkippedType[] | null = qt
+        ? final
+            .filter((card) => !kept.includes(card))
+            .map((card) => ({ type: plan.types[card.index], reason: 'not_generated' as const }))
+        : null;
+      // Final review (minor 5). Why each card a question-types session went without was dropped.
+      const logNotGenerated = () => {
+        for (const [index, refusal] of notGenerated) {
+          logger.info({ event: 'card_dropped', session_id: sessionId, key: keyOf(index), type: plan.types[index], ...refusal });
+        }
+      };
+      if (skipped && kept.length === 0) {
+        // Not a throw: a retry would pay for the model calls again, to the same end.
+        const failed = await transaction(async ({ session }) => {
+          if (!(await session.transition(sessionId, ['preparing'], 'failed'))) return false;
+          await session.setSkippedTypes(sessionId, skipped);
+          return true;
+        });
+        for (const fate of fateOf.values()) {
+          if (fate.fate !== 'drop') continue;
+          logger.info({ event: 'card_dropped', session_id: sessionId, key: keyOf(fate.index), type: plan.types[fate.index], ...fate.refusal });
+        }
+        logNotGenerated();
+        logger.info({ event: 'session_preparation_failed', session_id: sessionId, marked: failed, reason: 'no_card_generated' });
+        return;
+      }
 
       const written = await transaction(async ({ session, question, gloss }) => {
         // Conditional: a skip that landed during the model call wins, and this
@@ -1988,6 +2038,7 @@ export function createSessionService({
         // Each choice shuffled on its own, a board's words once together; the
         // question order is the plan's and is not shuffled.
         await session.insertSessionQuestions(sessionId, shuffleSession(generated, rng));
+        if (skipped) await session.setSkippedTypes(sessionId, skipped);
         return true;
       });
 
@@ -2009,6 +2060,7 @@ export function createSessionService({
               : { event: 'card_kept_refused', ...base, position: writtenAt.get(fate.index), shown_as: fate.shownAs },
           );
         }
+        logNotGenerated();
       }
       logger.info({
         event: written ? 'session_prepared' : 'session_preparation_dropped',
@@ -2016,7 +2068,7 @@ export function createSessionService({
         // Phase 48 (spec D6): the questions written, of the cards planned.
         question_count: written ? kept.length : 0,
         planned_count: ordered.length,
-        dropped_count: [...fateOf.values()].filter((fate) => fate.fate === 'drop').length,
+        dropped_count: [...fateOf.values()].filter((fate) => fate.fate === 'drop').length + notGenerated.size,
         item_count: items.length,
         model_ms: modelMs,
         context_ms: contextMs,

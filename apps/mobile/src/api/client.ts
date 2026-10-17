@@ -3,6 +3,8 @@ import type {
   ChangeTargetDateRequest,
   CreateEnrollmentRequest,
   CreateGrantRequest,
+  CreateQuestionTypeSessionRequest,
+  CreateQuestionTypeSessionResponse,
   CreateSessionRequest,
   CreateSessionResponse,
   CreateTargetRequest,
@@ -24,6 +26,7 @@ import type {
   PhotoImportSummary,
   PushDeviceRequest,
   PushDeviceUnregisterRequest,
+  QuestionTypesResponse,
   ReminderSettings,
   ReminderSettingsResponse,
   SaveVocabularyRequest,
@@ -237,6 +240,21 @@ export function createApiClient({
     },
     getSession: (sessionId: string) =>
       getJson<SessionView>(`/api/sessions/${encodeURIComponent(sessionId)}`),
+    // Phase 61 (spec D2, D3). A tester's read of one saved meaning's question types, and its session.
+    questionTypes: (enrollmentId: string, query: { glossId: string; variantId: string; listening: boolean; speaking: boolean }) => {
+      const params = new URLSearchParams({
+        gloss_id: query.glossId,
+        variant_id: query.variantId,
+        listening: String(query.listening),
+        speaking: String(query.speaking),
+      });
+      return getJson<QuestionTypesResponse>(`${vocabularyPath(enrollmentId)}/question-types?${params}`);
+    },
+    createQuestionTypeSession: (enrollmentId: string, request: CreateQuestionTypeSessionRequest) =>
+      postJson<CreateQuestionTypeSessionResponse>(
+        `/api/enrollments/${encodeURIComponent(enrollmentId)}/question-type-sessions`,
+        request,
+      ),
     skipSession: (sessionId: string) =>
       postJson<SkipSessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/skip`, {}),
     // Phase 43 (spec D2). Starting a session has the next one built for this device.

@@ -4,7 +4,7 @@ import { createApp } from '../../../src/app';
 import { signUp, signUpWithProfile } from '../../support/auth';
 import { createFakeLogger } from '../../support/fakes';
 import { clearNamespace, expectEmails, mailBaseUrlFor, mockNamespace } from '../../support/mockServer';
-import { timeZoneOf } from '../../support/seedUser';
+import { setTester, timeZoneOf } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
@@ -54,6 +54,20 @@ describe('GET /api/me', () => {
 
     await putTimeZone({ time_zone: 'Asia/Jerusalem' });
     expect(await zoneInMe()).toBe('Asia/Jerusalem');
+  });
+});
+
+// Phase 61 (spec D1). A tester is a flag on the account, off until db:tester turns it on.
+describe('the tester flag', () => {
+  it('is off for a new account, and on once set', async () => {
+    const testerInMe = async () => {
+      const res = await app.request('/api/me', { headers: { cookie } });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { user: { tester: boolean } }).user.tester;
+    };
+    expect(await testerInMe()).toBe(false);
+    await setTester(t.db, userId);
+    expect(await testerInMe()).toBe(true);
   });
 });
 

@@ -19,6 +19,7 @@ function toUser(row: UserRow): User {
     age: row.age!,
     native_language: row.nativeLanguage,
     time_zone: row.timeZone,
+    tester: row.tester,
   };
 }
 

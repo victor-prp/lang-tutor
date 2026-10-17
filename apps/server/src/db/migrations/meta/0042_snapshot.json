@@ -1,5 +1,5 @@
 {
-  "id": "a71ea879-5131-409f-ad68-317d37bad70e",
+  "id": "2524eadb-e80b-4dc6-9150-50f3e65d1158",
   "prevId": "0407a685-1b5a-4bdb-9d86-963f63881959",
   "version": "7",
   "dialect": "postgresql",
@@ -3492,25 +3492,25 @@
           "name": "wish",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "slots": {
           "name": "slots",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "picked": {
           "name": "picked",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "reason": {
           "name": "reason",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "days_left": {
           "name": "days_left",
@@ -3529,30 +3529,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
-        },
-        "cap_halves": {
-          "name": "cap_halves",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "readiness_pct": {
-          "name": "readiness_pct",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "fsrs_ready_count": {
-          "name": "fsrs_ready_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "owed_gloss_ids": {
-          "name": "owed_gloss_ids",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -3683,27 +3659,28 @@
           "primaryKey": false,
           "notNull": false
         },
-        "target_id": {
-          "name": "target_id",
-          "type": "uuid",
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'practice'"
+        },
+        "skipped_types": {
+          "name": "skipped_types",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         }
       },
       "indexes": {
-        "sessions_one_stock_per_path": {
-          "name": "sessions_one_stock_per_path",
+        "sessions_one_stock_per_enrollment": {
+          "name": "sessions_one_stock_per_enrollment",
           "columns": [
             {
               "expression": "enrollment_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "coalesce(\"target_id\", '00000000-0000-0000-0000-000000000000'::uuid)",
-              "asc": true,
-              "isExpression": true,
               "nulls": "last"
             }
           ],
@@ -3713,19 +3690,13 @@
           "method": "btree",
           "with": {}
         },
-        "sessions_one_started_per_path": {
-          "name": "sessions_one_started_per_path",
+        "sessions_one_started_per_enrollment": {
+          "name": "sessions_one_started_per_enrollment",
           "columns": [
             {
               "expression": "enrollment_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "coalesce(\"target_id\", '00000000-0000-0000-0000-000000000000'::uuid)",
-              "asc": true,
-              "isExpression": true,
               "nulls": "last"
             }
           ],
@@ -3785,19 +3756,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "sessions_target_fk": {
-          "name": "sessions_target_fk",
-          "tableFrom": "sessions",
-          "tableTo": "targets",
-          "columnsFrom": [
-            "target_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3811,6 +3769,10 @@
         "sessions_source_known": {
           "name": "sessions_source_known",
           "value": "\"sessions\".\"source\" in ('seed', 'list')"
+        },
+        "sessions_kind_known": {
+          "name": "sessions_kind_known",
+          "value": "\"sessions\".\"kind\" in ('practice', 'question_types')"
         },
         "sessions_completed_consistent": {
           "name": "sessions_completed_consistent",
@@ -3923,207 +3885,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.target_skill_events": {
-      "name": "target_skill_events",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "target_id": {
-          "name": "target_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "gloss_id": {
-          "name": "gloss_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dimension": {
-          "name": "dimension",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "before": {
-          "name": "before",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "after": {
-          "name": "after",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "why": {
-          "name": "why",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "target_skill_events_target_created_idx": {
-          "name": "target_skill_events_target_created_idx",
-          "columns": [
-            {
-              "expression": "target_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "target_skill_events_target_fk": {
-          "name": "target_skill_events_target_fk",
-          "tableFrom": "target_skill_events",
-          "tableTo": "targets",
-          "columnsFrom": [
-            "target_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "target_skill_events_dimension_known": {
-          "name": "target_skill_events_dimension_known",
-          "value": "\"target_skill_events\".\"dimension\" in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')"
-        },
-        "target_skill_events_why_known": {
-          "name": "target_skill_events_why_known",
-          "value": "\"target_skill_events\".\"why\" in ('miss', 'recall', 'recognition')"
-        },
-        "target_skill_events_values_range": {
-          "name": "target_skill_events_values_range",
-          "value": "\"target_skill_events\".\"before\" between 0 and 20 and \"target_skill_events\".\"after\" between 0 and 20"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.target_skills": {
-      "name": "target_skills",
-      "schema": "",
-      "columns": {
-        "target_id": {
-          "name": "target_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "gloss_id": {
-          "name": "gloss_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dimension": {
-          "name": "dimension",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "halves": {
-          "name": "halves",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "day": {
-          "name": "day",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "target_skills_word_fk": {
-          "name": "target_skills_word_fk",
-          "tableFrom": "target_skills",
-          "tableTo": "target_words",
-          "columnsFrom": [
-            "target_id",
-            "gloss_id"
-          ],
-          "columnsTo": [
-            "target_id",
-            "gloss_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {
-        "target_skills_pkey": {
-          "name": "target_skills_pkey",
-          "columns": [
-            "target_id",
-            "gloss_id",
-            "dimension"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "target_skills_dimension_known": {
-          "name": "target_skills_dimension_known",
-          "value": "\"target_skills\".\"dimension\" in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')"
-        },
-        "target_skills_halves_range": {
-          "name": "target_skills_halves_range",
-          "value": "\"target_skills\".\"halves\" between 0 and 20"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.target_words": {
       "name": "target_words",
       "schema": "",
@@ -4146,12 +3907,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "started_on": {
-          "name": "started_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -4366,6 +4121,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'UTC'"
+        },
+        "tester": {
+          "name": "tester",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},
