@@ -22,7 +22,7 @@ done.
 
 ## Where go-live stands
 
-Last updated 2026-10-16.
+Last updated 2026-10-17.
 
 - [ ] **1. Xcode and the simulators.** Not started. Blocked on a macOS update: the App Store's
       Xcode needs macOS 26.6 or later and this Mac is on 26.5.2, so run Software Update first
@@ -36,9 +36,12 @@ Last updated 2026-10-16.
       the App Manager role. No push key: reminders are Android-only.
 - [x] **4. The app in App Store Connect, and its id in `eas.json`.** Done 2026-10-16: Apple ID
       `6823711479`, in `submit.production.ios.ascAppId`.
-- [ ] **5. TestFlight's external group.** Waits for step 4.
-- [ ] **6. The first release.** Waits for steps 3–5. `IOS_RELEASE` is not set yet, so releases
-      until then skip iOS.
+- [x] **5. TestFlight's external group.** Done 2026-10-16: the **Friends** group, with test
+      information and beta review details (reviewer sign-in `ios_tester_0001@wordspal.ai`).
+      EAS also created an internal group, *Team (Expo)*, on its first submit; it is harmless.
+- [x] **6. The first release.** Done 2026-10-16: `IOS_RELEASE` on, release `v2026.10.16`
+      built 1.0.0 (1), uploaded it and published its update. Beta App Review approved it for
+      Friends on 2026-10-17.
 - [ ] **7. Invite friends.** After step 6.
 
 `EXPO_TOKEN` and the EAS project are already in place from Android's setup; iOS uses the same.
