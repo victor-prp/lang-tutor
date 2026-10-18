@@ -25,7 +25,8 @@ export function HelpButton({ onPress, disabled, testID }: Props) {
       testID={testID}
       disabled={disabled}
       hitSlop={6}
-      onPress={onPress}
+      // The press event is not the caller's: a session's pressHelp would read it as typed text.
+      onPress={() => onPress()}
       style={[styles.chip, disabled && styles.chipOff]}
     >
       <Ionicons name="bulb-outline" size={18} color={disabled ? colors.faint : colors.primary} />

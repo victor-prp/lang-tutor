@@ -199,8 +199,9 @@ export function tappedFor(question: Question, tapped: readonly number[]): number
  *  marks from its first wrong character, or gives the step after a right start. */
 export function helpPressedState(current: QuizState, typed?: string): QuizState {
   if (current.answer !== null || !current.question) return current;
-  const target = typed === undefined ? null : helpText(current.question);
-  if (target === null || typed === undefined) return { ...current, help: current.help + 1, helpPressed: true };
+  // Only text is typing: a press handler may be handed a button's event.
+  const target = typeof typed === 'string' ? helpText(current.question) : null;
+  if (target === null || typeof typed !== 'string') return { ...current, help: current.help + 1, helpPressed: true };
   const pressed = pressTyped(target, typed, current.help, current.question.type === 'typed_meaning');
   return {
     ...current,

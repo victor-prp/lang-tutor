@@ -682,6 +682,11 @@ describe('help reads the typing (phase 63 D3, D10)', () => {
     expect(helpPressedState(ON(MEANING), 'אֲר')).toMatchObject({ help: 3, helpMarks: null });
   });
 
+  // A press handler handed a button's event must not read it as typed text.
+  it('takes anything but a string as no typing', () => {
+    expect(helpPressedState(ON(SAY), { nativeEvent: {} } as unknown as string)).toMatchObject({ help: 1, helpPressed: true, helpMarks: null });
+  });
+
   it('adds one step a press where nothing is typed: spoken, listening, a choice', () => {
     expect(helpPressedState(ON(SAY))).toMatchObject({ help: 1, helpPressed: true });
     expect(helpPressedState(helpPressedState(ON(CHOICE)))).toMatchObject({ help: 2, helpPressed: true });
