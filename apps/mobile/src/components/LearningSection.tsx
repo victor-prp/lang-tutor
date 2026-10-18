@@ -1,9 +1,11 @@
 import type { CurrentSessionResponse, Enrollment, TargetSummary } from '@lang-tutor/core/api';
 import { router, useFocusEffect, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ApiError } from '@/api/client';
+import { CardStack } from '@/components/CardStack';
+import { MyWordsCard } from '@/components/MyWordsCard';
 import { TargetCard } from '@/components/TargetCard';
 import { availableTargets } from '@/enrollments';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -17,7 +19,6 @@ import {
   homeActionOf,
   homeReminderStartOf,
   mainEmptyNote,
-  myWordsLine,
   openSessionOf,
   shouldAutoCreate,
   shouldPoll,
@@ -28,7 +29,7 @@ import {
 } from '@/nextSession';
 import { homePhotoCard, isWorking, type HomePhotoCard } from '@/photoImports';
 import { strings } from '@/strings';
-import { homeOrder, shouldPollTargets } from '@/targets';
+import { homeOrder, shouldPollTargets, stackDots, type HomeCard } from '@/targets';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 /** Final review N1. Create refused: the path has a started session (409 session_open). */
@@ -141,9 +142,11 @@ export function LearningSection({ active }: { active: Enrollment }) {
   const canAdd = availableTargets(enrollments).length > 0;
   const action: HomeAction | null = next.current ? homeActionOf(next.current) : null;
   const photoCard = homePhotoCard(imports);
-  // Phase 57 (spec D11). One card per path, by priority; the first one's button is filled.
+  // Phase 57 (spec D11). One card per path, by priority; phase 64 (spec D3) shows them as a
+  // stack, one at a time, in that order.
   const targets = targetList?.targets ?? [];
-  const { first, order } = homeOrder(targets);
+  const { order } = homeOrder(targets);
+  const dots = stackDots(order, targets);
 
   // Phase 43 (spec D2). A session not yet answered is started, which has the
   // next one built for this device. Not waited on: its first answer starts it too.
@@ -293,6 +296,38 @@ export function LearningSection({ active }: { active: Enrollment }) {
     if (step.kind === 'enter') enterSession(step.sessionId, step.fresh);
   });
 
+  // Phase 64 (spec D3, D4). Each card of the stack: My words with today's machinery as it was,
+  // or a target's card with its own path's button.
+  const cardNode = (card: HomeCard) => {
+    if (card === 'main') {
+      return (
+        <MyWordsCard
+          current={next.current}
+          language={strings.languageName(active.target_language)}
+          action={action}
+          emptyNote={mainEmptyNote(targetList?.targets ?? null)}
+          loadFailed={next.loadFailed}
+          busy={busy}
+          onRetry={reload}
+          makeFailed={createLook(makeFailedFor, active.id) === 'retry'}
+          onStartSeed={startSeed}
+          onMake={() => void makeNext(active.id)}
+          onEnter={enterSession}
+          onSkip={skip}
+        />
+      );
+    }
+    const target = targets.find((candidate) => candidate.id === card);
+    return target ? (
+      <TargetCard
+        target={target}
+        busy={busy}
+        onOpen={() => router.push(`/targets/${target.id}`)}
+        onPractice={() => practiceTarget(target)}
+      />
+    ) : null;
+  };
+
   return (
     <>
       <Pressable
@@ -341,49 +376,10 @@ export function LearningSection({ active }: { active: Enrollment }) {
         </View>
       ) : null}
 
-      {order.map((card) => {
-        if (card === 'main') {
-          // Phase 57 (spec D11). My words: the main path, with today's machinery as it was.
-          return (
-            <View
-              key="main"
-              testID="home-my-words"
-              style={[styles.pathCard, first === 'main' && styles.pathCardFirst]}
-            >
-              <Text style={styles.pathTitle}>{strings.myWords}</Text>
-              {next.current ? (
-                <Text style={styles.pathLine}>
-                  {myWordsLine(next.current, strings.languageName(active.target_language))}
-                </Text>
-              ) : null}
-              <SessionAction
-                action={action}
-                emptyNote={mainEmptyNote(targetList?.targets ?? null)}
-                filled={first === 'main'}
-                loadFailed={next.loadFailed}
-                busy={busy}
-                onRetry={reload}
-                makeFailed={createLook(makeFailedFor, active.id) === 'retry'}
-                onStartSeed={startSeed}
-                onMake={() => void makeNext(active.id)}
-                onEnter={enterSession}
-                onSkip={skip}
-              />
-            </View>
-          );
-        }
-        const target = targets.find((candidate) => candidate.id === card);
-        return target ? (
-          <TargetCard
-            key={card}
-            target={target}
-            filled={first === card}
-            busy={busy}
-            onOpen={() => router.push(`/targets/${target.id}`)}
-            onPractice={() => practiceTarget(target)}
-          />
-        ) : null;
-      })}
+      <CardStack
+        resetKey={order.join(',')}
+        cards={order.map((card, at) => ({ key: card, urgent: dots[at]?.urgent ?? false, node: cardNode(card) }))}
+      />
 
       {photoSaved ? (
         <Text testID="home-photo-saved" style={styles.notice}>
@@ -446,148 +442,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
   );
 }
 
-function SessionAction({
-  action,
-  emptyNote,
-  filled,
-  loadFailed,
-  busy,
-  onRetry,
-  makeFailed,
-  onStartSeed,
-  onMake,
-  onEnter,
-  onSkip,
-}: {
-  action: HomeAction | null;
-  /** Final review M2. What My words says with nothing of its own: save words first, or that
-   *  every saved word is in the targets. */
-  emptyNote: ReturnType<typeof mainEmptyNote>;
-  /** Phase 57 (spec D11). My words is home's first card: its button is filled, else outlined. */
-  filled: boolean;
-  loadFailed: boolean;
-  busy: boolean;
-  onRetry: () => void;
-  /** Phase 43 (spec D7). Home's own create for the `create` state failed. */
-  makeFailed: boolean;
-  onStartSeed: () => void;
-  onMake: () => void;
-  onEnter: (sessionId: string, fresh: boolean) => void;
-  onSkip: (sessionId: string) => void;
-}) {
-  const box = filled ? styles.button : styles.outlinedButton;
-  const text = filled ? styles.buttonLabel : styles.outlinedButtonLabel;
-  const primary = (testID: string, label: string, onPress: () => void) => (
-    <Pressable
-      accessibilityRole="button"
-      testID={testID}
-      disabled={busy}
-      onPress={onPress}
-      style={[box, busy && styles.buttonDisabled]}
-    >
-      <Text style={text}>{label}</Text>
-    </Pressable>
-  );
-  const skip = (sessionId: string) => (
-    <Pressable
-      accessibilityRole="button"
-      testID="home-skip"
-      disabled={busy}
-      onPress={() => onSkip(sessionId)}
-      style={styles.secondaryButton}
-    >
-      <Text style={styles.secondaryButtonLabel}>{strings.skip}</Text>
-    </Pressable>
-  );
-  const preparingLabel = (
-    <View testID="preparing-label" style={[box, styles.buttonDisabled, styles.preparing]}>
-      <ActivityIndicator color={filled ? colors.onPrimary : colors.primary} />
-      <Text style={text}>{strings.preparingQuestions}</Text>
-    </View>
-  );
-  // Phase 43 (spec D7). Making the next session failed: say so and offer
-  // "try again", which makes it again; no button names creating questions.
-  const retry = (
-    <>
-      <Text testID="preparation-failed" style={styles.notice}>
-        {strings.preparationFailed}
-      </Text>
-      {primary('home-make-retry', strings.translateRetry, onMake)}
-    </>
-  );
-
-  if (!action) {
-    if (!loadFailed) return <ActivityIndicator testID="home-loading" />;
-    return (
-      <>
-        <Text testID="home-load-failed" style={styles.notice}>
-          {strings.homeLoadFailed}
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          testID="home-retry"
-          onPress={onRetry}
-          style={styles.secondaryButton}
-        >
-          <Text style={styles.secondaryButtonLabel}>{strings.translateRetry}</Text>
-        </Pressable>
-      </>
-    );
-  }
-  switch (action.kind) {
-    case 'start-seed':
-      return primary('start-button', strings.start, onStartSeed);
-    case 'create':
-      // Phase 43 (spec D7). Home sends create itself: this is how it looks.
-      return makeFailed ? retry : preparingLabel;
-    case 'save-words-first':
-      return (
-        <Text testID={emptyNote.kind === 'all-in-targets' ? 'all-words-in-targets' : 'save-words-first'} style={styles.notice}>
-          {emptyNote.text}
-        </Text>
-      );
-    case 'preparing':
-      return (
-        <>
-          {preparingLabel}
-          {skip(action.sessionId)}
-        </>
-      );
-    case 'start':
-    case 'resume':
-      return (
-        <>
-          {primary('start-button', action.kind === 'start' ? strings.start : strings.resume, () =>
-            onEnter(action.sessionId, action.kind === 'start'),
-          )}
-          {skip(action.sessionId)}
-        </>
-      );
-    case 'failed':
-      return retry;
-  }
-}
-
 const styles = StyleSheet.create({
-  // Phase 57 (spec D11). My words, a card like a target's: bordered in the accent colour
-  // while it is first.
-  pathCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  pathCardFirst: { borderColor: colors.primary },
-  pathTitle: {
-    fontSize: fontSizes.lg,
-    lineHeight: lineHeights.lg,
-    fontWeight: '700',
-    color: colors.text,
-    writingDirection: 'rtl',
-  },
-  pathLine: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, writingDirection: 'rtl' },
   card: {
     marginTop: spacing.md,
     backgroundColor: colors.surface,
@@ -602,34 +457,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     writingDirection: 'rtl',
   },
-  button: {
-    backgroundColor: colors.primary,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  buttonLabel: {
-    color: colors.onPrimary,
-    fontSize: fontSizes.md,
-    lineHeight: lineHeights.md,
-    fontWeight: '700',
-  },
-  outlinedButton: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  outlinedButtonLabel: {
-    color: colors.primary,
-    fontSize: fontSizes.md,
-    lineHeight: lineHeights.md,
-    fontWeight: '700',
-  },
-  buttonDisabled: { opacity: 0.6 },
-  preparing: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm },
   notice: {
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
