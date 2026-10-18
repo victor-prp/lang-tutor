@@ -1,7 +1,8 @@
 # Phase 63 — Help in the answer
 
-- **Status:** Victor approved the design in the mockups on 2026-10-18. This document awaits his review. His
-  rulings are at the end.
+- **Status:** Victor approved the design in the mockups on 2026-10-18, then said "go till PR". Implemented
+  inline on branch `phase-63-help-in-the-answer`: seven tasks and a final review. His rulings, and those
+  made while building, are at the end.
 - **Date:** 2026-10-18
 - **Source:**
   - The one-pager: `drafts/2026-10-18-help-button-one-pager.md` (main checkout).
@@ -375,3 +376,36 @@ Victor, 2026-10-18, in the chat and the mockups:
 - **R9. (Assumed in the one-pager, kept.)** A helped answer on the new cards is a miss.
 - **R10. The phone check comes after the merge,** not before. Android-only problems (the keyboard, the grey
   letters' alignment) are fixed in a follow-up PR.
+
+### Made while building (2026-10-18)
+
+- **B1.** A helped choice row is tested through the route on the four choice cards and a board word. A new
+  meaning's `helped` is pinned by core's `takesHelp` table, because the integration helper cannot build a new
+  meaning card.
+- **B2.** The migration is `0044_helped_choices.sql`, a descriptive name like its neighbours.
+- **B3.** Help compares as the checker folds, at the place the checker folds:
+  - **Not mistakes:** a capital, a typographic apostrophe, a run of spaces, a combining mark typed apart from
+    its letter, a space before the typing, and a space or full stop past the answer's end.
+  - **Mistakes:** an accent, and a space or full stop inside the word.
+  - The final review found the last two cases wrong at first, and they were fixed.
+- **B4.** The marks are drawn by a layer behind the transparent input: a red surface and a red underline. On a
+  phone the letters are the input's own, so they are dark over red rather than red. Colouring the input's text
+  would hide the caret on web. Victor judges it on the phone (R10).
+- **B5.** The layer hides when its text would wrap, the "or hide them" of D3. On web, which cannot measure, a
+  long answer's grey may misalign; the web build is for tests only.
+- **B6.** One `LettersBox` serves the spoken card and listen choice (D4, D6). Placed tiles use
+  `primarySurface`. The grey letters replace the input's placeholder while they show.
+- **B7.** A sentence translation with no word map shows the practised word's form under the sentence once it is
+  tapped (`sentence-mark-answer`), since such a sentence has no Italian line (D9).
+- **B8.** No new style uses a physical left or right:
+  - The boxes pad by start and end.
+  - The layer and the letters box set no `textAlign`, only `writingDirection`.
+  - This follows phase 1's fix (1fff73e): native RTL swaps a physical side and web does not. The web e2e cannot
+    see such a swap, so the phone check names it.
+- **B9.** `HelpButton` calls `onPress` with nothing, and `helpPressedState` takes only a string as typing. A
+  button's event read as typing threw on the spoken card. The e2e found this before merge.
+- **B10.** Listen-choice help is tested in a test of its own. A helped listening card is a miss, so the
+  ten-words test, which checks that listening was practised, keeps its listening card unhelped.
+- **B11.** The layout check (Done 1, D2) runs at 390 × 844 on the typed translation and on the cloze typed with
+  its Hebrew sentence shown, so that test now sends `hint_opened: true`.
+- **B12.** `@expo/vector-icons` was added with `expo install`; the native fingerprint is unchanged (50e1c87).
