@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { LlmDistractors } from '@lang-tutor/core/api';
 
 import { distractorItems, NOTHING_GENERATED, type DistractorVerdict, type Generated, type GenerationContext } from './distractors';
-import { gapCheckItem, gapFaults, rewriteItems, rewriteOthers, type GapFault } from './gapRewrite';
+import { gapCheckItem, gapFaults, pointFaults, rewriteItems, rewriteOthers, type GapFault } from './gapRewrite';
 
 const row = (form: string, translation: string, example: string | null = null): GenerationContext => ({
   glossId: `g-${form}`,
@@ -119,5 +119,32 @@ describe('rewriteOthers', () => {
       { form: 'casa', translation: 'בית' },
       { form: 'libro', translation: 'ספר' },
     ]);
+  });
+});
+
+// Phase 62d (spec D3). A typed gap the point check failed is asked again, told what a reader guessed.
+describe('pointFaults', () => {
+  const TYPED = distractorItems([row('cielo', 'שמיים', 'Spero che la sua anima riposi in cielo.'), row('sedia', 'כיסא'), row('libro', 'ספר')], ['sentence', 'sentence', 'meaning'], new Map());
+  const CIELO = 'Il cielo è qui.';
+  const verdict: DistractorVerdict = {
+    byKey: new Map([
+      ['q1', { ...NOTHING_GENERATED, sentence: written(CIELO, 'cielo') }],
+      ['q2', { ...NOTHING_GENERATED, degraded: 'the sentence has 9 words' }],
+      ['q3', { ...NOTHING_GENERATED, distractors: ['כלב', 'חתול', 'שולחן'] }],
+    ]),
+    refused: new Map(),
+  };
+  const failed = (key: string) => new Map([[key, { fits: ['tavolo', 'libro'], problem: 'a reader who covers the word guesses tavolo first' }]]);
+
+  it('a sentence item the point check failed is a pointing fault with its old sentence, the guesses and why', () => {
+    expect(pointFaults({ items: TYPED, verdict, failed: failed('q1') })).toEqual([
+      { key: 'q1', stage: 'pointing', rewrite: { sentence: CIELO, fits: ['tavolo', 'libro'], problem: 'a reader who covers the word guesses tavolo first' } },
+    ]);
+  });
+
+  it('a sentence item with no written sentence, or not failed, or of another task, is no fault', () => {
+    expect(pointFaults({ items: TYPED, verdict, failed: failed('q2') })).toEqual([]);
+    expect(pointFaults({ items: TYPED, verdict, failed: new Map() })).toEqual([]);
+    expect(pointFaults({ items: TYPED, verdict, failed: failed('q3') })).toEqual([]);
   });
 });

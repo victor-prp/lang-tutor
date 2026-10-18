@@ -53,7 +53,14 @@ export type SentenceContent = {
 export type TranslateContent = { hebrew: string; reference: string; gap: { start: number; end: number } };
 
 /** `explanation` is the enrollment's source language, the one the translations are in (spec D5, D6). */
-type Input = { form: string; target: LanguageCode; explanation: LanguageCode; avoid: readonly string[] };
+type Input = {
+  form: string;
+  target: LanguageCode;
+  explanation: LanguageCode;
+  avoid: readonly string[];
+  /** Phase 62d (spec D3): a gap sentence's most words, SHORT_SENTENCE_MAX_WORDS unless a rewrite allows more. */
+  maxWords?: number;
+};
 type Found = { sentence?: string; gap?: string; translation?: string; alternatives?: string[] };
 
 /** Gap offsets are UTF-16 indices and the database counts characters, so a character beyond the BMP would misplace the gap. */
@@ -81,7 +88,7 @@ export function validateSentenceItem(
   if (hasAstral(sentence, translation, gap)) return fail('the sentence holds a character outside the basic plane');
 
   const words = wordCount(sentence);
-  if (words < SENTENCE_MIN_WORDS || words > SHORT_SENTENCE_MAX_WORDS) return fail(`the sentence has ${words} words`);
+  if (words < SENTENCE_MIN_WORDS || words > (input.maxWords ?? SHORT_SENTENCE_MAX_WORDS)) return fail(`the sentence has ${words} words`);
 
   if (hasExplanation(input, sentence) || !LANGUAGES[input.target].letters.test(sentence)) {
     return fail(`the sentence is not written in ${LANGUAGES[input.target].name}`);

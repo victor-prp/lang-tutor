@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from '@jest/globals';
 
 import type { QuestionType } from '@lang-tutor/core/domain';
@@ -1161,5 +1163,71 @@ describe('buildDistractorPrompt (phase 62c)', () => {
     const rewrite = { sentence: null, fits: [], problem: 'the sentence repeats one it was told to avoid' };
     const prompt = buildDistractorPrompt({ items: [{ ...gap, rewrite }], from: 'it', to: 'he', others: [] });
     expect(userItem(prompt).rewrite).toEqual({ problem: 'the sentence repeats one it was told to avoid' });
+  });
+});
+
+// Phase 62d (spec D3). A typed gap asked again carries a rule of its own; every call
+// that exists today sends exactly today's prompt, pinned by hash from master.
+describe('buildDistractorPrompt (phase 62d)', () => {
+  const digest = (prompt: { system: string; user: string }) => createHash('sha256').update(`${prompt.system}\n---\n${prompt.user}`).digest('hex');
+  const italian = (form: string, translation: string, example: string): GenerationContext => ({
+    ...CONTEXT[1],
+    glossId: `g-${form}`,
+    form,
+    lemma: form,
+    translation,
+    example,
+    exampleTranslation: 'משפט.',
+  });
+  const [gap, sentence] = distractorItems(
+    [italian('fratello', 'אח', 'Mio fratello abita qui.'), italian('cielo', 'שמיים', 'Spero che la sua anima riposi in cielo.')],
+    ['gap', 'sentence'],
+    NO_RECENT,
+  );
+  const learnerWords = [{ key: 'w1', glossId: 'g-w1', word: 'qui', meaning: 'כאן' }];
+  const OLD = 'Il cielo è qui.';
+  const pointing = { sentence: OLD, fits: ['tavolo', 'libro', 'gatto'], problem: 'a reader who covers the word guesses tavolo first' };
+  const GAP_RULE = 'Io ho una madre qui ora.';
+  const SENTENCE_RULE = 'Leggo un ___ prima di dormire.';
+
+  it('sends a batch with no rewrite exactly as master does', () => {
+    expect(digest(buildDistractorPrompt({ items: [gap, sentence, ...ITEMS], from: 'it', to: 'he', others: [], learnerWords }))).toBe('03d311629c1a5098591616212b16d8e85a607758ab07fc7f63e4954b3adb72c3');
+  });
+
+  it('sends 62c’s gap rewrite exactly as master does', () => {
+    const rewrite = { sentence: 'Io ho un fratello qui ora.', fits: ['tavolo', 'amico'], problem: null };
+    expect(digest(buildDistractorPrompt({ items: [{ ...gap, rewrite }], from: 'it', to: 'he', others: [], learnerWords }))).toBe('2b219cc8fd692e90a66dbe55c0eb1bcdfad17a3664833714c0f6be924176a2f6');
+  });
+
+  it('a rewritten sentence item carries the sentence rule and not the gap rule', () => {
+    const prompt = buildDistractorPrompt({ items: [{ ...sentence, rewrite: pointing }], from: 'it', to: 'he', others: [], learnerWords });
+    expect(prompt.system).toContain(REWRITE_MARKER);
+    expect(prompt.system).toContain(SENTENCE_RULE);
+    expect(prompt.system).toContain('12 words');
+    expect(prompt.system).not.toContain(GAP_RULE);
+    const [item] = (JSON.parse(prompt.user) as { items: Record<string, unknown>[] }).items;
+    expect(item.rewrite).toEqual({ old_sentence: OLD, fits: ['tavolo', 'libro', 'gatto'], problem: pointing.problem });
+  });
+
+  it('a rewritten gap item carries the gap rule and not the sentence rule', () => {
+    const rewrite = { sentence: 'Io ho un fratello qui ora.', fits: ['tavolo'], problem: null };
+    const prompt = buildDistractorPrompt({ items: [{ ...gap, rewrite }], from: 'it', to: 'he', others: [], learnerWords });
+    expect(prompt.system).toContain(GAP_RULE);
+    expect(prompt.system).not.toContain(SENTENCE_RULE);
+  });
+
+  describe('validateDistractors', () => {
+    const TEN = 'Gli uccelli volano alti nel cielo blu sopra la città.';
+    const answer = { items: [{ key: sentence.key, distractors: [], sentence: TEN, gap: 'cielo', translation: 'הציפורים עפות גבוה בשמיים הכחולים מעל העיר.' }] };
+
+    it('keeps a rewritten sentence item of ten words', () => {
+      const verdict = validateDistractors([{ ...sentence, rewrite: pointing }], answer, 'he', [], 'it', NONE);
+      expect(verdict.byKey.get(sentence.key)?.sentence?.sentence).toBe(TEN);
+    });
+
+    it('degrades a first-written one of ten words, as before', () => {
+      const verdict = validateDistractors([sentence], answer, 'he', [], 'it', NONE);
+      expect(verdict.byKey.get(sentence.key)?.degraded).toBe('the sentence has 10 words');
+    });
   });
 });
