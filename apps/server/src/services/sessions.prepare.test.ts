@@ -127,7 +127,7 @@ function world(opts: {
   /** Phase 62c. The gap check's answer, by default every gap option wrong. */
   gapCheckReply?: string | Error | ((request: LlmJsonRequest) => string | Promise<string>);
   /** Phase 62c. The rewrite's answers in order; by default a call is a failure the test sees. */
-  rewriteReply?: (string | Error | ((request: LlmJsonRequest) => string))[];
+  rewriteReply?: (string | Error | ((request: LlmJsonRequest) => string | Promise<string>))[];
   /** Phase 34 (spec D3). What findKnownRight answers; nothing known by default. */
   known?: KnownRight;
   enrollment?: Enrollment;
@@ -1953,6 +1953,32 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
         await service.prepareSession(payloadOf(rows, cards));
         expect(calls.transitions).toEqual(['preparing→ready']);
       });
+
+      // Final review, Important 1 (spec D1): the gap check, then the rewrite, beside the context call.
+      it('asks the rewrite while the context call is still out', async () => {
+        let contextAsked!: () => void;
+        let rewriteAsked!: () => void;
+        const contextStarted = new Promise<void>((resolve) => (contextAsked = resolve));
+        const rewriteStarted = new Promise<void>((resolve) => (rewriteAsked = resolve));
+        const { service, calls } = world({
+          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), gapCheckReply: ALL_FIT,
+          // Each answers only once the other has been asked: the rewrite after the context call never would.
+          contextReply: async () => {
+            contextAsked();
+            await rewriteStarted;
+            return JSON.stringify({ items: [] });
+          },
+          rewriteReply: [
+            async () => {
+              rewriteAsked();
+              await contextStarted;
+              return rewritten();
+            },
+          ],
+        });
+        await service.prepareSession(payloadOf(rows, cards));
+        expect(insertedOf(calls)[1]).toMatchObject({ type: 'cloze_choice', sentence: NEW });
+      }, 5_000);
 
       it('rewrites a card the gap check left short, checks it again, and writes it with its new sentence and map', async () => {
         const { service, calls, logger, contextLlm, checkerLlm, gapRewriteLlm } = world({

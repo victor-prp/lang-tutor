@@ -1745,61 +1745,68 @@ export function createSessionService({
           return { reading: null, ms };
         }
       };
-      const [first, gapCheck] = await Promise.all([
+      // Phase 62c (spec D1–D4). The gap check, then one rewrite for every gap to choose
+      // validation refused or the gap check left short, each told what was wrong: the
+      // two in a row, beside the context call. Both only read the session's state here;
+      // what the rewrite changes is applied once both branches are back. The rescue
+      // failing never fails the attempt.
+      const rescueGaps = async () => {
+        const gapCheck = gapItems.length > 0 ? await askGaps(gapItems) : { reading: null, ms: 0 };
+        // What the gap check found of each item it judged; a miscounted one is not here.
+        const judged: GapJudged | null = gapCheck.reading
+          ? new Map(
+              gapItems.flatMap((item) => {
+                const finding = gapCheck.reading!.byKey.get(item.key);
+                return item.task === 'gap' && finding?.task === 'gap' ? [[item.key, { options: item.options, alsoRight: finding.alsoRight }] as const] : [];
+              }),
+            )
+          : null;
+        const faults = gapFaults({ items, answer: batchAnswer, verdict, judged });
+        const rewrites: { index: number; fault: GapFault; reason: string; made: Generated | null; failed: string | null }[] = [];
+        let rewriteMs = 0;
+        if (faults.length > 0) {
+          const asked = rewriteItems(items, faults);
+          const clear = rewriteOthers(items, faults, others);
+          const rewriteStarted = now();
+          let again: DistractorVerdict | null = null;
+          let failure: string | null = null;
+          try {
+            const raw = await gapRewriteLlm({
+              ...buildDistractorPrompt({ items: asked, from: target, to: read.enrolled.source_language, others: clear, learnerWords: read.learnerWords }),
+              record: record('gap_rewrite'),
+            });
+            const answer = raw === '' ? null : parseLlmDistractors(raw);
+            if (answer) again = validateDistractors(asked, answer, read.enrolled.source_language, clear, target, read.known);
+            else failure = raw === '' ? 'the rewrite returned no content' : 'the rewrite answer was unreadable';
+          } catch (error) {
+            failure = error instanceof Error ? error.message : String(error);
+          }
+          rewriteMs = now() - rewriteStarted;
+          for (const fault of faults) {
+            const found = judged?.get(fault.key);
+            const reason = found ? shortReason(fault.key, found.options.length, found.options.length - fault.rewrite.fits.length) : (fault.rewrite.problem ?? '');
+            const made = again?.byKey.get(fault.key) ?? null;
+            const index = cards.find((candidate) => keyOf(candidate.index) === fault.key)!.index;
+            rewrites.push({ index, fault, reason, made, failed: made ? null : (failure ?? again?.refused.get(fault.key) ?? `no answer for ${fault.key}`) });
+          }
+        }
+        return { gapCheck, judged, rewrites, rewriteMs };
+      };
+      const [first, { gapCheck, judged, rewrites, rewriteMs }] = await Promise.all([
         contextItems.size > 0 ? askContext([...contextItems.values()]) : Promise.resolve({ answer: null, ms: 0 }),
-        gapItems.length > 0 ? askGaps(gapItems) : Promise.resolve({ reading: null, ms: 0 }),
+        rescueGaps(),
       ]);
       const contextMs = first.ms;
-      // What the gap check found of each item it judged; a miscounted one is not here.
-      const judged: GapJudged | null = gapCheck.reading
-        ? new Map(
-            gapItems.flatMap((item) => {
-              const finding = gapCheck.reading!.byKey.get(item.key);
-              return item.task === 'gap' && finding?.task === 'gap' ? [[item.key, { options: item.options, alsoRight: finding.alsoRight }] as const] : [];
-            }),
-          )
-        : null;
-
-      // Phase 62c (spec D2–D4). One rewrite for every gap to choose validation
-      // refused or the gap check left short, each told what was wrong. A rescued
-      // card takes its new content and loses its refusal; any other keeps its own,
-      // and one the gap check left short is refused as the checker would refuse it.
-      // The rewrite failing never fails the attempt.
-      const faults = gapFaults({ items, answer: batchAnswer, verdict, judged });
-      const rewrites: { index: number; fault: GapFault; reason: string; made: Generated | null; failed: string | null }[] = [];
-      let rewriteMs = 0;
-      if (faults.length > 0) {
-        const asked = rewriteItems(items, faults);
-        const clear = rewriteOthers(items, faults, others);
-        const rewriteStarted = now();
-        let again: DistractorVerdict | null = null;
-        let failure: string | null = null;
-        try {
-          const raw = await gapRewriteLlm({
-            ...buildDistractorPrompt({ items: asked, from: target, to: read.enrolled.source_language, others: clear, learnerWords: read.learnerWords }),
-            record: record('gap_rewrite'),
-          });
-          const answer = raw === '' ? null : parseLlmDistractors(raw);
-          if (answer) again = validateDistractors(asked, answer, read.enrolled.source_language, clear, target, read.known);
-          else failure = raw === '' ? 'the rewrite returned no content' : 'the rewrite answer was unreadable';
-        } catch (error) {
-          failure = error instanceof Error ? error.message : String(error);
-        }
-        rewriteMs = now() - rewriteStarted;
-        for (const fault of faults) {
-          const card = cards.find((candidate) => keyOf(candidate.index) === fault.key)!;
-          const found = judged?.get(fault.key);
-          const reason = found ? shortReason(fault.key, found.options.length, found.options.length - fault.rewrite.fits.length) : (fault.rewrite.problem ?? '');
-          const made = again?.byKey.get(fault.key) ?? null;
-          rewrites.push({ index: card.index, fault, reason, made, failed: made ? null : (failure ?? again?.refused.get(fault.key) ?? `no answer for ${fault.key}`) });
-          if (made) {
-            verdict.byKey.set(fault.key, made);
-            verdict.refused.delete(fault.key);
-            refusals.delete(card.index);
-            card.answered = made;
-          } else if (fault.stage === 'checker') {
-            refusals.set(card.index, { stage: 'checker', reason });
-          }
+      // A rescued card takes its new content and loses its refusal; any other keeps its
+      // own, and one the gap check left short is refused as the checker would refuse it.
+      for (const { index, fault, reason, made } of rewrites) {
+        if (made) {
+          verdict.byKey.set(fault.key, made);
+          verdict.refused.delete(fault.key);
+          refusals.delete(index);
+          cards[index].answered = made;
+        } else if (fault.stage === 'checker') {
+          refusals.set(index, { stage: 'checker', reason });
         }
       }
       const rescued = new Set(rewrites.filter((rewrite) => rewrite.made).map((rewrite) => rewrite.index));

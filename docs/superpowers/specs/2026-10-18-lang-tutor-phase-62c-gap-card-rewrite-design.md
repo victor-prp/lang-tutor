@@ -208,8 +208,10 @@ the final checker as today (my call: a miscount is no fault of the sentence).
 - **R4 (building, measured).** Both budgets are 60 s. Over the eval runs the gap check took 4–19 s
   (60 calls) and the rewrite 7–21 s (23 calls): three times the slowest, capped at D1's 60 s. The
   prepare-session job now expires at 840 s, which `updateQueue` applies to the existing queue on
-  deploy. A rescue therefore adds about 10–20 s to a session whose gap card fails, not the 5–10 s
-  first guessed, and nothing to one where none does.
+  deploy. The gap check and the rewrite run one after the other beside the context call (15–33 s on
+  lane 0), as D1 draws it: a rescue adds only what the two take beyond that call, from nothing up
+  to about 20 s, and a session where no card fails waits for nothing new. (The plan had first put
+  the rewrite after the context call; the final review caught it, and it was fixed.)
 - **R5 (building, the rule's wording).** Four drafts, each judged over three gap runs. An Italian
   example resting on grammar ("mio tavolo" lacks its article) was copied, and the checker still
   called tavolo right. Banning the words in `fits` pushed fratello's rewrite to a sentence with none
