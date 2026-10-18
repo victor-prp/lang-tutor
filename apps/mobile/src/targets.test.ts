@@ -6,6 +6,7 @@ import {
   actionFailureMessage,
   countdownBig,
   dateHasCome,
+  dotLook,
   fuseOf,
   isUrgent,
   stackDots,
@@ -659,5 +660,14 @@ describe('stackDots (phase 64, spec D3, D5)', () => {
       { card: 'main', urgent: false },
       { card: 't2', urgent: true },
     ]);
+  });
+});
+
+describe('dotLook (phase 64, spec D5)', () => {
+  it('draws the top card long and blue, an urgent card under it amber, and the rest grey', () => {
+    expect(dotLook({ onTop: true, urgent: false })).toBe('on');
+    expect(dotLook({ onTop: true, urgent: true })).toBe('on');
+    expect(dotLook({ onTop: false, urgent: true })).toBe('urgent');
+    expect(dotLook({ onTop: false, urgent: false })).toBe('off');
   });
 });

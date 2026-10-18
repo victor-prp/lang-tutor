@@ -208,6 +208,13 @@ export function targetButtonSolid(target: TargetSummary): boolean {
   return target.today.state === 'due_today' && target.readiness_pct < 100;
 }
 
+/** Phase 64 (spec D3, D5). How a dot of the stack is drawn: the top card's long and blue, a
+ *  card in its last two days that is not on top amber, any other grey. */
+export function dotLook({ onTop, urgent }: { onTop: boolean; urgent: boolean }): 'on' | 'urgent' | 'off' {
+  if (onTop) return 'on';
+  return urgent ? 'urgent' : 'off';
+}
+
 /** Phase 64 (spec D3, D5). The stack's dots, one per card in home's order, amber for a target
  *  in its last two days. One card has none. */
 export function stackDots(order: readonly HomeCard[], targets: readonly TargetSummary[]): { card: HomeCard; urgent: boolean }[] {

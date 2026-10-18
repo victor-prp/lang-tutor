@@ -2,6 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, PanResponder, Pressable, StyleSheet, View } from 'react-native';
 
+import { dotLook } from '@/targets';
 import { colors, radii, shadows } from '@/theme';
 
 /** How far a drag goes before it turns the card, in points. */
@@ -69,18 +70,21 @@ export function CardStack({
       </View>
       {several ? (
         <View style={styles.dots}>
-          {cards.map((card, i) => (
-            <Pressable
-              key={card.key}
-              accessibilityRole="button"
-              accessibilityState={{ selected: i === at }}
-              aria-selected={i === at}
-              testID={`home-dot-${card.key}`}
-              hitSlop={8}
-              onPress={() => setIndex(i)}
-              style={[styles.dot, i === at && styles.dotOn, card.urgent && styles.dotUrgent]}
-            />
-          ))}
+          {cards.map((card, i) => {
+            const look = dotLook({ onTop: i === at, urgent: card.urgent });
+            return (
+              <Pressable
+                key={card.key}
+                accessibilityRole="button"
+                accessibilityState={{ selected: i === at }}
+                aria-selected={i === at}
+                testID={`home-dot-${card.key}`}
+                hitSlop={8}
+                onPress={() => setIndex(i)}
+                style={[styles.dot, look === 'on' && styles.dotOn, look === 'urgent' && styles.dotUrgent]}
+              />
+            );
+          })}
         </View>
       ) : null}
     </View>
