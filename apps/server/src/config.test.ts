@@ -147,10 +147,10 @@ describe('loadConfig', () => {
         (config.sessionGenerationTimeoutMs +
           2 * config.contextCallTimeoutMs +
           2 * config.gapCheckTimeoutMs +
-          2 * config.gapRewriteTimeoutMs +
+          3 * config.gapRewriteTimeoutMs +
           config.checkerCallTimeoutMs +
-          // Phase 62d (spec D5): the re-check.
-          config.gapCheckTimeoutMs),
+          // Phase 62d (spec D5): the two re-checks.
+          2 * config.gapCheckTimeoutMs),
     );
   });
 
@@ -163,13 +163,15 @@ describe('loadConfig', () => {
       GAP_REWRITE_BUDGET_MS,
       CONTEXT_CALL_BUDGET_MS,
       CHECKER_CALL_BUDGET_MS,
-      // Phase 62d (spec D5): the point check, the typed gaps' rewrite and the re-check.
+      // Phase 62d (spec D5): the point check, the typed gaps' two rewrites and their re-checks.
+      GAP_CHECK_BUDGET_MS,
+      GAP_REWRITE_BUDGET_MS,
       GAP_CHECK_BUDGET_MS,
       GAP_REWRITE_BUDGET_MS,
       GAP_CHECK_BUDGET_MS,
     ]);
-    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (120_000 + 60_000 + 3 * GAP_CHECK_BUDGET_MS + 2 * GAP_REWRITE_BUDGET_MS + 60_000 + 60_000)) / 1000);
-    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe(1200);
+    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (120_000 + 60_000 + 4 * GAP_CHECK_BUDGET_MS + 3 * GAP_REWRITE_BUDGET_MS + 60_000 + 60_000)) / 1000);
+    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe(1440);
   });
 
   it('defaults the gap check’s budget to its own, reads GAP_CHECK_TIMEOUT_MS, and never above it (phase 62c)', () => {

@@ -30,6 +30,12 @@ export const SESSION_GENERATION_BUDGET_MS = 120_000;
  *  answered in English eight of eight, in 15–19 s. */
 export const SESSION_GENERATION_THINKING = 4096;
 
+/** Phase 62d (spec D2). The point check's thinking budget, in tokens. Uncapped, one
+ *  sentence took 3–5 s and now and then ran past the eval's 30 s (2026-10-18); at
+ *  512 it answered in 2.3–2.9 s with the same split of readers; at 0 in about 1 s,
+ *  but it gave a bad sentence's first guess six readers of ten. */
+export const POINT_CHECK_THINKING = 512;
+
 /** Phase 34 (spec D6, D8, ruling R12). The most the context call may take, the
  *  call after the batch. A minute: measured at about 7 s for a full session, and
  *  a call that runs out costs only the sentences (ruling R11), never the
@@ -62,8 +68,9 @@ export const GAP_REWRITE_BUDGET_MS = 60_000;
  *  call added to the attempt adds its budget here. Phase 62c (spec D1): the gap
  *  check (beside the context call), the rewrite and the rewritten cards' context
  *  call (beside the checker), counted as if one after another. Phase 62d (spec D5):
- *  the point check and the typed gaps' rewrite (beside the gap check and its
- *  rewrite), and the re-check (beside the checker), on the same budgets. */
+ *  the point check, the typed gaps' rewrite, its re-check and second rewrite (beside
+ *  the gap check and its rewrite), and the last re-check (beside the checker), on the
+ *  same budgets. */
 export const PREPARE_SESSION_CALL_BUDGETS_MS: readonly number[] = [
   SESSION_GENERATION_BUDGET_MS,
   CONTEXT_CALL_BUDGET_MS,
@@ -71,6 +78,8 @@ export const PREPARE_SESSION_CALL_BUDGETS_MS: readonly number[] = [
   GAP_REWRITE_BUDGET_MS,
   CONTEXT_CALL_BUDGET_MS,
   CHECKER_CALL_BUDGET_MS,
+  GAP_CHECK_BUDGET_MS,
+  GAP_REWRITE_BUDGET_MS,
   GAP_CHECK_BUDGET_MS,
   GAP_REWRITE_BUDGET_MS,
   GAP_CHECK_BUDGET_MS,

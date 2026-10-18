@@ -3,13 +3,13 @@ import { describe, expect, it } from '@jest/globals';
 import { CHECK_MARKER } from './check';
 import { CONTEXT_MARKER } from './context';
 import { DISTRACTOR_MARKER } from './distractors';
-import { POINT_MARKER, buildPointPrompt, judgePoint, parsePoint, pointItem, readPoint, type PointFinding, type PointTarget } from './pointing';
+import { POINT_MARKER, POINT_READERS, buildPointPrompt, judgePoint, parsePoint, pointItem, readPoint, type PointFinding, type PointTarget } from './pointing';
 
 // Phase 62d (spec D2). The blind reader of a typed gap: its prompt, its parse,
 // and whether its guess means the sentence points to its word. Lane 0's
 // 2026-10-18 cards: "Il cielo è qui." (alternatives tavolo, fratello, pesce…).
 const CIELO: PointTarget = { word: { answer: 'cielo', lemma: 'cielo', alternatives: ['Cielo'] }, meanings: ['שמיים'] };
-const finding = (guesses: string[], meaning: string, clear = true): PointFinding => ({ guesses, meaning, clear });
+const finding = (guesses: string[], meaning: string, readers = 8): PointFinding => ({ guesses, meaning, readers });
 
 describe('pointItem', () => {
   it('blanks the gap the sentence card stores', () => {
@@ -35,13 +35,13 @@ describe('buildPointPrompt', () => {
 
 describe('parsePoint', () => {
   it('reads a fenced answer', () => {
-    const raw = '```json\n{"items":[{"key":"q3","guesses":["tavolo"],"meaning":"שולחן","clear":false}]}\n```';
-    expect(parsePoint(raw)).toEqual({ items: [{ key: 'q3', guesses: ['tavolo'], meaning: 'שולחן', clear: false }] });
+    const raw = '```json\n{"items":[{"key":"q3","guesses":[{"word":"tavolo","readers":2}],"meaning":"שולחן"}]}\n```';
+    expect(parsePoint(raw)).toEqual({ items: [{ key: 'q3', guesses: [{ word: 'tavolo', readers: 2 }], meaning: 'שולחן' }] });
   });
 
-  it('is null for an answer that is not JSON, or that leaves out clear', () => {
+  it('is null for an answer that is not JSON, or whose guesses leave out readers', () => {
     expect(parsePoint('not json')).toBeNull();
-    expect(parsePoint('{"items":[{"key":"q3","guesses":["tavolo"],"meaning":"שולחן"}]}')).toBeNull();
+    expect(parsePoint('{"items":[{"key":"q3","guesses":[{"word":"tavolo"}],"meaning":"שולחן"}]}')).toBeNull();
   });
 });
 
@@ -51,39 +51,40 @@ describe('readPoint', () => {
   it('keeps the first answer of a key, drops a key nobody asked, and trims the guesses', () => {
     const read = readPoint(items, {
       items: [
-        { key: 'q3', guesses: [' cielo ', '', 'mare'], meaning: ' שמיים ', clear: true },
-        { key: 'q3', guesses: ['tavolo'], meaning: 'שולחן', clear: false },
-        { key: 'q9', guesses: ['gatto'], meaning: 'חתול', clear: true },
+        { key: 'q3', guesses: [{ word: ' ', readers: 5 }, { word: ' cielo ', readers: 7 }, { word: 'mare', readers: 2 }], meaning: ' שמיים ' },
+        { key: 'q3', guesses: [{ word: 'tavolo', readers: 1 }], meaning: 'שולחן' },
+        { key: 'q9', guesses: [{ word: 'gatto', readers: 9 }], meaning: 'חתול' },
       ],
     });
     expect([...read.keys()]).toEqual(['q3']);
-    expect(read.get('q3')).toEqual({ guesses: ['cielo', 'mare'], meaning: 'שמיים', clear: true });
+    expect(read.get('q3')).toEqual({ guesses: ['cielo', 'mare'], meaning: 'שמיים', readers: 7 });
   });
 
-  it('leaves an unanswered key out', () => {
+  it('leaves an unanswered key out, and reads no guesses as no readers', () => {
     expect(readPoint(items, { items: [] }).size).toBe(0);
+    expect(readPoint(items, { items: [{ key: 'q3', guesses: [], meaning: '' }] }).get('q3')).toEqual({ guesses: [], meaning: '', readers: 0 });
   });
 });
 
 describe('judgePoint', () => {
-  it('passes a clear first guess that is the word', () => {
-    expect(judgePoint(finding(['cielo', 'mare', 'sole'], 'שמיים'), CIELO)).toEqual({ points: true });
+  it('passes a first guess that is the word, at POINT_READERS of ten', () => {
+    expect(judgePoint(finding(['cielo', 'mare', 'sole'], 'שמיים', POINT_READERS), CIELO)).toEqual({ points: true });
   });
 
-  it('fails a first guess that is the word when words of other meanings fit about as well', () => {
-    const verdict = judgePoint(finding(['cielo', 'mare', 'sole'], 'שמיים', false), CIELO);
+  it('fails a first guess that is the word when fewer than POINT_READERS of ten would write it, naming the others', () => {
+    const verdict = judgePoint(finding(['cielo', 'mare', 'sole'], 'שמיים', POINT_READERS - 1), CIELO);
     expect(verdict.points).toBe(false);
     if (verdict.points) return;
     expect(verdict.fits).toEqual(['mare', 'sole']);
-    expect(verdict.problem).toMatch(/different meanings/);
+    expect(verdict.problem).toBe(`only ${POINT_READERS - 1} of ten readers who cover the word would write it; the others would write mare, sole`);
   });
 
-  it('fails a clear first guess that is another word, and names it', () => {
+  it('fails a first guess that is another word, and names it', () => {
     const verdict = judgePoint(finding(['tavolo', 'libro', 'gatto'], 'שולחן'), CIELO);
     expect(verdict.points).toBe(false);
     if (verdict.points) return;
     expect(verdict.fits).toEqual(['tavolo', 'libro', 'gatto']);
-    expect(verdict.problem).toContain('tavolo');
+    expect(verdict.problem).toBe('a reader who covers the word guesses tavolo first (tavolo, libro, gatto)');
   });
 
   it('passes a first guess of the same meaning', () => {

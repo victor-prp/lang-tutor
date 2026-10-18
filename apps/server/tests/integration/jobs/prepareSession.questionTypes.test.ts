@@ -119,7 +119,7 @@ describe('prepareSession with question_types', () => {
   // Phase 62d (spec D4, ruling R3). A typed gap the reader cannot place, whose one rewrite
   // fails too (the stub writes its old sentence back), is dropped and named, never shown.
   it('drops a typed gap whose sentence points to nothing, and names it', async () => {
-    await expectPoint(ns, { q2: { guesses: ['kettle', 'pillow', 'ladder'], meaning: 'קומקום', clear: false } });
+    await expectPoint(ns, { q2: { guesses: ['kettle', 'pillow', 'ladder'], meaning: 'קומקום', readers: 3 } });
     const { record } = await prepared(['multiple_choice', 'cloze_typed'], ['meaning', 'sentence']);
     expect(record.questions.map((question) => question.type)).toEqual(['multiple_choice']);
     expect(record.skipped_types).toEqual([{ type: 'cloze_typed', reason: 'not_generated' }]);

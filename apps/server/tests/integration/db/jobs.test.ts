@@ -59,8 +59,8 @@ describe('installJobs', () => {
       // Phase 34 (ruling R12): twice the sum of the batch's 120 s (phase 47 D1),
       // the context call's 60 s and the checker's 60 s. Phase 62c (spec D1): and the
       // gap check's 60 s, the rewrite's 60 s and a rewritten card's context call's 60 s.
-      // Phase 62d (spec D5): and the point check's, the typed gaps' rewrite's and the re-check's.
-      expire_seconds: 1200,
+      // Phase 62d (spec D5): and the point check's, the typed gaps' two rewrites' and their re-checks'.
+      expire_seconds: 1440,
       deletion_seconds: 86_400,
       dead_letter: PREPARE_SESSION_FAILED,
     });

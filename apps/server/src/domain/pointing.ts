@@ -18,6 +18,11 @@ import { dropNulls, unfence } from './translation';
  * narrows the gap to a kind ("Mio ___ è felice.", any person) does not point.
  */
 
+/** Phase 62d (spec D3). How many times a typed gap the reader cannot place is written
+ *  again, each told what the last one's readers would write. One rescued about half of
+ *  the eval's (2026-10-18), and a second, given new feedback, most of the rest. */
+export const POINT_REWRITE_ROUNDS = 2;
+
 /** In the instruction verbatim, so MockServer can tell this call apart.
  *  Changing the wording means changing the stubs. */
 export const POINT_MARKER = 'never seen the word';
@@ -28,8 +33,14 @@ export type PointItem = { key: string; sentence: string };
 /** Structurally LlmJsonRequest; services/sessions.ts is where the two meet. */
 export type PointPrompt = { system: string; user: string; schema: typeof LlmPointSchema };
 
-/** What the reader said of one sentence. */
-export type PointFinding = { guesses: string[]; meaning: string; clear: boolean };
+/** What the reader said of one sentence: its guesses, likeliest first, the first one's
+ *  meaning, and how many of ten readers would write the first or a word of its meaning. */
+export type PointFinding = { guesses: string[]; meaning: string; readers: number };
+
+/** Spec D2, ruling R1: the first guess is clearly the likeliest when at least this many
+ *  readers of ten would write it. The model estimates and the code decides, so the bar is
+ *  set against Victor's verdicts (the eval's pointing group) without rewording the prompt. */
+export const POINT_READERS = 6;
 
 /** The word a typed gap asks, by its own forms only, and the meanings its gloss is known by. */
 export type PointTarget = { word: TypedTarget; meanings: readonly string[] };
@@ -57,9 +68,8 @@ export function buildPointPrompt(items: readonly PointItem[], from: string, to: 
     `Each item is a ${learned.name} sentence with one word left out, written ___.`,
     `Read each as a native ${learned.name} speaker who has ${POINT_MARKER}: only the sentence.`,
     'Return JSON only, matching the supplied schema. For each item:',
-    `- guesses: the three words you would most likely put in the gap, the likeliest first, each in the form the gap needs.`,
+    '- guesses: the three words you would most likely put in the gap, the likeliest first, each in word, in the form the gap needs, and in readers how many of them would write it: picture ten native readers, each seeing only this sentence and writing one word in the gap. A reader who would write a word that means the same as one of your guesses counts for that guess. Each reader counts once, so the three counts add up to ten at most, and words of different meanings (a wife and a husband, a dog and a cat, a taxi and a bus) are counted apart, however natural each would be.',
     `- meaning: your first guess translated into ${own.name}, in its dictionary form.`,
-    '- clear: true when one meaning is clearly the likeliest, so that most readers would put your first guess or a word meaning the same; false when words of different meanings fit the gap about as well, or the sentence only narrows it to a kind (any person, any vehicle, any thing one can have).',
     'Answer every item, using its key exactly as given.',
     ...own.writing,
     ...learned.writing,
@@ -88,24 +98,23 @@ export function readPoint(items: readonly PointItem[], answer: LlmPoint): Map<st
   const read = new Map<string, PointFinding>();
   for (const got of answer.items) {
     if (!asked.has(got.key) || read.has(got.key)) continue;
-    read.set(got.key, {
-      guesses: got.guesses.map((guess) => guess.trim()).filter((guess) => guess !== ''),
-      meaning: got.meaning.trim(),
-      clear: got.clear,
-    });
+    const guesses = got.guesses.map((guess) => ({ word: guess.word.trim(), readers: guess.readers })).filter((guess) => guess.word !== '');
+    read.set(got.key, { guesses: guesses.map((guess) => guess.word), meaning: got.meaning.trim(), readers: guesses[0]?.readers ?? 0 });
   }
   return read;
 }
 
-/** Spec D2: the first guess is the word or of its meaning, and clearly the likeliest. */
+/** Spec D2: the first guess is the word or of its meaning, and clearly the likeliest (POINT_READERS). */
 export function judgePoint(finding: PointFinding, target: PointTarget): PointVerdict {
   const [first] = finding.guesses;
   if (first === undefined) return { points: false, fits: [], problem: 'a reader who covers the word guesses nothing' };
   const isWord = (guess: string) => judgeTyped(target.word, guess) !== 'wrong';
   const others = finding.guesses.filter((guess) => !isWord(guess));
-  if (!finding.clear) {
-    return { points: false, fits: others, problem: `words of different meanings fit its gap about as well: ${finding.guesses.join(', ')}` };
+  if (!isWord(first) && !meaningFits(finding.meaning, target.meanings)) {
+    return { points: false, fits: others, problem: `a reader who covers the word guesses ${first} first (${finding.guesses.join(', ')})` };
   }
-  if (isWord(first) || meaningFits(finding.meaning, target.meanings)) return { points: true };
-  return { points: false, fits: others, problem: `a reader who covers the word guesses ${first} first` };
+  if (finding.readers < POINT_READERS) {
+    return { points: false, fits: others, problem: `only ${finding.readers} of ten readers who cover the word would write it; the others would write ${others.join(', ') || 'other words'}` };
+  }
+  return { points: true };
 }

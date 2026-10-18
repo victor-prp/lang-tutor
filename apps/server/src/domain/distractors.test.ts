@@ -1188,7 +1188,7 @@ describe('buildDistractorPrompt (phase 62d)', () => {
   const OLD = 'Il cielo è qui.';
   const pointing = { sentence: OLD, fits: ['tavolo', 'libro', 'gatto'], problem: 'a reader who covers the word guesses tavolo first' };
   const GAP_RULE = 'Io ho una madre qui ora.';
-  const SENTENCE_RULE = 'Leggo un ___ prima di dormire.';
+  const SENTENCE_RULE = 'Ora leggo un ___ e poi dormo.';
 
   it('sends a batch with no rewrite exactly as master does', () => {
     expect(digest(buildDistractorPrompt({ items: [gap, sentence, ...ITEMS], from: 'it', to: 'he', others: [], learnerWords }))).toBe('03d311629c1a5098591616212b16d8e85a607758ab07fc7f63e4954b3adb72c3');
