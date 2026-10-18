@@ -17,6 +17,8 @@ export type BoardState = {
   meaning: number | null;
   /** The last wrong pair, shown until the next tap. */
   miss: { word: number; meaning: number } | null;
+  /** Phase 63 (spec D8). The words help matched, by board index: each a miss. */
+  helped: boolean[];
 };
 
 export function startBoard(question: MatchingQuestion): BoardState {
@@ -28,6 +30,7 @@ export function startBoard(question: MatchingQuestion): BoardState {
     word: null,
     meaning: null,
     miss: null,
+    helped: question.board.words.map(() => false),
   };
 }
 
@@ -67,4 +70,37 @@ export function tapMeaning(state: BoardState, question: MatchingQuestion, meanin
 export function firstAttempts(state: BoardState): number[] | null {
   if (!state.matched.every(Boolean)) return null;
   return state.first.slice(state.start).map((meaning) => meaning!);
+}
+
+/**
+ * Phase 63 (spec D8). A press of help matches one pair: the word selected, else
+ * the selected meaning's word, else the first unmatched word. The fifth meaning
+ * belongs to no word, so with it selected help takes the first unmatched one.
+ * The word is helped, a miss; a word not tried yet is sent its own meaning.
+ */
+export function helpBoard(state: BoardState, question: MatchingQuestion): BoardState {
+  const open = (word: number) => word >= 0 && !state.matched[word];
+  const ofMeaning = state.meaning === null ? -1 : question.board.correct_options.indexOf(state.meaning);
+  const word = state.word !== null && open(state.word) ? state.word : open(ofMeaning) ? ofMeaning : state.matched.indexOf(false);
+  if (word < 0) return state;
+  return {
+    ...state,
+    matched: state.matched.map((done, index) => done || index === word),
+    helped: state.helped.map((helped, index) => helped || index === word),
+    first: state.first.map((tried, index) => (index === word && tried === null ? question.board.correct_options[word] : tried)),
+    word: null,
+    meaning: null,
+    miss: null,
+  };
+}
+
+/** Phase 63 (spec D8). Every word matched: help has nothing left to match. */
+export function boardHelpDone(state: BoardState): boolean {
+  return state.matched.every(Boolean);
+}
+
+/** Phase 63 (spec D8). Which words this screen played help matched, in board
+ *  order, as `firstAttempts` lists their meanings. */
+export function helpedWords(state: BoardState): boolean[] {
+  return state.helped.slice(state.start);
 }

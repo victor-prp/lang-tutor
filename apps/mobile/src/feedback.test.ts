@@ -538,3 +538,34 @@ describe('a helped answer on more cards (phase 56 D8)', () => {
     expect(checksFit(CLOZE, { text: 'banana', helped: true })).toBe(false);
   });
 });
+
+// Phase 63 (spec D12). A right option after help is "right, with help"; a board
+// counts a helped word as not right.
+describe('a helped choice and board (phase 63 D12)', () => {
+  const HELPED = { tone: 'other', title: 'נכון, עם עזרה', line: null, verdict: null };
+  const board: Question = {
+    id: 'm1', type: 'matching', vocab_term_id: 'l', question: 'casa',
+    options: ['בית', 'חתול', 'כלב', 'עץ', 'דלת'], correct_option: 0,
+    board: { question_ids: ['m1', 'm2', 'm3', 'm4'], words: ['casa', 'gatto', 'cane', 'albero'], parts_of_speech: ['noun', 'noun', 'noun', 'noun'], correct_options: [0, 1, 2, 3] },
+    part_of_speech: 'noun',
+  };
+
+  it('tells a right option chosen after help as right, with help', () => {
+    expect(feedbackFor(choice, { option_index: (choice as { correct_option: number }).correct_option, helped: true }, null)).toEqual(HELPED);
+  });
+
+  it('tells a wrong option chosen after help as wrong', () => {
+    const wrong = ((choice as { correct_option: number }).correct_option + 1) % 2;
+    expect(feedbackFor(choice, { option_index: wrong, helped: true }, null)).toMatchObject({ tone: 'wrong' });
+  });
+
+  it('tells an unhelped right option as before', () => {
+    expect(feedbackFor(choice, { option_index: (choice as { correct_option: number }).correct_option, helped: false }, null).tone).toBe('correct');
+  });
+
+  it('counts a helped board word as not right', () => {
+    expect(feedbackFor(board, { board: [0, 1, 2, 3], helped: [false, true, false, false] }, null)).toEqual({
+      tone: 'wrong', title: 'בניסיון הראשון: 3 מתוך 4', line: null, verdict: null,
+    });
+  });
+});

@@ -47,6 +47,8 @@ const BASE: QuizState = {
   retry: null,
   retype: null,
   help: 0,
+  helpPressed: false,
+  helpMarks: null,
   tapped: [],
 };
 
@@ -524,7 +526,10 @@ describe('help on more cards (phase 56 D5, D7)', () => {
     expect(helpedFor(TRANSLATE, 0)).toBe(false);
     expect(helpedFor(TILES, 0, { helped: true })).toBe(true);
     expect(helpedFor(TILES, 4, { helped: false })).toBe(false);
-    expect(helpedFor(CHOICE, 2)).toBeUndefined();
+    // Phase 63 (spec D10): a choice takes help now; a new meaning does not.
+    expect(helpedFor(CHOICE, 2)).toBe(true);
+    expect(helpedFor(CHOICE, 0)).toBe(false);
+    expect(helpedFor({ ...CHOICE, type: 'new_meaning', known_meanings: [] } as Question, 2)).toBeUndefined();
   });
 
   it('opens the retype on a wrong dictation and a wrong typed say the translation', () => {
@@ -648,5 +653,54 @@ describe('taps on every sentence card (phase 62 D3, D6)', () => {
     expect(nextStepRequest('c1', { option_index: 0 }, null, undefined, false, [0])).toEqual({ question_id: 'c1', option_index: 0, tapped: [0] });
     expect(nextStepRequest('c1', { text: 'grande' }, null, undefined, false, [0, 2])).toEqual({ question_id: 'c1', text: 'grande', tapped: [0, 2] });
     expect(nextStepRequest('c1', { option_index: 0 }, null)).toEqual({ question_id: 'c1', option_index: 0 });
+  });
+});
+
+// Phase 63 (spec D3, D10). On a typed card a press reads the typing: it marks
+// from the first wrong character, or gives the step after a right start. A press
+// that only marks still makes the card helped; a choice card counts presses.
+describe('help reads the typing (phase 63 D3, D10)', () => {
+  const TYPED: Question = { id: 't1', type: 'typed_translation', vocab_term_id: 'l', question: 'ארוחת בוקר', part_of_speech: 'noun', answer: 'colazione', lemma: 'colazione', alternatives: [], context: null };
+  const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l', question: 'colazione', part_of_speech: 'noun', meaning: 'ארוחה', context: null };
+  const SAY: Question = { id: 's1', type: 'say_translation', vocab_term_id: 'l', question: 'מדבר', part_of_speech: 'verb', answer: 'parlo', lemma: 'parlare', alternatives: [], context: null };
+  const CHOICE: Question = { id: 'q1', type: 'multiple_choice', vocab_term_id: 'l', question: 'casa', options: ['בית', 'דלת', 'גג', 'קיר'], correct_option: 0, context: null };
+  const ON = (question: Question): QuizState => ({ ...BASE, question, position: 3, answer: null, advanceRequested: false, speakingOff: null, judging: 'idle' });
+
+  it('marks from the first wrong letter, gives nothing, and makes the card helped', () => {
+    const marked = helpPressedState({ ...ON(TYPED), help: 2 }, 'calazo');
+    expect(marked).toMatchObject({ help: 2, helpPressed: true, helpMarks: { text: 'calazo', from: 1 } });
+    expect(helpedFor(TYPED, marked.help, undefined, marked.helpPressed)).toBe(true);
+    expect(helpedFor(TYPED, 0, undefined, true)).toBe(true);
+  });
+
+  it('gives the step after a right start, and clears the marks', () => {
+    const marked = helpPressedState({ ...ON(TYPED), help: 2 }, 'calazo');
+    expect(helpPressedState(marked, 'colazi')).toMatchObject({ help: 7, helpPressed: true, helpMarks: null });
+  });
+
+  it('compares a typed meaning as Hebrew', () => {
+    expect(helpPressedState(ON(MEANING), 'אֲר')).toMatchObject({ help: 3, helpMarks: null });
+  });
+
+  it('adds one step a press where nothing is typed: spoken, listening, a choice', () => {
+    expect(helpPressedState(ON(SAY))).toMatchObject({ help: 1, helpPressed: true });
+    expect(helpPressedState(helpPressedState(ON(CHOICE)))).toMatchObject({ help: 2, helpPressed: true });
+  });
+
+  // Review focus 5: the same card back for its second try keeps its help.
+  it('keeps help through a second try, and resets it on the next card', () => {
+    const pressed = { ...ON(TYPED), help: 3, helpPressed: true, helpMarks: { text: 'cx', from: 1 } };
+    expect(applyQueued(pressed, { complete: false, question: TYPED, position: 3, retry: { answer: 'pasto', wording: 'word' } })).toMatchObject({
+      help: 3,
+      helpPressed: true,
+      helpMarks: null,
+    });
+    expect(applyQueued(pressed, { complete: false, question: SAY, position: 4, retry: null })).toMatchObject({ help: 0, helpPressed: false, helpMarks: null });
+    expect(enteredState('s2')).toMatchObject({ help: 0, helpPressed: false, helpMarks: null });
+  });
+
+  it('sends helped with an option', () => {
+    expect(nextStepRequest('q1', { option_index: 2, helped: true }, null)).toEqual({ question_id: 'q1', option_index: 2, helped: true });
+    expect(nextStepRequest('q1', { option_index: 2 }, null)).toStrictEqual({ question_id: 'q1', option_index: 2 });
   });
 });

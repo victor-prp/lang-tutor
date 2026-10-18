@@ -73,15 +73,19 @@ export type SessionValue = {
   /** Phase 56 (spec D5). How many characters help has revealed on the card on
    *  screen, its second try and "can't speak now" included; 0 on a new card. */
   help: number;
-  /** Help pressed: one more character. Every answer to the card then says it was helped. */
-  pressHelp: () => void;
+  /** Help pressed: one more character. Every answer to the card then says it was helped.
+   *  Phase 63 (spec D3): on a typed card, with the text typed, which the press reads. */
+  pressHelp: (typed?: string) => void;
+  /** Phase 63 (spec D3). The typed text the last press marked, from its first wrong character. */
+  helpMarks: { text: string; from: number } | null;
   /** Phase 59 (spec D3, D5). The sentence translation's words tapped, by index.
    *  Phase 62 (spec D3): any tapped sentence's. */
   tapped: number[];
   /** A word of the sentence tapped: its index, or `'mark'` on a card with no word map. */
   pressWord: (tap: number | 'mark') => void;
   /** Phase 24. Answers a board: each word's first-tried meaning, in board order. */
-  submitBoard: (firstAttempts: number[]) => void;
+  /** Phase 63 (spec D8): with the words help matched, in the same order. */
+  submitBoard: (firstAttempts: number[], helped?: boolean[]) => void;
   /** Phase 25. The speaking card's attempt that has recorded nothing yet. */
   speech: SpeechAttempt;
   /** Phase 25 (spec D8). Off for the rest of the session, and why. */
@@ -244,8 +248,16 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       if (!state || state.answer !== null || !state.question || state.judging === 'checking') return;
       const { sessionId, question, retry } = state;
       // Phase 56 (spec D5): a text answer says whether the card was helped.
-      const helped = 'text' in given ? helpedFor(question, state.help, given) : undefined;
-      const input = 'text' in given ? (helped === undefined ? { text: given.text } : { text: given.text, helped }) : given;
+      // Phase 63 (spec D10): and so does a choice.
+      const helped = helpedFor(question, state.help, 'text' in given ? given : undefined, state.helpPressed);
+      const input =
+        'text' in given
+          ? helped === undefined
+            ? { text: given.text }
+            : { text: given.text, helped }
+          : helped === undefined
+            ? { option_index: given.option_index }
+            : { option_index: given.option_index, helped };
       // Phase 34 (spec D9): the second try at a held card carries retry: true,
       // and an answer meeting a hold it could not have opened goes again as one.
       // Phase 62 (spec D6): and the words tapped on its sentence.
@@ -285,20 +297,22 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   // go in board order, one call after another, and only the last response is
   // queued — the ones between are the board's own next words.
   const submitBoard = useCallback(
-    (firstAttempts: number[]) => {
+    (firstAttempts: number[], helped: boolean[] = []) => {
       if (!state || state.answer !== null || state.question?.type !== 'matching') return;
       const { sessionId, question } = state;
       const ids = question.board.question_ids.slice(question.board.question_ids.indexOf(question.id));
-      setState((current) => (current ? { ...current, answer: { board: firstAttempts } } : current));
+      // Phase 63 (spec D8, D10): each word says whether help matched it.
+      const answer = { board: firstAttempts, helped: firstAttempts.map((_, index) => helped[index] === true) };
+      setState((current) => (current ? { ...current, answer } : current));
       queueResponse(
         sessionId,
         (async () => {
           let response: NextStepResponse | undefined;
           for (const [index, id] of ids.entries()) {
-            response = await api.nextStep(sessionId, { question_id: id, option_index: firstAttempts[index] });
+            response = await api.nextStep(sessionId, { question_id: id, option_index: firstAttempts[index], helped: answer.helped[index] });
           }
           if (!response) throw new Error('a board with no words to answer');
-          return { answer: { board: firstAttempts }, next: response, met: null };
+          return { answer, next: response, met: null };
         })(),
       );
     },
@@ -313,7 +327,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       if (!state || state.answer !== null || !state.question || state.speech.phase === 'checking') return;
       const { sessionId, question, retry } = state;
       // Phase 56 (spec D5): a say the translation said with help says so.
-      const helped = helpedFor(question, state.help);
+      const helped = helpedFor(question, state.help, undefined, state.helpPressed);
       const helps = helped === undefined ? {} : { helped };
       // Only an attempt still being checked on this card may land: a card
       // answered meanwhile (show the answer, can't speak now) keeps its answer.
@@ -352,7 +366,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       if (!state || !state.question || !canJudge(state.judging, state.answer !== null)) return;
       const { sessionId, question, retry } = state;
       // Phase 56 (spec D5): a judged card says whether it was helped.
-      const helped = helpedFor(question, state.help);
+      const helped = helpedFor(question, state.help, undefined, state.helpPressed);
       const helps = helped === undefined ? {} : { helped };
       // Phase 59 (spec D5): and which of its words were tapped.
       const tapped = tappedFor(question, state.tapped);
@@ -380,7 +394,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         current ? { ...current, answer: { pass: kind }, speech: IDLE_ATTEMPT, advanceRequested: kind === 'skip' } : current,
       );
       // Phase 56 (spec D5): given up after help, the pass says so.
-      const helped = helpedFor(question, state.help);
+      const helped = helpedFor(question, state.help, undefined, state.helpPressed);
       const passed = helped === undefined ? { pass: kind } : { pass: kind, helped };
       // Phase 34 (spec D9): on a second try, a skip is sent as the give-up.
       queueResponse(
@@ -442,8 +456,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   }, []);
 
   // Phase 56 (spec D5). The phone's alone until the answer says it.
-  const pressHelp = useCallback(() => {
-    setState((current) => (current ? helpPressedState(current) : current));
+  const pressHelp = useCallback((typed?: string) => {
+    setState((current) => (current ? helpPressedState(current, typed) : current));
   }, []);
 
   // Phase 59 (spec D3). The phone's alone until the answer carries it.
@@ -471,6 +485,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         submitText,
         help: 0,
         pressHelp,
+        helpMarks: null,
         tapped: [],
         pressWord,
         submitBoard,
@@ -509,6 +524,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       submitText,
       help: state.help,
       pressHelp,
+      helpMarks: state.helpMarks,
       tapped: state.tapped,
       pressWord,
       submitBoard,

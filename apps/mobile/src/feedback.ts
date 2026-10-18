@@ -19,7 +19,8 @@ export type Feedback = {
  *  server recorded for it, so the app never judges a transcript itself. */
 export type CardAnswer =
   | Exclude<AnswerInput, { heard: string }>
-  | { board: number[] }
+  // Phase 63 (spec D12): `helped`, the words help matched, in the same order.
+  | { board: number[]; helped?: boolean[] }
   // Phase 56 (spec D8): `helped`, said with help, which the server records given up.
   | { heard: string; verdict: 'understood' | 'alternative'; helped?: boolean };
 
@@ -68,11 +69,18 @@ function unhelped(answer: CardAnswer): CardAnswer {
   if (!('helped' in answer)) return answer;
   if ('judged' in answer) return { text: answer.text, judged: answer.judged };
   if ('heard' in answer) return { heard: answer.heard, verdict: answer.verdict };
+  // Phase 63 (spec D12): a choice is told by its option.
+  if ('option_index' in answer) return { option_index: answer.option_index };
   return 'text' in answer ? { text: answer.text } : answer;
 }
 
 function helped(answer: CardAnswer): boolean {
   return 'helped' in answer && answer.helped === true;
+}
+
+/** Phase 63 (spec D12). A choice has no verdict: right is its option. */
+function rightOption(answer: CardAnswer, feedback: Feedback): boolean {
+  return 'option_index' in answer && feedback.tone === 'correct';
 }
 
 /** Phase 55 (spec D7). A right text found with help: neither green nor red.
@@ -85,7 +93,8 @@ function helpedOr(answer: CardAnswer, feedback: Feedback, secondTry: boolean): F
     feedback.verdict === 'exact' ||
     feedback.verdict === 'alternative' ||
     feedback.verdict === 'understood' ||
-    (secondTry && feedback.verdict === 'near_miss');
+    (secondTry && feedback.verdict === 'near_miss') ||
+    rightOption(answer, feedback);
   if (!helped(answer) || !right) return feedback;
   return { tone: 'other', title: strings.feedbackHelped, line: null, verdict: null };
 }
@@ -123,7 +132,8 @@ function answerFeedback(question: Question, answer: CardAnswer): Feedback {
   if ('board' in answer) {
     if (question.type !== 'matching') throw new Error(`a board answer for a ${question.type} card`);
     const start = question.board.question_ids.indexOf(question.id);
-    const right = answer.board.filter((meaning, i) => meaning === question.board.correct_options[start + i]).length;
+    // Phase 63 (spec D12): a word help matched is not right.
+    const right = answer.board.filter((meaning, i) => meaning === question.board.correct_options[start + i] && answer.helped?.[i] !== true).length;
     return {
       tone: right === answer.board.length ? 'correct' : 'wrong',
       title: strings.boardResult(right, answer.board.length),

@@ -15,7 +15,7 @@ import type { JudgeAttempt } from '@/judging';
 import { opensRetype, retypeChecked, retypeTyping, startRetype, type Retype } from '@/retype';
 import { IDLE_ATTEMPT, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 import type { ServedWord } from '@/taps';
-import { wholeForm } from '@/typedHelp';
+import { helpText, pressTyped, wholeForm } from '@/typedHelp';
 
 // What the background next-step call resolved to, waiting to be applied when
 // the learner taps Continue. Only one of these is ever in flight at a time,
@@ -58,6 +58,13 @@ export type QuizState = {
    *  screen: one count a card, kept through its second try and through "can't
    *  speak now", 0 on the next card. The tiles card counts its own. */
   help: number;
+  /** Phase 63 (spec D3). Whether help was pressed on the card on screen, a press
+   *  that only marked a mistake included: what makes its answer helped. Kept as
+   *  `help` is. */
+  helpPressed: boolean;
+  /** Phase 63 (spec D3). The typed text the last press marked, from its first
+   *  wrong character: shown while the input still holds exactly that text. */
+  helpMarks: { text: string; from: number } | null;
   /** Phase 59 (spec D3, D5). The words of a sentence translation tapped, by their
    *  index in its `words`, in the order first tapped: kept through its second
    *  try, none on the next card. */
@@ -85,6 +92,8 @@ export function enteredState(sessionId: string): QuizState {
     retry: null,
     retype: null,
     help: 0,
+    helpPressed: false,
+    helpMarks: null,
     tapped: [],
   };
 }
@@ -120,6 +129,8 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
       retry: null,
       retype: null,
       help: 0,
+      helpPressed: false,
+      helpMarks: null,
       tapped: [],
     };
   }
@@ -137,6 +148,10 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
     retype: null,
     // Phase 56 (spec D5): the same card back for its second try keeps its help.
     help: same ? current.help : 0,
+    // Phase 63 (spec D3): and whether it was pressed; its marks were for the text
+    // the first try sent.
+    helpPressed: same ? current.helpPressed : false,
+    helpMarks: null,
     // Phase 59 (spec D5): and its taps.
     tapped: same ? current.tapped : [],
   };
@@ -168,7 +183,8 @@ export function wordTappedState(current: QuizState, tap: number | 'mark'): QuizS
   if (tap !== 'mark' && !word) return current;
   const target = tap === 'mark' || word!.target;
   const tapped = tap === 'mark' || current.tapped.includes(tap) ? current.tapped : [...current.tapped, tap];
-  return { ...current, tapped, help: target ? Math.max(current.help, wholeForm(question.answer)) : current.help };
+  if (!target) return { ...current, tapped };
+  return { ...current, tapped, help: Math.max(current.help, wholeForm(question.answer)), helpPressed: true };
 }
 
 /** Phase 59 (spec D5). The `tapped` an answer to `question` carries: none on a
@@ -178,17 +194,29 @@ export function tappedFor(question: Question, tapped: readonly number[]): number
 }
 
 /** Phase 56 (spec D5). Help pressed on the card on screen: one more character
- *  shown. An answered card takes none (a retype offers no help). */
-export function helpPressedState(current: QuizState): QuizState {
-  return current.answer !== null ? current : { ...current, help: current.help + 1 };
+ *  shown. An answered card takes none (a retype offers no help).
+ *  Phase 63 (spec D3): on a typed card, with what is typed, a press reads it:
+ *  marks from its first wrong character, or gives the step after a right start. */
+export function helpPressedState(current: QuizState, typed?: string): QuizState {
+  if (current.answer !== null || !current.question) return current;
+  const target = typed === undefined ? null : helpText(current.question);
+  if (target === null || typed === undefined) return { ...current, help: current.help + 1, helpPressed: true };
+  const pressed = pressTyped(target, typed, current.help, current.question.type === 'typed_meaning');
+  return {
+    ...current,
+    help: pressed.given,
+    helpPressed: true,
+    helpMarks: pressed.markFrom === null ? null : { text: typed, from: pressed.markFrom },
+  };
 }
 
 /** Phase 56 (spec D5). The `helped` an answer to `question` carries: none on a
  *  card that takes no help; the tiles card's own say (a wrong tile helps, phase
  *  55); on every other card, whether help was pressed on it. */
-export function helpedFor(question: Question, help: number, card?: { helped?: boolean }): boolean | undefined {
+export function helpedFor(question: Question, help: number, card?: { helped?: boolean }, pressed = false): boolean | undefined {
   if (!takesHelp(question.type)) return undefined;
-  return question.type === 'letter_tiles' ? card?.helped === true : help > 0;
+  // Phase 63 (spec D3): a press that only marked a mistake gave no step, and helps.
+  return question.type === 'letter_tiles' ? card?.helped === true : help > 0 || pressed;
 }
 
 /** Phase 19. A loaded session continues from its current card. Phase 34 (spec
@@ -225,7 +253,7 @@ export function passFor(kind: 'skip' | 'show_answer', retry: PendingRetry | null
  *  D5): so does a pass, a spoken card given up after help. */
 export function nextStepRequest(
   questionId: string,
-  input: { option_index: number } | { text: string; helped?: boolean } | { pass: 'skip' | 'show_answer'; helped?: boolean } | { seen: true },
+  input: { option_index: number; helped?: boolean } | { text: string; helped?: boolean } | { pass: 'skip' | 'show_answer'; helped?: boolean } | { seen: true },
   retry: PendingRetry | null,
   hintOpened?: boolean,
   checkFit = false,
