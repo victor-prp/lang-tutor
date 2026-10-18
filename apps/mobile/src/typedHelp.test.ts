@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import type { Question } from '@lang-tutor/core/api';
 
-import { allRevealed, helpText, revealed } from './typedHelp';
+import { allRevealed, helpText, pressTyped, revealed, typedHelpDone, typedHint } from './typedHelp';
 
 // Phase 55 (spec D7). The typed card's help: one more character a press.
 describe('typed help (phase 55 D7)', () => {
@@ -76,5 +76,82 @@ describe('help on more cards (phase 56 D1)', () => {
       [{ id: 'q', type: 'multiple_choice', vocab_term_id: 'l', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, context: null }, null],
     ];
     for (const [question, text] of cards) expect([question.type, helpText(question)]).toEqual([question.type, text]);
+  });
+});
+
+// Phase 63 (spec D3, the approved storyboard). On a typed card help reads the
+// typing: it marks from the first wrong character, or gives the next step after
+// a right start, shown in grey after the caret.
+describe('help reads the typing (phase 63 D3)', () => {
+  const A = 'colazione';
+
+  it('gives the first letter when nothing is typed', () => {
+    expect(pressTyped(A, '', 0, false)).toEqual({ given: 1, markFrom: null });
+    expect(typedHint(A, '', 1, false)).toEqual({ ghost: 'c', more: true });
+  });
+
+  it('shows the given letters not yet typed, ahead of the typing', () => {
+    expect(typedHint(A, 'c', 2, false)).toEqual({ ghost: 'o', more: true });
+    expect(typedHint(A, 'co', 2, false)).toEqual({ ghost: '', more: true });
+  });
+
+  it('shows no grey once the typing leaves the answer', () => {
+    expect(typedHint(A, 'ca', 2, false)).toBeNull();
+  });
+
+  it('marks from the first wrong letter and gives nothing', () => {
+    expect(pressTyped(A, 'calazo', 0, false)).toEqual({ given: 0, markFrom: 1 });
+    expect(pressTyped(A, 'calazo', 4, false)).toEqual({ given: 4, markFrom: 1 });
+  });
+
+  it('marks from a missing letter on', () => {
+    expect(pressTyped(A, 'colazone', 2, false)).toEqual({ given: 2, markFrom: 5 });
+  });
+
+  it('marks a letter typed past the end', () => {
+    expect(pressTyped(A, 'colazionee', 0, false)).toEqual({ given: 0, markFrom: 9 });
+  });
+
+  it('gives the step after the typing, whatever was given before', () => {
+    expect(pressTyped(A, 'colazi', 2, false)).toEqual({ given: 7, markFrom: null });
+    expect(typedHint(A, 'colazi', 7, false)).toEqual({ ghost: 'o', more: true });
+    expect(pressTyped(A, 'c', 4, false)).toEqual({ given: 5, markFrom: null });
+  });
+
+  it('is done when the typing is right and nothing is left to give', () => {
+    expect(typedHelpDone(A, 'colazione', 0, false)).toBe(true);
+    expect(typedHelpDone(A, 'colaz', 9, false)).toBe(true);
+    expect(typedHelpDone(A, 'colaz', 2, false)).toBe(false);
+    expect(typedHelpDone(A, 'calazo', 9, false)).toBe(false);
+    expect(typedHint(A, 'colaz', 9, false)).toEqual({ ghost: 'ione', more: false });
+  });
+
+  // Review focus 1: compared as the checker compares, an accent is spelling.
+  it('takes a capital or a curly apostrophe as right, and an accent as wrong', () => {
+    expect(pressTyped(A, 'Co', 0, false)).toEqual({ given: 3, markFrom: null });
+    expect(pressTyped("l'acqua", 'l’a', 0, false)).toEqual({ given: 3, markFrom: null });
+    expect(typedHint("l'acqua", 'l’a', 3, false)).toEqual({ ghost: 'c', more: true });
+    expect(pressTyped('perché', 'perche', 0, false)).toEqual({ given: 0, markFrom: 5 });
+  });
+
+  // Review focus 2: a space or an apostrophe comes with the letter after it.
+  it('gives a joined step, folds a double space and ignores a trailing one', () => {
+    expect(pressTyped('fare colazione', 'fare', 0, false)).toEqual({ given: 5, markFrom: null });
+    expect(typedHint('fare colazione', 'fare', 5, false)).toEqual({ ghost: ' c', more: true });
+    expect(typedHint('fare colazione', 'fare ', 5, false)).toEqual({ ghost: 'c', more: true });
+    expect(pressTyped('fare colazione', 'fare  c', 0, false)).toEqual({ given: 6, markFrom: null });
+    expect(pressTyped(A, 'colazione ', 0, false)).toEqual({ given: 9, markFrom: null });
+    expect(typedHelpDone(A, 'colazione ', 0, false)).toBe(true);
+    expect(pressTyped("l'acqua", 'l', 0, false)).toEqual({ given: 2, markFrom: null });
+    expect(typedHint("l'acqua", 'l', 2, false)).toEqual({ ghost: "'a", more: true });
+  });
+
+  // Review focus 3: a Hebrew meaning is compared as normaliseHebrew compares.
+  it('takes points, a maqaf or a hyphen in Hebrew as right', () => {
+    expect(typedHelpDone('ארוחה', 'אֲרוּחָה', 0, true)).toBe(true);
+    expect(typedHelpDone('ארוחת־בוקר', 'ארוחת בוקר', 0, true)).toBe(true);
+    expect(typedHelpDone('ארוחת בוקר', 'ארוחת-בוקר', 0, true)).toBe(true);
+    expect(pressTyped('ארוחה', 'ארב', 0, true)).toEqual({ given: 0, markFrom: 2 });
+    expect(typedHint('ארוחה', 'אר', 3, true)).toEqual({ ghost: 'ו', more: true });
   });
 });
