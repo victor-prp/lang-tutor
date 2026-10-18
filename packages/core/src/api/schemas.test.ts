@@ -167,6 +167,13 @@ describe('NextStepRequestSchema', () => {
     expect(NextStepRequestSchema.safeParse({ question_id: 'q1', pass: 'skip', helped: 'yes' }).success).toBe(false);
   });
 
+  // Phase 63 (spec D10). Help on a choice card travels with its option.
+  it('keeps helped on an option, takes one without it, and refuses one that is not a boolean', () => {
+    expect(NextStepRequestSchema.parse({ question_id: 'q', option_index: 1, helped: true })).toEqual({ question_id: 'q', option_index: 1, helped: true });
+    expect(NextStepRequestSchema.parse({ question_id: 'q', option_index: 1 })).not.toHaveProperty('helped');
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q', option_index: 1, helped: 'yes' }).success).toBe(false);
+  });
+
   // Phase 56 (spec D3). Help on a spoken or a judged card travels with its request.
   it('keeps helped on a spoken and a judged answer, takes them without it, and refuses one that is not a boolean', () => {
     const spoken = { question_id: 'q1', mime_type: 'audio/aac', audio: 'AAAA' } as const;

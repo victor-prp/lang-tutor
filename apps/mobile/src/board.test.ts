@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { MatchingQuestion } from '@lang-tutor/core/api';
 
-import { firstAttempts, startBoard, tapMeaning, tapWord } from './board';
+import { boardHelpDone, firstAttempts, helpBoard, helpedWords, startBoard, tapMeaning, tapWord } from './board';
 
 const question = (current = 'm1'): MatchingQuestion => ({
   id: current,
@@ -64,5 +64,55 @@ describe('the matching board (spec D10)', () => {
     expect(start.matched).toEqual([true, true, false, false]);
     const done = play(q, [['w', 2], ['m', 2], ['w', 3], ['m', 3]]);
     expect(firstAttempts(done)).toEqual([2, 3]);
+  });
+});
+
+// Phase 63 (spec D8). Help on the board matches one pair a press: the word
+// selected, else the selected meaning's word, else the first unmatched word.
+describe('help on the board (phase 63 D8)', () => {
+  it('matches the selected word, marked helped, its first try its meaning', () => {
+    const q = question();
+    const state = helpBoard(play(q, [['w', 2]]), q);
+    expect(state.matched).toEqual([false, false, true, false]);
+    expect(state.helped).toEqual([false, false, true, false]);
+    expect(state.first[2]).toBe(2);
+    expect(state.word).toBeNull();
+  });
+
+  it('matches the selected meaning’s word', () => {
+    const q = question();
+    expect(helpBoard(play(q, [['m', 3]]), q).helped).toEqual([false, false, false, true]);
+  });
+
+  it('matches the first unmatched word when nothing is selected', () => {
+    const q = question();
+    expect(helpBoard(play(q, [['w', 0], ['m', 0]]), q).helped).toEqual([false, true, false, false]);
+  });
+
+  // Review focus 4: the fifth meaning belongs to no word.
+  it('falls back to the first unmatched word when the distractor meaning is selected', () => {
+    const q = question();
+    expect(helpBoard(play(q, [['m', 4]]), q).helped).toEqual([true, false, false, false]);
+  });
+
+  it('keeps a wrong first try on the word it helps', () => {
+    const q = question();
+    expect(helpBoard(play(q, [['w', 1], ['m', 4], ['w', 1]]), q).first[1]).toBe(4);
+  });
+
+  // Review focus 4: a board resumed mid-way sends only the words this screen played.
+  it('says which words of this screen were helped, from where it started', () => {
+    const q = question('m3');
+    const state = helpBoard(startBoard(q), q);
+    expect(state.helped).toEqual([false, false, true, false]);
+    expect(helpedWords(state)).toEqual([true, false]);
+  });
+
+  it('is done once every word is matched', () => {
+    const q = question();
+    const all = [0, 1, 2, 3].reduce((state) => helpBoard(state, q), startBoard(q));
+    expect(boardHelpDone(all)).toBe(true);
+    expect(firstAttempts(all)).toEqual([0, 1, 2, 3]);
+    expect(boardHelpDone(startBoard(q))).toBe(false);
   });
 });

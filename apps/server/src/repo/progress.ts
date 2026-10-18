@@ -54,6 +54,8 @@ export type AnswerRow = {
   verdict: string | null;
   retry_verdict: string | null;
   intro: boolean;
+  /** Phase 63 (spec D11). Help used on the card: a choice chosen after it is a miss. */
+  helped: boolean;
 };
 
 /** A stored answer as the rules read it: a text answer carries the verdict it was
@@ -79,7 +81,7 @@ export const tapMissType = sql`CASE WHEN q.type = 'sentence_translation' THEN 's
 export const tappedMisses = (where: SQL) => sql`
   SELECT s.enrollment_id, tp.gloss_id, ${tapMissType} AS type, NULL::jsonb AS options,
          NULL::integer AS selected_option_position, 'wrong' AS verdict, NULL::text AS retry_verdict, false AS intro,
-         s.practice_day::text AS day, a.answered_at, tp.position, tp.word_index
+         s.practice_day::text AS day, a.answered_at, tp.position, tp.word_index, false AS helped
   FROM answer_taps tp
   JOIN answers a  ON a.session_id = tp.session_id AND a.position = tp.position
   JOIN questions q ON q.id = a.question_id
@@ -97,7 +99,8 @@ export function decodeAnswer(row: AnswerRow): AnsweredQuestion {
     type: row.type as ChoiceAnswerType,
     // selected_option_position is canonical (sessions.insertAnswer), and
     // question_options_valid makes positions 0..n-1.
-    correct: canonicalOptions(row.options!)[row.selected_option_position!].is_correct,
+    // Phase 63 (spec D11): the right option chosen after help is a miss.
+    correct: canonicalOptions(row.options!)[row.selected_option_position!].is_correct && !row.helped,
     ...intro,
   };
 }
@@ -157,7 +160,7 @@ export function createProgressRepo(tx: Tx) {
       // card's answer: a written answer to it, wrong (TAPPED_MISS), never helped, given
       // when its card's answer was. Phase 57 (spec D4): the target skills read it too.
       const rows = await tx.execute<
-        AnswerRow & { enrollment_id: string; day: string; last_answered_at: string; helped: boolean; answered_at: string }
+        AnswerRow & { enrollment_id: string; day: string; last_answered_at: string; answered_at: string }
       >(sql`
         SELECT enrollment_id, gloss_id, type, options, selected_option_position, verdict, retry_verdict, intro, day,
                (max(answered_at) OVER ())::text AS last_answered_at,
@@ -172,7 +175,7 @@ export function createProgressRepo(tx: Tx) {
           JOIN questions q ON q.id = a.question_id
           WHERE a.session_id = ${sessionId}
           UNION ALL
-          SELECT tapped.*, false AS helped FROM (${tappedMisses(sql`tp.session_id = ${sessionId}`)}) tapped
+          SELECT tapped.* FROM (${tappedMisses(sql`tp.session_id = ${sessionId}`)}) tapped
         ) evidence
         ORDER BY position, word_index`);
       if (rows.rows.length === 0) return undefined;

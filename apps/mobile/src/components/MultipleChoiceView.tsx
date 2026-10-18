@@ -3,7 +3,10 @@ import type { ChoiceQuestion } from '@lang-tutor/core/domain';
 import { useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { choiceHelpDone, ruledOut } from '@/choiceHelp';
 import { ContextLine, type SentenceTaps } from '@/components/ContextLine';
+import { HelpButton } from '@/components/HelpButton';
+import { LettersBox } from '@/components/LettersBox';
 import { ListenPrompt } from '@/components/ListenPrompt';
 import { OptionButton, type OptionVisualState } from '@/components/OptionButton';
 import { SpeakButton } from '@/components/SpeakButton';
@@ -25,12 +28,16 @@ type Props = {
   onSelect: (optionIndex: number) => void;
   /** Phase 62 (spec D3). A multiple choice's context line is tapped word by word. */
   taps?: SentenceTaps;
+  /** Phase 63 (spec D6, D7). Help, by the session's count of presses: on a
+   *  listening card it spells the word heard; on the others it rules out
+   *  options. None on a new meaning. */
+  help?: { presses: number; onPress: () => void } | null;
 };
 
 // Phase 23. Today's card asks a target word and offers Hebrew meanings; the
 // reversed card asks a Hebrew meaning and offers target words. Only the text
 // directions differ (spec D10).
-export function MultipleChoiceView({ question, instruction, language, selectedOption, onSelect, prompt, taps }: Props) {
+export function MultipleChoiceView({ question, instruction, language, selectedOption, onSelect, prompt, taps, help = null }: Props) {
   const reversed = question.type === 'reverse_choice';
   // The options are target words on a reversed or gap card: left to right.
   const optionsLtr = reversed || question.type === 'cloze_choice';
@@ -47,9 +54,13 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
   }, [question.id]);
 
   const answered = selectedOption !== null;
+  const presses = help?.presses ?? 0;
+  const listening = question.type === 'listen_choice';
+  // Phase 63 (spec D7): the options help ruled out, gone from play until the card is answered.
+  const out = help !== null && !listening && !answered ? ruledOut(question, presses) : [];
 
   function visualState(index: number): OptionVisualState {
-    if (!answered) return 'idle';
+    if (!answered) return out.includes(index) ? 'out' : 'idle';
     if (index === question.correct_option) return 'correct';
     if (index === selectedOption) return 'wrong';
     return 'dimmed';
@@ -61,7 +72,13 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
       {prompt !== undefined ? (
         prompt
       ) : question.type === 'listen_choice' ? (
-        <ListenPrompt text={question.question} language={language} answered={answered} />
+        <>
+          <ListenPrompt text={question.question} language={language} answered={answered} />
+          {/* Phase 63 (spec D6): the word heard, spelt a step a press, under the speaker. */}
+          {help !== null && !answered ? (
+            <LettersBox text={question.question} presses={presses} onPress={help.onPress} busy={false} testID="listen-help" hintTestID="listen-hint" />
+          ) : null}
+        </>
       ) : question.type === 'cloze_choice' ? null : (
         <View style={styles.promptRow}>
           <Text style={[styles.prompt, { writingDirection: reversed ? 'rtl' : 'ltr' }]} testID="question-prompt">
@@ -80,6 +97,12 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
       {prompt === undefined && 'context' in question && question.context ? (
         <ContextLine context={question.context} language={contextLanguage(question.type, language)} taps={taps} />
       ) : null}
+      {/* Phase 63 (spec D2, D7): help at the right edge, just above the options. */}
+      {help !== null && !listening && !answered ? (
+        <View style={styles.helpRow}>
+          <HelpButton testID="choice-help" disabled={choiceHelpDone(question, presses)} onPress={help.onPress} />
+        </View>
+      ) : null}
       <View style={styles.options}>
         {question.options.map((option, index) => (
           <OptionButton
@@ -88,7 +111,7 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
             label={option}
             direction={optionsLtr ? 'ltr' : 'rtl'}
             state={visualState(index)}
-            disabled={answered}
+            disabled={answered || out.includes(index)}
             minHeight={maxHeight > 0 ? maxHeight : undefined}
             onPress={() => onSelect(index)}
             onMeasure={(height) =>
@@ -128,4 +151,6 @@ const styles = StyleSheet.create({
     marginTop: -spacing.md,
   },
   options: { gap: spacing.sm },
+  // The RTL row's first child sits at the right edge; the options follow close.
+  helpRow: { flexDirection: 'row', marginBottom: -spacing.sm },
 });

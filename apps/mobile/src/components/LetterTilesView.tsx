@@ -3,6 +3,7 @@ import { tileLetters } from '@lang-tutor/core/domain';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { HelpButton } from '@/components/HelpButton';
 import { answerStyles } from '@/components/TypedAnswerView';
 import { strings } from '@/strings';
 import { builtWord, helpTile, isBuilt, tryTile } from '@/tiles';
@@ -84,13 +85,18 @@ export function LetterTilesView({ question, instruction, answered, verdict, onSu
           {partOfSpeech}
         </Text>
       ) : null}
-      {/* Placed tiles are the word's right start: they are not taken back. */}
-      <View style={[styles.slots, built]} testID="tiles-built">
-        {placed.map((tile, slot) => (
-          <View key={`slot-${tile}`} testID={`tile-slot-${slot}`} style={styles.tile}>
-            <Text style={styles.letter}>{question.tiles[tile]}</Text>
-          </View>
-        ))}
+      {/* Placed tiles are the word's right start: they are not taken back.
+          Phase 63 (spec D5): the built word is a box like the input, with help
+          at its right edge (the RTL row's first child). */}
+      <View style={[styles.box, built]}>
+        {answered ? null : <HelpButton testID="tiles-help" disabled={false} onPress={help} />}
+        <View style={styles.slots} testID="tiles-built">
+          {placed.map((tile, slot) => (
+            <View key={`slot-${tile}`} testID={`tile-slot-${slot}`} style={[styles.tile, styles.placed]}>
+              <Text style={styles.letter}>{question.tiles[tile]}</Text>
+            </View>
+          ))}
+        </View>
       </View>
       {wrong && !answered ? (
         <Text style={styles.wrongLine} testID="tiles-wrong">
@@ -116,9 +122,6 @@ export function LetterTilesView({ question, instruction, answered, verdict, onSu
       </View>
       {answered ? null : (
         <View style={answerStyles.actions}>
-          <Pressable accessibilityRole="button" testID="tiles-help" hitSlop={8} onPress={help}>
-            <Text style={answerStyles.help}>{strings.help}</Text>
-          </Pressable>
           <Pressable accessibilityRole="button" testID="tiles-show-answer" hitSlop={8} onPress={() => submit('', helped)}>
             <Text style={answerStyles.showAnswer}>{strings.typedShowAnswer}</Text>
           </Pressable>
@@ -131,20 +134,31 @@ export function LetterTilesView({ question, instruction, answered, verdict, onSu
 const TILE = 44;
 const styles = StyleSheet.create({
   container: { gap: spacing.lg },
+  // Phase 63 (spec D5). The box the word is built in, as the typed card's input.
+  box: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderRadius: radii.md,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 7,
+    paddingVertical: spacing.sm,
+    minHeight: TILE + spacing.md,
+    gap: spacing.sm,
+  },
   // The word being built is the target language: left to right, whatever the screen.
   slots: {
+    flex: 1,
     direction: 'ltr',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    minHeight: TILE + spacing.md,
-    paddingBottom: spacing.sm,
-    borderBottomWidth: 1.5,
-    borderColor: colors.border,
+    justifyContent: 'flex-start',
+    gap: spacing.xs,
   },
-  slotsCorrect: { borderColor: colors.correct },
-  slotsWrong: { borderColor: colors.wrong },
+  slotsCorrect: { borderColor: colors.correct, backgroundColor: colors.correctSurface },
+  slotsWrong: { borderColor: colors.wrong, backgroundColor: colors.wrongSurface },
+  placed: { minWidth: 36, height: 40, backgroundColor: colors.primarySurface },
   // Phase 55 (spec D7): in the colour of the app's other refusals.
   wrongLine: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.wrong, textAlign: 'center', writingDirection: 'rtl', marginTop: -spacing.sm },
   pool: { direction: 'ltr', flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.sm },

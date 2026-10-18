@@ -366,10 +366,10 @@ test('a translation that uses another word on both tries is told it is still not
 });
 
 // Phase 56 (spec D1, D4, D7, D8). Help on the typed gap, beside its Hebrew hint: a
-// wrong word after it is sent helped and unchecked, and typed again; help on the
-// translation reveals the practised word, and a right sentence after it is right
-// with help.
-test('help on a typed gap and on a sentence translation', async ({ page, request }) => {
+// wrong word after it is sent helped and unchecked, and typed again. Phase 63
+// (spec D9): the translation has no help button, its words being tapped instead,
+// and a right sentence typed without a tap is right.
+test('help on a typed gap, and none on a sentence translation', async ({ page, request }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
   await reachSentenceSession(page, request, 'e2e_sentences_help_ru');
@@ -385,11 +385,17 @@ test('help on a typed gap and on a sentence translation', async ({ page, request
       await page.getByTestId('typed-help').click();
       await expect(page.getByTestId('typed-hint')).toHaveText(`${[...STUB_GAP].slice(0, 2).join('')}…`);
       await expect(page.getByTestId('sentence-hint')).toBeVisible();
+      // Phase 63 (spec D2). The tallest typed card, its Hebrew sentence shown, on a
+      // phone-sized screen: help is inside the answer box, in view.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.getByTestId('sentence-hint').click();
+      await expect(page.getByTestId('sentence-translation')).toBeVisible();
+      await expect(page.getByTestId('typed-box').getByTestId('typed-help')).toBeInViewport();
       // A wrong word with help is a miss whatever the model says: no fit check.
       const sent = nextStepSent(page);
       await answerTyped(page, STUB_GAP_LEMMA);
       const body = (await sent).postDataJSON() as Record<string, unknown>;
-      expect(body).toMatchObject({ text: STUB_GAP_LEMMA, helped: true, hint_opened: false });
+      expect(body).toMatchObject({ text: STUB_GAP_LEMMA, helped: true, hint_opened: true });
       expect(body).not.toHaveProperty('check_fit');
       await expect(page.getByTestId('retype')).toBeVisible();
       await expect(page.getByTestId('retype-answer')).toHaveText(STUB_GAP);
@@ -397,14 +403,13 @@ test('help on a typed gap and on a sentence translation', async ({ page, request
       await page.getByTestId('continue-button').click();
     } else if (card.kind === 'translate') {
       seen.push(card.kind);
-      await page.getByTestId('typed-help').click();
-      await expect(page.getByTestId('typed-hint')).toHaveText(`${[...STUB_GAP][0]}…`);
+      await expect(page.getByTestId('typed-box')).toBeVisible();
+      await expect(page.getByTestId('typed-help')).toHaveCount(0);
       await expectJudge(request, 'right');
       const judged = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/judged-answer'));
       await answerTyped(page, 'Она прочитала эту книгу вчера');
-      expect((await judged).postDataJSON()).toMatchObject({ text: 'Она прочитала эту книгу вчера', helped: true });
-      await expect(page.getByTestId('feedback-other')).toBeVisible();
-      await expect(page.getByTestId('feedback-title')).toHaveText('נכון, עם עזרה');
+      expect((await judged).postDataJSON()).toMatchObject({ text: 'Она прочитала эту книгу вчера', helped: false });
+      await expect(page.getByTestId('feedback-correct')).toBeVisible();
       // No retype on a translation, and its reference is still shown.
       await expect(page.getByTestId('retype')).toHaveCount(0);
       expect(stripIsolates(await page.getByTestId('translation-reference').textContent())).toBe(STUB_SENTENCE);
@@ -442,8 +447,10 @@ test('a tap shows a word of the sentence to translate, and the practised word\'s
       await expect(page.getByTestId('sentence-translation-word-0-text')).toHaveCount(0);
       await page.getByTestId('sentence-translation-word-0').click();
       await expect(page.getByTestId('sentence-translation-word-0-text')).toHaveText('Вчера');
+      // Phase 63 (spec D9): the practised word tapped shows its Russian under it, as any word does.
+      await expect(page.getByTestId('typed-help')).toHaveCount(0);
       await page.getByTestId('sentence-translation-mark').click();
-      await expect(page.getByTestId('typed-hint')).toContainText(STUB_GAP);
+      await expect(page.getByTestId('sentence-translation-mark-text')).toHaveText(STUB_GAP);
       await expectJudge(request, 'right');
       const judged = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/judged-answer'));
       await answerTyped(page, 'Она прочитала эту книгу вчера');

@@ -667,24 +667,57 @@ describe('phase 55: helped', () => {
   // Review M8. The one list of the cards that take help, which the server stores `helped` by:
   // every type named, so a new one must say whether it takes help.
   it('takes help on the cards where the learner produces the answer, and nowhere else', () => {
+    // Phase 63 (spec D10): the choice cards and matching take help too; a new meaning does not.
     const TAKES_HELP: Record<QuestionType, boolean> = {
-      multiple_choice: false,
+      multiple_choice: true,
       new_meaning: false,
-      reverse_choice: false,
+      reverse_choice: true,
       typed_translation: true,
-      listen_choice: false,
+      listen_choice: true,
       dictation: true,
-      matching: false,
+      matching: true,
       letter_tiles: true,
       read_aloud: false,
       meet: false,
       say_translation: true,
       typed_meaning: true,
-      cloze_choice: false,
+      cloze_choice: true,
       cloze_typed: true,
       sentence_translation: true,
     };
     for (const [type, takes] of Object.entries(TAKES_HELP)) expect([type, takesHelp(type as QuestionType)]).toEqual([type, takes]);
+  });
+});
+
+// Phase 63 (spec D10). Help on a choice card or a board word: the right option
+// chosen after help is a miss, an unhelped one is graded as before.
+describe('phase 63: help on choices', () => {
+  const REVERSE: Question = {
+    id: 'rv', type: 'reverse_choice', vocab_term_id: 'l1', question: 'חתול', part_of_speech: 'noun',
+    options: ['gatto', 'cane', 'casa', 'porta'], correct_option: 0, context: null,
+  };
+  const CHOICES: [string, Question][] = [
+    ['multiple_choice', makeQuestion(1)],
+    ['reverse_choice', REVERSE],
+    ['listen_choice', listen],
+    ['cloze_choice', CLOZE_CHOICE],
+    ['matching', word('m1', 'casa', 0)],
+  ];
+  it.each(CHOICES)('records a helped right option on a %s wrong', (_type, question) => {
+    const right = (question as { correct_option: number }).correct_option;
+    expect(evaluate(question, { option_index: right, helped: true })).toMatchObject({ is_correct: false, answer_string: rightAnswer(question) });
+  });
+  it.each(CHOICES)('grades an unhelped option on a %s as today', (_type, question) => {
+    const right = (question as { correct_option: number }).correct_option;
+    expect(evaluate(question, { option_index: right, helped: false }).is_correct).toBe(true);
+    expect(evaluate(question, { option_index: right }).is_correct).toBe(true);
+  });
+  it('ignores helped on a new meaning', () => {
+    const card: Question = {
+      id: 'n1', type: 'new_meaning', vocab_term_id: 'v1', question: 'pick up', known_meanings: ['להרים'],
+      options: ['לאסוף', 'לבשל', 'לשבור', 'לנגן'], correct_option: 0, context: null,
+    };
+    expect(evaluate(card, { option_index: 0, helped: true }).is_correct).toBe(true);
   });
 });
 

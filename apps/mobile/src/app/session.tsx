@@ -103,6 +103,13 @@ function translatePrompt(question: SentenceTranslationQuestion, session: Session
         // Phase 62 (spec D5): once answered, every word's Italian.
         reveal={answered}
       />
+      {/* Phase 63 (spec D9). A card with no word map shows no Italian under its
+          words, so the practised word tapped shows its form here instead. */}
+      {!answered && !question.words && session.help > 0 ? (
+        <Text style={styles.markAnswer} testID="sentence-mark-answer">
+          {question.answer}
+        </Text>
+      ) : null}
       {answered ? (
         <View style={styles.reference}>
           <Text style={styles.referenceLabel}>{strings.translationReference}</Text>
@@ -126,8 +133,9 @@ function tapsOf(session: SessionValue, learner: string): SentenceTaps {
 }
 
 // Phase 56 (spec D5, D6). Help on a card, the count the session keeps for it.
+// Phase 63 (spec D3): and the marks of the last press on a typed card.
 function helpOf(session: SessionValue) {
-  return { presses: session.help, onPress: session.pressHelp };
+  return { presses: session.help, onPress: session.pressHelp, marks: session.helpMarks };
 }
 
 // Phase 55 (spec D7). A typed card's verdict, for its input's border: a retype
@@ -194,6 +202,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           selectedOption={session.selectedOption}
           onSelect={session.select}
           taps={tapsOf(session, learner)}
+          help={helpOf(session)}
         />
       );
     case 'new_meaning':
@@ -216,6 +225,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           language={language}
           selectedOption={session.selectedOption}
           onSelect={session.select}
+          help={helpOf(session)}
         />
       );
     case 'typed_translation':
@@ -251,13 +261,15 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           selectedOption={session.selectedOption}
           onSelect={session.select}
           prompt={gapPrompt(question, tapsOf(session, learner), language, 'cloze-card')}
+          help={helpOf(session)}
         />
       );
     case 'cloze_typed':
       // Judged on the phone against the gap's word, as a typed translation is.
       return <ClozeTypedCard key={question.id} question={question} session={session} language={language} learner={learner} answerLanguage={answerLanguage} />;
     case 'sentence_translation':
-      // Phase 56 (spec D1): help reveals the practised word, never the reference; no retype.
+      // Phase 56 (spec D1): no retype. Phase 63 (spec D9): no help button either:
+      // its words are tapped, and a tap on the practised word is the help.
       return (
         <TypedAnswerView
           key={question.id}
@@ -273,7 +285,6 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           onSubmit={session.submitJudged}
           retry={session.retry}
           prompt={translatePrompt(question, session, language)}
-          help={helpOf(session)}
         />
       );
     case 'typed_meaning':
@@ -306,6 +317,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           language={language}
           selectedOption={session.selectedOption}
           onSelect={session.select}
+          help={helpOf(session)}
         />
       );
     case 'dictation':
@@ -538,6 +550,8 @@ const styles = StyleSheet.create({
   gapSentence: { fontSize: fontSizes.xl, lineHeight: lineHeights.xl, color: colors.text, textAlign: 'center', writingDirection: 'ltr' },
   reference: { gap: spacing.xs, alignItems: 'center' },
   referenceLabel: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, writingDirection: 'rtl' },
+  // Phase 63 (spec D9). The practised word's form, tapped on a card with no word map: the target language.
+  markAnswer: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.primary, fontWeight: '600', textAlign: 'center', writingDirection: 'ltr' },
   referenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   referenceText: { flexShrink: 1, fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.text, textAlign: 'center', writingDirection: 'ltr' },
   bold: { fontWeight: '700' },

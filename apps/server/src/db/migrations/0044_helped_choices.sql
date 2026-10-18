@@ -1,0 +1,1 @@
+ALTER TABLE "answers" DROP CONSTRAINT "answers_helped_text";

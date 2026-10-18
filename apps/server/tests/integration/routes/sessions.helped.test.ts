@@ -57,6 +57,7 @@ const WORDS: [string, string][] = [
   ['tome', 'ספר'],
   ['lantern', 'פנס'],
   ['anchor', 'עוגן'],
+  ['harbor', 'נמל'],
 ];
 
 /** A ready list session, one card of each type in `types`; a typed card accepts
@@ -135,10 +136,11 @@ describe('helped (phase 55 D6)', () => {
     }
   });
 
-  it('stores null on a card that takes no help, even when sent', async () => {
+  it('stores null on a choice when an older app sends none', async () => {
     const { sessionId, questions, next } = await start(['multiple_choice']);
-    // Phase 56: a cloze takes help now, so a choice is the card that does not.
-    await next({ question_id: questions[0].id, option_index: 0, helped: true });
+    // Phase 63 (spec D10): a choice takes help now; a new meaning, which does not,
+    // is covered by core's takesHelp table, which is what the server stores by.
+    await next({ question_id: questions[0].id, option_index: 0 });
     expect(await readHelped(t.db, sessionId)).toEqual([null]);
   });
 
@@ -230,5 +232,55 @@ describe('help on more cards (phase 56 D2–D4)', () => {
     await post('speech', { question_id: questions[0].id, mime_type: 'audio/aac', audio: AUDIO, helped: false });
     expect(await readStoredAnswers(t.db, sessionId)).toMatchObject([{ verdict: 'understood', is_correct: true }]);
     expect(await readHelped(t.db, sessionId)).toEqual([false]);
+  });
+});
+
+// Phase 63 (spec D10, D11). A choice or a board word answered after help is
+// stored with `helped`, read back wrong, and graded as a wrong option is.
+describe('help on choices (phase 63 D10–D11)', () => {
+  const rightOf = (question: { correct_option?: number }) => question.correct_option!;
+  // The dimension a wrong option on each card grades Again (core gradesFor).
+  const AGAIN_ON: [QuestionType, string][] = [
+    ['multiple_choice', 'written_receptive'],
+    ['reverse_choice', 'written_productive'],
+    ['listen_choice', 'spoken_receptive'],
+    ['cloze_choice', 'written_productive'],
+  ];
+
+  it('stores a helped right option on each choice card wrong, with helped, and grades it Again', async () => {
+    const { sessionId, asked, questions, next } = await start(AGAIN_ON.map(([type]) => type));
+    let last: unknown;
+    for (const question of questions) {
+      last = await next({ question_id: question.id, option_index: rightOf(question as { correct_option?: number }), helped: true });
+    }
+    expect(last).toMatchObject({ complete: true });
+    expect(await readHelped(t.db, sessionId)).toEqual([true, true, true, true]);
+    expect((await readStoredAnswers(t.db, sessionId)).map((a) => a.is_correct)).toEqual([false, false, false, false]);
+    for (const [index, [, dimension]] of AGAIN_ON.entries()) {
+      const row = (await readGlossMemory(t.db, asked[index].glossId)).find((r) => r.dimension === dimension);
+      expect([AGAIN_ON[index][0], row]).toEqual([AGAIN_ON[index][0], expect.objectContaining({ reps: 1, lapses: 1 })]);
+    }
+  });
+
+  it('stores an unhelped right option right, with helped false', async () => {
+    const { sessionId, questions, next } = await start(['multiple_choice', 'listen_choice']);
+    for (const question of questions) {
+      await next({ question_id: question.id, option_index: rightOf(question as { correct_option?: number }), helped: false });
+    }
+    expect(await readHelped(t.db, sessionId)).toEqual([false, false]);
+    expect((await readStoredAnswers(t.db, sessionId)).map((a) => a.is_correct)).toEqual([true, true]);
+  });
+
+  it('stores a helped board word helped, and its evidence wrong while the other word stays right', async () => {
+    const { sessionId, asked, questions, next } = await start(['matching', 'matching']);
+    await next({ question_id: questions[0].id, option_index: rightOf(questions[0] as { correct_option?: number }), helped: true });
+    expect(await next({ question_id: questions[1].id, option_index: rightOf(questions[1] as { correct_option?: number }), helped: false })).toMatchObject({
+      complete: true,
+    });
+    expect(await readHelped(t.db, sessionId)).toEqual([true, false]);
+    const helped = (await readGlossMemory(t.db, asked[0].glossId)).find((r) => r.dimension === 'written_receptive');
+    const plain = (await readGlossMemory(t.db, asked[1].glossId)).find((r) => r.dimension === 'written_receptive');
+    expect(helped).toMatchObject({ reps: 1, lapses: 1 });
+    expect(plain).toMatchObject({ reps: 1, lapses: 0 });
   });
 });

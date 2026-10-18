@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { WRONG_RUSSIAN, answerTyped, boardWords, buildTiles, expectGeneration, readCard, retypeShown, type CardKind } from './support/cards';
+import { WRONG_RUSSIAN, answerTyped, boardWords, buildTiles, expectGeneration, playOut, readCard, retypeShown, type CardKind } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
@@ -76,6 +76,11 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
   page.on('dialog', (dialog) => void dialog.accept());
+  // Every answer the app sends, in order (phase 63: which say they were helped).
+  const sent: Record<string, unknown>[] = [];
+  page.on('request', (req) => {
+    if (req.method() === 'POST' && /\/next-step$/.test(req.url())) sent.push(req.postDataJSON() as Record<string, unknown>);
+  });
   await withVoices(page, ['ru-RU']);
   await signUpLearner(page, 'e2e_listen_ru', 'ru');
   await saveTenWords(page.request);
@@ -101,6 +106,9 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
       // The word is spoken on arrival and not shown; pick its meaning.
       const heard = await spokenAfter(page, before);
       expect(heard.lang).toBe('ru-RU');
+      // Phase 63: unhelped here, so listening is practised (spec D13 below); the
+      // next test helps on it.
+      await expect(page.getByTestId('listen-help')).toBeVisible();
       await page.getByTestId(`option-${card.options.indexOf(MEANING_OF[heard.text])}`).click();
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
       await expect(page.getByTestId('question-prompt')).toHaveText(heard.text);
@@ -136,14 +144,24 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
       };
       await tapBoardWord(0);
       await page.getByTestId(`board-meaning-${meanings.findIndex((m) => m !== MEANING_OF[words[0]])}`).click();
+      // Phase 63 (spec D8): the second word selected, help matches it, a miss.
+      await tapBoardWord(1);
+      await page.getByTestId('board-help').click();
+      await expect(page.getByTestId('board-word-1')).toBeDisabled();
+      const answered = sent.length;
       for (const [i, word] of words.entries()) {
+        if (i === 1) continue;
         await tapBoardWord(i);
         await page.getByTestId(`board-meaning-${meanings.indexOf(MEANING_OF[word])}`).click();
       }
-      await expect(page.getByTestId('feedback-title')).toHaveText(/3\s*מתוך\s*4/);
+      await expect(page.getByTestId('board-help')).toHaveCount(0);
+      await expect(page.getByTestId('feedback-title')).toHaveText(/2\s*מתוך\s*4/);
+      // Each word its own answer, and only the one help matched says it was helped.
+      await expect.poll(() => sent.length).toBe(answered + 4);
+      expect(sent.slice(answered).map((body) => body.helped)).toEqual([false, true, false, false]);
       // The tapped words and nothing else: a meaning says nothing, and neither
-      // does the board by itself.
-      expect(await said()).toEqual([words[0], ...words].map((text) => ({ text, lang: 'ru-RU' })));
+      // does the board by itself, or its help.
+      expect(await said()).toEqual([words[0], words[1], words[0], words[2], words[3]].map((text) => ({ text, lang: 'ru-RU' })));
       // The board takes four positions.
       position += 3;
     } else if (card.kind === 'meaning') {
@@ -179,5 +197,67 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
 
   // Results: listening is practice now (spec D13).
   await expect(page.getByText(/הבנת הנשמע/).first(), report()).toBeVisible();
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 63 (spec D6, D10, D12). On the listening card help spells the word heard,
+// a letter a press, in a box under the speaker; the right meaning after it is
+// right with help, sent helped, and the box goes with the answer. The cards
+// before it are played out; the session is not finished.
+test('help on the listening card spells the word heard', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  page.on('dialog', (dialog) => void dialog.accept());
+  const sent: Record<string, unknown>[] = [];
+  page.on('request', (req) => {
+    if (req.method() === 'POST' && /\/next-step$/.test(req.url())) sent.push(req.postDataJSON() as Record<string, unknown>);
+  });
+  await withVoices(page, ['ru-RU']);
+  await signUpLearner(page, 'e2e_listen_help_ru', 'ru');
+  await saveTenWords(page.request);
+  await seedMemory('e2e_listen_help_ru', MEMORY);
+
+  await clearGemini(request);
+  await expectGeneration(request);
+  await openApp(page, 'enrollment-switcher');
+  await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
+  await tapUntil(page, 'start-button', 'progress-label');
+
+  for (let position = 1; position <= 10; position++) {
+    const card = await readCard(page, position, 10);
+    if (card.kind === 'board') {
+      const words = await boardWords(page);
+      const meanings = await Promise.all(
+        [0, 1, 2, 3, 4].map(async (i) => stripIsolates(await page.getByTestId(`board-meaning-${i}`).textContent())),
+      );
+      for (const [i, word] of words.entries()) {
+        await page.getByTestId(`board-word-${i}`).click();
+        await page.getByTestId(`board-meaning-${meanings.indexOf(MEANING_OF[word])}`).click();
+      }
+      await page.getByTestId('continue-button').click();
+      position += 3;
+      continue;
+    }
+    if (card.kind !== 'listen') {
+      await playOut(page, card);
+      continue;
+    }
+    // The listening card is ведро's (its memory is the one spoken receptive at level 1).
+    await expect(page.getByTestId('listen-hint')).toHaveCount(0);
+    await page.getByTestId('listen-help').click();
+    await expect(page.getByTestId('listen-hint')).toHaveText('в…');
+    await page.getByTestId('listen-help').click();
+    await expect(page.getByTestId('listen-hint')).toHaveText('ве…');
+    const answered = sent.length;
+    await page.getByTestId(`option-${card.options.indexOf(MEANING_OF['ведро'])}`).click();
+    await expect(page.getByTestId('feedback-other')).toBeVisible();
+    await expect(page.getByTestId('feedback-title')).toHaveText('נכון, עם עזרה');
+    await expect(page.getByTestId('listen-help')).toHaveCount(0);
+    await expect(page.getByTestId('listen-hint')).toHaveCount(0);
+    await expect.poll(() => sent.length).toBe(answered + 1);
+    expect(sent[answered]).toMatchObject({ option_index: expect.any(Number), helped: true });
+    break;
+  }
+
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

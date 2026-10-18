@@ -396,7 +396,10 @@ export function createSessionsRouter(sessions: SessionService) {
                   ? body.helped === undefined
                     ? { pass: body.pass }
                     : { pass: body.pass, helped: body.helped }
-                  : { option_index: body.option_index },
+                  : // Phase 63 (spec D10): a choice after help says so.
+                    body.helped === undefined
+                    ? { option_index: body.option_index }
+                    : { option_index: body.option_index, helped: body.helped },
               // Phase 62 (spec D6): a choice card's taps travel with its option.
               { retry: 'seen' in body ? false : body.retry ?? false, tapped: 'option_index' in body ? body.tapped : undefined },
             );

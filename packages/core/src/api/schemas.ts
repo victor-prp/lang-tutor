@@ -486,6 +486,9 @@ export const NextStepRequestSchema = z.union([
     option_index: z.number().int().nonnegative(),
     retry: z.boolean().optional(),
     tapped: TappedSchema.optional(),
+    // Phase 63 (spec D10). Help used on a choice card or a board word: graded a
+    // miss. Optional, so an older app is unchanged; ignored on a new meaning.
+    helped: z.boolean().optional(),
   }),
   z.object({
     question_id: z.string().min(1),
