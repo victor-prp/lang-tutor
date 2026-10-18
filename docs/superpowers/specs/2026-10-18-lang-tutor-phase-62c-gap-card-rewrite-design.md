@@ -1,8 +1,8 @@
 # Phase 62c — A gap card the checker refuses gets one rewrite
 
 - **Status:** design agreed with Victor on 2026-10-18 (placement B, scope as played back: "agree");
-  builder check done, its three questions settled as my calls (D1 budgets, D4, D6). Awaiting
-  Victor's review of this document.
+  builder check done, its three questions settled as my calls (D1 budgets, D4, D6). Approved by
+  Victor on 2026-10-18 ("go till PR"). Implemented inline on branch `fix-gap-sentence-rules-out`.
 - **Date:** 2026-10-18
 - **Source:** the brainstorming of 2026-10-18, started from the `test-eval` gap group failing on
   master since phase 62, and the earlier session's investigation that day (seven prompt rewordings,
