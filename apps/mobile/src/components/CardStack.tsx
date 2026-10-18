@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
-import { Animated, PanResponder, Platform, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { Animated, Easing, PanResponder, Platform, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 
 import { dotLook, type StackBar } from '@/targets';
 import { colors } from '@/theme';
@@ -53,15 +53,31 @@ export function CardStack({
   const count = cards.length;
   const at = count === 0 ? 0 : Math.min(index, count - 1);
 
-  useEffect(() => setIndex(0), [resetKey]);
-  useFocusEffect(useCallback(() => setIndex(0), []));
-
   // The row's offset: the card in view at the stage's start, and the finger's drag on top.
   const offset = useRef(new Animated.Value(0)).current;
   const step = width + GAP;
-  useEffect(() => {
-    Animated.timing(offset, { toValue: at * step, duration: SLIDE_MS, useNativeDriver: false }).start();
-  }, [at, step, offset]);
+
+  // Back on the first card at once, never sliding across every card to it (final review): only
+  // a tap on a bar or a swipe slides, easing out.
+  const reset = useCallback(() => {
+    offset.stopAnimation();
+    offset.setValue(0);
+    setIndex(0);
+  }, [offset]);
+  useEffect(reset, [resetKey, reset]);
+  useFocusEffect(reset);
+  const slideTo = useCallback(
+    (target: number, stride: number) => {
+      setIndex(target);
+      Animated.timing(offset, {
+        toValue: target * stride,
+        duration: SLIDE_MS,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    },
+    [offset],
+  );
 
   // On the web a Pressable presses on the DOM's click, which follows a drag that ends on it as
   // well (react-native-web's PressResponder): the click a drag leaves behind is swallowed here,
@@ -101,7 +117,7 @@ export function CardStack({
         const { at: current, step: stride, count: total } = live.current;
         const next = gesture.dx >= SWIPE ? current + 1 : gesture.dx <= -SWIPE ? current - 1 : current;
         const target = Math.max(0, Math.min(total - 1, next));
-        if (target !== current) setIndex(target);
+        if (target !== current) slideTo(target, stride);
         else Animated.spring(offset, { toValue: current * stride, useNativeDriver: false }).start();
       },
       onPanResponderTerminate: () => {
@@ -109,7 +125,7 @@ export function CardStack({
         Animated.spring(offset, { toValue: live.current.at * live.current.step, useNativeDriver: false }).start();
       },
       });
-  }, [offset]);
+  }, [offset, slideTo]);
 
   const onLayout = (event: LayoutChangeEvent) => {
     const measured = event.nativeEvent.layout.width - 2 * SHADOW_ROOM;
@@ -123,11 +139,11 @@ export function CardStack({
   return (
     <View style={styles.stack}>
       <View ref={stageRef} style={styles.stage} onLayout={onLayout} {...responder.panHandlers}>
-        <Animated.View style={[styles.row, { transform: [{ translateX: offset }] }]}>
-          {cards.map((card) => (
-            <View key={card.key} style={[styles.slot, { width }]}>
+        <Animated.View testID="home-row" style={[styles.row, { transform: [{ translateX: offset }] }]}>
+          {cards.map((card, i) => (
+            <Slot key={card.key} hidden={i !== at} width={width}>
               {card.node}
-            </View>
+            </Slot>
           ))}
         </Animated.View>
       </View>
@@ -144,7 +160,7 @@ export function CardStack({
                 accessibilityState={{ selected: i === at }}
                 aria-selected={i === at}
                 testID={`home-bar-${bar.card}`}
-                onPress={() => setIndex(i)}
+                onPress={() => slideTo(i, step)}
                 style={styles.bar}
               >
                 <View style={[styles.line, look === 'on' && styles.lineOn, look === 'urgent' && styles.lineUrgent]} />
@@ -161,6 +177,29 @@ export function CardStack({
           })}
         </View>
       ) : null}
+    </View>
+  );
+}
+
+/** The web's DOM node of a View, as much of it as `Slot` uses. */
+type InertTarget = { inert?: boolean };
+
+/**
+ * Phase 64b (final review I1). One card's place in the row. Only the card on show is there for a
+ * screen reader: the others sit beside it, clipped, and are hidden from accessibility (TalkBack,
+ * VoiceOver, the web's aria-hidden) and, on the web, made inert, so a keyboard cannot reach a
+ * button on a card nobody sees (and scroll the clipped stage out of line doing it).
+ */
+function Slot({ hidden, width, children }: { hidden: boolean; width: number; children: ReactNode }) {
+  const ref = useRef<View>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const node = ref.current as unknown as InertTarget | null;
+    if (node) node.inert = hidden;
+  }, [hidden]);
+  return (
+    <View ref={ref} aria-hidden={hidden} style={[styles.slot, { width }]}>
+      {children}
     </View>
   );
 }

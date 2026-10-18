@@ -124,3 +124,46 @@ test('the first tab is בית, named bars bring their cards, and the cards are o
   await expect(page.getByTestId('target-title')).toHaveCount(0);
   await expect(page.getByTestId('home-bar-main')).toBeVisible();
 });
+
+// Phase 64b final review. Only the card on show is there for a screen reader or a keyboard: the
+// others are beside it, clipped, and must not be read or pressed; and coming back to בית snaps to
+// the first card instead of sliding across every card back to it.
+test('only the card on show is read, and coming back to בית snaps to the first card', async ({ page, request }) => {
+  await signUpLearner(page, 'e2e_tabs_hidden', 'ru');
+  const enrollmentId = await enrollmentIdOf(page.request);
+  const [mine, examWord] = await lookUpEntries(page.request, enrollmentId, BOARD_WORDS.slice(0, 2));
+  await expectGeneration(request);
+  await saveEntries(page.request, enrollmentId, mine);
+  const { today } = await readTargets(page.request, enrollmentId);
+  const exam = await createTarget(page.request, enrollmentId, { kind: 'exam', due_on: addDays(today, 5), entries: examWord });
+  await openApp(page, `home-bar-${exam.id}`);
+  await expect(page.getByTestId('start-button')).toHaveCount(1);
+
+  // Two cards each with a button: only the one on show is in the accessibility tree.
+  await expect(page.getByRole('button', { name: 'לתרגל עכשיו' })).toHaveCount(1);
+  await page.getByTestId('home-bar-main').click();
+  await expect(page.getByRole('button', { name: 'לתרגל עכשיו' })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'לתרגל עכשיו' })).toHaveAttribute('data-testid', 'start-button');
+
+  // Away and back: the row is at the first card at once, never somewhere in between.
+  await page.getByTestId('vocabulary-entry').click();
+  await expect(page.getByTestId('vocabulary-title')).toBeVisible();
+  const step = await page.getByTestId('home-row').evaluate((row) => new DOMMatrix(getComputedStyle(row).transform).m41);
+  expect(step).toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const row = document.querySelector('[data-testid="home-row"]');
+    const seen: number[] = [];
+    (window as unknown as { seen: number[] }).seen = seen;
+    const sample = () => {
+      if (row) seen.push(new DOMMatrix(getComputedStyle(row).transform).m41);
+      if (seen.length < 60) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await page.getByTestId('tab-home').click();
+  await page.waitForTimeout(1_200);
+  const seen = await page.evaluate(() => (window as unknown as { seen: number[] }).seen);
+  const between = seen.filter((x) => x > 1 && x < step - 1);
+  expect(between, `the row passed through ${JSON.stringify(seen)}`).toEqual([]);
+  expect(seen[seen.length - 1]).toBe(0);
+});

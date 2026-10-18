@@ -350,10 +350,10 @@ describe('signing out (spec D4)', () => {
   });
 });
 
-// Phase 64 (final review C1). A tapped reminder opens תרגול with start=reminder. Over the
+// Phase 64 (final review C1). A tapped reminder opens בית with start=reminder. Over the
 // tabs (a session, translate) the stack is dismissed to them, as before; with a tab on top
 // there is nothing to dismiss, and dismissTo's POP_TO is lost on the tab navigator, so the
-// tap navigates instead, which jumps to תרגול and sets the param.
+// tap navigates instead, which jumps to בית and sets the param.
 describe('openReminderTap', () => {
   const HREF = { pathname: '/', params: { start: 'reminder' } };
   const routerWith = (canDismiss: boolean) => {

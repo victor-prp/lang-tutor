@@ -297,13 +297,14 @@ export function LearningSection({ active }: { active: Enrollment }) {
 
   return (
     <>
-      <CardStack resetKey={order.join(',')} bars={bars} cards={order.map((card) => ({ key: card, node: cardNode(card) }))} />
-
+      {/* Phase 64b (spec D2): above the cards, which fill the space under it. */}
       {photoSaved ? (
         <Text testID="home-photo-saved" style={styles.notice}>
           {strings.photoImportSaved(Number(photoSaved))}
         </Text>
       ) : null}
+      <CardStack resetKey={order.join(',')} bars={bars} cards={order.map((card) => ({ key: card, node: cardNode(card) }))} />
+
 
 
     </>

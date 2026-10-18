@@ -126,6 +126,10 @@ test('a photo of an Italian list goes to My words, as the review decided', async
 
   // Back on תרגול with the count, and the two ticked words in מילים.
   await expect(page.getByTestId('home-photo-saved')).toContainText('נשמרו');
+  // Phase 64b (spec D2): the notice sits above the cards, not under them.
+  const notice = await page.getByTestId('home-photo-saved').boundingBox();
+  const card = await page.getByTestId('home-my-words').boundingBox();
+  expect((notice?.y ?? Infinity) + (notice?.height ?? 0)).toBeLessThanOrEqual(card?.y ?? -Infinity);
   expect(await savedLemmas(page.request, enrollmentId)).toEqual(['cane', 'casa']);
   expect(await openImports(page.request, enrollmentId)).toEqual([]);
   await tapUntil(page, 'vocabulary-entry', 'vocabulary-word');

@@ -12,11 +12,11 @@ import { strings } from '@/strings';
 import { spacing } from '@/theme';
 
 /**
- * Phase 64 (spec D3). The תרגול tab: the header, a tutor's invitation while it waits for an
+ * Phase 64 (spec D3), phase 64b (spec D1). The בית tab: the header, a tutor's invitation while it waits for an
  * answer, then the paths one card at a time. No title: the cards tell the story (R3). The
  * gates (signed out, a profile to make, the enroll screen) are the tab layout's.
  */
-export default function PracticeTab() {
+export default function HomeTab() {
   const { active, reloadGrants } = useCurrentUser();
 
   // Phase 52 (spec D8). A tapped reminder opens home with start=reminder, which
