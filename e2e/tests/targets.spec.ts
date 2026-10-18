@@ -453,7 +453,19 @@ test('a new homework comes first with practice now, which asks its words alone; 
   await expect
     .poll(async () => (await readCurrent(page.request, enrollmentId, target.id)).current?.started, { message: report() })
     .toBe(true);
+  // The tap waits for home's own read of the targets since it came back, and its render: a tap
+  // on the list home held from before the start goes through create, which answers
+  // session_open, and home recovers by entering the session (final review N1). That recovery
+  // is by design; this step is about the list read since, which resumes with no create.
+  const reread = page.waitForResponse(
+    async (res) =>
+      res.request().method() === 'GET' &&
+      res.url().endsWith(`/api/enrollments/${enrollmentId}/targets`) &&
+      ((await res.json()) as TargetList).targets.find((t) => t.id === target.id)?.session?.started === true,
+  );
   await page.getByTestId('session-back').click();
+  await reread;
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(practice, report()).toBeVisible();
   const resumed = createsSent(diagnostics);
   await tapUntil(page, `target-practice-${target.id}`, 'progress-label');
