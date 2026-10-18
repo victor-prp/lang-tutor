@@ -64,9 +64,15 @@ what keeps both Jest projects off it, and it is part of neither `npm test` nor
 and refuses to run against MockServer.
 
 Because it calls a third party, `test-eval` is the one job that can go red with nothing
-wrong in the diff — a model update alone will do it. Read the run's `eval-report` artifact
-before assuming the commit broke something, and never answer a tier 2 drop by lowering
-`TIER2_THRESHOLD`.
+wrong in the diff — a model update alone will do it. That decides where the fix goes, not
+whether it happens: the `ci-green` skill owns a red or flaky `test-eval` like any other
+check. Before changing anything, read the run's `eval-report` artifact and compare it per
+row with master's latest. A row that fails on master too is fixed in a separate PR from
+`origin/master`; a row that only this branch fails is fixed on the branch. Reproduce it
+locally first, fix the prompt, the code or the case's own bug, and prove it by running the
+group at least twice (`npx tsx tests/eval/run.ts "<group> "` from `apps/server`). Never
+answer a tier 2 drop by lowering `TIER2_THRESHOLD`, loosening an assertion, or skipping or
+deleting a case.
 
 # Lanes
 
