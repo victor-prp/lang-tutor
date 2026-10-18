@@ -1681,8 +1681,8 @@ export type ContextCase = {
    *  and the Hebrew word that stands for it. */
   sentence?: { hebrew: string; target: string; word: string; marked: string };
   /** Phase 59. A translation card: Hebrew runs the word map must make tappable,
-   *  each with the reference's words for it. */
-  mapped?: { hebrew: string; translation: string }[];
+   *  each with the reference's words for it, or any one of several. */
+  mapped?: { hebrew: string; translation: string | string[] }[];
   /** Phase 62 (spec D1). The learner's practised words, which a target-language
    *  line is built from as much as it can. */
   learner?: { word: string; meaning: string }[];
@@ -1705,6 +1705,20 @@ export const CONTEXT_CASES: ContextCase[] = [
     example: null, exampleTranslation: null,
     sentence: { hebrew: 'יש לי אח.', target: 'Ho un fratello.', word: 'fratello', marked: 'אח' },
     mapped: [{ hebrew: 'יש לי', translation: 'Ho' }],
+  },
+  // Victor's card of 2026-10-18: the reference writes a + il as al, so ליד's "è vicino
+  // a" and השולחן's "il tavolo" were not in it as written and lost their taps. ליד
+  // may take the è, which Hebrew does not write, or leave it.
+  {
+    label: 'context map: ליד and השולחן are tappable across al',
+    target: 'it', type: 'sentence_translation', form: 'sedia', lemma: 'sedia', partOfSpeech: 'noun', translation: 'כיסא',
+    example: null, exampleTranslation: null,
+    sentence: { hebrew: 'הכיסא ליד השולחן.', target: 'La sedia è vicino al tavolo.', word: 'sedia', marked: 'הכיסא' },
+    learner: [{ word: 'tavolo', meaning: 'שולחן' }, { word: 'finestra', meaning: 'חלון' }, { word: 'porta', meaning: 'דלת' }, { word: 'albero', meaning: 'עץ' }],
+    mapped: [
+      { hebrew: 'ליד', translation: ['vicino a', 'è vicino a', 'vicino al', 'è vicino al'] },
+      { hebrew: 'השולחן', translation: ['il tavolo', 'al tavolo', 'tavolo'] },
+    ],
   },
   // E, 71b0b407: `saw` is the tool's verb here, never the past of see.
   {

@@ -3,7 +3,7 @@ import { LlmContextSchema } from '@lang-tutor/core/api/schemas';
 import type { QuestionType } from '@lang-tutor/core/domain';
 
 import { comparable, learnerWordsJson, type GenerationContext, type LearnerWord } from './distractors';
-import { LANGUAGES, type LanguageCode } from './languages';
+import { LANGUAGES, type Language, type LanguageCode } from './languages';
 import { findMark, findMarks, type Mark } from './marks';
 import { SENTENCE_MAX_WORDS, SENTENCE_MIN_WORDS, SHORT_SENTENCE_MAX_WORDS, SHORT_SENTENCE_MIN_ASKED, wordCount } from './sentences';
 import { dropNulls, unfence } from './translation';
@@ -269,9 +269,26 @@ type Found = LlmContext['items'][number];
 /** Gap offsets are UTF-16 indices and the database counts characters (sentences.ts). */
 const ASTRAL = /[\u{10000}-\u{10FFFF}]/u;
 
-/** A phrase's words, in order, among a text's words, both under `comparable`. */
-function holds(text: string, phrase: string): boolean {
-  const words = (value: string) => comparable(value).split(/[^\p{L}\p{M}\p{N}']+/u).filter(Boolean);
+type Contractions = Language['contractions'];
+const NO_CONTRACTIONS: Contractions = {};
+
+/** Words with each contraction written apart: al is a, il; all'ufficio is a, l'ufficio.
+ *  Only the table's own keys: "constructor" is a word, never Object's. */
+function apart(words: readonly string[], contractions: Contractions): string[] {
+  const joined = (word: string) => (Object.hasOwn(contractions, word) ? contractions[word] : undefined);
+  return words.flatMap((word) => {
+    const whole = joined(word);
+    if (whole) return [...whole];
+    const cut = word.indexOf("'") + 1;
+    const elided = cut > 0 ? joined(word.slice(0, cut)) : undefined;
+    return elided ? [elided[0], elided[1] + word.slice(cut)] : [word];
+  });
+}
+
+/** A phrase's words, in order, among a text's words, both under `comparable`
+ *  and with `contractions` written apart. */
+function holds(text: string, phrase: string, contractions: Contractions = NO_CONTRACTIONS): boolean {
+  const words = (value: string) => apart(comparable(value).split(/[^\p{L}\p{M}\p{N}']+/u).filter(Boolean), contractions);
   const all = words(text);
   const sought = words(phrase);
   return sought.length > 0 && all.some((_, at) => sought.every((word, offset) => all[at + offset] === word));
@@ -399,7 +416,9 @@ const overlaps = (a: Mark, b: Mark) => a.start < b.end && b.start < a.end;
  * answer, or null when it has none usable. Never a refusal: a bad entry costs
  * that word its tap. Each Hebrew word is found after the one before it; an entry
  * whose Italian is not in the reference, or that overlaps one already kept, is
- * dropped. The target is every entry over the mark, or with no mark the entry
+ * dropped. Both are read with `target`'s contractions apart: in "vicino al
+ * tavolo", ליד's "vicino a" and השולחן's "il tavolo" are each in the reference.
+ * The target is every entry over the mark, or with no mark the entry
  * whose Italian holds every word of the gap; with a mark no entry covers, the mark itself, with
  * the gap's text. Any other entry sharing a word with the gap is dropped, so a
  * free tap never shows the answer.
@@ -410,8 +429,11 @@ export function wordMapFor(
   mark: Mark | null,
   learner: readonly LearnerWord[],
   ownGlossId: string,
+  /** The language of the reference and of each entry's translation. */
+  target: LanguageCode,
 ): MapWord[] | null {
   if (!item.map || !found?.sentence_words) return null;
+  const { contractions } = LANGUAGES[target];
   const gapWords = new Set(wordsOf(item.word));
   const glossOf = new Map(learner.map((word) => [word.key, word.glossId]));
   const kept: MapWord[] = [];
@@ -419,7 +441,7 @@ export function wordMapFor(
   for (const entry of found.sentence_words) {
     const text = entry.translation.trim();
     const hebrew = entry.shown.trim();
-    if (text === '' || hebrew === '' || !holds(item.translation, text)) continue;
+    if (text === '' || hebrew === '' || !holds(item.translation, text, contractions)) continue;
     const at = findMarks(item.sentence, hebrew).find((place) => place.start >= cursor);
     if (!at || kept.some((word) => overlaps(word, at))) continue;
     cursor = at.end;

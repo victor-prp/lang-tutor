@@ -332,7 +332,7 @@ describe('wordMapFor (phase 59 D2)', () => {
   const mark = { start: 9, end: 11 };
 
   it('maps each located word to its Italian, marks the target, and names a list word', () => {
-    expect(wordMapFor(item, { key: 'q1', sentence_words: words }, mark, learner, 'g-con')).toEqual([
+    expect(wordMapFor(item, { key: 'q1', sentence_words: words }, mark, learner, 'g-con', 'it')).toEqual([
       { start: 4, end: 8, text: 'Vado', glossId: null, target: false },
       { start: 9, end: 11, text: 'con', glossId: null, target: true },
       { start: 12, end: 17, text: 'amici', glossId: 'g-amico', target: false },
@@ -345,7 +345,7 @@ describe('wordMapFor (phase 59 D2)', () => {
     expect(wordMapFor(have, { key: 'q1', sentence_words: [
       { shown: 'יש לי', translation: 'Ho', word: 'w4' },
       { shown: 'אח', translation: 'un fratello', word: '' },
-    ] }, { start: 6, end: 8 }, ho, 'g-fratello')).toEqual([
+    ] }, { start: 6, end: 8 }, ho, 'g-fratello', 'it')).toEqual([
       { start: 0, end: 5, text: 'Ho', glossId: 'g-ho', target: false },
       { start: 6, end: 8, text: 'un fratello', glossId: null, target: true },
     ]);
@@ -356,8 +356,61 @@ describe('wordMapFor (phase 59 D2)', () => {
       { shown: 'הולך', translation: 'andiamo', word: '' },
       { shown: 'רץ', translation: 'Vado', word: '' },
       ...words.slice(2),
-    ] }, mark, learner, 'g-con');
+    ] }, mark, learner, 'g-con', 'it');
     expect(map!.map((word) => word.text)).toEqual(['con', 'amici']);
+  });
+
+  // Victor's card of 2026-10-18: Italian writes a + il as al, so neither ליד's "è
+  // vicino a" nor השולחן's "il tavolo" was in the reference, and only the target kept its tap.
+  const chair: MarkItem = { key: 'q1', task: 'mark', word: 'sedia', meaning: 'כיסא', sentence: 'הכיסא ליד השולחן.', translation: 'La sedia è vicino al tavolo.', map: 'sentence' };
+  const chairAt = (beside: string, table: string) => [
+    { shown: 'הכיסא', translation: 'La sedia', word: '' },
+    { shown: 'ליד', translation: beside, word: '' },
+    { shown: 'השולחן', translation: table, word: 'w1' },
+  ];
+  const tavolo = [{ key: 'w1', glossId: 'g-tavolo', word: 'tavolo', meaning: 'שולחן' }];
+
+  it('finds an entry in the reference across a preposition and an article written as one word', () => {
+    expect(wordMapFor(chair, { key: 'q1', sentence_words: chairAt('è vicino a', 'il tavolo') }, { start: 0, end: 5 }, tavolo, 'g-sedia', 'it')).toEqual([
+      { start: 0, end: 5, text: 'La sedia', glossId: null, target: true },
+      { start: 6, end: 9, text: 'è vicino a', glossId: null, target: false },
+      { start: 10, end: 16, text: 'il tavolo', glossId: 'g-tavolo', target: false },
+    ]);
+  });
+
+  it('still finds an entry that writes the contraction as the reference does', () => {
+    const map = wordMapFor(chair, { key: 'q1', sentence_words: chairAt('vicino', 'al tavolo') }, { start: 0, end: 5 }, tavolo, 'g-sedia', 'it');
+    expect(map!.map((word) => word.text)).toEqual(['La sedia', 'vicino', 'al tavolo']);
+  });
+
+  it('splits an elided contraction from the word it joins', () => {
+    const house: MarkItem = { key: 'q1', task: 'mark', word: 'casa', meaning: 'בית', sentence: 'הבית ליד המשרד.', translation: "La casa è vicino all'ufficio.", map: 'sentence' };
+    const map = wordMapFor(house, { key: 'q1', sentence_words: [
+      { shown: 'הבית', translation: 'La casa', word: '' },
+      { shown: 'ליד', translation: 'vicino a', word: '' },
+      { shown: 'המשרד', translation: "l'ufficio", word: '' },
+    ] }, { start: 0, end: 4 }, [], 'g-casa', 'it');
+    expect(map!.map((word) => word.text)).toEqual(['La casa', 'vicino a', "l'ufficio"]);
+  });
+
+  it('still drops an entry the reference does not hold with its contractions apart: al is a il, never a la', () => {
+    const map = wordMapFor(chair, { key: 'q1', sentence_words: chairAt('vicino a', 'la tavola') }, { start: 0, end: 5 }, tavolo, 'g-sedia', 'it');
+    expect(map!.map((word) => word.text)).toEqual(['La sedia', 'vicino a']);
+  });
+
+  it('reads a word named like an object\'s own property as a word, never a contraction', () => {
+    const builder: MarkItem = { key: 'q1', task: 'mark', word: 'house', meaning: 'בית', sentence: 'הבנאי בנה בית.', translation: 'The constructor built a house.', map: 'sentence' };
+    const map = wordMapFor(builder, { key: 'q1', sentence_words: [
+      { shown: 'הבנאי', translation: 'The constructor', word: '' },
+      { shown: 'בנה', translation: 'built', word: '' },
+      { shown: 'בית', translation: 'a house', word: '' },
+    ] }, { start: 10, end: 13 }, [], 'g-house', 'en');
+    expect(map!.map((word) => word.text)).toEqual(['The constructor', 'built', 'a house']);
+  });
+
+  it('reads contractions only in a language that has them', () => {
+    const map = wordMapFor(chair, { key: 'q1', sentence_words: chairAt('è vicino a', 'il tavolo') }, { start: 0, end: 5 }, tavolo, 'g-sedia', 'en');
+    expect(map!.map((word) => word.text)).toEqual(['La sedia']);
   });
 
   it('drops a non-target entry that holds the target\'s Italian, so a free tap never shows the answer', () => {
@@ -366,12 +419,12 @@ describe('wordMapFor (phase 59 D2)', () => {
       { shown: 'יש', translation: 'Ci sono', word: '' },
       { shown: 'פה', translation: 'sono qui', word: '' },
       { shown: 'אנשים', translation: 'persone', word: '' },
-    ] }, { start: 0, end: 2 }, [], 'g-ci');
+    ] }, { start: 0, end: 2 }, [], 'g-ci', 'it');
     expect(map!.map((word) => [word.text, word.target])).toEqual([['Ci sono', true], ['persone', false]]);
   });
 
   it('with no mark, takes the entry whose Italian is the gap as the target', () => {
-    const map = wordMapFor(item, { key: 'q1', sentence_words: words }, null, learner, 'g-con');
+    const map = wordMapFor(item, { key: 'q1', sentence_words: words }, null, learner, 'g-con', 'it');
     expect(map!.filter((word) => word.target)).toEqual([{ start: 9, end: 11, text: 'con', glossId: null, target: true }]);
   });
 
@@ -380,7 +433,7 @@ describe('wordMapFor (phase 59 D2)', () => {
     const map = wordMapFor(have, { key: 'q1', sentence_words: [
       { shown: 'יש לי', translation: 'Ho', word: '' },
       { shown: 'אח', translation: 'un fratello', word: '' },
-    ] }, null, [], 'g-fratello');
+    ] }, null, [], 'g-fratello', 'it');
     expect(map).toEqual([
       { start: 0, end: 5, text: 'Ho', glossId: null, target: false },
       { start: 6, end: 8, text: 'un fratello', glossId: null, target: true },
@@ -388,7 +441,7 @@ describe('wordMapFor (phase 59 D2)', () => {
   });
 
   it('adds the mark as the target when no entry covers it', () => {
-    const map = wordMapFor(item, { key: 'q1', sentence_words: [words[1], words[3]] }, mark, learner, 'g-con');
+    const map = wordMapFor(item, { key: 'q1', sentence_words: [words[1], words[3]] }, mark, learner, 'g-con', 'it');
     expect(map).toEqual([
       { start: 4, end: 8, text: 'Vado', glossId: null, target: false },
       { start: 9, end: 11, text: 'con', glossId: null, target: true },
@@ -400,15 +453,15 @@ describe('wordMapFor (phase 59 D2)', () => {
     const map = wordMapFor(item, { key: 'q1', sentence_words: [
       { shown: 'הולך', translation: 'Vado', word: 'w9' },
       { shown: 'חברים', translation: 'amici', word: 'w2' },
-    ] }, mark, learner, 'g-con');
+    ] }, mark, learner, 'g-con', 'it');
     expect(map!.filter((word) => !word.target).map((word) => word.glossId)).toEqual([null, null]);
   });
 
   it('is null with no map, an unmapped item, or nothing usable', () => {
-    expect(wordMapFor(item, { key: 'q1' }, mark, learner, 'g-con')).toBeNull();
-    expect(wordMapFor(item, undefined, mark, learner, 'g-con')).toBeNull();
-    expect(wordMapFor({ ...item, map: undefined }, { key: 'q1', sentence_words: words }, mark, learner, 'g-con')).toBeNull();
-    expect(wordMapFor(item, { key: 'q1', sentence_words: [{ shown: 'רץ', translation: 'x', word: '' }] }, null, learner, 'g-con')).toBeNull();
+    expect(wordMapFor(item, { key: 'q1' }, mark, learner, 'g-con', 'it')).toBeNull();
+    expect(wordMapFor(item, undefined, mark, learner, 'g-con', 'it')).toBeNull();
+    expect(wordMapFor({ ...item, map: undefined }, { key: 'q1', sentence_words: words }, mark, learner, 'g-con', 'it')).toBeNull();
+    expect(wordMapFor(item, { key: 'q1', sentence_words: [{ shown: 'רץ', translation: 'x', word: '' }] }, null, learner, 'g-con', 'it')).toBeNull();
   });
 });
 
