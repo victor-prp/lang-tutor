@@ -146,6 +146,19 @@ describe('help reads the typing (phase 63 D3)', () => {
     expect(typedHint("l'acqua", 'l', 2, false)).toEqual({ ghost: "'a", more: true });
   });
 
+  // Final review. What the checker drops is dropped only at the end of the answer:
+  // a stray space or full stop inside the word is a mistake; a leading space, which
+  // the checker trims, is not.
+  it('marks a stray space or full stop inside the word, not a leading space', () => {
+    expect(pressTyped(A, 'cola ', 0, false)).toEqual({ given: 0, markFrom: 4 });
+    expect(pressTyped(A, 'col.', 0, false)).toEqual({ given: 0, markFrom: 3 });
+    expect(typedHint(A, 'cola ', 5, false)).toBeNull();
+    expect(pressTyped(A, ' co', 0, false)).toEqual({ given: 3, markFrom: null });
+    expect(typedHint(A, ' c', 2, false)).toEqual({ ghost: 'o', more: true });
+    expect(pressTyped(A, ' cx', 0, false)).toEqual({ given: 0, markFrom: 2 });
+    expect(typedHelpDone(A, 'colazione.', 0, false)).toBe(true);
+  });
+
   // Review focus 3: a Hebrew meaning is compared as normaliseHebrew compares.
   it('takes points, a maqaf or a hyphen in Hebrew as right', () => {
     expect(typedHelpDone('ארוחה', 'אֲרוּחָה', 0, true)).toBe(true);

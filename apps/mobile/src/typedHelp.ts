@@ -116,14 +116,16 @@ function fold(text: string, hebrew: boolean): Folded[] {
 }
 
 /** How far a typed text agrees with the answer: the answer's offset it covers,
- *  or the typed offset of its first wrong character. What the checker ignores at
- *  the end of a typed answer (a space, a full stop) is not wrong. */
+ *  or the typed offset of its first wrong character. What the checker trims is
+ *  not wrong: spaces before the typing, and past the answer's end a space or a
+ *  full stop; inside the word they are. */
 function compare(answer: string, typed: string, hebrew: boolean): { covered: number } | { wrongAt: number } {
   const a = fold(answer, hebrew);
-  const t = fold(typed, hebrew);
+  const all = fold(typed, hebrew);
+  const t = all.slice(all[0]?.ch === ' ' ? 1 : 0);
   let i = 0;
   while (i < t.length && i < a.length && t[i].ch === a[i].ch) i++;
-  if (i < t.length && !t.slice(i).every((char) => TRAILING.test(char.ch))) return { wrongAt: t[i].start };
+  if (i < t.length && !(i >= a.length && t.slice(i).every((char) => TRAILING.test(char.ch)))) return { wrongAt: t[i].start };
   return { covered: i === 0 ? 0 : a[i - 1].end };
 }
 
