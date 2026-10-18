@@ -122,6 +122,10 @@ function world(opts: {
   recentContexts?: RecentContexts;
   /** Phase 34 (spec D5). The checker's answer, on its own client; `checking()` by default. */
   checkReply?: string | Error | ((request: LlmJsonRequest) => string);
+  /** Phase 62c. The gap check's answer, by default every gap option wrong. */
+  gapCheckReply?: string | Error | ((request: LlmJsonRequest) => string);
+  /** Phase 62c. The rewrite's answers in order; by default a call is a failure the test sees. */
+  rewriteReply?: (string | Error | ((request: LlmJsonRequest) => string))[];
   /** Phase 34 (spec D3). What findKnownRight answers; nothing known by default. */
   known?: KnownRight;
   enrollment?: Enrollment;
@@ -225,6 +229,8 @@ function world(opts: {
   const llm = createFakeLlmClient(opts.reply ?? GOOD);
   const contextLlm = createFakeLlmClient(opts.contextReply ?? JSON.stringify({ items: [] }));
   const checkerLlm = createFakeLlmClient(opts.checkReply ?? checking());
+  const gapCheckLlm = createFakeLlmClient(opts.gapCheckReply ?? checking());
+  const gapRewriteLlm = createFakeLlmClient(...(opts.rewriteReply ?? [new Error('no rewrite expected')]));
   const logger = createFakeLogger();
   // Phase 34 (spec D1). What the read asked the accept job for.
   const jobs = createFakeJobRepo();
@@ -253,12 +259,14 @@ function world(opts: {
     llm,
     contextLlm,
     checkerLlm,
+    gapCheckLlm,
+    gapRewriteLlm,
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
     translationJudge: createFakeLlmClient(''),
     soundAlikeThreshold: 0.95,
   });
-  return { service, calls, llm, contextLlm, checkerLlm, logger, jobs };
+  return { service, calls, llm, contextLlm, checkerLlm, gapCheckLlm, gapRewriteLlm, logger, jobs };
 }
 
 describe('prepareSession', () => {

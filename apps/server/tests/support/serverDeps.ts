@@ -5,6 +5,8 @@ import type { Db } from '../../src/db/client';
 import {
   CHECKER_CALL_BUDGET_MS,
   CONTEXT_CALL_BUDGET_MS,
+  GAP_CHECK_BUDGET_MS,
+  GAP_REWRITE_BUDGET_MS,
   PHOTO_READ_BUDGET_MS,
   SESSION_GENERATION_BUDGET_MS,
   STOCK_SAVE_DELAY_SECONDS,
@@ -47,6 +49,9 @@ export function createTestServerDeps(io: {
   contextCallTimeoutMs?: number;
   /** Phase 34. The budget of the checker; defaults to production's. */
   checkerCallTimeoutMs?: number;
+  /** Phase 62c. The budgets of the gap check and the rewrite; default to production's. */
+  gapCheckTimeoutMs?: number;
+  gapRewriteTimeoutMs?: number;
   /** Phase 25. The budget of one transcription; defaults to production's. */
   speechTimeoutMs?: number;
   /** Phase 27. The budget of one judged answer; defaults to production's. */
@@ -90,6 +95,8 @@ export function createTestServerDeps(io: {
     sessionGenerationTimeoutMs: io.sessionGenerationTimeoutMs ?? SESSION_GENERATION_BUDGET_MS,
     contextCallTimeoutMs: io.contextCallTimeoutMs ?? CONTEXT_CALL_BUDGET_MS,
     checkerCallTimeoutMs: io.checkerCallTimeoutMs ?? CHECKER_CALL_BUDGET_MS,
+    gapCheckTimeoutMs: io.gapCheckTimeoutMs ?? GAP_CHECK_BUDGET_MS,
+    gapRewriteTimeoutMs: io.gapRewriteTimeoutMs ?? GAP_REWRITE_BUDGET_MS,
     speechTimeoutMs: io.speechTimeoutMs ?? 8_000,
     judgeTimeoutMs: io.judgeTimeoutMs ?? 8_000,
     photoReadTimeoutMs: io.photoReadTimeoutMs ?? PHOTO_READ_BUDGET_MS,

@@ -43,11 +43,27 @@ export const CONTEXT_CALL_BUDGET_MS = 60_000;
  *  it. The environment may lower it (config.ts); tests do. */
 export const CHECKER_CALL_BUDGET_MS = 60_000;
 
+/** Phase 62c (spec D1). The most the gap check may take, beside the context call: a
+ *  few gap items of one session. Its own and short, so a hang holds the session no
+ *  longer than this; a check that runs out rescues nothing, and the final checker
+ *  reads its items. The environment may lower it (config.ts); tests do. */
+export const GAP_CHECK_BUDGET_MS = 30_000;
+
+/** Phase 62c (spec D1). The most the rewrite may take: the batch's prompt for the
+ *  few gap items asked again, on the batch's thinking budget. A rewrite that runs
+ *  out leaves its cards as they were. The environment may lower it (config.ts). */
+export const GAP_REWRITE_BUDGET_MS = 45_000;
+
 /** Phase 34 (ruling R12). Every model call one prepare-session attempt makes, in
  *  order, each at most its budget: the batch, the context call, the checker. A
- *  call added to the attempt adds its budget here. */
+ *  call added to the attempt adds its budget here. Phase 62c (spec D1): the gap
+ *  check (beside the context call), the rewrite and the rewritten cards' context
+ *  call (beside the checker), counted as if one after another. */
 export const PREPARE_SESSION_CALL_BUDGETS_MS: readonly number[] = [
   SESSION_GENERATION_BUDGET_MS,
+  CONTEXT_CALL_BUDGET_MS,
+  GAP_CHECK_BUDGET_MS,
+  GAP_REWRITE_BUDGET_MS,
   CONTEXT_CALL_BUDGET_MS,
   CHECKER_CALL_BUDGET_MS,
 ];

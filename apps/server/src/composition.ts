@@ -168,6 +168,10 @@ export function createServerDeps(io: {
   // Phase 34 (spec D5, ruling R12). The checker's budget, after the context call:
   // its own, so its wait is bounded apart from the batch's two minutes.
   checkerCallTimeoutMs: number;
+  // Phase 62c (spec D1). The gap check's and the rewrite's budgets: their own and
+  // short, so a rescue that hangs holds a session no longer than these.
+  gapCheckTimeoutMs: number;
+  gapRewriteTimeoutMs: number;
   // Phase 25 (spec D13). One transcription's budget: short, because a learner
   // is waiting on a card.
   speechTimeoutMs: number;
@@ -258,6 +262,29 @@ export function createServerDeps(io: {
     onCall,
     now: io.now,
     timeoutMs: io.checkerCallTimeoutMs,
+  });
+
+  // Phase 62c (spec D1, D3). The checker's prompt for a session's gap cards, beside
+  // the context call, and the batch's prompt for the cards asked again: each the
+  // same provider with a budget of its own, and the rewrite the batch's thinking.
+  const gapCheckLlm: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    onCall,
+    now: io.now,
+    timeoutMs: io.gapCheckTimeoutMs,
+  });
+  const gapRewriteLlm: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    onCall,
+    now: io.now,
+    timeoutMs: io.gapRewriteTimeoutMs,
+    thinkingBudget: SESSION_GENERATION_THINKING,
   });
 
   // Phase 25. The same provider over audio. Named here and nowhere else
@@ -354,6 +381,8 @@ export function createServerDeps(io: {
       llm: sessionLlm,
       contextLlm,
       checkerLlm,
+      gapCheckLlm,
+      gapRewriteLlm,
       transcriber,
       judge,
       translationJudge,

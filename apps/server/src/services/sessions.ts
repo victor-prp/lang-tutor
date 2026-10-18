@@ -248,6 +248,8 @@ export function createSessionService({
   llm,
   contextLlm,
   checkerLlm,
+  gapCheckLlm,
+  gapRewriteLlm,
   transcriber,
   judge,
   translationJudge,
@@ -264,6 +266,12 @@ export function createSessionService({
   /** Phase 34 (spec D5, ruling R12). The checker's client, likewise with a
    *  budget of its own; its failure fails the attempt, which pg-boss retries. */
   checkerLlm: LlmClient;
+  /** Phase 62c (spec D1). The gap check's client: the checker's prompt for the
+   *  session's gap cards, beside the context call, with a short budget of its own. */
+  gapCheckLlm: LlmClient;
+  /** Phase 62c (spec D3). The rewrite's client: the batch's prompt for the gap cards
+   *  asked again, with a short budget of its own. */
+  gapRewriteLlm: LlmClient;
   transcriber: SpeechTranscriber;
   judge: LlmClient;
   /** Phase 45 (spec D3). The sentence translation's judge: it thinks before it

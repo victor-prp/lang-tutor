@@ -100,6 +100,8 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
     llm: createFakeLlmClient(''),
     contextLlm: createFakeLlmClient(''),
     checkerLlm: createFakeLlmClient(''),
+    gapCheckLlm: createFakeLlmClient(''),
+    gapRewriteLlm: createFakeLlmClient(''),
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
     translationJudge: createFakeLlmClient(''),

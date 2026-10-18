@@ -51,6 +51,8 @@ describe('createServerDeps', () => {
       sessionGenerationTimeoutMs: 120_000,
       contextCallTimeoutMs: 60_000,
       checkerCallTimeoutMs: 60_000,
+      gapCheckTimeoutMs: 30_000,
+      gapRewriteTimeoutMs: 45_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
