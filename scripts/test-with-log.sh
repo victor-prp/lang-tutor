@@ -51,12 +51,25 @@ out=$(run --tty metro bash -c '[ -t 1 ] && echo tty || echo plain')
 expect "--tty with no terminal on stdin runs the command plainly" "plain" "$out"
 
 # A terminal for with-log.sh itself, from `script`, the way Victor's shell gives
-# it one: the macOS and Linux forms, as with-log.sh has them.
+# it one: the macOS and Linux forms, as with-log.sh has them. On Linux its input
+# stays open and empty, as a terminal's does: given one that ends (/dev/null),
+# `script` types an EOF into the terminal, and when with-log.sh's own `script` has
+# already set that terminal raw, it echoes as ^@ into the output and the file
+# (about one run in five under load; CI run 39133235622). A pipe whose writer only
+# sleeps sends none. macOS's `script` refuses a pipe for input ("tcgetattr/ioctl:
+# Operation not supported on socket"), so it keeps /dev/null, whose EOF echoes as
+# ^D and is stripped below.
 in_tty() {
-  if [ "$(uname)" = "Darwin" ]; then script -q /dev/null "$@"
-  else script -qefc "$(printf '%q ' "$@")" /dev/null; fi
+  if [ "$(uname)" = "Darwin" ]; then script -q /dev/null "$@" < /dev/null; return; fi
+  mkfifo "$LOGS/stdin"
+  sleep 60 > "$LOGS/stdin" &
+  local keep=$! status
+  script -qefc "$(printf '%q ' "$@")" /dev/null < "$LOGS/stdin"
+  status=$?
+  kill "$keep" 2>/dev/null
+  return "$status"
 }
-out=$(in_tty env LANE_LOGS="$LOGS" bash "$REPO/scripts/with-log.sh" --tty tty bash -c '[ -t 1 ] && echo tty || echo plain' < /dev/null \
+out=$(in_tty env LANE_LOGS="$LOGS" bash "$REPO/scripts/with-log.sh" --tty tty bash -c '[ -t 1 ] && echo tty || echo plain' \
   | tr -d '\r\004\010' | sed 's/\^D//g')
 expect "--tty in a terminal gives the command one" "tty" "$out"
 expect "and its output still reaches the file" "1" "$(grep -cE "^$STAMP tty$" "$LOGS/tty.log")"
