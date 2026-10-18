@@ -31,7 +31,8 @@ export type QuestionType = Question['type'];
  *  a speaking card by a transcript, which only the server builds from the audio
  *  it judged, or by a pass (spec D5). */
 export type AnswerInput =
-  | { option_index: number }
+  // Phase 63 (spec D10): `helped`, help used on a choice card or a board word.
+  | { option_index: number; helped?: boolean }
   // Phase 55 (spec D6). `helped`: the learner used help, or placed a wrong tile,
   // on a card that takes help (`takesHelp`). The app sends it; no other card
   // reads it. Phase 56 (spec D2): a transcript and a judged text carry it too.
@@ -208,8 +209,15 @@ function verdictFor(question: TextQuestion | SayTranslationQuestion, text: strin
  * Phase 55 (spec D6). The cards on which help, or a wrong tile, grades the
  * answer wrong whatever its text. On any other type `helped` is ignored.
  * Phase 56 (spec D2): every card where the learner produces the answer.
+ * Phase 63 (spec D10): and the choice cards and matching, where help rules out
+ * an option, shows the heard word or matches a pair. Not a new meaning.
  */
 const HELPED: ReadonlySet<QuestionType> = new Set([
+  'multiple_choice',
+  'reverse_choice',
+  'listen_choice',
+  'cloze_choice',
+  'matching',
   'letter_tiles',
   'typed_translation',
   'say_translation',
@@ -266,7 +274,8 @@ export function evaluate(question: Question, answer: AnswerInput): AnswerRecord 
   if (isChoice(question) && 'option_index' in answer) {
     return recorded(question, {
       question_id: question.id,
-      is_correct: answer.option_index === question.correct_option,
+      // Phase 63 (spec D10). A helped option is a miss, whichever it is.
+      is_correct: !helpedOn(question, answer) && answer.option_index === question.correct_option,
       answer_string: question.options[answer.option_index],
     });
   }
