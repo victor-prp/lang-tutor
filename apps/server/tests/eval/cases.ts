@@ -1530,6 +1530,12 @@ export const POINT_CASES: PointCase[] = [
   pointCase('it', 'Un ___ vola nel cielo.', 'uccello', 'ציפור', true),
   pointCase('it', 'Ci sono uccelli nel ___.', 'cielo', 'שמיים', true),
   pointCase('it', "Il ___ è nell'acqua.", 'pesce', 'דג', true),
+  // Final review (Important 1): a typed gap can practise a phrase of up to four words, and
+  // its gap is one ___ for all of them. Labelled under the same bar.
+  pointCase('it', 'Nel frigo ___ tre uova e il latte.', 'ci sono', 'יש', true, 'esserci'),
+  pointCase('it', 'In questa città ___ molti musei famosi.', 'ci sono', 'יש', true, 'esserci'),
+  pointCase('it', 'Oggi ___ qui.', 'ci sono', 'יש', false, 'esserci'),
+  pointCase('en', 'Can you ___ the kids from school at four?', 'pick up', 'לאסוף', true),
 ];
 export const TRANSLATE_CASES: SentenceCase[] = [
   ...sentenceCases('translate'),
