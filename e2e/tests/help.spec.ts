@@ -126,6 +126,8 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await expect(page.getByTestId('typed-hint')).toHaveText(`${letters[0]}${letters[1]}…`);
   const input = page.getByTestId('typed-input');
   await expect(input).toHaveValue('');
+  // The grey letters stand where the placeholder was: it goes while they show.
+  await expect(input).not.toHaveAttribute('placeholder', /התשובה/);
 
   // Phase 63 (spec D3). Help reads the typing: after a wrong letter the grey goes,
   // nothing is marked until help is pressed, which marks it and gives nothing;

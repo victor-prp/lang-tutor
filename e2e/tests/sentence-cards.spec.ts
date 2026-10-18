@@ -385,11 +385,17 @@ test('help on a typed gap, and none on a sentence translation', async ({ page, r
       await page.getByTestId('typed-help').click();
       await expect(page.getByTestId('typed-hint')).toHaveText(`${[...STUB_GAP].slice(0, 2).join('')}…`);
       await expect(page.getByTestId('sentence-hint')).toBeVisible();
+      // Phase 63 (spec D2). The tallest typed card, its Hebrew sentence shown, on a
+      // phone-sized screen: help is inside the answer box, in view.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.getByTestId('sentence-hint').click();
+      await expect(page.getByTestId('sentence-translation')).toBeVisible();
+      await expect(page.getByTestId('typed-box').getByTestId('typed-help')).toBeInViewport();
       // A wrong word with help is a miss whatever the model says: no fit check.
       const sent = nextStepSent(page);
       await answerTyped(page, STUB_GAP_LEMMA);
       const body = (await sent).postDataJSON() as Record<string, unknown>;
-      expect(body).toMatchObject({ text: STUB_GAP_LEMMA, helped: true, hint_opened: false });
+      expect(body).toMatchObject({ text: STUB_GAP_LEMMA, helped: true, hint_opened: true });
       expect(body).not.toHaveProperty('check_fit');
       await expect(page.getByTestId('retype')).toBeVisible();
       await expect(page.getByTestId('retype-answer')).toHaveText(STUB_GAP);

@@ -233,7 +233,10 @@ export function TypedAnswerView({
         <View style={styles.field}>
           {ghost !== '' || markFrom !== null ? (
             <Text
-              style={[styles.input, styles.layer, { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }, overflow && styles.hidden]}
+              // No physical textAlign: native RTL swaps left and right on a Text (and
+              // not on a TextInput), web does not; the base direction puts the layer's
+              // text where the input's is on both (phase 1's fix, 1fff73e).
+              style={[styles.input, styles.layer, { writingDirection: direction }, overflow && styles.hidden]}
               testID="typed-hint"
               onTextLayout={(event) => setOverflow(event.nativeEvent.lines.length > 1)}
             >
@@ -274,7 +277,8 @@ export function TypedAnswerView({
             onSubmitEditing={() => {
               if (!empty) submit(text);
             }}
-            placeholder={strings.typedPlaceholder}
+            // Phase 63 (final review): the grey letters stand where the placeholder is.
+            placeholder={ghost !== '' ? undefined : strings.typedPlaceholder}
             placeholderTextColor={colors.muted}
             style={[styles.input, question.type === 'sentence_translation' && styles.inputMultiline, { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }]}
           />
@@ -402,7 +406,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: radii.md,
     backgroundColor: colors.surface,
-    paddingRight: 7,
+    // Start, not right: native RTL swaps a physical side, web does not. Start is the
+    // button's side, the screen's right, on both.
+    paddingStart: 7,
   },
   field: { flex: 1, alignSelf: 'stretch', justifyContent: 'center' },
   // The answer's language decides: a target word left to right, a Hebrew meaning right to left (phase 27 D13).

@@ -49,10 +49,12 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radii.md,
     paddingVertical: 7,
-    paddingRight: 7,
-    paddingLeft: spacing.md,
+    // Start and end, not right and left: native RTL swaps a physical side, web does not.
+    paddingStart: 7,
+    paddingEnd: spacing.md,
     gap: spacing.sm,
   },
-  // A target-language word: left to right inside the mirrored screen.
-  letters: { flex: 1, fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.faint, writingDirection: 'ltr', textAlign: 'left' },
+  // A target-language word: left to right inside the mirrored screen. No physical
+  // textAlign, which native RTL would swap: the LTR base direction aligns it left.
+  letters: { flex: 1, fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.faint, writingDirection: 'ltr' },
 });
