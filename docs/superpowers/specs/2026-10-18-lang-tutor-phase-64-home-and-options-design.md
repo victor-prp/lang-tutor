@@ -301,7 +301,9 @@ take the theme's colours and nothing else.
 ## Left for Victor
 
 1. After the merge, once the release reaches the phone (About shows the version), the phone check on
-   Android: the swipe between cards, the fuse's glow, and the shadows. Anything off is a follow-up PR.
+   Android: the swipe between cards, the fuse's glow, and the shadows; and a reminder tapped while the
+   app is open on מילים or הגדרות opens תרגול and starts the session (the final review's C1, fixed by
+   routing, which only the phone can prove). Anything off is a follow-up PR.
 
 ## Rulings
 
@@ -375,4 +377,9 @@ Each with what it costs if wrong.
   `about-back`). Cost: heavier chips.
 - **Bug found by e2e:** a language switched from the header while on מילים reset the list after its
   reload had started, leaving it empty. The tab now reads an idle list again while in view.
+- **Final review (2026-10-18), fixed:** a reminder tapped with a tab on top was lost (dismissTo's
+  POP_TO does nothing on the tab navigator); it now navigates when there is nothing to dismiss. The
+  photo flow's My words saved each photo on its own, so a word on two photos unticked in the review
+  was saved by its other row; the flow's photos are now saved together, as a prep saves them, through
+  `POST /api/enrollments/{id}/photo-imports/save`. The top card's dot is blue even when urgent (D5).
 
