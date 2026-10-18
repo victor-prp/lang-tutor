@@ -383,6 +383,8 @@ export function createServerDeps(io: {
       checkerLlm,
       gapCheckLlm,
       gapRewriteLlm,
+      // Phase 62d (spec D2): the point check runs on the gap check's client, budget and model.
+      pointCheckLlm: gapCheckLlm,
       transcriber,
       judge,
       translationJudge,

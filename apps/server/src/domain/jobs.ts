@@ -61,7 +61,9 @@ export const GAP_REWRITE_BUDGET_MS = 60_000;
  *  order, each at most its budget: the batch, the context call, the checker. A
  *  call added to the attempt adds its budget here. Phase 62c (spec D1): the gap
  *  check (beside the context call), the rewrite and the rewritten cards' context
- *  call (beside the checker), counted as if one after another. */
+ *  call (beside the checker), counted as if one after another. Phase 62d (spec D5):
+ *  the point check and the typed gaps' rewrite (beside the gap check and its
+ *  rewrite), and the re-check (beside the checker), on the same budgets. */
 export const PREPARE_SESSION_CALL_BUDGETS_MS: readonly number[] = [
   SESSION_GENERATION_BUDGET_MS,
   CONTEXT_CALL_BUDGET_MS,
@@ -69,6 +71,9 @@ export const PREPARE_SESSION_CALL_BUDGETS_MS: readonly number[] = [
   GAP_REWRITE_BUDGET_MS,
   CONTEXT_CALL_BUDGET_MS,
   CHECKER_CALL_BUDGET_MS,
+  GAP_CHECK_BUDGET_MS,
+  GAP_REWRITE_BUDGET_MS,
+  GAP_CHECK_BUDGET_MS,
 ];
 
 /** Twice the sum of the calls' budgets, phase 19's rule: a worker that crashed

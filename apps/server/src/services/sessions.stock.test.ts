@@ -102,6 +102,7 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
     checkerLlm: createFakeLlmClient(''),
     gapCheckLlm: createFakeLlmClient(''),
     gapRewriteLlm: createFakeLlmClient(''),
+    pointCheckLlm: createFakeLlmClient(''),
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
     translationJudge: createFakeLlmClient(''),

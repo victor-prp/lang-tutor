@@ -146,14 +146,16 @@ describe('loadConfig', () => {
       2 *
         (config.sessionGenerationTimeoutMs +
           2 * config.contextCallTimeoutMs +
-          config.gapCheckTimeoutMs +
-          config.gapRewriteTimeoutMs +
-          config.checkerCallTimeoutMs),
+          2 * config.gapCheckTimeoutMs +
+          2 * config.gapRewriteTimeoutMs +
+          config.checkerCallTimeoutMs +
+          // Phase 62d (spec D5): the re-check.
+          config.gapCheckTimeoutMs),
     );
   });
 
   // Phase 62c (spec D1): the gap check, the rewrite and the rewritten cards' word maps add theirs.
-  it('expires a prepare-session job at exactly twice the budgets of every call an attempt may make (ruling R12, phase 62c)', () => {
+  it('expires a prepare-session job at exactly twice the budgets of every call an attempt may make (ruling R12, phase 62c, 62d)', () => {
     expect(PREPARE_SESSION_CALL_BUDGETS_MS).toEqual([
       SESSION_GENERATION_BUDGET_MS,
       CONTEXT_CALL_BUDGET_MS,
@@ -161,8 +163,13 @@ describe('loadConfig', () => {
       GAP_REWRITE_BUDGET_MS,
       CONTEXT_CALL_BUDGET_MS,
       CHECKER_CALL_BUDGET_MS,
+      // Phase 62d (spec D5): the point check, the typed gaps' rewrite and the re-check.
+      GAP_CHECK_BUDGET_MS,
+      GAP_REWRITE_BUDGET_MS,
+      GAP_CHECK_BUDGET_MS,
     ]);
-    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (120_000 + 60_000 + GAP_CHECK_BUDGET_MS + GAP_REWRITE_BUDGET_MS + 60_000 + 60_000)) / 1000);
+    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (120_000 + 60_000 + 3 * GAP_CHECK_BUDGET_MS + 2 * GAP_REWRITE_BUDGET_MS + 60_000 + 60_000)) / 1000);
+    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe(1200);
   });
 
   it('defaults the gap check’s budget to its own, reads GAP_CHECK_TIMEOUT_MS, and never above it (phase 62c)', () => {
