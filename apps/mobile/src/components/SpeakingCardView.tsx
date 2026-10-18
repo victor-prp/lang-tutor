@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ContextLine } from '@/components/ContextLine';
+import { LettersBox } from '@/components/LettersBox';
 import { RetryNotice } from '@/components/RetryNotice';
 import { SpeakButton } from '@/components/SpeakButton';
 import { answerStyles } from '@/components/TypedAnswerView';
@@ -15,7 +16,7 @@ import { MAX_RECORDING_SECONDS, secondsLeft, type Clip } from '@/recording';
 import { attemptNotice, type SpeechAttempt } from '@/speaking';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
-import { allRevealed, revealed } from '@/typedHelp';
+
 
 type Props = {
   question: ReadAloudQuestion | SayTranslationQuestion;
@@ -35,7 +36,8 @@ type Props = {
   retry: PendingRetry | null;
   /** Phase 56 (spec D6). Help on say the translation: each press reveals one
    *  more character of the word, in a line above the microphone. The count is
-   *  the session's, so it carries over when the card turns typed. */
+   *  the session's, so it carries over when the card turns typed. Phase 63
+   *  (spec D4): in a box above the microphone, with help at its edge. */
   help?: { presses: number; onPress: () => void } | null;
 };
 
@@ -194,10 +196,9 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
 
       {answered ? null : (
         <>
-          {helps && presses > 0 ? (
-            <Text style={styles.hint} testID="speak-hint">
-              {`${revealed(form, presses)}…`}
-            </Text>
+          {/* Phase 63 (spec D4): the letters help gave, in a box with help at its edge. */}
+          {help !== null && helps ? (
+            <LettersBox text={form} presses={presses} onPress={help.onPress} busy={checking} testID="speak-help" hintTestID="speak-hint" />
           ) : null}
           {retry !== null ? <RetryNotice retry={retry} type={question.type} /> : null}
           <Pressable
@@ -238,19 +239,6 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
           ) : null}
 
           <View style={answerStyles.actions}>
-            {/* Phase 56 (spec D6): help reveals; the answer is still said. */}
-            {help !== null && helps ? (
-              <Pressable
-                accessibilityRole="button"
-                testID="speak-help"
-                hitSlop={8}
-                disabled={checking || allRevealed(form, presses)}
-                onPress={help.onPress}
-                style={(checking || allRevealed(form, presses)) && styles.micBusy}
-              >
-                <Text style={answerStyles.help}>{strings.help}</Text>
-              </Pressable>
-            ) : null}
             {read ? null : (
               <Pressable
                 accessibilityRole="button"
@@ -289,8 +277,6 @@ export const speakingStyles = StyleSheet.create({
   form: { fontSize: fontSizes.xl, lineHeight: lineHeights.xl, color: colors.text, writingDirection: 'ltr', textAlign: 'center' },
   meaning: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, textAlign: 'center', writingDirection: 'rtl' },
   heard: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, textAlign: 'center', writingDirection: 'rtl' },
-  // Phase 56 (spec D6). The help's letters, as on the typed card: the target word, left to right.
-  hint: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.text, textAlign: 'center', writingDirection: 'ltr' },
   mic: {
     alignSelf: 'center',
     width: MIC,

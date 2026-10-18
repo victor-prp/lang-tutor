@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, type LayoutChangeEvent } from 'react-nativ
 
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
-export type OptionVisualState = 'idle' | 'correct' | 'wrong' | 'dimmed' | 'selected';
+export type OptionVisualState = 'idle' | 'correct' | 'wrong' | 'dimmed' | 'selected' | 'out' | 'helped';
 
 type Props = {
   label: string;
@@ -38,7 +38,7 @@ export function OptionButton({ label, direction, state, disabled, minHeight, not
         pressed && !disabled ? styles.pressed : null,
       ]}
     >
-      <Text style={[styles.label, { writingDirection: direction }, state === 'dimmed' ? styles.labelDimmed : null]}>
+      <Text style={[styles.label, { writingDirection: direction }, state === 'dimmed' ? styles.labelDimmed : null, labelStyles[state]]}>
         {label}
       </Text>
       {note === undefined ? null : (
@@ -77,4 +77,14 @@ const stateStyles = StyleSheet.create({
   dimmed: { opacity: 0.45 },
   // Phase 24. A board's word or meaning waiting for its pair.
   selected: { borderColor: colors.primary, borderWidth: 2 },
+  // Phase 63 (spec D7). An option help ruled out: faded, struck through, not tappable.
+  out: { opacity: 0.4 },
+  // Phase 63 (spec D8). A pair help matched: blue, not green, which is the learner's own.
+  helped: { borderColor: colors.primary, backgroundColor: colors.primarySurface },
+});
+
+// Phase 63 (spec D7, D8). The label's own look in the states help sets.
+const labelStyles: Partial<Record<OptionVisualState, object>> = StyleSheet.create({
+  out: { color: colors.muted, textDecorationLine: 'line-through' },
+  helped: { color: colors.primary },
 });

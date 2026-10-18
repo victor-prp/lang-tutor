@@ -16,6 +16,9 @@ export const colors = {
   primarySurface: '#EEF2FB',
   warmSurface: '#FFF6E0',
   warmText: '#7A5200',
+  // Phase 63 (spec D1, D3). Help's letters not yet typed, and its button with nothing left to give.
+  faint: '#B4B4C3',
+  faintSurface: '#F2F2F5',
 } as const;
 
 export const spacing = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 } as const;

@@ -14,13 +14,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type TextStyle } from 'react-native';
 
 import { ContextLine, type SentenceTaps } from '@/components/ContextLine';
+import { HelpButton } from '@/components/HelpButton';
 import { ListenPrompt } from '@/components/ListenPrompt';
 import { RetryNotice } from '@/components/RetryNotice';
 import { contextLanguage } from '@/context';
 import { retryText } from '@/feedback';
 import type { Retype } from '@/retype';
 import { strings, type Instruction } from '@/strings';
-import { allRevealed, helpText, revealed } from '@/typedHelp';
+import { helpText, typedHelpDone, typedHint } from '@/typedHelp';
 import { typedSubmit } from '@/typedSubmit';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
@@ -71,9 +72,10 @@ type Props = {
    *  input starts again (a translation keeps its first sentence). */
   retry: PendingRetry | null;
   /** Phase 55 (spec D7). Help: each press reveals one more character of the
-   *  answer, in a line apart from the input. Phase 56 (spec D5, D6): on every
-   *  card here, the count the session keeps for the card. */
-  help?: { presses: number; onPress: () => void } | null;
+   *  answer. Phase 56 (spec D5, D6): on every card here, the count the session
+   *  keeps for the card. Phase 63 (spec D3): a press reads what is typed, and
+   *  `marks` is the text the last press marked; what help gave shows in the input. */
+  help?: { presses: number; onPress: (typed: string) => void; marks: { text: string; from: number } | null } | null;
   /** Phase 55 (spec D7). The retype after a wrong or nearly right first answer,
    *  under that answer's banner title: the card asks for the word again. Phase
    *  56 (spec D7): on a typed meaning, dictation, typed gap and typed say too. */
@@ -117,6 +119,9 @@ export function TypedAnswerView({
   // Phase 39 (spec D8): the last send was in the wrong alphabet, or one word
   // for a whole sentence; the text stays.
   const [refused, setRefused] = useState<'wrong_script' | 'word_only' | null>(null);
+  // Phase 63 (spec D3): the grey letters and the marks no longer fit on one line,
+  // where the input scrolls and they would not: hidden, not misplaced.
+  const [overflow, setOverflow] = useState(false);
   const input = useRef<TextInput>(null);
   // Phase 55 (spec D7): the retype open, which unlocks the answered card for
   // the word again; once it ends, the card is answered as any other.
@@ -143,8 +148,15 @@ export function TypedAnswerView({
   // (spec D5: the session's count, kept through a second try).
   const hinted = helpText(question) ?? '';
   const presses = help?.presses ?? 0;
-  // No help in a retype: it asks for the word just shown.
-  const helps = help !== null && retype === null && hinted !== '';
+  // No help in a retype: it asks for the word just shown. Phase 63 (spec D9):
+  // none on a sentence translation, whose words are tapped instead.
+  const helps = help !== null && retype === null && hinted !== '' && question.type !== 'sentence_translation';
+  // Phase 63 (spec D3): what help gave not yet typed, in grey after the typing,
+  // and the marks of the last press while the text is still the one it read.
+  const hebrew = question.type === 'typed_meaning';
+  const hint = helps && !locked ? typedHint(hinted, text, presses, hebrew) : null;
+  const ghost = hint && hint.ghost !== '' ? `${hint.ghost}${hint.more ? '…' : ''}` : '';
+  const markFrom = help !== null && helps && !locked && help.marks !== null && help.marks.text === text ? help.marks.from : null;
 
   function submit(value: string) {
     if (locked) return;
@@ -211,39 +223,63 @@ export function TypedAnswerView({
           </Text>
         </View>
       ) : null}
-      {helps && presses > 0 ? (
-        <Text style={[styles.hint, { writingDirection: direction }]} testID="typed-hint">
-          {`${revealed(hinted, presses)}…`}
-        </Text>
-      ) : null}
-      <TextInput
-        ref={input}
-        testID="typed-input"
-        value={text}
-        onChangeText={(value) => {
-          setText(value);
-          setRefused(null);
-          // Phase 55 (spec D7): the right answer hides at the first character.
-          if (retyping && retype.showing && value !== '') onRetypeTyping?.();
-        }}
-        editable={!locked && !checking}
-        autoFocus
-        autoCapitalize="none"
-        autoCorrect={false}
-        spellCheck={false}
-        autoComplete="off"
-        // A sentence is longer than a word (spec D6); Return still submits.
-        multiline={question.type === 'sentence_translation'}
-        maxLength={question.type === 'sentence_translation' ? MAX_JUDGED_TEXT : 100}
-        returnKeyType="done"
-        submitBehavior="submit"
-        onSubmitEditing={() => {
-          if (!empty) submit(text);
-        }}
-        placeholder={strings.typedPlaceholder}
-        placeholderTextColor={colors.muted}
-        style={[styles.input, question.type === 'sentence_translation' && styles.inputMultiline, { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }, border]}
-      />
+      {/* Phase 63 (spec D1, D2): the box holds the help button at its right edge,
+          where the keyboard never hides it, and the input; the input's own text
+          lies over a layer drawn behind it with the grey letters and the marks. */}
+      <View style={[styles.box, question.type === 'sentence_translation' && styles.inputMultiline, border]} testID="typed-box">
+        {helps && !locked ? (
+          <HelpButton testID="typed-help" disabled={checking || typedHelpDone(hinted, text, presses, hebrew)} onPress={() => help?.onPress(text)} />
+        ) : null}
+        <View style={styles.field}>
+          {ghost !== '' || markFrom !== null ? (
+            <Text
+              style={[styles.input, styles.layer, { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }, overflow && styles.hidden]}
+              testID="typed-hint"
+              onTextLayout={(event) => setOverflow(event.nativeEvent.lines.length > 1)}
+            >
+              <Text style={styles.under}>{markFrom === null ? text : text.slice(0, markFrom)}</Text>
+              {markFrom !== null ? (
+                <Text style={styles.marked} testID="typed-marks">
+                  {text.slice(markFrom)}
+                </Text>
+              ) : null}
+              {ghost !== '' ? (
+                <Text style={styles.ghost} testID="typed-ghost">
+                  {ghost}
+                </Text>
+              ) : null}
+            </Text>
+          ) : null}
+          <TextInput
+            ref={input}
+            testID="typed-input"
+            value={text}
+            onChangeText={(value) => {
+              setText(value);
+              setRefused(null);
+              // Phase 55 (spec D7): the right answer hides at the first character.
+              if (retyping && retype.showing && value !== '') onRetypeTyping?.();
+            }}
+            editable={!locked && !checking}
+            autoFocus
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
+            autoComplete="off"
+            // A sentence is longer than a word (spec D6); Return still submits.
+            multiline={question.type === 'sentence_translation'}
+            maxLength={question.type === 'sentence_translation' ? MAX_JUDGED_TEXT : 100}
+            returnKeyType="done"
+            submitBehavior="submit"
+            onSubmitEditing={() => {
+              if (!empty) submit(text);
+            }}
+            placeholder={strings.typedPlaceholder}
+            placeholderTextColor={colors.muted}
+            style={[styles.input, question.type === 'sentence_translation' && styles.inputMultiline, { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }]}
+          />
+        </View>
+      </View>
       {refused === 'wrong_script' && answerLanguage !== null && !locked ? (
         <View testID="wrong-script">
           <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} languageTestId="wrong-script-language" style={styles.wrongScript} />
@@ -265,19 +301,6 @@ export function TypedAnswerView({
           >
             <Text style={answerStyles.checkLabel}>{checking ? strings.checking : strings.typedCheck}</Text>
           </Pressable>
-          {/* Phase 55 (spec D7): help reveals; it never changes the input. */}
-          {help !== null && helps && !checking ? (
-            <Pressable
-              accessibilityRole="button"
-              testID="typed-help"
-              disabled={allRevealed(hinted, presses)}
-              hitSlop={8}
-              onPress={help.onPress}
-              style={allRevealed(hinted, presses) && answerStyles.checkDisabled}
-            >
-              <Text style={answerStyles.help}>{strings.help}</Text>
-            </Pressable>
-          ) : null}
           {failed && !checking && !retyping ? (
             <>
               <Text style={answerStyles.showAnswer} testID="judge-failed">
@@ -364,14 +387,6 @@ export const answerStyles = StyleSheet.create({
     fontWeight: '700',
     writingDirection: 'rtl',
   },
-  // Phase 55 (spec D7): the help on the tiles and typed cards.
-  help: {
-    fontSize: fontSizes.md,
-    lineHeight: lineHeights.md,
-    color: colors.primary,
-    fontWeight: '700',
-    writingDirection: 'rtl',
-  },
 });
 
 const styles = StyleSheet.create({
@@ -379,17 +394,39 @@ const styles = StyleSheet.create({
   instructionLanguage: { fontWeight: '700' },
   // Phase 39 (spec D8): a refusal, in the colour of the app's other errors, not a second instruction.
   wrongScript: { color: colors.wrong },
-  // The answer's language decides: a target word left to right, a Hebrew meaning right to left (phase 27 D13).
-  input: {
+  // Phase 63 (spec D2). The box the learner answers in: its border, its colour
+  // once answered, and the help button at its right edge (the RTL row's first child).
+  box: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1.5,
     borderRadius: radii.md,
     backgroundColor: colors.surface,
+    paddingRight: 7,
+  },
+  field: { flex: 1, alignSelf: 'stretch', justifyContent: 'center' },
+  // The answer's language decides: a target word left to right, a Hebrew meaning right to left (phase 27 D13).
+  // Transparent, so the layer behind it shows; the layer is laid out exactly as it is.
+  input: {
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     fontSize: fontSizes.lg,
     lineHeight: lineHeights.lg,
     color: colors.text,
+    backgroundColor: 'transparent',
   },
+  // Phase 63 (spec D3). Behind the input, its text again: the typed part unseen
+  // (the input draws it), the marked part on red, then the grey letters.
+  layer: { position: 'absolute', top: 0, left: 0, right: 0, pointerEvents: 'none' },
+  hidden: { opacity: 0 },
+  under: { color: 'transparent' },
+  marked: {
+    color: colors.wrong,
+    backgroundColor: colors.wrongSurface,
+    textDecorationLine: 'underline',
+    textDecorationColor: colors.wrong,
+  },
+  ghost: { color: colors.faint },
   // The meaning card asks with a target-language form, which reads left to right.
   promptLtr: { writingDirection: 'ltr' },
   // A sentence needs room, and Android centres a multiline box's text by default.
@@ -397,10 +434,6 @@ const styles = StyleSheet.create({
   inputIdle: { borderColor: colors.border },
   inputCorrect: { borderColor: colors.correct, backgroundColor: colors.correctSurface },
   inputWrong: { borderColor: colors.wrong, backgroundColor: colors.wrongSurface },
-  // Phase 55 (spec D7). The help's letters are the target word: left to right,
-  // centred, so the RTL screen leaves them and their ellipsis in place. Phase 56
-  // (spec D6): a Hebrew meaning's read right to left, set where it is drawn.
-  hint: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.text, textAlign: 'center', writingDirection: 'ltr' },
   // Phase 55 (spec D7). The retype: the first answer's title and the word, as the banner words them.
   retype: { gap: spacing.xs, alignItems: 'center' },
   retypeTitle: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, fontWeight: '700', textAlign: 'center', writingDirection: 'rtl' },
