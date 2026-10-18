@@ -114,7 +114,7 @@ export function contextTier2(kase: ContextCase, answer: LlmContext): Check[] {
       return checks;
     }
     // Phase 59: each expected run is tappable, with the reference's words for it.
-    const map = wordMapFor(item, got, mark, [], 'g-c') ?? [];
+    const map = wordMapFor(item, got, mark, [], 'g-c', kase.target) ?? [];
     for (const run of kase.mapped ?? []) {
       const found = map.find((word) => comparable(item.sentence.slice(word.start, word.end)) === comparable(run.hebrew));
       checks.push({

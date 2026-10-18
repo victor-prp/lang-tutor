@@ -38,6 +38,12 @@ export type Language = {
   /** How to write this language at all. It applies whenever the call writes
    *  it, which is both directions, because every example has both halves. */
   writing: string[];
+  /** Words that write a preposition and an article as one, each with the two it
+   *  joins: Italian al is a il. A translation card's word map reads its reference
+   *  and each run's words with these apart, since the run beside a contraction
+   *  keeps the preposition and the next keeps the article. An elided one ends in
+   *  its apostrophe and joins the word after it: all'ufficio is a l'ufficio. */
+  contractions: Readonly<Record<string, readonly [string, string]>>;
 };
 
 export const LANGUAGES: Record<LanguageCode, Language> = {
@@ -55,6 +61,7 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
     // a printed Hebrew dictionary prints nikud. That cost a recording of סֵפֶר
     // where every consumer expects ספר.
     writing: ['Write Hebrew in plain unvocalised script, with no nikud: ספר, never סֵפֶר.'],
+    contractions: {},
   },
   en: {
     code: 'en',
@@ -66,6 +73,7 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
     ],
     asTarget: [],
     writing: [],
+    contractions: {},
   },
   ru: {
     code: 'ru',
@@ -91,6 +99,7 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
       'Write Russian without stress marks: молоко, never молоко́.',
       'Write ё wherever the word has it: ёлка, never елка.',
     ],
+    contractions: {},
   },
   it: {
     code: 'it',
@@ -131,6 +140,15 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
       'singular: "ha scritto", "è partito".',
     ],
     writing: ['Write Italian with every accent its spelling has, grave or acute: però, così, più.'],
+    // a, da, di, in and su join every article; con only il and i, as everyday Italian writes it.
+    contractions: {
+      al: ['a', 'il'], allo: ['a', 'lo'], alla: ['a', 'la'], "all'": ['a', "l'"], ai: ['a', 'i'], agli: ['a', 'gli'], alle: ['a', 'le'],
+      dal: ['da', 'il'], dallo: ['da', 'lo'], dalla: ['da', 'la'], "dall'": ['da', "l'"], dai: ['da', 'i'], dagli: ['da', 'gli'], dalle: ['da', 'le'],
+      del: ['di', 'il'], dello: ['di', 'lo'], della: ['di', 'la'], "dell'": ['di', "l'"], dei: ['di', 'i'], degli: ['di', 'gli'], delle: ['di', 'le'],
+      nel: ['in', 'il'], nello: ['in', 'lo'], nella: ['in', 'la'], "nell'": ['in', "l'"], nei: ['in', 'i'], negli: ['in', 'gli'], nelle: ['in', 'le'],
+      sul: ['su', 'il'], sullo: ['su', 'lo'], sulla: ['su', 'la'], "sull'": ['su', "l'"], sui: ['su', 'i'], sugli: ['su', 'gli'], sulle: ['su', 'le'],
+      col: ['con', 'il'], coi: ['con', 'i'],
+    },
   },
 };
 
