@@ -57,8 +57,9 @@ describe('installJobs', () => {
       retry_limit: 2,
       retry_backoff: true,
       // Phase 34 (ruling R12): twice the sum of the batch's 120 s (phase 47 D1),
-      // the context call's 60 s and the checker's 60 s.
-      expire_seconds: 480,
+      // the context call's 60 s and the checker's 60 s. Phase 62c (spec D1): and the
+      // gap check's 60 s, the rewrite's 60 s and a rewritten card's context call's 60 s.
+      expire_seconds: 840,
       deletion_seconds: 86_400,
       dead_letter: PREPARE_SESSION_FAILED,
     });
