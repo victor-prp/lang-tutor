@@ -25,7 +25,7 @@ import {
   type TargetCreate,
 } from '@/nextSession';
 import { strings } from '@/strings';
-import { homeOrder, shouldPollTargets, stackDots, type HomeCard } from '@/targets';
+import { homeOrder, shouldPollTargets, stackBars, type HomeCard } from '@/targets';
 import { colors, fontSizes, lineHeights } from '@/theme';
 
 /** Final review N1. Create refused: the path has a started session (409 session_open). */
@@ -113,7 +113,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
   // stack, one at a time, in that order.
   const targets = targetList?.targets ?? [];
   const { order } = homeOrder(targets);
-  const dots = stackDots(order, targets);
+  const bars = stackBars(order, targets);
 
   // Phase 43 (spec D2). A session not yet answered is started, which has the
   // next one built for this device. Not waited on: its first answer starts it too.
@@ -299,7 +299,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
     <>
       <CardStack
         resetKey={order.join(',')}
-        cards={order.map((card, at) => ({ key: card, urgent: dots[at]?.urgent ?? false, node: cardNode(card) }))}
+        cards={order.map((card, at) => ({ key: card, urgent: bars[at]?.urgent ?? false, node: cardNode(card) }))}
       />
 
       {photoSaved ? (

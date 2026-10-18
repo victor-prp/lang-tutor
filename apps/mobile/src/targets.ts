@@ -215,13 +215,42 @@ export function dotLook({ onTop, urgent }: { onTop: boolean; urgent: boolean }):
   return urgent ? 'urgent' : 'off';
 }
 
-/** Phase 64 (spec D3, D5). The stack's dots, one per card in home's order, amber for a target
- *  in its last two days. One card has none. */
-export function stackDots(order: readonly HomeCard[], targets: readonly TargetSummary[]): { card: HomeCard; urgent: boolean }[] {
+/** Phase 64b (spec D4). One bar under the cards: its card, whether it is in its last two days,
+ *  what it shows (a name, or from five cards the kind's icon and the due day's letter) and what a
+ *  screen reader says of it (the card's full name and its place). */
+export type StackBar = {
+  card: HomeCard;
+  urgent: boolean;
+  label: string;
+  icon: 'main' | 'exam' | 'homework' | null;
+  spoken: string;
+};
+
+/** From this many cards the bars show the kind's icon and the day instead of names. */
+const COMPACT_BARS = 5;
+
+/** Phase 64b (spec D4). The bars, one per card in home's order; none for one card. A target is
+ *  named by its kind, with its due day's letter when another target shares the kind or the bars
+ *  are compact; My words by its name (its icon alone when compact). */
+export function stackBars(order: readonly HomeCard[], targets: readonly TargetSummary[]): StackBar[] {
   if (order.length <= 1) return [];
-  return order.map((card) => {
-    const target = targets.find((candidate) => candidate.id === card);
-    return { card, urgent: target !== undefined && isUrgent(target) };
+  const compact = order.length >= COMPACT_BARS;
+  const byId = new Map(targets.map((target) => [target.id, target]));
+  const kinds = order.flatMap((card) => {
+    const target = byId.get(card);
+    return target ? [target.kind] : [];
+  });
+  return order.map((card, at) => {
+    const target = byId.get(card);
+    const place = (name: string) => strings.barSpoken(name, at + 1, order.length);
+    if (!target) {
+      return { card, urgent: false, label: compact ? '' : strings.myWords, icon: compact ? 'main' : null, spoken: place(strings.myWords) };
+    }
+    const day = strings.dayLetter(dayStart(target.due_on).getUTCDay());
+    const kind = strings.targetKindName(target.kind);
+    const shared = kinds.filter((other) => other === target.kind).length > 1;
+    const name = shared || compact ? `${kind} ${day}` : kind;
+    return { card, urgent: isUrgent(target), label: compact ? day : name, icon: compact ? target.kind : null, spoken: place(name) };
   });
 }
 
