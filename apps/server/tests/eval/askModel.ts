@@ -27,6 +27,7 @@ import {
   parseLlmDistractors,
   type DistractorItem,
   type LearnerWord,
+  type OtherRow,
 } from '../../src/domain/distractors';
 import {
   buildFitJudgePrompt,
@@ -155,9 +156,10 @@ export async function askRendering(
  *  records it as a failed call. */
 export async function askDistractors(
   llm: LlmClient,
-  input: { from: LanguageCode; to: LanguageCode; items: DistractorItem[]; learnerWords?: LearnerWord[] },
+  // Phase 62c (spec D6): a rewrite names what it must keep clear of, as prepareSession's does.
+  input: { from: LanguageCode; to: LanguageCode; items: DistractorItem[]; learnerWords?: LearnerWord[]; others?: OtherRow[] },
 ): Promise<LlmDistractors> {
-  const raw = await llm({ ...buildDistractorPrompt({ ...input, others: [] }), record: { kind: 'session_generation' } });
+  const raw = await llm({ ...buildDistractorPrompt({ ...input, others: input.others ?? [] }), record: { kind: input.others ? 'gap_rewrite' : 'session_generation' } });
   const answer = raw === '' ? null : parseLlmDistractors(raw);
   if (!answer) throw new Error(`unreadable distractor answer: ${raw.slice(0, 200)}`);
   return answer;

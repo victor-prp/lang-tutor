@@ -25,7 +25,8 @@ import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
 import { readCheck, type CheckItem } from '../../src/domain/check';
 import { findGap } from '../../src/domain/cloze';
-import { ASKED_DISTRACTORS, comparable, distractorItems, KEPT_DISTRACTORS, nothingKnown, validateDistractors, type DistractorItem, type RecentSentences, type Task } from '../../src/domain/distractors';
+import { ASKED_DISTRACTORS, comparable, distractorItems, KEPT_DISTRACTORS, nothingKnown, validateDistractors, type DistractorItem, type Generated, type LearnerWord, type RecentSentences, type Task } from '../../src/domain/distractors';
+import { gapCheckItem, gapFaults, rewriteItems, rewriteOthers, type GapJudged } from '../../src/domain/gapRewrite';
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import { TRANSLATION_JUDGE_THINKING } from '../../src/domain/judge';
 import { DEFAULT_SOUND_ALIKE_THRESHOLD } from '../../src/domain/soundAlike';
@@ -1154,19 +1155,23 @@ async function main(): Promise<void> {
     try {
       const learnerWords = kase.learner?.map((entry, index) => ({ key: `w${index + 1}`, glossId: `g-w${index + 1}`, ...entry }));
       const answer = await askDistractors(sessionLlm, { from: kase.from, to: 'he', items: sentenceItemsOf(kase), learnerWords });
+      // Phase 62c (spec D6). A gap to choose's cards as production shows them, after its one
+      // rewrite: tier 1 still reads the first answer, and every tier-2 check the cards shown.
+      const rescue = kase.checked ? await rescueGaps(kase.from as LanguageCode, 'he', sentenceItemsOf(kase), answer, learnerWords) : null;
+      const shown = rescue?.shown ?? answer;
       return {
         label: kase.label,
         text,
-        tier1: sentenceTier1(kase, answer),
+        tier1: [...sentenceTier1(kase, answer), ...(rescue?.tier1 ?? [])],
         tier2: [
-          ...sentenceTier2(kase, answer),
-          ...listShare(kase, answer),
+          ...sentenceTier2(kase, shown),
+          ...listShare(kase, shown),
           // Phase 62 (spec D1, ruling R5): today's checks, unchanged: the probe on a typed
           // gap's sentence, the checker on a gap to choose's (every gap case is `checked`).
-          ...(kase.task === 'sentence' ? await pointsToWord(kase, answer) : []),
-          ...(kase.checked ? await survivesChecker(kase.from, 'he', sentenceItemsOf(kase), answer) : []),
+          ...(kase.task === 'sentence' ? await pointsToWord(kase, shown) : []),
+          ...(rescue?.tier2 ?? []),
         ],
-        written: writtenBy(kase, answer),
+        written: [...writtenBy(kase, shown), ...(rescue?.written ?? [])],
       };
     } catch (error) {
       return {
@@ -1216,12 +1221,6 @@ async function main(): Promise<void> {
       const made = verdict.byKey.get(item.key);
       const options = made ? [...made.distractors, ...made.spares].slice(0, ASKED_DISTRACTORS) : [];
       if (options.length === 0) return [];
-      if (item.task === 'gap') {
-        // Phase 62 (spec D1): the sentence the item wrote, as prepareSession checks it.
-        const written = made?.sentence;
-        if (!written) return [];
-        return [{ key: item.key, task: 'gap', sentence: `${written.sentence.slice(0, written.gap.start)}___${written.sentence.slice(written.gap.end)}`, options }];
-      }
       if (item.task === 'meaning') return [{ key: item.key, task: 'choice', word: item.form, options }];
       if (item.task === 'word') return [{ key: item.key, task: 'choice', word: item.translation, options }];
       return [];
@@ -1243,6 +1242,108 @@ async function main(): Promise<void> {
     } catch (error) {
       return [{ name: 'the checker answered', ok: false, detail: (error as Error).message }];
     }
+  };
+
+  // Phase 62c (spec D6). prepareSession's rescue of a gap to choose, through the same domain
+  // functions: the gap check on what validation kept, one rewrite of every fault (validation's
+  // refusals and the check's short cards), validated as production validates it, and the
+  // final check of the rewritten items. A card left with no usable options is a failed check.
+  const rescueGaps = async (
+    from: LanguageCode,
+    to: LanguageCode,
+    items: DistractorItem[],
+    answer: LlmDistractors,
+    learnerWords: LearnerWord[] | undefined,
+  ): Promise<{ shown: LlmDistractors; tier1: Check[]; tier2: Check[]; written: string[] }> => {
+    const verdict = validateDistractors(items, answer, to, [], from, nothingKnown());
+    const optionsOf = (made: Generated) => [...made.distractors, ...made.spares].slice(0, ASKED_DISTRACTORS);
+    const gapItemsOf = (made: Map<string, Generated>, keys: readonly string[]): CheckItem[] =>
+      keys.flatMap((key) => {
+        const card = made.get(key);
+        return card?.sentence ? [gapCheckItem(key, card.sentence, optionsOf(card))] : [];
+      });
+    const gaps = items.filter((item) => item.task === 'gap').map((item) => item.key);
+    const ask = async (asked: CheckItem[]) => {
+      const started = Date.now();
+      const reading = readCheck(asked, await askCheck(llm, { from, to, items: asked }));
+      return { reading, ms: Date.now() - started };
+    };
+    const tier1: Check[] = [];
+    const written: string[] = [];
+    let judged: GapJudged | null = null;
+    const findings = new Map<string, boolean[]>();
+    const asked = gapItemsOf(verdict.byKey, gaps);
+    if (asked.length > 0) {
+      try {
+        const { reading, ms } = await ask(asked);
+        written.push(`gap check: ${ms} ms`);
+        judged = new Map(
+          asked.flatMap((item) => {
+            const finding = reading.byKey.get(item.key);
+            return item.task === 'gap' && finding?.task === 'gap' ? [[item.key, { options: item.options, alsoRight: finding.alsoRight }] as const] : [];
+          }),
+        );
+        for (const [key, found] of judged) findings.set(key, found.alsoRight);
+      } catch (error) {
+        written.push(`gap check failed: ${(error as Error).message}`);
+      }
+    }
+    const faults = gapFaults({ items, answer, verdict, judged });
+    const made = new Map(verdict.byKey);
+    let shown = answer;
+    const again = new Set<string>();
+    if (faults.length > 0) {
+      const rewritten = rewriteItems(items, faults);
+      const clear = rewriteOthers(items, faults, []);
+      const started = Date.now();
+      try {
+        const reply = await askDistractors(sessionLlm, { from, to, items: rewritten, learnerWords, others: clear });
+        written.push(`rewrite: ${Date.now() - started} ms`);
+        const rescued = validateDistractors(rewritten, reply, to, clear, from, nothingKnown());
+        for (const fault of faults) {
+          const got = reply.items.find((item) => item.key === fault.key);
+          const options = got?.distractors ?? [];
+          tier1.push({ name: `${fault.key}: every rewritten wrong option is in ${from} script`, ok: options.every((text) => isInScript(text, from)), detail: options.join(' | ') });
+          const card = rescued.byKey.get(fault.key);
+          if (card && got) {
+            made.set(fault.key, card);
+            again.add(fault.key);
+            findings.delete(fault.key);
+            shown = { items: shown.items.map((item) => (item.key === fault.key ? got : item)) };
+            written.push(`rewrite ${fault.key} (${fault.stage}): ${fault.rewrite.sentence ?? '(none)'} → ${got.sentence ?? '(none)'}`);
+          } else {
+            written.push(`rewrite ${fault.key} (${fault.stage}) refused: ${rescued.refused.get(fault.key) ?? 'no answer'}`);
+          }
+        }
+      } catch (error) {
+        tier1.push({ name: 'the rewrite call succeeded', ok: false, detail: (error as Error).message });
+      }
+    }
+    // The final checker's share: the rewritten items, and those the gap check did not judge.
+    const finalKeys = gaps.filter((key) => again.has(key) || !judged?.has(key));
+    const finalItems = gapItemsOf(made, finalKeys);
+    if (finalItems.length > 0) {
+      try {
+        const { reading } = await ask(finalItems);
+        for (const item of finalItems) {
+          const finding = reading.byKey.get(item.key);
+          if (finding?.task === 'gap') findings.set(item.key, finding.alsoRight);
+        }
+      } catch (error) {
+        return { shown, tier1, tier2: [{ name: 'the checker answered', ok: false, detail: (error as Error).message }], written };
+      }
+    }
+    const tier2 = gaps.map((key): Check => {
+      const name = `${key}: ${KEPT_DISTRACTORS} or more wrong options survive the checker`;
+      const card = made.get(key);
+      const right = findings.get(key);
+      if (!card) return { name, ok: false, detail: `no card after the rescue: ${verdict.refused.get(key) ?? 'no answer'}` };
+      if (!right) return { name, ok: false, detail: 'the checker did not judge it' };
+      const options = optionsOf(card);
+      const left = options.filter((_, at) => !right[at]);
+      return { name, ok: left.length >= KEPT_DISTRACTORS, detail: `kept ${left.join(' | ')}; right ${options.filter((_, at) => right[at]).join(' | ') || '(none)'}` };
+    });
+    return { shown, tier1, tier2, written };
   };
 
   const scoreFitJudge = async (kase: FitJudgeCase): Promise<Row> => {
