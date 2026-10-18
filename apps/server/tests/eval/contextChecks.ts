@@ -117,9 +117,10 @@ export function contextTier2(kase: ContextCase, answer: LlmContext): Check[] {
     const map = wordMapFor(item, got, mark, [], 'g-c', kase.target) ?? [];
     for (const run of kase.mapped ?? []) {
       const found = map.find((word) => comparable(item.sentence.slice(word.start, word.end)) === comparable(run.hebrew));
+      const translations = [run.translation].flat();
       checks.push({
-        name: `${run.hebrew} is tappable as ${run.translation}`,
-        ok: found !== undefined && comparable(found.text) === comparable(run.translation),
+        name: `${run.hebrew} is tappable as ${translations.join(' or ')}`,
+        ok: found !== undefined && translations.some((translation) => comparable(found.text) === comparable(translation)),
         detail: JSON.stringify(got?.sentence_words ?? null),
       });
     }
