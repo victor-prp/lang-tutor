@@ -80,7 +80,8 @@ test('the language switched from the header on מילים switches the list with
 // Phase 64b (spec D1, D2, D4). The first tab is בית. Under the cards, a named bar per card:
 // tapping one brings its card, and every card is as tall as the others.
 test('the first tab is בית, named bars bring their cards, and the cards are one height', async ({ page, request }) => {
-  await signUpLearner(page, 'e2e_tabs_bars', 'ru');
+  // A repeat's index keeps the name new under --repeat-each (none on a single run).
+  await signUpLearner(page, `e2e_tabs_bars${test.info().repeatEachIndex || ''}`, 'ru');
   const enrollmentId = await enrollmentIdOf(page.request);
   const [mine, examWord] = await lookUpEntries(page.request, enrollmentId, BOARD_WORDS.slice(0, 2));
   await expectGeneration(request);
@@ -106,6 +107,11 @@ test('the first tab is בית, named bars bring their cards, and the cards are o
   // A drag across a card slides to its neighbour (right brings the next, left goes back) and
   // never presses the card it starts on.
   await page.getByTestId(`home-bar-${exam.id}`).click();
+  // The bar slides the row back to the exam: read the card's place only once the row is at rest,
+  // or a slow runner measures it mid-slide and starts the drag outside the stack (CI, PR #211).
+  await expect
+    .poll(() => page.getByTestId('home-row').evaluate((row) => new DOMMatrix(getComputedStyle(row).transform).m41))
+    .toBe(0);
   const drag = async (by: number) => {
     const box = await page.getByTestId(`target-card-${exam.id}`).boundingBox();
     if (!box) throw new Error('no exam card');
