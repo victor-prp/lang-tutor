@@ -73,20 +73,19 @@ export function dueDayLabel(day: string): string {
 }
 
 const WIZARD_TITLES: Record<WizardMode, string> = {
-  create: strings.targetWizardCreate,
-  'add-photos': strings.targetWizardAddPhotos,
+  photo: strings.targetWizardAddPhotos,
   'add-words': strings.targetWizardAddWords,
   'change-date': strings.targetWizardChangeDate,
 };
 const STEP_TITLES: Record<WizardStep, string> = {
-  kind: strings.targetStepKind,
   photos: strings.targetStepPhotos,
   review: strings.targetStepReview,
+  choose: strings.targetStepChoose,
   words: strings.targetStepWords,
   date: strings.targetStepDate,
 };
 
-/** The wizard's title: a new target, or which of a target's actions it is. */
+/** The wizard's title: the photo flow, or which of a target's actions it is. */
 export function wizardTitle(mode: WizardMode): string {
   return WIZARD_TITLES[mode];
 }
@@ -94,12 +93,6 @@ export function wizardTitle(mode: WizardMode): string {
 /** What the step on screen asks. */
 export function stepTitle(step: WizardStep): string {
   return STEP_TITLES[step];
-}
-
-/** The photos step's hint. A new target may skip its photos; a target screen's add photos is
- *  there for them, and its Next needs one (canAdvance), so it says nothing of skipping. */
-export function photosHint(mode: WizardMode): string {
-  return mode === 'add-photos' ? strings.targetPhotosHintAdd : strings.targetPhotosHint;
 }
 
 /** Whether a target's date has come, which closes it: the server refuses every change

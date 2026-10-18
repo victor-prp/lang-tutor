@@ -171,14 +171,6 @@ export default function TargetScreen() {
             <View style={styles.actions}>
               <Pressable
                 accessibilityRole="button"
-                testID="target-add-photos"
-                onPress={() => openWizard('add-photos')}
-                style={styles.action}
-              >
-                <Text style={styles.actionLabel}>{strings.targetAddPhotos}</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
                 testID="target-add-word"
                 onPress={() => openWizard('add-words')}
                 style={styles.action}

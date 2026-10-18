@@ -1,6 +1,7 @@
-import type { Enrollment, TargetKind } from '@lang-tutor/core/api';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import type { Enrollment } from '@lang-tutor/core/api';
 import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ComponentProps } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
@@ -43,12 +44,11 @@ import {
   saveHolding,
   wizardReducer,
   wizardRouteOf,
+  type Destination,
   type WizardRoute,
 } from '@/targetWizard';
-import { doneFailureMessage, dueDateChoices, photosHint, stepTitle, targetTitle, wizardTitle } from '@/targets';
-import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
-
-const KINDS: readonly TargetKind[] = ['homework', 'exam'];
+import { dateHasCome, daysLeftLabel, doneFailureMessage, dueDateChoices, stepTitle, targetTitle, wizardTitle } from '@/targets';
+import { colors, fontSizes, lineHeights, radii, shadows, spacing } from '@/theme';
 
 /** What is in flight, one thing at a time: the photos being picked (and shrunk), sent
  *  (the photo on its way, of how many), a photo's import being discarded, Done, or
@@ -62,10 +62,11 @@ type Work =
   | null;
 
 /**
- * Phase 53 (spec D10). A new target, step by step: its kind, photos of the word list,
- * their review, typed words, and the date. A target screen opens the same wizard for its
- * actions, a mode each: add photos (photos and review), add a word, change the date.
- * Nothing is saved until Done, which sends one request.
+ * Phase 53 (spec D10), phase 64 (spec D8). The photo flow, from the header's camera: photos
+ * of a word list, their review, then what to do with the words: save them to My words, make
+ * a new prep (more words, then its date), or add them to a prep already open. A target
+ * screen opens the same wizard for its two other actions: add a word, change the date.
+ * Nothing is saved until Done; leaving discards the flow's imports (R12).
  */
 export default function TargetWizardScreen() {
   const params = useLocalSearchParams<{ mode?: string; targetId?: string }>();
@@ -81,7 +82,7 @@ const leaveScreen = () => (router.canGoBack() ? router.back() : router.replace('
 
 function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollment }) {
   const api = useApi();
-  const { pick, pickMany, upload, discard } = usePhotoImports();
+  const { pick, pickMany, upload, discard, save } = usePhotoImports();
   const { list, reload: reloadTargets } = useTargets();
   const [state, dispatch] = useReducer(wizardReducer, route.mode, initialWizard);
   // The review's own answer: every import settled, and no change of a row in flight.
@@ -202,9 +203,9 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
     }, [back]),
   );
 
-  const chooseKind = (kind: TargetKind) => {
-    dispatch({ type: 'kind', kind });
-    dispatch({ type: 'next' });
+  const chooseDestination = (destination: Destination) => {
+    setError(null);
+    dispatch({ type: 'destination', destination });
   };
 
   const take = () =>
@@ -287,9 +288,23 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
   const done = () =>
     act({ kind: 'saving' }, async () => {
       try {
-        if (route.mode === 'create') {
-          const target = await saveHolding(made, () => api.createTarget(enrollment.id, createRequest(state)));
-          if (!leaving.current) router.replace(`/targets/${target.id}`);
+        if (route.mode === 'photo') {
+          const destination = state.destination;
+          if (destination?.kind === 'my-words') {
+            // Each photo's words saved as today's photo import saves them; back on תרגול with
+            // its "N מילים נשמרו". A photo that saves nothing (unread) does not stop the others.
+            const count = await saveHolding(made, async () => savedCount(await Promise.allSettled(state.importIds.map((id) => save(id)))));
+            if (!leaving.current) router.dismissTo({ pathname: '/', params: { photoSaved: String(count) } });
+            return;
+          }
+          if (destination?.kind === 'target') {
+            const { targetId } = destination;
+            await saveHolding(made, () => api.addTargetWords(targetId, addRequest(state)));
+            if (!leaving.current) router.replace(`/targets/${targetId}`);
+            return;
+          }
+          await saveHolding(made, () => api.createTarget(enrollment.id, createRequest(state)));
+          if (!leaving.current) router.dismissTo('/');
           return;
         }
         const { targetId } = route;
@@ -304,6 +319,10 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
         else setError(doneFailureMessage(failure));
       }
     });
+
+  // Phase 64 (spec D8). The preps a photo's words can join: the active ones whose date has
+  // not come (the server refuses a change to one on its date).
+  const openTargets = (list?.targets ?? []).filter((target) => !dateHasCome(target));
 
   const last = isLastStep(state);
   const canGo = canAdvance(state, reviewSettled) && !busy;
@@ -338,30 +357,55 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
       </Text>
 
       <View style={styles.body}>
-        {state.step === 'kind' ? (
-          <View style={styles.kinds}>
-            {KINDS.map((kind) => {
-              const selected = state.kind === kind;
-              return (
-                <Pressable
-                  key={kind}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  aria-selected={selected}
-                  testID={`wizard-kind-${kind}`}
-                  onPress={() => chooseKind(kind)}
-                  style={[styles.kind, selected && styles.kindSelected]}
-                >
-                  <Text style={[styles.kindLabel, selected && styles.kindLabelSelected]}>{targetTitle(kind)}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+        {state.step === 'choose' ? (
+          <ScrollView contentContainerStyle={styles.choices}>
+            <View style={styles.group}>
+              <ChoiceRow
+                testID="wizard-dest-my-words"
+                icon="book-outline"
+                label={strings.targetChooseMyWords}
+                selected={state.destination?.kind === 'my-words'}
+                onPress={() => chooseDestination({ kind: 'my-words' })}
+              />
+              <ChoiceRow
+                testID="wizard-dest-exam"
+                icon="calendar-outline"
+                label={strings.targetChooseNewExam}
+                selected={state.destination?.kind === 'new' && state.destination.targetKind === 'exam'}
+                onPress={() => chooseDestination({ kind: 'new', targetKind: 'exam' })}
+              />
+              <ChoiceRow
+                testID="wizard-dest-homework"
+                icon="document-text-outline"
+                label={strings.targetChooseNewHomework}
+                selected={state.destination?.kind === 'new' && state.destination.targetKind === 'homework'}
+                onPress={() => chooseDestination({ kind: 'new', targetKind: 'homework' })}
+              />
+            </View>
+            {openTargets.length > 0 ? (
+              <>
+                <Text style={styles.groupTitle}>{strings.targetChooseExisting}</Text>
+                <View style={styles.group}>
+                  {openTargets.map((target) => (
+                    <ChoiceRow
+                      key={target.id}
+                      testID={`wizard-dest-target-${target.id}`}
+                      icon="add"
+                      label={`${targetTitle(target.kind)} ${daysLeftLabel(target.days_left)}`}
+                      detail={strings.targetWordCount(target.word_count)}
+                      selected={state.destination?.kind === 'target' && state.destination.targetId === target.id}
+                      onPress={() => chooseDestination({ kind: 'target', targetId: target.id })}
+                    />
+                  ))}
+                </View>
+              </>
+            ) : null}
+          </ScrollView>
         ) : null}
 
         {state.step === 'photos' ? (
           <>
-            <Text style={styles.hint}>{photosHint(state.mode)}</Text>
+            <Text style={styles.hint}>{strings.targetPhotosHintAdd}</Text>
             <View style={styles.photoButtons}>
               <Pressable
                 accessibilityRole="button"
@@ -503,8 +547,7 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
           {error}
         </Text>
       ) : null}
-      {/* The kind step has none: a kind's button goes on by itself. */}
-      {state.step !== 'kind' ? (
+      {
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: !canGo }}
@@ -519,9 +562,55 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
             <Text style={styles.buttonLabel}>{last ? strings.targetWizardDone : strings.targetWizardNext}</Text>
           )}
         </Pressable>
-      ) : null}
+      }
     </SafeAreaView>
   );
+}
+
+/** Phase 64 (spec D8). One choice of what to do with the words: a row of a white group with
+ *  its icon, its label and, for a prep already open, its word count. */
+function ChoiceRow({
+  testID,
+  icon,
+  label,
+  detail,
+  selected,
+  onPress,
+}: {
+  testID: string;
+  icon: ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  detail?: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      aria-selected={selected}
+      testID={testID}
+      onPress={onPress}
+      style={[styles.choice, selected && styles.choiceSelected]}
+    >
+      <View style={styles.choiceIcon}>
+        <Ionicons name={icon} size={18} color={colors.primary} />
+      </View>
+      <View style={styles.choiceText}>
+        <Text style={[styles.choiceLabel, selected && styles.choiceLabelSelected]}>{label}</Text>
+        {detail ? <Text style={styles.hint}>{detail}</Text> : null}
+      </View>
+      {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
+    </Pressable>
+  );
+}
+
+/** The words the photos' saves saved; with none saved and one refused, that refusal. */
+function savedCount(results: PromiseSettledResult<{ saved_gloss_ids: string[] }>[]): number {
+  const saved = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value.saved_gloss_ids.length] : []));
+  const refused = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (saved.length === 0 && refused) throw refused.reason;
+  return saved.reduce((sum, count) => sum + count, 0);
 }
 
 const styles = StyleSheet.create({
@@ -539,24 +628,38 @@ const styles = StyleSheet.create({
   },
   hint: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, writingDirection: 'rtl' },
   body: { flex: 1, gap: spacing.sm },
-  kinds: { gap: spacing.md, paddingTop: spacing.md },
-  kind: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: spacing.lg,
-    alignItems: 'center',
-  },
-  kindSelected: { borderColor: colors.primary, borderWidth: 2 },
-  kindLabel: {
-    fontSize: fontSizes.xl,
-    lineHeight: lineHeights.xl,
-    fontWeight: '700',
-    color: colors.text,
+  choices: { gap: spacing.sm, paddingTop: spacing.xs, paddingBottom: spacing.md },
+  group: { backgroundColor: colors.surface, borderRadius: radii.group, overflow: 'hidden', ...shadows.card },
+  groupTitle: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
+    color: colors.muted,
+    marginTop: spacing.sm,
+    marginHorizontal: spacing.xs,
     writingDirection: 'rtl',
   },
-  kindLabelSelected: { color: colors.primary },
+  choice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm + 4,
+    paddingHorizontal: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.hairline,
+  },
+  choiceSelected: { backgroundColor: colors.primarySurface },
+  choiceIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: colors.primarySurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  choiceText: { flex: 1, gap: 2 },
+  choiceLabel: { fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '600', color: colors.text, writingDirection: 'rtl' },
+  choiceLabelSelected: { color: colors.primary },
   photoButtons: { flexDirection: 'row', gap: spacing.sm },
   grow: { flex: 1 },
   progress: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

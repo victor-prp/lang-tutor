@@ -16,7 +16,6 @@ import {
   daysLeftLabel,
   doneFailureMessage,
   homeOrder,
-  photosHint,
   readinessColor,
   readinessName,
   readyLabel,
@@ -202,29 +201,17 @@ describe('dueDayLabel', () => {
 
 describe('wizardTitle and stepTitle', () => {
   it('names the wizard of each action', () => {
-    expect(wizardTitle('create')).toBe('הכנה חדשה');
-    expect(wizardTitle('add-photos')).toBe('מילים מתמונות');
+    expect(wizardTitle('photo')).toBe('מילים מתמונות');
     expect(wizardTitle('add-words')).toBe('הוספת מילים');
     expect(wizardTitle('change-date')).toBe('שינוי התאריך');
   });
 
   it('names each step', () => {
-    expect(stepTitle('kind')).toBe('למה מתכוננים?');
     expect(stepTitle('photos')).toBe('תמונות של רשימת המילים');
+    expect(stepTitle('choose')).toBe('מה לעשות עם המילים החדשות?');
     expect(stepTitle('review')).toBe('המילים מהתמונות');
     expect(stepTitle('words')).toBe('עוד מילים');
     expect(stepTitle('date')).toBe('באיזה תאריך?');
-  });
-});
-
-describe('photosHint (final review item 32)', () => {
-  it('lets a new target skip its photos, and says so', () => {
-    expect(photosHint('create')).toBe('אפשר לצלם או לבחור כמה תמונות, או לדלג על השלב.');
-  });
-
-  it("says nothing of skipping where Next needs a photo: a target screen's add photos", () => {
-    expect(photosHint('add-photos')).toBe('אפשר לצלם או לבחור כמה תמונות.');
-    expect(photosHint('add-photos')).not.toContain('לדלג');
   });
 });
 

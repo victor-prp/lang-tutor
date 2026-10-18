@@ -478,19 +478,21 @@ export const strings = {
   /** `weekday` is JavaScript's (0 = Sunday), `month` is 1 = January. */
   targetDueDay: (weekday: number, day: number, month: number) =>
     `יום ${TARGET_WEEKDAY_NAMES[weekday]}, ${isolateLtr(String(day))} ${TARGET_MONTH_NAMES[month - 1]}`,
-  // Home's button, which says what a target is for.
-  targetNew: 'הכנה לשיעורי בית או לבוחן',
   // The wizard: its title for each action, and each step's (spec D10).
-  targetWizardCreate: 'הכנה חדשה',
   targetWizardAddPhotos: 'מילים מתמונות',
   targetWizardAddWords: 'הוספת מילים',
   targetWizardChangeDate: 'שינוי התאריך',
-  targetStepKind: 'למה מתכוננים?',
+  // Phase 64 (spec D8). The photo flow's choice, once the words are marked.
+  targetStepChoose: 'מה לעשות עם המילים החדשות?',
+  targetChooseMyWords: 'להוסיף למילים שלי',
+  targetChooseNewExam: 'הכנה חדשה לבוחן',
+  targetChooseNewHomework: 'הכנה חדשה לשיעורי בית',
+  targetChooseExisting: 'או להוסיף להכנה קיימת',
+  targetWordCount: (count: number) => (count === 1 ? 'מילה אחת' : `${isolateLtr(String(count))} מילים`),
   targetStepPhotos: 'תמונות של רשימת המילים',
   targetStepReview: 'המילים מהתמונות',
   targetStepWords: 'עוד מילים',
   targetStepDate: 'באיזה תאריך?',
-  targetPhotosHint: 'אפשר לצלם או לבחור כמה תמונות, או לדלג על השלב.',
   // A target screen's add photos, whose Next needs a photo: no skipping there.
   targetPhotosHintAdd: 'אפשר לצלם או לבחור כמה תמונות.',
   targetReviewHint: 'אפשר להוריד סימון ממילה או לבחור לה משמעות אחרת.',
@@ -526,7 +528,6 @@ export const strings = {
   targetSaveFailed: 'השמירה נכשלה. נסו שוב.',
   targetClosed: 'ההכנה הזו כבר הסתיימה.',
   // The target screen (spec D11).
-  targetAddPhotos: 'הוספת מילים מתמונות',
   targetAddWord: 'הוספת מילה',
   targetChangeDate: 'שינוי התאריך',
   targetEnd: 'סיום ההכנה',

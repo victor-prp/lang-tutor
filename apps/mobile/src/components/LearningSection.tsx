@@ -1,14 +1,13 @@
 import type { CurrentSessionResponse, Enrollment, TargetSummary } from '@lang-tutor/core/api';
 import { router, useFocusEffect, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text } from 'react-native';
 
 import { ApiError } from '@/api/client';
 import { CardStack } from '@/components/CardStack';
 import { MyWordsCard } from '@/components/MyWordsCard';
 import { TargetCard } from '@/components/TargetCard';
 import { useNextSession } from '@/hooks/useNextSession';
-import { usePhotoImports } from '@/hooks/usePhotoImports';
 import { useSession } from '@/hooks/useSession';
 import { useTargets } from '@/hooks/useTargets';
 import {
@@ -25,26 +24,12 @@ import {
   type HomeAction,
   type TargetCreate,
 } from '@/nextSession';
-import { homePhotoCard, isWorking, type HomePhotoCard } from '@/photoImports';
 import { strings } from '@/strings';
 import { homeOrder, shouldPollTargets, stackDots, type HomeCard } from '@/targets';
-import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { colors, fontSizes, lineHeights } from '@/theme';
 
 /** Final review N1. Create refused: the path has a started session (409 session_open). */
 const isSessionOpen = (error: unknown) => error instanceof ApiError && error.code === 'session_open';
-
-function photoCardLabel(card: NonNullable<HomePhotoCard>): string {
-  switch (card.kind) {
-    case 'working':
-      return strings.homePhotoWorking;
-    case 'ready':
-      return strings.homePhotoReady(card.count);
-    case 'failed':
-      return strings.homePhotoFailed;
-    case 'several':
-      return strings.homePhotoSeveral(card.count);
-  }
-}
 
 /** Phase 52 (spec D8), phase 57. What home holds of a tapped reminder: the main path's read it
  *  first saw, the targets read made after the tap (its list), and the create a target first
@@ -58,7 +43,6 @@ type ReminderHeld = {
 export function LearningSection({ active }: { active: Enrollment }) {
   const { enter } = useSession();
   const next = useNextSession();
-  const { imports, reload: reloadPhotos } = usePhotoImports();
   const { list: targetList, reload: reloadTargets, create: createTargetSession } = useTargets();
   // Set by the review after a save (spec D13): "28 words saved".
   const { photoSaved, start } = useLocalSearchParams<{ photoSaved?: string; start?: string }>();
@@ -100,9 +84,8 @@ export function LearningSection({ active }: { active: Enrollment }) {
       attemptedFor.current = null;
       setMakeFailedFor(null);
       reload();
-      reloadPhotos();
       void reloadTargets();
-    }, [reload, reloadPhotos, reloadTargets]),
+    }, [reload, reloadTargets]),
   );
 
   // While preparing, and only while this screen is focused.
@@ -113,16 +96,6 @@ export function LearningSection({ active }: { active: Enrollment }) {
       const timer = setInterval(reload, POLL_INTERVAL_MS);
       return () => clearInterval(timer);
     }, [polling, reload]),
-  );
-
-  // The photo card moves while an import is read or looked up, the same way.
-  const photosWorking = imports.some((summary) => isWorking(summary.status));
-  useFocusEffect(
-    useCallback(() => {
-      if (!photosWorking) return undefined;
-      const timer = setInterval(reloadPhotos, POLL_INTERVAL_MS);
-      return () => clearInterval(timer);
-    }, [photosWorking, reloadPhotos]),
   );
 
   // Phase 57. A target's session is prepared the same way: its card moves while it is.
@@ -136,7 +109,6 @@ export function LearningSection({ active }: { active: Enrollment }) {
   );
 
   const action: HomeAction | null = next.current ? homeActionOf(next.current) : null;
-  const photoCard = homePhotoCard(imports);
   // Phase 57 (spec D11). One card per path, by priority; phase 64 (spec D3) shows them as a
   // stack, one at a time, in that order.
   const targets = targetList?.targets ?? [];
@@ -336,38 +308,12 @@ export function LearningSection({ active }: { active: Enrollment }) {
         </Text>
       ) : null}
 
-      {photoCard ? (
-        <Pressable
-          accessibilityRole="button"
-          testID="home-photo-card"
-          onPress={() =>
-            router.push(photoCard.kind === 'several' ? '/photo-imports' : `/photo-imports/${photoCard.id}`)
-          }
-          style={styles.card}
-        >
-          <Text style={styles.cardLabel}>{photoCardLabel(photoCard)}</Text>
-        </Pressable>
-      ) : null}
 
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    marginTop: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  cardLabel: {
-    fontSize: fontSizes.lg,
-    lineHeight: lineHeights.lg,
-    color: colors.text,
-    writingDirection: 'rtl',
-  },
   notice: {
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
