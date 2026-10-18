@@ -48,6 +48,7 @@ export type {
   ClozeTypedQuestion,
   SentenceTranslationQuestion,
   LlmPhotoReading,
+  LlmPoint,
   LlmReconciliation,
   LlmRendering,
   LlmSense,

@@ -37,6 +37,7 @@ import type {
   LlmEntrySchema,
   LlmGlossMergeSchema,
   LlmPhotoReadingSchema,
+  LlmPointSchema,
   LlmReconciliationSchema,
   LlmRenderingSchema,
   LlmSenseMatchSchema,
@@ -222,6 +223,7 @@ export type SessionSource = z.infer<typeof SessionSourceSchema>;
 export type LlmDistractors = z.infer<typeof LlmDistractorsSchema>;
 export type LlmContext = z.infer<typeof LlmContextSchema>;
 export type LlmCheck = z.infer<typeof LlmCheckSchema>;
+export type LlmPoint = z.infer<typeof LlmPointSchema>;
 export type SessionView = z.infer<typeof SessionViewSchema>;
 export type PendingRetry = z.infer<typeof PendingRetrySchema>;
 export type CurrentSession = z.infer<typeof CurrentSessionSchema>;
