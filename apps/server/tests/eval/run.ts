@@ -26,17 +26,18 @@ import { normalizeForm } from '../../src/domain/dictionary';
 import { readCheck, type CheckItem } from '../../src/domain/check';
 import { findGap } from '../../src/domain/cloze';
 import { ASKED_DISTRACTORS, comparable, distractorItems, KEPT_DISTRACTORS, nothingKnown, validateDistractors, type DistractorItem, type Generated, type LearnerWord, type RecentSentences, type Task } from '../../src/domain/distractors';
-import { gapCheckItem, gapFaults, rewriteItems, rewriteOthers, type GapJudged } from '../../src/domain/gapRewrite';
+import { gapCheckItem, gapFaults, pointFaults, rewriteItems, rewriteOthers, type GapJudged } from '../../src/domain/gapRewrite';
+import { POINT_REWRITE_ROUNDS, judgePoint, pointItem, readPoint, type PointFinding, type PointItem } from '../../src/domain/pointing';
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import { TRANSLATION_JUDGE_THINKING } from '../../src/domain/judge';
 import { DEFAULT_SOUND_ALIKE_THRESHOLD } from '../../src/domain/soundAlike';
-import { SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
+import { POINT_CHECK_THINKING, SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
 import type { ReadItem } from '../../src/domain/photoReading';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from '../../src/providers/gemini';
 import { judgeSpoken, judgeTyped, normaliseGloss } from '@lang-tutor/core/domain';
 import type { LlmAccept, LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askAccept, askCheck, askContext, askDistractors, askFitJudge, askGapGuesses, askJudge, askModel, askRendering, askSoundAlike, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
+import { askAccept, askCheck, askContext, askDistractors, askFitJudge, askGapGuesses, askJudge, askModel, askPoint, askRendering, askSoundAlike, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
 import {
   ACCEPT_CASES,
   CASES,
@@ -46,6 +47,7 @@ import {
   FIT_JUDGE_CASES,
   GAP_CASES,
   JUDGE_CASES,
+  POINT_CASES,
   SOUND_ALIKE_CASES,
   RENDERING_CASES,
   SENTENCE_CASES,
@@ -59,6 +61,7 @@ import {
   type EvalCase,
   type FitJudgeCase,
   type JudgeCase,
+  type PointCase,
   type RenderingCase,
   type SentenceCase,
   type SoundAlikeCase,
@@ -906,12 +909,14 @@ async function main(): Promise<void> {
   const checkCases = CHECK_CASES.filter((kase) => matches(kase.label));
   // Phase 50. Every label starts "sound", so the filter "sound" selects the group.
   const soundCases = SOUND_ALIKE_CASES.filter((kase) => matches(kase.label));
+  // Phase 62d. Every label starts "point ", so the filter "point " selects the group.
+  const pointCases = POINT_CASES.filter((kase) => matches(kase.label));
   if (filter) console.log(`filter "${filter}"`);
   if (
     cases.length + renderingCases.length + acceptCases.length + distractorCases.length + transcriptionCases.length +
       photoCases.length + matchCases.length + judgeCases.length +
       gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length + fitCases.length + contextCases.length +
-      checkCases.length + soundCases.length === 0
+      checkCases.length + soundCases.length + pointCases.length === 0
   ) {
     throw new Error(`filter "${filter}" matched no case`);
   }
@@ -936,6 +941,17 @@ async function main(): Promise<void> {
     now: Date.now,
     timeoutMs: TIMEOUT_MS,
     thinkingBudget: SESSION_GENERATION_THINKING,
+  });
+  // Phase 62d (spec D2). The point check on the client composition.ts gives it: thinking capped.
+  const pointLlm = createGeminiClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
+    timeoutMs: TIMEOUT_MS,
+    thinkingBudget: POINT_CHECK_THINKING,
   });
   // Matches the options composition.ts gives the judge client, except the
   // timeout: the eval uses its own TIMEOUT_MS (30 s), not production's budget.
@@ -1158,20 +1174,32 @@ async function main(): Promise<void> {
       // Phase 62c (spec D6). A gap to choose's cards as production shows them, after its one
       // rewrite: tier 1 still reads the first answer, and every tier-2 check the cards shown.
       const rescue = kase.checked ? await rescueGaps(kase.from as LanguageCode, 'he', sentenceItemsOf(kase), answer, learnerWords) : null;
-      const shown = rescue?.shown ?? answer;
+      // Phase 62d (spec D6). A typed gap's cards as production shows them, after the point
+      // check and its one rewrite: every tier-2 check reads the last sentence written.
+      const pointed = kase.task === 'sentence' ? await rescuePoints(kase, answer, learnerWords) : null;
+      const shown = rescue?.shown ?? pointed?.shown ?? answer;
       return {
         label: kase.label,
         text,
-        tier1: [...sentenceTier1(kase, answer), ...(rescue?.tier1 ?? [])],
+        tier1: [...sentenceTier1(kase, answer), ...(rescue?.tier1 ?? []), ...(pointed?.tier1 ?? [])],
         tier2: [
           ...sentenceTier2(kase, shown),
-          ...listShare(kase, shown),
+          // Phase 62d (ruling R4): a typed gap's list share is the batch's first answer's, as on
+          // master; a rescued sentence may leave the list where pointing needs it (R2), and its
+          // share is printed below, not gated.
+          ...listShare(kase, pointed ? answer : shown),
           // Phase 62 (spec D1, ruling R5): today's checks, unchanged: the probe on a typed
           // gap's sentence, the checker on a gap to choose's (every gap case is `checked`).
           ...(kase.task === 'sentence' ? await pointsToWord(kase, shown) : []),
           ...(rescue?.tier2 ?? []),
+          ...(pointed?.tier2 ?? []),
         ],
-        written: [...writtenBy(kase, shown), ...(rescue?.written ?? [])],
+        written: [
+          ...writtenBy(kase, shown),
+          ...(rescue?.written ?? []),
+          ...(pointed?.written ?? []),
+          ...(pointed && pointed.shown !== answer ? listShare(kase, pointed.shown).map((check) => `shown list share, not gated: ${check.name}: ${check.detail}`) : []),
+        ],
       };
     } catch (error) {
       return {
@@ -1241,6 +1269,139 @@ async function main(): Promise<void> {
       });
     } catch (error) {
       return [{ name: 'the checker answered', ok: false, detail: (error as Error).message }];
+    }
+  };
+
+  // Phase 62d (spec D6). prepareSession's rescue of a typed gap, through the same domain
+  // functions: the point check of what validation kept, one rewrite of every sentence the
+  // reader could not place, validated as production validates it, and the re-check of the
+  // rewritten ones. A card production would write as a typed translation fails one check,
+  // and so does one the check could not judge: it is the sentence shown that must point.
+  const rescuePoints = async (
+    kase: SentenceCase,
+    answer: LlmDistractors,
+    learnerWords: LearnerWord[] | undefined,
+  ): Promise<{ shown: LlmDistractors; tier1: Check[]; tier2: Check[]; written: string[] }> => {
+    const from = kase.from as LanguageCode;
+    const to: LanguageCode = 'he';
+    const items = sentenceItemsOf(kase);
+    const verdict = validateDistractors(items, answer, to, [], from, nothingKnown());
+    const made = new Map(verdict.byKey);
+    const targetOf = (key: string) => {
+      const { form, lemma, translation } = kase.items[items.findIndex((item) => item.key === key)];
+      const { sentence, gap } = made.get(key)!.sentence!;
+      return { word: { answer: sentence.slice(gap.start, gap.end), lemma, alternatives: [form] }, meanings: [translation] };
+    };
+    const tier1: Check[] = [];
+    const written: string[] = [];
+    // Each typed gap's outcome: null when the sentence shown points, else why not.
+    const status = new Map<string, string | null>();
+    // One call per sentence, side by side, as prepareSession asks them.
+    const read = async (asked: PointItem[], label: string): Promise<ReadonlyMap<string, PointFinding>> => {
+      const started = Date.now();
+      const found = await Promise.all(
+        asked.map(async (item) => {
+          try {
+            return [...readPoint([item], await askPoint(pointLlm, { from, to, items: [item] }))];
+          } catch (error) {
+            written.push(`${label} of ${item.key} failed: ${(error as Error).message}`);
+            return [];
+          }
+        }),
+      );
+      if (asked.length > 0) written.push(`${label}: ${Date.now() - started} ms`);
+      return new Map(found.flat());
+    };
+    const judge = (asked: PointItem[], reading: ReadonlyMap<string, PointFinding>, label: string) => {
+      const failed = new Map<string, { fits: string[]; problem: string }>();
+      for (const item of asked) {
+        const finding = reading.get(item.key);
+        if (!finding) {
+          status.set(item.key, `the ${label} did not judge it`);
+          continue;
+        }
+        const found = judgePoint(finding, targetOf(item.key));
+        written.push(`${label} ${item.key}: ${item.sentence} → ${finding.guesses.join(' / ')} (${finding.meaning}, ${finding.readers}/10)`);
+        status.set(item.key, found.points ? null : found.problem);
+        if (!found.points) failed.set(item.key, { fits: found.fits, problem: found.problem });
+      }
+      return failed;
+    };
+    const asked = items.flatMap((item) => {
+      const card = made.get(item.key);
+      return card?.sentence ? [pointItem(item.key, card.sentence)] : [];
+    });
+    const failed = judge(asked, await read(asked, 'point check'), 'point check');
+    let shown = answer;
+    // Up to POINT_REWRITE_ROUNDS rewrites per typed gap, one call each, side by side, as
+    // prepareSession asks them; each but the last read again before the next.
+    let asking = pointFaults({ items, verdict, failed }).map((fault) => ({ fault, base: items }));
+    for (let round = 1; round <= POINT_REWRITE_ROUNDS && asking.length > 0; round += 1) {
+      const again: { item: PointItem; base: DistractorItem[] }[] = [];
+      await Promise.all(
+        asking.map(async ({ fault, base }) => {
+          const rewritten = rewriteItems(base, [fault]);
+          const clear = rewriteOthers(items, [fault], []);
+          const started = Date.now();
+          try {
+            const reply = await askDistractors(sessionLlm, { from, to, items: rewritten, learnerWords, others: clear });
+            const rescued = validateDistractors(rewritten, reply, to, clear, from, nothingKnown());
+            const got = reply.items.find((item) => item.key === fault.key);
+            const card = rescued.byKey.get(fault.key);
+            if (card?.sentence && got) {
+              made.set(fault.key, card);
+              shown = { items: shown.items.map((item) => (item.key === fault.key ? got : item)) };
+              again.push({ item: pointItem(fault.key, card.sentence), base: rewritten });
+              written.push(`rewrite ${fault.key} (round ${round}, ${Date.now() - started} ms): ${fault.rewrite.sentence ?? '(none)'} → ${got.sentence ?? '(none)'}`);
+            } else {
+              const why = card?.degraded ?? 'no answer';
+              status.set(fault.key, `the rewrite was refused: ${why}`);
+              written.push(`rewrite ${fault.key} (round ${round}) refused: ${why}`);
+            }
+          } catch (error) {
+            tier1.push({ name: `${fault.key}: the sentence rewrite call succeeded`, ok: false, detail: (error as Error).message });
+          }
+        }),
+      );
+      const items2 = again.map(({ item }) => item);
+      const still = judge(items2, await read(items2, `point re-check ${round}`), `point re-check ${round}`);
+      asking = again.flatMap(({ item, base }) => {
+        const found = still.get(item.key);
+        if (!found || round === POINT_REWRITE_ROUNDS) return [];
+        return [{ fault: { key: item.key, stage: 'pointing' as const, rewrite: { sentence: made.get(item.key)!.sentence!.sentence, ...found } }, base }];
+      });
+    }
+    const tier2 = items.map((item, index): Check => {
+      const why = status.has(item.key) ? status.get(item.key)! : 'no sentence';
+      return { name: `${kase.items[index].form}: the point check passes the sentence shown`, ok: why === null, detail: why ?? undefined };
+    });
+    return { shown, tier1, tier2, written };
+  };
+
+  /** Phase 62d (spec D6). The point check alone, on a sentence whose verdict is known. */
+  const scorePoint = async (kase: PointCase): Promise<Row> => {
+    const text = kase.sentence;
+    const item: PointItem = { key: 'p1', sentence: kase.sentence };
+    try {
+      const finding = readPoint([item], await askPoint(pointLlm, { from: kase.from, to: 'he', items: [item] })).get(item.key);
+      if (!finding) return { label: kase.label, text, tier1: [{ name: 'the answer reads', ok: false, detail: 'p1 unanswered' }], tier2: [] };
+      const found = judgePoint(finding, { word: { ...kase.word, alternatives: [] }, meanings: kase.meanings });
+      const read = `${finding.guesses.join(' / ')} (${finding.meaning}, ${finding.readers}/10)`;
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the answer reads', ok: true }],
+        tier2: [{ name: `${kase.word.answer} ${kase.points ? 'points' : 'does not point'}`, ok: found.points === kase.points, detail: read }],
+        written: [read],
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
     }
   };
 
@@ -1466,7 +1627,7 @@ async function main(): Promise<void> {
   const started = Date.now();
   const [
     translationRows, renderingRows, acceptRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows,
-    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows, fitRows, soundRows,
+    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows, fitRows, soundRows, pointRows,
   ] = await Promise.all([
     mapWithConcurrency(cases, CONCURRENCY, scoreCase),
     mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
@@ -1485,10 +1646,11 @@ async function main(): Promise<void> {
     mapWithConcurrency(checkCases, CONCURRENCY, scoreCheck),
     mapWithConcurrency(fitCases, CONCURRENCY, scoreFitJudge),
     mapWithConcurrency(soundCases, CONCURRENCY, scoreSoundAlike),
+    mapWithConcurrency(pointCases, CONCURRENCY, scorePoint),
   ]);
   const rows = [
     ...translationRows, ...renderingRows, ...acceptRows, ...distractorRows, ...transcriptionRows, ...photoRows, ...matchRows,
-    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows, ...fitRows, ...soundRows,
+    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows, ...fitRows, ...soundRows, ...pointRows,
   ];
   const elapsedMs = Date.now() - started;
 
@@ -1526,6 +1688,9 @@ async function main(): Promise<void> {
     // Phase 50 (spec D8). The sound-alike score, a line of its own: a scorer
     // that calls every near miss the same word must fail here.
     { name: 'sound alike', rows: soundRows, passed: 0, total: 0 },
+    // Phase 62d (spec D6). The point check, a line of its own: a reader who calls every
+    // sentence clear, or none, must fail here.
+    { name: 'pointing check', rows: pointRows, passed: 0, total: 0 },
   ];
 
   for (const row of rows) {
@@ -1630,7 +1795,8 @@ async function main(): Promise<void> {
       `${cases.length} translation + ${renderingCases.length} rendering + ${acceptCases.length} accept + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ` +
       `${photoCases.length} photo + ${matchCases.length} match + ${judgeCases.length} judge + ` +
       `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge + ` +
-      `${contextCases.length} context + ${checkCases.length} checker + ${fitCases.length} fit judge + ${soundCases.length} sound alike cases in ` +
+      `${contextCases.length} context + ${checkCases.length} checker + ${fitCases.length} fit judge + ${soundCases.length} sound alike + ` +
+      `${pointCases.length} pointing check cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
@@ -1656,6 +1822,7 @@ async function main(): Promise<void> {
         checkerScore: groupScore(groups[4]),
         fitJudgeScore: groupScore(groups[5]),
         soundAlikeScore: groupScore(groups[6]),
+        pointingScore: groupScore(groups[7]),
         rows,
       },
       null,
