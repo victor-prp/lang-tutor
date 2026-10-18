@@ -1469,7 +1469,13 @@ export const LlmContextSchema = z.object({
         // mapped translation cards and a six-word list, gemini-2.5-flash,
         // 2026-10-16, production's budget: accepted on three runs, no 400, in
         // 11.1, 10.2 and 10.8 s, both maps whole and every list word named.
-        sentence_words: z.array(z.object({ hebrew: z.string(), translation: z.string(), word: z.string() })).optional(),
+        // Phase 62b. Of the sentence the card shows, in its order, in either
+        // language: `shown` is a run of it (Hebrew on a translation card, the
+        // target language on a gap card or a context line), `translation` its
+        // other-language words. Renamed from `hebrew`, still three strings.
+        // Measured as above, 2026-10-17: accepted on two runs, 20.6 and 20.7 s
+        // (21 s before the rename), every map in the shown sentence's order.
+        sentence_words: z.array(z.object({ shown: z.string(), translation: z.string(), word: z.string() })).optional(),
       }),
     )
     .max(10),

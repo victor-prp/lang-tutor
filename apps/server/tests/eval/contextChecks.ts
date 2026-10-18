@@ -70,6 +70,20 @@ function lineMapped(map: ReturnType<typeof italianWordMap>, entries: unknown): C
   return { name: 'the sentence is mapped, its word the target and another word tappable', ok, detail: JSON.stringify(map ?? entries ?? null) };
 }
 
+/** Phase 62b. Each expected run of a target-language sentence: tapped or not as the
+ *  case says, and its Hebrew holding the word the case names (Mio, שלי). */
+function runChecks(kase: ContextCase, text: string, map: ReturnType<typeof italianWordMap>, entries: unknown): Check[] {
+  return (kase.runs ?? []).map((run): Check => {
+    const found = (map ?? []).find((word) => !word.target && comparable(text.slice(word.start, word.end)) === comparable(run.shown));
+    const ok = run.tappable ? found !== undefined && (!run.hebrew || normaliseHebrew(found.text).split(' ').includes(normaliseHebrew(run.hebrew))) : found === undefined;
+    return {
+      name: run.tappable ? `${run.shown} is tappable${run.hebrew ? ` as ${run.hebrew}` : ''}` : `${run.shown} is not tappable`,
+      ok,
+      detail: JSON.stringify(entries ?? null),
+    };
+  });
+}
+
 /** Phase 62 (spec D1). As run.ts's listShare: the share of the line's words, its
  *  own word left out, from the learner's list, at a word's first four letters. */
 export const LINE_LIST_SHARE_THRESHOLD = 0.5;
@@ -95,7 +109,8 @@ export function contextTier2(kase: ContextCase, answer: LlmContext): Check[] {
     // Phase 62 (spec D2): a gap card's map, turned onto its target-language sentence.
     if (kase.type !== 'sentence_translation') {
       const gap = findGap(item.translation, [item.word]);
-      checks.push(lineMapped(italianWordMap({ text: item.translation, translation: item.sentence, target: gap, meaning: kase.translation, entries: got?.sentence_words, learner: learnerOf(kase), ownGlossId: 'g-c' }), got?.sentence_words));
+      const map = italianWordMap({ text: item.translation, explanation: 'he', target: gap, meaning: kase.translation, entries: got?.sentence_words, learner: learnerOf(kase), ownGlossId: 'g-c' });
+      checks.push(lineMapped(map, got?.sentence_words), ...runChecks(kase, item.translation, map, got?.sentence_words));
       return checks;
     }
     // Phase 59: each expected run is tappable, with the reference's words for it.
@@ -117,7 +132,8 @@ export function contextTier2(kase: ContextCase, answer: LlmContext): Check[] {
   // and built from the learner's list as much as it can.
   const line = outcome.dropped === null ? outcome.context : null;
   if (item.task === 'target' && item.map && line?.translation) {
-    checks.push(lineMapped(italianWordMap({ text: line.text, translation: line.translation, target: line.mark, meaning: kase.translation, entries: got?.sentence_words, learner: learnerOf(kase), ownGlossId: 'g-c' }), got?.sentence_words));
+    const map = italianWordMap({ text: line.text, explanation: 'he', target: line.mark, meaning: kase.translation, entries: got?.sentence_words, learner: learnerOf(kase), ownGlossId: 'g-c' });
+    checks.push(lineMapped(map, got?.sentence_words), ...runChecks(kase, line.text, map, got?.sentence_words));
   }
   if (kase.learner && line) checks.push(listShareOf(line.text, kase.form, kase.learner));
   // A word that begins with "saw" is never see or seen: this is R3's

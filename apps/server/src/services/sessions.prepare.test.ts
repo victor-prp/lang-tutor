@@ -1321,9 +1321,9 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
       items: [
         { key: 'q1', context: 'Please saw the plank in half.', context_translation: 'בבקשה תנסר את הקרש לשניים.', context_word: 'saw' },
         { key: 'q3', sentence_word: 'נשלב', sentence_words: [
-          { hebrew: 'בואו', translation: "Let's", word: '' },
-          { hebrew: 'נשלב', translation: 'combine', word: '' },
-          { hebrew: 'כוחות', translation: 'forces', word: 'w1' },
+          { shown: 'בואו', translation: "Let's", word: '' },
+          { shown: 'נשלב', translation: 'combine', word: '' },
+          { shown: 'כוחות', translation: 'forces', word: 'w1' },
         ] },
       ],
     });
@@ -1349,21 +1349,21 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
     expect(JSON.stringify(calls.sessionQuestions[0][2])).not.toContain('g-forces');
   });
 
-  // Phase 62 (spec D2). The context line's map and the gap sentence's, each turned onto
-  // its target-language sentence: a span there, the Hebrew to show.
+  // Phase 62 (spec D2), 62b. The context line's map and the gap sentence's, each of its
+  // target-language sentence, in its order: a run there, the Hebrew to show.
   const MAPPED_CONTEXT = JSON.stringify({
     items: [
       { key: 'q1', context: 'Please saw the plank in half.', context_translation: 'בבקשה תנסר את הקרש לשניים.', context_word: 'saw', sentence_words: [
-        { hebrew: 'בבקשה', translation: 'Please', word: '' },
-        { hebrew: 'תנסר', translation: 'saw', word: '' },
-        { hebrew: 'את הקרש', translation: 'the plank', word: 'w1' },
-        { hebrew: 'לשניים', translation: 'in half', word: '' },
+        { shown: 'Please', translation: 'בבקשה', word: '' },
+        { shown: 'saw', translation: 'תנסר', word: '' },
+        { shown: 'the plank', translation: 'את הקרש', word: 'w1' },
+        { shown: 'in half', translation: 'לשניים', word: '' },
       ] },
       { key: 'q3', sentence_word: 'נשלב' },
       { key: 'q5', sentence_word: 'לחם', sentence_words: [
-        { hebrew: 'אנחנו אופים', translation: 'We bake', word: '' },
-        { hebrew: 'לחם', translation: 'bread', word: '' },
-        { hebrew: 'כל בוקר', translation: 'every morning', word: '' },
+        { shown: 'We bake', translation: 'אנחנו אופים', word: '' },
+        { shown: 'bread', translation: 'לחם', word: '' },
+        { shown: 'every morning', translation: 'כל בוקר', word: '' },
       ] },
     ],
   });

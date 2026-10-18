@@ -16,13 +16,14 @@ test.setTimeout(180_000);
 const SENTENCE = 'Мой лук и стрелы лежат дома';
 const SENTENCE_HEBREW = 'הקשת והחצים שלי נמצאים בבית';
 const SENTENCE_WORD = 'лук';
-// Phase 62 (spec D2). The line's map, as the context call answers it: Hebrew word by word.
+// Phase 62 (spec D2), 62b. The line's map, as the context call answers it: the Russian
+// line, run by run in its order, each with its Hebrew.
 const SENTENCE_WORDS = [
-  { hebrew: 'שלי', translation: 'Мой', word: '' },
-  { hebrew: 'הקשת', translation: 'лук', word: '' },
-  { hebrew: 'והחצים', translation: 'и стрелы', word: '' },
-  { hebrew: 'נמצאים', translation: 'лежат', word: '' },
-  { hebrew: 'בבית', translation: 'дома', word: '' },
+  { shown: 'Мой', translation: 'שלי', word: '' },
+  { shown: 'лук', translation: 'הקשת', word: '' },
+  { shown: 'и стрелы', translation: 'והחצים', word: '' },
+  { shown: 'лежат', translation: 'נמצאים', word: '' },
+  { shown: 'дома', translation: 'בבית', word: '' },
 ];
 
 // Phase 39 (spec D6). лук has two saved meanings, a family. בצל is known in every skill
