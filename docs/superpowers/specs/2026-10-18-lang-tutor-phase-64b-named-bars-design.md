@@ -85,3 +85,23 @@ Victor, 2026-10-18, in the chat and the mockups:
   a scrolling strip (`six-cards.html`).
 - **R5.** Rename the first tab to home; coming back to it shows the cards by priority, not the last
   state.
+
+### Made while building (2026-10-18)
+
+Each with what it costs if wrong.
+
+- **A drag never presses the card it starts on.** The stack claims a sideways drag in the capture
+  phase; on the web, where react-native-web presses on the DOM click, the click a drag leaves
+  behind is swallowed. Cost: a click within half a second of a drag is lost on the web.
+- **The cards grow from their content** (`flexGrow`, not `flex: 1`), so the tallest card sets the
+  least height and the free space stretches every card. Cost: on a small phone a short card's
+  button can sit below the fold when another card is taller than the screen.
+- **Final review, fixed:** the cards beside the one on show are hidden from screen readers and, on
+  the web, inert; coming back to בית jumps to the first card instead of sliding across every card,
+  and slides ease out; the saved-words notice sits above the cards.
+- **Final review, deferred:** a quick flick under 50 pt springs back and the row has no resistance
+  at its ends; the first frame is laid out at zero width before the stage is measured; the bars use
+  `aria-selected` on a button (TalkBack reads "selected"; web screen readers may not); a hot fuse
+  keeps pulsing on a card that is not on show; four full names may ellipsize on a narrow phone
+  (part of the phone check).
+
