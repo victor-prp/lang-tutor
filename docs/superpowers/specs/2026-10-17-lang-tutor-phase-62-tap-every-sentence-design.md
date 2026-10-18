@@ -366,3 +366,34 @@ strings live in `apps/mobile/src/strings.ts`, and the UI is Hebrew only.
   check exists because a typed gap's Hebrew is its hint and must lead to the word. A gap to choose
   is answered from the Italian alone, and its `gap` test reads that sentence with every option. An
   unnatural Hebrew line under an answered card costs nothing it is graded on.
+
+---
+
+## Follow-up 62b: the map is of the sentence the card shows
+
+Victor's question-types session for *fratello* on 2026-10-18 showed *ragazzo* untappable on
+*Mio fratello è un bravo ragazzo.* The map went Hebrew to Italian (phase 59's format, reused
+in D2), and ילד → *un … ragazzo* is not a run of the Italian, so the server dropped it. With
+Victor, on 2026-10-18 (he approved the rules below, then said "continue till PR"):
+
+- **R11.** The map is always of the sentence the card shows, in its order, each run with the
+  other language's words for it. That is the Hebrew on a translation card, unchanged, and the
+  Italian on a gap card and a context line. The item says which (`map: "sentence"`,
+  `"translation"` or `"context"`). The entry fields are `shown` / `translation` / `word`, renamed
+  from `hebrew`.
+- **R12.** On an Italian sentence, a run's Hebrew is its own meaning and need not be written so
+  in the sentence's Hebrew (*Mio* → שלי under אחי). It must be in Hebrew script, and a free run
+  never shows the answer.
+
+The prompt states the cut by example:
+
+| Rule | Example |
+|---|---|
+| One word → one word | *grande* → גדול |
+| Adjacent words rendered together are one entry | *ci sono* → יש · *fa caldo* → חם |
+| An article stays with its noun | *La casa* → הבית |
+| A possessive is its own entry, even where the Hebrew joins it to the noun | *Mio fratello* (אחי) → *Mio* → שלי, *fratello* → אח |
+| One word → several Hebrew words | *Studiamo* → אנחנו לומדים |
+| A word Hebrew does not render: empty, not tappable | *è* in *La casa è grande* · *un* in *un bravo ragazzo* |
+| Words rendered together but not adjacent: each its own Hebrew | *un bravo ragazzo* (ילד טוב) → *bravo* → טוב, *ragazzo* → ילד |
+| The practised word is always its own entry | *fratello* in *Mio fratello* |

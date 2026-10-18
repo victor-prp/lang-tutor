@@ -1721,10 +1721,10 @@ export function createSessionService({
           if (contextAnswer && card.type === 'sentence_translation') {
             words = wordMapFor(item, found.get(item.key), sentence.mark, read.learnerWords, card.row.glossId);
           } else if (contextAnswer && card.answered.sentence) {
-            // Phase 62 (spec D2): a gap card's map, turned onto its sentence, the gap its target.
+            // Phase 62 (spec D2): a gap card's map, of its sentence, the gap its target.
             words = italianWordMap({
               text: item.translation,
-              translation: item.sentence,
+              explanation: languages.explanation,
               target: card.answered.sentence.gap,
               meaning: card.row.translation,
               entries: found.get(item.key)?.sentence_words,
@@ -1744,7 +1744,7 @@ export function createSessionService({
               if (item.map && outcome.context?.translation) {
                 words = italianWordMap({
                   text: outcome.context.text,
-                  translation: outcome.context.translation,
+                  explanation: languages.explanation,
                   target: outcome.context.mark,
                   meaning: card.row.translation,
                   entries: found.get(item.key)?.sentence_words,
