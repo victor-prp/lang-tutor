@@ -9,10 +9,14 @@ import { SpeakButton } from '@/components/SpeakButton';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useVocabulary } from '@/hooks/useVocabulary';
 import { strings } from '@/strings';
-import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { colors, fontSizes, lineHeights, radii, shadows, spacing } from '@/theme';
 import { partsOfSpeechLabel, showsMark } from '@/vocabulary';
 
 const LEVELS = [1, 2, 3, 4, 5];
+
+function Separator() {
+  return <View style={styles.separator} />;
+}
 
 function Chip({
   label,
@@ -41,7 +45,11 @@ function Chip({
   );
 }
 
-export default function VocabularyScreen() {
+/**
+ * Phase 64 (spec D6). The מילים tab: the learner's words, as the vocabulary screen showed them,
+ * under the header, with no back button: it is a tab now, not a screen over home.
+ */
+export default function WordsTab() {
   const { active } = useCurrentUser();
   const v = useVocabulary();
   const { reload } = v;
@@ -76,15 +84,10 @@ export default function VocabularyScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" testID="vocabulary-back" onPress={() => router.back()}>
-          <Text style={styles.link}>{strings.back}</Text>
-        </Pressable>
-        <Text testID="vocabulary-title" style={styles.title}>
-          {strings.vocabularyTitle(active.target_language)}
-        </Text>
-      </View>
+    <SafeAreaView style={styles.screen} edges={[]}>
+      <Text testID="vocabulary-title" style={styles.title}>
+        {strings.myWords}
+      </Text>
 
       {v.status === 'error' ? (
         <Text style={styles.notice}>{strings.vocabularyLoadFailed}</Text>
@@ -148,6 +151,7 @@ export default function VocabularyScreen() {
         refreshing={v.status === 'loading' && v.words.length === 0}
         onRefresh={v.reload}
         contentContainerStyle={styles.list}
+        ItemSeparatorComponent={Separator}
         ListEmptyComponent={
           v.status !== 'ready' ? null : v.query.level !== null ? (
             <View testID="vocabulary-empty-level" style={styles.empty}>
@@ -201,18 +205,21 @@ export default function VocabularyScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.sm },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { fontSize: fontSizes.lg, fontWeight: '700', color: colors.text, writingDirection: 'rtl' },
+  screen: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: spacing.sm },
+  title: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, fontWeight: '800', color: colors.text, writingDirection: 'rtl' },
   link: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
-  list: { gap: spacing.sm, paddingBottom: spacing.xl },
-  // Phase 23 (spec §1 D10). The card holds two sibling buttons: the word, which
+  // Phase 64 (spec D6, D9). The words in one white group, a hairline between rows.
+  list: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.group,
+    overflow: 'hidden',
+    marginBottom: spacing.xl,
+    ...shadows.card,
+  },
+  separator: { height: 1, backgroundColor: colors.hairline, marginHorizontal: spacing.md },
+  // Phase 23 (spec §1 D10). The row holds two sibling buttons: the word, which
   // opens it, and its speaker.
   row: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
     paddingEnd: spacing.md,
@@ -227,13 +234,13 @@ const styles = StyleSheet.create({
   addedBy: { color: colors.muted, fontSize: fontSizes.sm, writingDirection: 'rtl' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   chip: {
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderRadius: radii.pill,
+    backgroundColor: colors.surface,
     paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.md - 4,
+    boxShadow: '0 1px 2px rgba(16, 24, 40, 0.06)',
   },
-  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipSelected: { backgroundColor: colors.primary },
   chipLabel: { fontSize: fontSizes.sm, color: colors.text },
   chipLabelSelected: { color: colors.onPrimary, fontWeight: '700' },
   empty: { gap: spacing.sm, alignItems: 'center', paddingTop: spacing.xl },

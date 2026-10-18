@@ -592,6 +592,13 @@ export const strings = {
       : `${today} התרגול הבא בעוד ${isolateLtr(String(nextIn))} ימים`;
   },
   myWords: 'המילים שלי',
+  // Phase 64 (spec D1, D7). The bar's four tabs, and the groups of אני and הגדרות.
+  tabPractice: 'תרגול',
+  tabWords: 'מילים',
+  tabMe: 'אני',
+  tabSettings: 'הגדרות',
+  settingsTitle: 'הגדרות',
+  myLanguagesTitle: 'השפות שלי',
   wordsWaiting: (count: number) =>
     count === 1 ? 'מילה אחת מחכה לחזרה' : `${isolateLtr(String(count))} מילים מחכות לחזרה`,
   // Phase 61 (spec D6). A tester's session of one meaning's question types.

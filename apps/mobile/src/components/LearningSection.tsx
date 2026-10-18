@@ -7,8 +7,6 @@ import { ApiError } from '@/api/client';
 import { CardStack } from '@/components/CardStack';
 import { MyWordsCard } from '@/components/MyWordsCard';
 import { TargetCard } from '@/components/TargetCard';
-import { availableTargets } from '@/enrollments';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { usePhotoImports } from '@/hooks/usePhotoImports';
 import { useSession } from '@/hooks/useSession';
@@ -60,7 +58,6 @@ type ReminderHeld = {
 export function LearningSection({ active }: { active: Enrollment }) {
   const { enter } = useSession();
   const next = useNextSession();
-  const { enrollments, switchTo } = useCurrentUser();
   const { imports, reload: reloadPhotos } = usePhotoImports();
   const { list: targetList, reload: reloadTargets, create: createTargetSession } = useTargets();
   // Set by the review after a save (spec D13): "28 words saved".
@@ -70,7 +67,6 @@ export function LearningSection({ active }: { active: Enrollment }) {
   // the focused screen's.
   const navigation = useNavigation<{ setParams: (params: { start?: string }) => void }>();
   const focused = useIsFocused();
-  const [switcherOpen, setSwitcherOpen] = useState(false);
   // A ref guards re-entry (state is stale between two taps in one frame); the
   // state only drives the disabled look.
   const [busy, setBusy] = useState(false);
@@ -139,7 +135,6 @@ export function LearningSection({ active }: { active: Enrollment }) {
     }, [targetsPolling, reloadTargets]),
   );
 
-  const canAdd = availableTargets(enrollments).length > 0;
   const action: HomeAction | null = next.current ? homeActionOf(next.current) : null;
   const photoCard = homePhotoCard(imports);
   // Phase 57 (spec D11). One card per path, by priority; phase 64 (spec D3) shows them as a
@@ -330,52 +325,6 @@ export function LearningSection({ active }: { active: Enrollment }) {
 
   return (
     <>
-      <Pressable
-        accessibilityRole="button"
-        testID="enrollment-switcher"
-        onPress={() => setSwitcherOpen((open) => !open)}
-        style={styles.switcher}
-      >
-        <Text style={styles.switcherLabel}>
-          {strings.learningLabel(strings.languageName(active.target_language))}
-        </Text>
-      </Pressable>
-
-      {switcherOpen ? (
-        <View style={styles.switcherList}>
-          {enrollments.map((enrollment) => (
-            <Pressable
-              key={enrollment.id}
-              accessibilityRole="button"
-              accessibilityState={{ selected: enrollment.id === active.id }}
-              testID={`enrollment-option-${enrollment.target_language}`}
-              onPress={() => {
-                switchTo(enrollment.id);
-                setSwitcherOpen(false);
-              }}
-              style={[styles.switcherItem, enrollment.id === active.id && styles.switcherItemActive]}
-            >
-              <Text style={styles.switcherItemLabel}>
-                {strings.languageName(enrollment.target_language)}
-              </Text>
-            </Pressable>
-          ))}
-          {canAdd ? (
-            <Pressable
-              accessibilityRole="button"
-              testID="enrollment-add"
-              onPress={() => {
-                setSwitcherOpen(false);
-                router.push('/enroll');
-              }}
-              style={styles.switcherItem}
-            >
-              <Text style={styles.switcherAddLabel}>{strings.addLanguage}</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
-
       <CardStack
         resetKey={order.join(',')}
         cards={order.map((card, at) => ({ key: card, urgent: dots[at]?.urgent ?? false, node: cardNode(card) }))}
@@ -400,44 +349,6 @@ export function LearningSection({ active }: { active: Enrollment }) {
         </Pressable>
       ) : null}
 
-      {/* Phase 53. Shown once the first read of the targets lands, as the cards are. */}
-      {targetList ? (
-        <Pressable
-          accessibilityRole="button"
-          testID="target-new"
-          onPress={() => router.push('/targets/new')}
-          style={styles.secondaryButton}
-        >
-          <Text style={styles.secondaryButtonLabel}>{strings.targetNew}</Text>
-        </Pressable>
-      ) : null}
-
-      <Pressable
-        accessibilityRole="button"
-        testID="translate-entry"
-        onPress={() => router.push('/translate')}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryButtonLabel}>{strings.translateEntry}</Text>
-      </Pressable>
-
-      <Pressable
-        accessibilityRole="button"
-        testID="vocabulary-entry"
-        onPress={() => router.push('/vocabulary')}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryButtonLabel}>{strings.vocabularyEntry}</Text>
-      </Pressable>
-
-      <Pressable
-        accessibilityRole="button"
-        testID="photo-import-entry"
-        onPress={() => router.push('/photo-imports')}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryButtonLabel}>{strings.photoImportEntry}</Text>
-      </Pressable>
     </>
   );
 }
@@ -463,38 +374,4 @@ const styles = StyleSheet.create({
     color: colors.muted,
     writingDirection: 'rtl',
   },
-  secondaryButton: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  secondaryButtonLabel: {
-    color: colors.primary,
-    fontSize: fontSizes.md,
-    lineHeight: lineHeights.md,
-    fontWeight: '700',
-  },
-  switcher: {
-    alignSelf: 'flex-start',
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  switcherLabel: { color: colors.text, fontSize: fontSizes.md, fontWeight: '700', writingDirection: 'rtl' },
-  switcherList: {
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  switcherItem: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
-  switcherItemActive: { backgroundColor: colors.background },
-  switcherItemLabel: { color: colors.text, fontSize: fontSizes.md, writingDirection: 'rtl' },
-  switcherAddLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700', writingDirection: 'rtl' },
 });
