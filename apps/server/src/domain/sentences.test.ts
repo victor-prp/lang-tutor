@@ -68,6 +68,17 @@ describe('validateTranslateItem (spec D6)', () => {
   });
 });
 
+describe('validateSentenceItem keeps eight words (phase 62 D1, ruling R5)', () => {
+  const input = { form: 'parlare', target: 'it' as const, explanation: 'he' as const, avoid: [] as string[] };
+  it('accepts an eight-word gap sentence', () => {
+    expect(validateSentenceItem(input, { sentence: 'Oggi voglio parlare a lungo con mia madre.', gap: 'parlare', translation: 'היום אני רוצה לדבר הרבה עם אמא שלי.' }).ok).toBe(true);
+  });
+  it('degrades a ten-word gap sentence', () => {
+    const verdict = validateSentenceItem(input, { sentence: 'Oggi voglio parlare a lungo con mia madre e Tom.', gap: 'parlare', translation: 'היום אני רוצה לדבר הרבה עם אמא שלי ותום.' });
+    expect(verdict).toEqual({ ok: false, reason: 'the sentence has 10 words' });
+  });
+});
+
 describe('validateTranslateItem keeps five words (phase 59 D1)', () => {
   it('accepts a five-word Hebrew sentence', () => {
     const input = { form: 'prenotare', target: 'it' as const, explanation: 'he' as const, avoid: [] as string[] };

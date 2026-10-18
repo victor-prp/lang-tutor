@@ -185,6 +185,9 @@ function world(opts: {
         const markOf = (start?: number | null, end?: number | null) => (start != null && end != null ? { start, end } : null);
         const context = q.context ? { text: q.context, mark: markOf(q.contextMarkStart, q.contextMarkEnd) } : null;
         const mark = markOf(q.sentenceMarkStart, q.sentenceMarkEnd);
+        // Phase 62 (spec D2, D5): a tapped sentence's map, never its glosses, and a tapped line's Hebrew.
+        const words = q.words ? q.words.map(({ start, end, text, target }) => ({ start, end, text, target })) : null;
+        const tapped = context && { ...context, words, translation: q.contextTranslation ?? null };
         switch (q.type) {
           case 'typed_translation':
             return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, lemma: q.lemma, alternatives: q.alternatives!, context };
@@ -197,9 +200,9 @@ function world(opts: {
           case 'matching':
             return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, ...choice(), board };
           case 'multiple_choice':
-            return { ...base, type: q.type, question: q.answerForm ?? q.form, ...choice(), context };
+            return { ...base, type: q.type, question: q.answerForm ?? q.form, ...choice(), context: tapped };
           case 'new_meaning':
-            return { ...base, type: q.type, question: q.answerForm ?? q.form, known_meanings: q.knownMeanings!, ...choice(), context };
+            return { ...base, type: q.type, question: q.answerForm ?? q.form, known_meanings: q.knownMeanings!, ...choice(), context: tapped };
           case 'listen_choice':
             return { ...base, type: q.type, question: q.answerForm ?? q.form, part_of_speech: q.partOfSpeech, ...choice() };
           case 'read_aloud':
@@ -208,11 +211,11 @@ function world(opts: {
           case 'say_translation':
             return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, lemma: q.lemma, alternatives: q.alternatives!, context };
           case 'typed_meaning':
-            return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, meaning: q.prompt!, context };
+            return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, meaning: q.prompt!, context: tapped };
           case 'cloze_choice':
-            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, ...choice() };
+            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, ...choice(), words };
           case 'cloze_typed':
-            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, answer: gapText, alternatives: q.alternatives!, mark };
+            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, answer: gapText, alternatives: q.alternatives!, mark, words };
           case 'sentence_translation':
             return { ...base, type: q.type, question: q.sentenceTranslation!, meaning: q.prompt!, sentence: q.sentence!, gap, answer: gapText, mark, words: servedWords(q.words ?? null) };
         }
@@ -629,20 +632,22 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
   // choice, the second, with a gap in its example, a cloze choice.
   const GAP_PAYLOAD = tenPayload(TEN_CARDS.map((card, i) => (i === 4 ? PICK_FORM : card)));
 
-  it('asks a gap item with the blank taken from the saved example, and keeps that gap on the card', async () => {
+  // Phase 62 (spec D1): a gap item writes its own sentence, as a typed cloze's does.
+  it('asks a gap item for a sentence of its own, and keeps that sentence and its gap on the card', async () => {
     const probe = world({ context: EXAMPLES, reply: 'nope' });
     await expect(probe.service.prepareSession(GAP_PAYLOAD)).rejects.toThrow();
     const gapItems = JSON.parse(probe.llm.calls[0].user).items.filter((item: { task: string }) => item.task === 'gap');
     expect(gapItems.length).toBeGreaterThan(0);
     for (const item of gapItems) {
-      expect(item.blank).toBe(item.word);
+      expect(item).not.toHaveProperty('blank');
+      expect(item.avoid).toEqual([item.example]);
     }
 
-    const reply = (items: { key: string; task: string }[]) =>
+    const reply = (items: { key: string; task: string; word: string }[]) =>
       JSON.stringify({
         items: items.map((item) =>
           item.task === 'gap'
-            ? { key: item.key, distractors: ['один', 'два', 'три'] }
+            ? { key: item.key, distractors: ['один', 'два', 'три'], sentence: `Мы видим ${item.word} здесь.`, gap: item.word, translation: 'אנחנו רואים את זה כאן.' }
             : item.task === 'meaning'
               ? { key: item.key, distractors: ['דלת', 'קיר', 'תקרה'] }
               : item.task === 'word'
@@ -657,6 +662,7 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
     const cloze = input.questions.filter((q) => q.type === 'cloze_choice');
     expect(cloze.length).toBeGreaterThan(0);
     for (const q of cloze) {
+      expect(q.sentence).toMatch(/^Мы видим [а-яё]+ здесь\.$/u);
       expect(q.sentence!.slice(q.gapStart!, q.gapEnd!)).toMatch(/^[а-яё]+$/u);
       expect(q.options!.find((o) => o.is_correct)!.text).toBe(q.sentence!.slice(q.gapStart!, q.gapEnd!));
     }
@@ -1343,6 +1349,61 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
     expect(JSON.stringify(calls.sessionQuestions[0][2])).not.toContain('g-forces');
   });
 
+  // Phase 62 (spec D2). The context line's map and the gap sentence's, each turned onto
+  // its target-language sentence: a span there, the Hebrew to show.
+  const MAPPED_CONTEXT = JSON.stringify({
+    items: [
+      { key: 'q1', context: 'Please saw the plank in half.', context_translation: 'בבקשה תנסר את הקרש לשניים.', context_word: 'saw', sentence_words: [
+        { hebrew: 'בבקשה', translation: 'Please', word: '' },
+        { hebrew: 'תנסר', translation: 'saw', word: '' },
+        { hebrew: 'את הקרש', translation: 'the plank', word: 'w1' },
+        { hebrew: 'לשניים', translation: 'in half', word: '' },
+      ] },
+      { key: 'q3', sentence_word: 'נשלב' },
+      { key: 'q5', sentence_word: 'לחם', sentence_words: [
+        { hebrew: 'אנחנו אופים', translation: 'We bake', word: '' },
+        { hebrew: 'לחם', translation: 'bread', word: '' },
+        { hebrew: 'כל בוקר', translation: 'every morning', word: '' },
+      ] },
+    ],
+  });
+  const PLANK = [{ glossId: 'g-plank', word: 'plank', meaning: 'קרש' }];
+
+  it('stores a typed meaning\'s context map and a typed cloze\'s sentence map, the Hebrew under each target-language word (phase 62 D2)', async () => {
+    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: MAPPED_CONTEXT, checkReply: SENTENCES_CHECK, practised: PLANK });
+    await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
+    expect(insertedOf(calls)[0]).toMatchObject({
+      type: 'typed_meaning',
+      words: [
+        { start: 0, end: 6, text: 'בבקשה', glossId: null, target: false },
+        { start: 7, end: 10, text: 'תנסר', glossId: null, target: true },
+        { start: 11, end: 20, text: 'את הקרש', glossId: 'g-plank', target: false },
+        { start: 21, end: 28, text: 'לשניים', glossId: null, target: false },
+      ],
+    });
+    expect(insertedOf(calls)[4]).toMatchObject({
+      type: 'cloze_typed',
+      words: [
+        { start: 0, end: 7, text: 'אנחנו אופים', glossId: null, target: false },
+        { start: 8, end: 13, text: 'לחם', glossId: null, target: true },
+        { start: 14, end: 27, text: 'כל בוקר', glossId: null, target: false },
+      ],
+    });
+    // Served without the list's glosses; the context line also with its Hebrew.
+    expect(calls.sessionQuestions[0][0]).toMatchObject({
+      context: { text: 'Please saw the plank in half.', translation: 'בבקשה תנסר את הקרש לשניים.', words: expect.arrayContaining([{ start: 11, end: 20, text: 'את הקרש', target: false }]) },
+    });
+    expect(calls.sessionQuestions[0][4]).toMatchObject({ words: expect.arrayContaining([{ start: 8, end: 13, text: 'לחם', target: true }]) });
+    expect(JSON.stringify(calls.sessionQuestions[0])).not.toContain('g-plank');
+  });
+
+  it('keeps no map on a context line the checker sends back to the saved example (phase 62 D2)', async () => {
+    const checkReply = checking({ q1c: { context_meaning: 'לראות' }, q3: { natural_translation: "Let's combine forces." }, q5: { natural_translation: 'We bake bread every morning.' } });
+    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: MAPPED_CONTEXT, checkReply, practised: PLANK });
+    await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
+    expect(insertedOf(calls)[0]).toMatchObject({ type: 'typed_meaning', context: 'He will saw the branch off.', words: null });
+  });
+
   it('stores no word map on a translation card the context call did not map', async () => {
     const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT, checkReply: SENTENCES_CHECK });
     await service.prepareSession(payloadOf(SENTENCES, SENTENCE_CARDS));
@@ -1752,7 +1813,7 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     const GAP_WRONG = ['eat', 'sleep', 'sing', 'dance', 'swim'];
     const batch = JSON.stringify({
       items: [
-        { key: 'q2', distractors: GAP_WRONG },
+        { key: 'q2', distractors: GAP_WRONG, sentence: 'I download the new file.', gap: 'download', translation: 'אני מוריד את הקובץ החדש.' },
         { key: 'q3', distractors: [], sentence: 'We combine the two plans today.', gap: 'combine', translation: 'אנחנו משלבים את שתי התוכניות היום.', alternatives: [] },
         { key: 'q4', distractors: ['table', 'door', 'wall'] },
         { key: 'q5', distractors: [], alternatives: [] },
@@ -1760,12 +1821,12 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     });
     const natural = { q3: { natural_translation: 'We combine the two plans today.' } };
 
-    it('sends the checker the saved example with its gap written ___, and every usable option', async () => {
+    it('sends the checker the generated sentence with its gap written ___, and every usable option (phase 62 D1)', async () => {
       const { service, calls, checkerLlm } = world({ enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural) });
       await service.prepareSession(payloadOf(rows, cards));
       expect(insertedOf(calls).map((q) => q.type)).toEqual(['typed_meaning', 'cloze_choice', 'cloze_typed', 'reverse_choice', 'typed_translation']);
       expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q2')).toEqual({
-        key: 'q2', task: 'gap', sentence: 'I need to ___ the file first.', options: GAP_WRONG,
+        key: 'q2', task: 'gap', sentence: 'I ___ the new file.', options: GAP_WRONG,
       });
       expect(optionTexts(insertedOf(calls)[1])).toEqual(['download', 'eat', 'sleep', 'sing']);
     });
@@ -1983,11 +2044,11 @@ describe('prepareSession, phase 39 (spec D6): the new_meaning card', () => {
       { key: 'q3', distractors: [], alternatives: ['fetch'] },
     ],
   });
-  const SENTENCE = "She'll pick up the kids at five.";
+  const SENTENCE = "She'll pick up the kids now.";
   const contextReply = (sentence: string, word: string) =>
     JSON.stringify({
       items: [
-        { key: 'q1', context: sentence, context_translation: 'היא תאסוף את הילדים בחמש.', context_word: word },
+        { key: 'q1', context: sentence, context_translation: 'היא תאסוף את הילדים עכשיו.', context_word: word },
         { key: 'q2', context: 'השולחן במטבח עשוי מעץ.', context_translation: 'The kitchen table is made of wood.', context_word: 'השולחן' },
         { key: 'q3', context: 'אני רוצה להוריד את המשחק החדש הלילה.', context_translation: 'I want to download the new game tonight.', context_word: 'להוריד' },
       ],
@@ -2019,7 +2080,7 @@ describe('prepareSession, phase 39 (spec D6): the new_meaning card', () => {
       knownMeanings: ['להרים'],
       prompt: null,
       context: SENTENCE,
-      contextTranslation: 'היא תאסוף את הילדים בחמש.',
+      contextTranslation: 'היא תאסוף את הילדים עכשיו.',
       contextMarkStart: at,
       contextMarkEnd: at + 'pick up'.length,
     });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { contextLanguage, markedParts } from './context';
+import { contextLanguage, markedParts, wholeSentenceOf } from './context';
 
 describe('markedParts (phase 34 D6, D8)', () => {
   it('cuts a sentence around its marked word', () => {
@@ -35,5 +35,20 @@ describe('contextLanguage (phase 34 D6)', () => {
   it('is the target language under a target word', () => {
     expect(contextLanguage('typed_meaning', 'it')).toBe('it');
     expect(contextLanguage('multiple_choice', 'en')).toBe('en');
+  });
+});
+
+// Phase 62 (spec D5, final review). A context line's whole translation once the card
+// is answered, with a word map or without one (a saved example, a card stored before).
+describe('wholeSentenceOf (phase 62 D5)', () => {
+  const line = { text: 'Mangiamo e poi usciamo.', mark: null, translation: 'אוכלים ואחר כך יוצאים.' };
+  it('is the line\'s translation once answered, mapped or not', () => {
+    expect(wholeSentenceOf(line, true)).toBe('אוכלים ואחר כך יוצאים.');
+    expect(wholeSentenceOf({ ...line, words: [{ start: 0, end: 8, text: 'אוכלים', target: false }] }, true)).toBe('אוכלים ואחר כך יוצאים.');
+  });
+  it('is nothing before the answer, or for a line served with no translation', () => {
+    expect(wholeSentenceOf(line, false)).toBeNull();
+    expect(wholeSentenceOf({ text: 'x', mark: null }, true)).toBeNull();
+    expect(wholeSentenceOf({ ...line, translation: null }, true)).toBeNull();
   });
 });

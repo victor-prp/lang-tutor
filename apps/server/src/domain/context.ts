@@ -5,7 +5,7 @@ import type { QuestionType } from '@lang-tutor/core/domain';
 import { comparable, learnerWordsJson, type GenerationContext, type LearnerWord } from './distractors';
 import { LANGUAGES, type LanguageCode } from './languages';
 import { findMark, findMarks, type Mark } from './marks';
-import { SENTENCE_MAX_WORDS, SENTENCE_MIN_WORDS, wordCount } from './sentences';
+import { SENTENCE_MAX_WORDS, SENTENCE_MIN_WORDS, SHORT_SENTENCE_MAX_WORDS, SHORT_SENTENCE_MIN_ASKED, wordCount } from './sentences';
 import { dropNulls, unfence } from './translation';
 
 /**
@@ -44,6 +44,9 @@ export function contextLanguageOf(type: QuestionType): ContextLanguage | null {
 
 /** Spec D8: the two sentence cards whose Hebrew names the practised word. */
 const MARKS_SENTENCE: ReadonlySet<QuestionType> = new Set(['cloze_typed', 'sentence_translation']);
+/** Phase 62 (spec D2). The sentence cards the call maps word by word, and so asks
+ *  a mark item of: the two above, and a cloze choice, whose mark is not stored. */
+const MAPPED_SENTENCE: ReadonlySet<QuestionType> = new Set([...MARKS_SENTENCE, 'cloze_choice']);
 
 /** A card's context as stored (spec D12): the sentence shown, its other half
  *  (never shown, read by the judge, D7), and the marked word, or null. */
@@ -73,6 +76,9 @@ export type BareContextItem = {
   refused: string[];
   /** Spec D6: the last sentences this gloss showed on this card type. */
   recent: string[];
+  /** Phase 62 (spec D2). A target sentence: the call also maps each word of its
+   *  translation to the sentence's, as a mark item's map does. */
+  map?: boolean;
 };
 
 /** One sentence card's request (spec D8): which words of its Hebrew stand for `word`. */
@@ -86,7 +92,8 @@ export type MarkItem = {
   sentence: string;
   /** Its target-language sentence. */
   translation: string;
-  /** Phase 59 (spec D2). A translation card: the call also maps each Hebrew word. */
+  /** Phase 59 (spec D2). A translation card: the call also maps each Hebrew word.
+   *  Phase 62: a gap card too, whose map the service turns onto its sentence. */
   map?: boolean;
 };
 
@@ -120,7 +127,7 @@ export function contextItemFor(input: {
   sentence: { hebrew: string; target: string; word: string } | null;
 }): ContextItem | null {
   const { key, type, row } = input;
-  if (MARKS_SENTENCE.has(type)) {
+  if (MAPPED_SENTENCE.has(type)) {
     return input.sentence
       ? {
           key,
@@ -129,7 +136,7 @@ export function contextItemFor(input: {
           meaning: row.translation,
           sentence: input.sentence.hebrew,
           translation: input.sentence.target,
-          ...(type === 'sentence_translation' ? { map: true } : {}),
+          map: true,
         }
       : null;
   }
@@ -154,6 +161,8 @@ export function contextItemFor(input: {
         ? unique([row.form, row.lemma, ...(row.answerForm ? [row.answerForm] : []), ...row.acceptedAnswers, ...input.alternatives])
         : [],
     recent: [...input.recent],
+    // Phase 62 (spec D2): a target sentence is tapped word by word; a Hebrew one is not (R1).
+    ...(task === 'target' ? { map: true } : {}),
   };
 }
 
@@ -164,9 +173,11 @@ function language(code: string) {
 }
 
 /** What the prompt asks for. The rules allow a little more either side
- *  (SENTENCE_MIN_WORDS to SENTENCE_MAX_WORDS, a gap sentence's), so a sentence
- *  one word off is not lost to the fallback. */
+ *  (SENTENCE_MIN_WORDS to SENTENCE_MAX_WORDS), so a sentence one word off is
+ *  not lost to the fallback. Phase 62 (spec D1): the Hebrew sentence's alone; a
+ *  target sentence is asked and kept to SHORT_SENTENCE_MAX_WORDS, as a gap's is. */
 const ASKED_WORDS = '4 to 10';
+const MAX_WORDS: Record<ContextLanguage, number> = { target: SHORT_SENTENCE_MAX_WORDS, explanation: SENTENCE_MAX_WORDS };
 
 /** The saved example's half a sentence in `task`'s language would repeat. */
 const exampleHalf = (item: BareContextItem): string | null =>
@@ -187,7 +198,7 @@ export function buildContextPrompt(input: {
     'A card that shows a word alone does not say which of its senses it asks for. A short sentence beside the word',
     `${CONTEXT_MARKER}: it uses the word in the one sense the card practises, so that a reader can tell that sense, and no other, from the sentence alone.`,
     'Each item has a task:',
-    `- "target": the card shows the ${learned.name} word in word, which means meaning in ${explained.name}. In context, write a short, natural, everyday ${learned.name} sentence of ${ASKED_WORDS} words that uses word exactly as it is written there, once, in the sense of meaning and of the example, never in another sense. In context_word, write word as it appears in context. In context_translation, write the whole sentence in natural ${explained.name}.`,
+    `- "target": the card shows the ${learned.name} word in word, which means meaning in ${explained.name}. In context, write a short, natural, everyday ${learned.name} sentence of ${SHORT_SENTENCE_MIN_ASKED} to ${SHORT_SENTENCE_MAX_WORDS} words that uses word exactly as it is written there, once, in the sense of meaning and of the example, never in another sense. When learner_words is given, the learner knows only those ${learned.name} words and word itself: build the sentence from word and learner_words, in whatever form each needs, adding another word only where the sentence cannot stand, or cannot show the sense, without it, and then a simple one (a pronoun, an article, a preposition, or the verb to be or to have); showing the sense comes first, then a short sentence, then the learner's words. Count its words: never more than ${SHORT_SENTENCE_MAX_WORDS}. In context_word, write word as it appears in context. In context_translation, write the whole sentence in natural ${explained.name}. When the item has map, also fill sentence_words as a mark item's, with context_translation as its sentence and context as its translation.`,
     `- "explanation": the card shows the ${explained.name} word in word, which translates the ${learned.name} word in translates. In context, write a short, natural, everyday ${explained.name} sentence of ${ASKED_WORDS} words that uses word once, in whatever form the sentence needs, in the sense in which it translates translates and the example shows, never in another sense. Never write a ${learned.name} word in it. In context_word, write that ${explained.name} word exactly as it is written in context, with any prefix it takes. In context_translation, write the whole sentence in natural ${learned.name}.`,
     `- "mark": sentence is a ${explained.name} sentence, and translation is a ${learned.name} translation of it that uses word, which means meaning. In sentence_word, write the ${explained.name} word or words of sentence that stand for word, exactly as they are written in sentence, with any prefix. Leave context, context_translation and context_word empty. When the item has map, also fill sentence_words, in the order of sentence, with every word of sentence in exactly one entry. An entry is one word of sentence, or several words of sentence that the translation renders together, such as יש לי rendered by a single word for "I have": never split those into entries with an empty translation. In hebrew, write the entry's words exactly as written in sentence, with any prefix; in translation, the words of translation that render them, exactly as written in translation, empty only when translation renders them with nothing at all; in word, the key of the learner_words entry they render, in any form, or empty.`,
     'A sentence must differ from every sentence in avoid.',
@@ -196,7 +207,8 @@ export function buildContextPrompt(input: {
     ...learned.writing,
   ].join('\n');
 
-  const mapped = input.items.some((item) => item.task === 'mark' && item.map);
+  // Phase 62 (spec D2): a target item is mapped too.
+  const mapped = input.items.some((item) => item.map);
   const user = JSON.stringify({
     items: input.items.map((item) => {
       if (item.task === 'mark') {
@@ -223,6 +235,7 @@ export function buildContextPrompt(input: {
         example: item.example,
         example_translation: item.exampleTranslation,
         ...(avoid.length > 0 ? { avoid } : {}),
+        ...(item.map ? { map: true } : {}),
       };
     }),
     ...(mapped && input.learnerWords && input.learnerWords.length > 0 ? { learner_words: learnerWordsJson(input.learnerWords) } : {}),
@@ -267,7 +280,7 @@ function validate(item: BareContextItem, found: Found | undefined, languages: { 
   if (translation === '') return fail('the sentence has no translation');
   if (ASTRAL.test(text) || ASTRAL.test(translation)) return fail('the sentence holds a character outside the basic plane');
   const words = wordCount(text);
-  if (words < SENTENCE_MIN_WORDS || words > SENTENCE_MAX_WORDS) return fail(`the sentence has ${words} words`);
+  if (words < SENTENCE_MIN_WORDS || words > MAX_WORDS[item.task]) return fail(`the sentence has ${words} words`);
 
   const own = item.task === 'target' ? languages.target : languages.explanation;
   const other = item.task === 'target' ? languages.explanation : languages.target;
@@ -418,3 +431,60 @@ export function wordMapFor(
 /** Phase 59 (spec D5). A word map as the card is served it: never the list's glosses. */
 export const servedWords = (words: readonly MapWord[] | null) =>
   words ? words.map(({ start, end, text, target }) => ({ start, end, text, target })) : null;
+
+/** One entry of the call's map as it answers it (LlmContextSchema's `sentence_words`):
+ *  words of the Hebrew, and the target-language words that render them. */
+type MapEntry = { hebrew: string; translation: string; word: string };
+
+/**
+ * Phase 62 (spec D2). A target-language sentence's word map: a gap card's sentence
+ * or a context line, each with its Hebrew `translation`. The call maps the Hebrew
+ * word by word, as for a translation card, and this turns each entry round onto
+ * `text`: its span is where its target-language words are, and what a tap shows
+ * is its Hebrew. Never a refusal: a bad entry costs that word its tap.
+ *
+ * - An entry with an empty side, whose Hebrew is not in `translation`, or whose
+ *   words are nowhere in `text` that no kept entry already holds, is dropped. The
+ *   two languages order words differently, so each is looked for anywhere.
+ * - `target` (the gap, or the context's mark) is the practised word's tap, exactly
+ *   its span: its Hebrew is the first entry's over it, or `meaning`. Any other
+ *   entry over it is dropped, so the gap stays the gap. With no target (a word the
+ *   line holds twice is not marked) there is no map: that word would be a free tap.
+ * - A free entry whose Hebrew holds `meaning`, as whole words or behind a prefix,
+ *   is dropped: on a word card that is the answer, and a tap must never show it.
+ */
+export function italianWordMap(input: {
+  text: string;
+  translation: string;
+  target: Mark | null;
+  meaning: string;
+  entries: readonly MapEntry[] | undefined;
+  learner: readonly LearnerWord[];
+  ownGlossId: string;
+}): MapWord[] | null {
+  // Final review: with no target the practised word could not be found in `text`,
+  // so it would be a free tap, its translation the answer: nothing is tapped.
+  const { target } = input;
+  if (!input.entries || !target) return null;
+  const glossOf = new Map(input.learner.map((word) => [word.key, word.glossId]));
+  const kept: MapWord[] = [];
+  let targetText: string | null = null;
+  for (const entry of input.entries) {
+    const hebrew = entry.hebrew.trim();
+    const words = entry.translation.trim();
+    if (hebrew === '' || words === '' || !holds(input.translation, hebrew)) continue;
+    const at = findMarks(input.text, words).find((place) => !kept.some((word) => overlaps(word, place)));
+    if (!at) continue;
+    if (overlaps(at, target)) {
+      targetText ??= hebrew;
+      continue;
+    }
+    // Whole words, or behind a Hebrew prefix (ואחר כך holds אחר כך), as findMarks reads it.
+    if (holds(hebrew, input.meaning) || findMarks(hebrew, input.meaning).length > 0) continue;
+    const glossId = glossOf.get(entry.word.trim()) ?? null;
+    kept.push({ start: at.start, end: at.end, text: hebrew, glossId: glossId === input.ownGlossId ? null : glossId, target: false });
+  }
+  kept.push({ start: target.start, end: target.end, text: targetText ?? input.meaning, glossId: null, target: true });
+  kept.sort((a, b) => a.start - b.start);
+  return kept.length > 0 ? kept : null;
+}

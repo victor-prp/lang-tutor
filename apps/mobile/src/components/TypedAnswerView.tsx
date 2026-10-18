@@ -13,7 +13,7 @@ import { MAX_JUDGED_TEXT, rightAnswer } from '@lang-tutor/core/domain';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type TextStyle } from 'react-native';
 
-import { ContextLine } from '@/components/ContextLine';
+import { ContextLine, type SentenceTaps } from '@/components/ContextLine';
 import { ListenPrompt } from '@/components/ListenPrompt';
 import { RetryNotice } from '@/components/RetryNotice';
 import { contextLanguage } from '@/context';
@@ -83,6 +83,8 @@ type Props = {
   onRetypeTyping?: () => void;
   /** A retype checked; never sent. */
   onRetype?: (text: string) => void;
+  /** Phase 62 (spec D3). A typed meaning's context line is tapped word by word. */
+  taps?: SentenceTaps;
 };
 
 /**
@@ -109,6 +111,7 @@ export function TypedAnswerView({
   retypeTitle,
   onRetypeTyping,
   onRetype,
+  taps,
 }: Props) {
   const [text, setText] = useState('');
   // Phase 39 (spec D8): the last send was in the wrong alphabet, or one word
@@ -185,7 +188,7 @@ export function TypedAnswerView({
             </Text>
           ) : null}
           {'context' in question && question.context ? (
-            <ContextLine context={question.context} language={contextLanguage(question.type, language)} />
+            <ContextLine context={question.context} language={contextLanguage(question.type, language)} taps={taps} />
           ) : null}
         </>
       ) : null}

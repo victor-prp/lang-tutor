@@ -76,3 +76,19 @@ describe('sentenceUnits (phase 59c, design A)', () => {
     expect(joined(units)).toBe(text);
   });
 });
+
+// Phase 62 (spec D3). A target-language sentence is cut the same way: letter for
+// letter, an elided article staying with its word.
+describe('sentenceUnits over an Italian sentence (phase 62)', () => {
+  it('keeps the sentence letter for letter, with each mapped run one unit', () => {
+    const text = "L'acqua è fredda oggi.";
+    const words = [
+      { start: 0, end: 7, text: 'המים', target: false },
+      { start: 10, end: 16, text: 'קרים', target: true },
+    ];
+    const units = sentenceUnits(text, words, null);
+    expect(units.map((unit) => unit.before + unit.text + unit.after).join('')).toBe(text);
+    expect(units.filter((unit) => unit.tap !== null).map((unit) => unit.text)).toEqual(["L'acqua", 'fredda']);
+    expect(units.find((unit) => unit.text === 'fredda')).toMatchObject({ target: true, translation: 'קרים' });
+  });
+});

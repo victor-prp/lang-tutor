@@ -6,7 +6,7 @@ describe('sentence-card strings (phase 27 D5, D6)', () => {
   it('words the three instructions and the reference label exactly', () => {
     expect(strings.questionInstructionCloze).toBe('איזו מילה חסרה?');
     expect(strings.questionInstructionClozeTyped('it')).toEqual({ before: 'השלימו את המילה החסרה ב', language: 'איטלקית', after: '' });
-    expect(strings.questionInstructionTranslate('it')).toEqual({ before: 'תרגמו את המשפט ל', language: 'איטלקית', after: '' });
+    expect(strings.questionInstructionTranslate('it')).toEqual({ before: 'תרגמו את כל המשפט ל', language: 'איטלקית', after: '' });
     expect(strings.translationReference).toBe('תרגום לדוגמה:');
   });
 });
@@ -72,7 +72,7 @@ describe('words from a photo', () => {
 
 describe('meaning-recall strings (phase 27 D12)', () => {
   it('words the instruction and both banners exactly', () => {
-    expect(strings.questionInstructionMeaning('he')).toEqual({ before: 'כתבו את הפירוש ב', language: 'עברית', after: '' });
+    expect(strings.questionInstructionMeaning('he')).toEqual({ before: 'תרגמו את המילה ל', language: 'עברית', after: '' });
     expect(strings.feedbackSavedMeaning).toBe('נכון! הפירוש השמור:');
     expect(strings.feedbackOtherSense).toBe('נכון, אבל כאן תרגלנו:');
   });
@@ -98,16 +98,16 @@ describe('new-meaning strings (phase 39 D6)', () => {
   it('words the instruction, the known-meanings line and the question exactly', () => {
     expect(strings.questionInstructionNewMeaning).toBe('פירוש חדש למילה שאתם מכירים');
     expect(strings.knownMeanings(['להרים', 'לאסוף'])).toBe('כבר למדתם: להרים, לאסוף');
-    expect(strings.newMeaningQuestion).toBe('מה עוד זה אומר?');
+    expect(strings.newMeaningQuestion).toBe('מה עוד המילה אומרת?');
   });
 });
 
 describe('instructions with a bold language (phase 39 D9)', () => {
   it('splits each typed instruction around the language name', () => {
-    expect(strings.questionInstructionTyped('it')).toEqual({ before: 'כתבו את המילה ב', language: 'איטלקית', after: '' });
+    expect(strings.questionInstructionTyped('it')).toEqual({ before: 'תרגמו את המילה ל', language: 'איטלקית', after: '' });
     expect(strings.questionInstructionDictation('ru')).toEqual({ before: 'הקשיבו וכתבו ב', language: 'רוסית', after: '' });
     expect(strings.questionInstructionClozeTyped('it')).toEqual({ before: 'השלימו את המילה החסרה ב', language: 'איטלקית', after: '' });
-    expect(strings.questionInstructionTranslate('it')).toEqual({ before: 'תרגמו את המשפט ל', language: 'איטלקית', after: '' });
+    expect(strings.questionInstructionTranslate('it')).toEqual({ before: 'תרגמו את כל המשפט ל', language: 'איטלקית', after: '' });
     expect(strings.wrongScriptNotice('en')).toEqual({ before: 'התשובה צריכה להיות ב', language: 'אנגלית', after: '' });
   });
 });
@@ -323,5 +323,27 @@ describe('removing the words a filter shows (phase 58 D4, 58b R2)', () => {
     expect(strings.vocabularyRemoveMessage).toBe('המילים יוסרו מהרשימה ומהיעדים. אי אפשר לבטל.');
     expect(strings.vocabularyRemoveConfirm).toBe('הסרה');
     expect(strings.vocabularyRemoveFailed).toBe('ההסרה נכשלה. נסו שוב.');
+  });
+});
+
+// Phase 62 (spec D7). Every sentence card says what is translated: the word, or the whole sentence.
+describe('what to translate (phase 62 D7)', () => {
+  it('names the word on the six word cards and the whole sentence on a translation', () => {
+    expect(strings.questionInstruction).toBe('תרגמו את המילה לעברית');
+    expect(strings.questionInstructionMeaning('he')).toEqual({ before: 'תרגמו את המילה ל', language: 'עברית', after: '' });
+    expect(strings.newMeaningQuestion).toBe('מה עוד המילה אומרת?');
+    expect(strings.questionInstructionReverse('it')).toBe('תרגמו את המילה לאיטלקית');
+    expect(strings.questionInstructionTyped('it')).toEqual({ before: 'תרגמו את המילה ל', language: 'איטלקית', after: '' });
+    expect(strings.questionInstructionSay('it')).toBe('אמרו את המילה באיטלקית');
+    expect(strings.questionInstructionTranslate('it')).toEqual({ before: 'תרגמו את כל המשפט ל', language: 'איטלקית', after: '' });
+  });
+  it('labels the context line an example, and the whole sentence\'s translation once answered', () => {
+    expect(strings.exampleLabel).toBe('משפט לדוגמה:');
+    expect(strings.sentenceIn('he')).toBe('המשפט בעברית:');
+    expect(strings.tapWordHint('he')).toBe('הקישו על מילה כדי לראות אותה בעברית');
+  });
+  it('leaves the gap cards as they were', () => {
+    expect(strings.questionInstructionCloze).toBe('איזו מילה חסרה?');
+    expect(strings.questionInstructionClozeTyped('it')).toEqual({ before: 'השלימו את המילה החסרה ב', language: 'איטלקית', after: '' });
   });
 });

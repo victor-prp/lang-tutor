@@ -1,7 +1,8 @@
 import type { LlmContext } from '@lang-tutor/core/api';
 import { normaliseHebrew } from '@lang-tutor/core/domain';
 
-import { contextItemFor, markFor, resolveContext, wordMapFor, type ContextItem } from '../../src/domain/context';
+import { findGap } from '../../src/domain/cloze';
+import { contextItemFor, italianWordMap, markFor, resolveContext, wordMapFor, type ContextItem } from '../../src/domain/context';
 import { comparable } from '../../src/domain/distractors';
 import { isInScript } from '../../src/domain/languages';
 import type { ContextCase } from './cases';
@@ -58,6 +59,30 @@ export function contextTier1(kase: ContextCase, answer: LlmContext): Check[] {
   ];
 }
 
+/** Phase 62. The learner's words as the prompts are sent them, keyed w1, w2, … */
+const learnerOf = (kase: ContextCase) =>
+  (kase.learner ?? []).map((entry, index) => ({ key: `w${index + 1}`, glossId: `g-w${index + 1}`, ...entry }));
+
+/** Phase 62 (spec D2). A target-language sentence's map: the practised word its
+ *  target, and at least one other word a tap can show. */
+function lineMapped(map: ReturnType<typeof italianWordMap>, entries: unknown): Check {
+  const ok = map !== null && map.some((word) => word.target) && map.some((word) => !word.target);
+  return { name: 'the sentence is mapped, its word the target and another word tappable', ok, detail: JSON.stringify(map ?? entries ?? null) };
+}
+
+/** Phase 62 (spec D1). As run.ts's listShare: the share of the line's words, its
+ *  own word left out, from the learner's list, at a word's first four letters. */
+export const LINE_LIST_SHARE_THRESHOLD = 0.5;
+function listShareOf(text: string, own: string, learner: { word: string }[]): Check {
+  const listWords = [...new Set(learner.flatMap((entry) => entry.word.toLowerCase().split(/\s+/u)))];
+  const fromList = (token: string) =>
+    listWords.some((word) => token === word || (word.length >= 4 && token.length >= 4 && token.slice(0, 4) === word.slice(0, 4)));
+  const ownWords = new Set(own.toLowerCase().split(/\s+/u));
+  const tokens = text.toLowerCase().split(/[^\p{L}\p{M}]+/u).filter((token) => token !== '' && !ownWords.has(token)).filter((token) => token.length > 2 || fromList(token));
+  const share = tokens.length === 0 ? 1 : tokens.filter(fromList).length / tokens.length;
+  return { name: "the line is built from the learner's list", ok: share >= LINE_LIST_SHARE_THRESHOLD, detail: `${(share * 100).toFixed(0)}%: ${text}` };
+}
+
 /** Ruling R3: kept by the server's rules, the marked word a form of the card's
  *  word, and the hidden Hebrew in the card's sense, not another word's. */
 export function contextTier2(kase: ContextCase, answer: LlmContext): Check[] {
@@ -67,6 +92,12 @@ export function contextTier2(kase: ContextCase, answer: LlmContext): Check[] {
     const mark = markFor(item, got);
     const marked = mark ? item.sentence.slice(mark.start, mark.end) : null;
     const checks: Check[] = [{ name: `${kase.sentence!.marked} is marked`, ok: marked !== null && comparable(marked) === comparable(kase.sentence!.marked), detail: marked ?? `${got?.sentence_word ?? '(none)'} not found` }];
+    // Phase 62 (spec D2): a gap card's map, turned onto its target-language sentence.
+    if (kase.type !== 'sentence_translation') {
+      const gap = findGap(item.translation, [item.word]);
+      checks.push(lineMapped(italianWordMap({ text: item.translation, translation: item.sentence, target: gap, meaning: kase.translation, entries: got?.sentence_words, learner: learnerOf(kase), ownGlossId: 'g-c' }), got?.sentence_words));
+      return checks;
+    }
     // Phase 59: each expected run is tappable, with the reference's words for it.
     const map = wordMapFor(item, got, mark, [], 'g-c') ?? [];
     for (const run of kase.mapped ?? []) {
@@ -82,6 +113,13 @@ export function contextTier2(kase: ContextCase, answer: LlmContext): Check[] {
   const outcome = resolveContext(item, got, { target: kase.target, explanation: 'he' });
   const word = comparable(got?.context_word ?? '');
   const checks: Check[] = [{ name: 'the server keeps the sentence', ok: outcome.dropped === null, detail: outcome.dropped ?? undefined }];
+  // Phase 62 (spec D1, D2): a target-language line is mapped, its word the target,
+  // and built from the learner's list as much as it can.
+  const line = outcome.dropped === null ? outcome.context : null;
+  if (item.task === 'target' && item.map && line?.translation) {
+    checks.push(lineMapped(italianWordMap({ text: line.text, translation: line.translation, target: line.mark, meaning: kase.translation, entries: got?.sentence_words, learner: learnerOf(kase), ownGlossId: 'g-c' }), got?.sentence_words));
+  }
+  if (kase.learner && line) checks.push(listShareOf(line.text, kase.form, kase.learner));
   // A word that begins with "saw" is never see or seen: this is R3's
   // "context_word is not see/seen" too.
   if (kase.formsOf) {

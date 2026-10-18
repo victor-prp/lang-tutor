@@ -1274,8 +1274,6 @@ export type SentenceCaseItem = {
   translation: string;
   example: string;
   exampleTranslation: string;
-  /** Gap only: words that would also fit the blank and so must never be offered. */
-  fits?: string[];
   /** Sentence and translate: words whose presence shows the wrong sense. */
   offSense?: string[];
   /** Sentences of earlier sessions: in the learned language for a sentence card,
@@ -1291,8 +1289,9 @@ export type SentenceCase = {
   items: SentenceCaseItem[];
   /** Phase 48 (spec D8). Also asks the real checker, and at least three wrong options must survive it. */
   checked?: boolean;
-  /** Phase 59 (spec D1). Translate only: the learner's practised words, which the
-   *  translation is built from as much as it can (tier 2, LIST_SHARE_THRESHOLD). */
+  /** Phase 59 (spec D1). The learner's practised words, which the target-language
+   *  sentence is built from as much as it can (tier 2, LIST_SHARE_THRESHOLD).
+   *  Phase 62 (spec D1): a gap or sentence item's too, not only a translation's. */
   learner?: { word: string; meaning: string }[];
 };
 
@@ -1306,37 +1305,44 @@ const word = (
   rest: Partial<SentenceCaseItem> = {},
 ): SentenceCaseItem => ({ form, lemma, partOfSpeech, translation, example, exampleTranslation, ...rest });
 
+/** Phase 59 (spec D1). Victor's Italian list on 2026-10-16, his practised words as
+ *  findPractisedWords lists them: the sentences his cards gave him used none of it. */
+const VICTOR_IT_LIST = [
+  ['poi', 'אחר כך'], ['ci sono', 'להיות'], ['fratello', 'אח'], ['ora', 'עכשיו'], ['ho', 'לבעול'],
+  ['qui', 'כאן'], ['io', 'אני'], ['con', 'עם'], ['poi', 'לאחר מכן'], ['ora', 'שעה'], ['ora', 'שעות'], ['ora', 'תכף'], ['poi', 'אז'],
+].map(([word, meaning]) => ({ word, meaning }));
+
+// Phase 62 (spec D1). A gap sentence, to type or to choose, from his list too.
+const VICTOR_GAP_WORDS = [
+  word('con', 'con', 'preposition' as PartOfSpeech, 'עם', 'Vado con amici.', 'אני הולך עם חברים.'),
+  word('poi', 'poi', 'adverb', 'אחר כך', 'Mangiamo adesso, e poi andiamo.', 'נאכל עכשיו, ואחר כך נלך.'),
+  word('fratello', 'fratello', 'noun', 'אח', 'Mio fratello abita qui.', 'אחי גר כאן.'),
+];
+
+// Phase 62 (spec D1). A gap item writes its own sentence now, so what fits its blank is
+// not known before the call: the real checker reads its wrong options against the
+// sentence written (`checked`), and the probe asks whether the sentence points to its word.
 export const GAP_CASES: SentenceCase[] = [
   {
     label: 'gap it: a table could also be set, cleaned or reserved',
     task: 'gap',
     from: 'it',
+    checked: true,
     items: [
-      word('prenotare', 'prenotare', 'verb', 'להזמין', 'Voglio prenotare un tavolo per due.', 'אני רוצה להזמין שולחן לשניים.', {
-        fits: ['riservare', 'apparecchiare', 'pulire', 'preparare', 'sistemare'],
-      }),
-      word('parla', 'parlare', 'verb', 'לדבר', 'Lei parla tre lingue.', 'היא מדברת בשלוש שפות.', {
-        fits: ['conosce', 'sa', 'studia', 'impara'],
-      }),
-      word('compro', 'comprare', 'verb', 'לקנות', 'Compro il pane ogni mattina.', 'אני קונה לחם כל בוקר.', {
-        fits: ['mangio', 'prendo', 'taglio', 'faccio', 'vendo', 'preparo'],
-      }),
+      word('prenotare', 'prenotare', 'verb', 'להזמין', 'Voglio prenotare un tavolo per due.', 'אני רוצה להזמין שולחן לשניים.'),
+      word('parla', 'parlare', 'verb', 'לדבר', 'Lei parla tre lingue.', 'היא מדברת בשלוש שפות.'),
+      word('compro', 'comprare', 'verb', 'לקנות', 'Compro il pane ogni mattina.', 'אני קונה לחם כל בוקר.'),
     ],
   },
   {
     label: 'gap ru: a city has many good adjectives',
     task: 'gap',
     from: 'ru',
+    checked: true,
     items: [
-      word('купить', 'купить', 'verb', 'לקנות', 'Я хочу купить хлеб.', 'אני רוצה לקנות לחם.', {
-        fits: ['съесть', 'взять', 'испечь', 'заказать', 'нарезать', 'приготовить'],
-      }),
-      word('красивый', 'красивый', 'adjective', 'יפה', 'Это очень красивый город.', 'זו עיר יפה מאוד.', {
-        fits: ['большой', 'старый', 'тихий', 'чистый', 'маленький', 'современный', 'древний'],
-      }),
-      word('лук', 'лук', 'noun', 'בצל', 'Я режу лук для супа.', 'אני חותך בצל למרק.', {
-        fits: ['морковь', 'картошку', 'капусту', 'мясо', 'хлеб', 'сыр', 'чеснок', 'овощи'],
-      }),
+      word('купить', 'купить', 'verb', 'לקנות', 'Я хочу купить хлеб.', 'אני רוצה לקנות לחם.'),
+      word('красивый', 'красивый', 'adjective', 'יפה', 'Это очень красивый город.', 'זו עיר יפה מאוד.'),
+      word('лук', 'лук', 'noun', 'בצל', 'Я режу лук для супа.', 'אני חותך בצל למרק.'),
     ],
   },
   {
@@ -1344,16 +1350,11 @@ export const GAP_CASES: SentenceCase[] = [
     label: 'gap en: a table could also be cleaned, set or reserved',
     task: 'gap',
     from: 'en',
+    checked: true,
     items: [
-      word('book', 'book', 'verb', 'להזמין', 'I want to book a table.', 'אני רוצה להזמין שולחן.', {
-        fits: ['clean', 'set', 'reserve', 'buy', 'wipe', 'paint', 'move', 'build'],
-      }),
-      word('begin', 'begin', 'verb', 'להתחיל', 'We begin at nine.', 'אנחנו מתחילים בתשע.', {
-        fits: ['start', 'meet', 'leave', 'eat', 'finish', 'close', 'open', 'arrive'],
-      }),
-      word('tulip', 'tulip', 'noun', 'צבעוני', 'She planted a red tulip.', 'היא שתלה צבעוני אדום.', {
-        fits: ['rose', 'flower', 'poppy', 'daisy', 'lily', 'geranium'],
-      }),
+      word('book', 'book', 'verb', 'להזמין', 'I want to book a table.', 'אני רוצה להזמין שולחן.'),
+      word('begin', 'begin', 'verb', 'להתחיל', 'We begin at nine.', 'אנחנו מתחילים בתשע.'),
+      word('tulip', 'tulip', 'noun', 'צבעוני', 'She planted a red tulip.', 'היא שתלה צבעוני אדום.'),
     ],
   },
   {
@@ -1364,11 +1365,10 @@ export const GAP_CASES: SentenceCase[] = [
     from: 'en',
     checked: true,
     items: [
-      word('cream', 'cream', 'noun', 'שמנת', 'I like to put cream in my coffee.', 'אני אוהב לשים שמנת בקפה שלי.', {
-        fits: ['sugar', 'milk', 'honey', 'salt', 'water', 'oil', 'cinnamon', 'butter', 'syrup', 'ice', 'whiskey', 'chocolate', 'cocoa', 'vanilla', 'caramel', 'lemon', 'spice', 'foam', 'sweetener'],
-      }),
+      word('cream', 'cream', 'noun', 'שמנת', 'I like to put cream in my coffee.', 'אני אוהב לשים שמנת בקפה שלי.'),
     ],
   },
+  { label: "gap it, a learner's list: con, poi, fratello", task: 'gap', from: 'it', checked: true, learner: VICTOR_IT_LIST, items: VICTOR_GAP_WORDS },
 ];
 
 /** Four words per language: two of several senses, one with sentences to avoid, one plain. */
@@ -1424,14 +1424,12 @@ const sentenceCases = (task: 'sentence' | 'translate'): SentenceCase[] =>
     items: SENTENCE_WORDS[from],
   }));
 
-/** Phase 59 (spec D1). Victor's Italian list on 2026-10-16, his practised words as
- *  findPractisedWords lists them: the sentences his cards gave him used none of it. */
-const VICTOR_IT_LIST = [
-  ['poi', 'אחר כך'], ['ci sono', 'להיות'], ['fratello', 'אח'], ['ora', 'עכשיו'], ['ho', 'לבעול'],
-  ['qui', 'כאן'], ['io', 'אני'], ['con', 'עם'], ['poi', 'לאחר מכן'], ['ora', 'שעה'], ['ora', 'שעות'], ['ora', 'תכף'], ['poi', 'אז'],
-].map(([word, meaning]) => ({ word, meaning }));
 
-export const SENTENCE_CASES: SentenceCase[] = sentenceCases('sentence');
+
+export const SENTENCE_CASES: SentenceCase[] = [
+  ...sentenceCases('sentence'),
+  { label: "sentence it, a learner's list: con, poi, fratello", task: 'sentence', from: 'it', learner: VICTOR_IT_LIST, items: VICTOR_GAP_WORDS },
+];
 export const TRANSLATE_CASES: SentenceCase[] = [
   ...sentenceCases('translate'),
   // Phase 59 (spec D1). Three of his words practised in sentences built from the rest.
@@ -1685,6 +1683,9 @@ export type ContextCase = {
   /** Phase 59. A translation card: Hebrew runs the word map must make tappable,
    *  each with the reference's words for it. */
   mapped?: { hebrew: string; translation: string }[];
+  /** Phase 62 (spec D1). The learner's practised words, which a target-language
+   *  line is built from as much as it can. */
+  learner?: { word: string; meaning: string }[];
 };
 
 /** לנסר's root in any form: לנסר, ינסר, מנסר, נוסר, ניסר, נסרתי. */
@@ -1722,6 +1723,20 @@ export const CONTEXT_CASES: ContextCase[] = [
     target: 'en', type: 'typed_translation', form: 'download', lemma: 'download', partOfSpeech: 'verb', translation: 'להוריד',
     example: 'I need to download the file before the meeting.', exampleTranslation: 'אני צריך להוריד את הקובץ לפני הפגישה.',
     acceptedAnswers: ['get'],
+  },
+  // Phase 62 (spec D1, D2). A target-language line from Victor's list, mapped word by
+  // word with poi its target; and a typed gap's sentence mapped the same way.
+  {
+    label: "context it, a learner's list: poi on a multiple choice",
+    target: 'it', type: 'multiple_choice', form: 'poi', lemma: 'poi', partOfSpeech: 'adverb', translation: 'אחר כך',
+    example: 'Mangiamo adesso, e poi andiamo.', exampleTranslation: 'נאכל עכשיו, ואחר כך נלך.',
+    learner: VICTOR_IT_LIST,
+  },
+  {
+    label: 'context it, a gap mapped: fratello in a typed cloze',
+    target: 'it', type: 'cloze_typed', form: 'fratello', lemma: 'fratello', partOfSpeech: 'noun', translation: 'אח',
+    example: null, exampleTranslation: null,
+    sentence: { hebrew: 'אחי גר כאן עם אמא.', target: 'Mio fratello abita qui con la mamma.', word: 'fratello', marked: 'אחי' },
   },
   // F, eb95d246: the practised word, named in the sentence the card shows.
   {

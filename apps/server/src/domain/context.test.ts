@@ -11,6 +11,7 @@ import {
   fallbackContext,
   markFor,
   parseLlmContext,
+  italianWordMap,
   resolveContext,
   wordMapFor,
   type BareContextItem,
@@ -73,8 +74,11 @@ describe('contextItemFor', () => {
     expect(contextItemFor({ key: 'q5', type: 'sentence_translation', row: SAW, alternatives: [], recent: [], sentence })).toEqual({
       key: 'q5', task: 'mark', word: 'combine', meaning: 'לנסר', sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces.", map: true,
     });
-    expect(contextItemFor({ key: 'q5', type: 'cloze_typed', row: SAW, alternatives: [], recent: [], sentence })).not.toHaveProperty('map');
-    for (const type of ['listen_choice', 'matching', 'dictation', 'letter_tiles', 'read_aloud', 'cloze_choice'] as const) {
+    // Phase 62 (spec D2): so does each gap card, a cloze choice now too.
+    for (const type of ['cloze_typed', 'cloze_choice'] as const) {
+      expect(contextItemFor({ key: 'q5', type, row: SAW, alternatives: [], recent: [], sentence })).toMatchObject({ task: 'mark', map: true });
+    }
+    for (const type of ['listen_choice', 'matching', 'dictation', 'letter_tiles', 'read_aloud'] as const) {
       expect(contextItemFor({ key: 'q1', type, row: SAW, alternatives: [], recent: [], sentence: null })).toBeNull();
     }
     // A sentence card the batch left without a sentence asks nothing.
@@ -103,10 +107,148 @@ describe('buildContextPrompt', () => {
     expect(saw).toEqual({
       key: 'q1', task: 'target', word: 'saw', lemma: 'saw', part_of_speech: 'verb', meaning: 'לנסר',
       example: 'He will saw the branch off.', example_translation: 'הוא ינסר את הענף.',
-      avoid: ['He will saw the branch off.', 'Saw this plank, please.'],
+      avoid: ['He will saw the branch off.', 'Saw this plank, please.'], map: true,
     });
     expect(download).toMatchObject({ key: 'q2', task: 'explanation', word: 'להוריד', translates: 'download', avoid: ['אני צריך להוריד את הקובץ קודם.'] });
     expect(combine).toEqual({ key: 'q3', task: 'mark', word: 'combine', meaning: 'לשלב', sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces." });
+  });
+});
+
+describe('contextItemFor and buildContextPrompt: the context line, short and mapped (phase 62 D1, D2)', () => {
+  const learnerWords = [{ key: 'w1', glossId: 'g-amico', word: 'amico', meaning: 'חבר' }];
+  it('maps every target sentence, and no Hebrew one', () => {
+    expect(bare('multiple_choice', SAW)).toMatchObject({ task: 'target', map: true });
+    expect(bare('typed_meaning', SAW)).toMatchObject({ task: 'target', map: true });
+    expect(bare('reverse_choice', SAW)).not.toHaveProperty('map');
+  });
+  it('asks a target sentence for 4 to 8 words from the learner\'s words and its map, and leaves the Hebrew rule as it was', () => {
+    const prompt = buildContextPrompt({ items: [bare('multiple_choice', SAW), { ...bare('reverse_choice', DOWNLOAD), key: 'q2' }], from: 'en', to: 'he', learnerWords });
+    const lines = prompt.system.split('\n');
+    const target = lines.find((line) => line.startsWith('- "target":'))!;
+    expect(target).toContain('4 to 8 words');
+    expect(target).toContain('learner_words');
+    expect(target).toContain('fill sentence_words as a mark item');
+    // R5: the sense comes before the learner's words.
+    expect(target.indexOf('never in another sense')).toBeLessThan(target.indexOf('learner_words'));
+    const explanation = lines.find((line) => line.startsWith('- "explanation":'))!;
+    expect(explanation).toContain('4 to 10 words');
+    expect(explanation).not.toContain('learner_words');
+    const sent = JSON.parse(prompt.user);
+    expect(sent.items[0]).toMatchObject({ key: 'q1', task: 'target', map: true });
+    expect(sent.items[1]).not.toHaveProperty('map');
+    expect(sent.learner_words).toEqual([{ key: 'w1', word: 'amico', meaning: 'חבר' }]);
+  });
+  it('refuses a target sentence of nine words, and keeps a Hebrew one of nine', () => {
+    const nine = resolveContext(bare('typed_meaning', SAW), { key: 'q1', context: 'Please saw the old wooden plank in half now.', context_translation: 'בבקשה תנסר את קרש העץ הישן לשניים עכשיו.' }, LANGS);
+    expect(nine.dropped).toBe('the sentence has 9 words');
+    const hebrew = resolveContext(bare('typed_translation', DOWNLOAD), {
+      key: 'q1', context: 'אני רוצה להוריד את הקובץ הזה היום בבוקר.', context_translation: 'I want to download this file this morning.', context_word: 'להוריד',
+    }, LANGS);
+    expect(hebrew.dropped).toBeNull();
+  });
+});
+
+describe('italianWordMap (phase 62 D2)', () => {
+  const learner = [{ key: 'w1', glossId: 'g-casa', word: 'casa', meaning: 'בית' }, { key: 'w2', glossId: 'g-own', word: 'molto', meaning: 'מאוד' }];
+  // Questa casa nuova è molto grande. / הבית החדש הזה גדול מאוד.
+  const text = 'Questa casa nuova è molto grande.';
+  const translation = 'הבית החדש הזה גדול מאוד.';
+  const gap = { start: 20, end: 25 };
+  const input = (entries: { hebrew: string; translation: string; word: string }[], extra: object = {}) => ({
+    text, translation, target: gap, meaning: 'מאוד', entries, learner, ownGlossId: 'g-own', ...extra,
+  });
+
+  it('finds each entry\'s words in the Italian whatever the Hebrew order, and shows the Hebrew (Review Focus 1)', () => {
+    const map = italianWordMap(input([
+      { hebrew: 'הבית', translation: 'casa', word: 'w1' },
+      { hebrew: 'החדש', translation: 'nuova', word: '' },
+      { hebrew: 'הזה', translation: 'Questa', word: '' },
+      { hebrew: 'מאוד', translation: 'molto', word: 'w2' },
+      { hebrew: 'גדול', translation: 'grande', word: '' },
+    ]));
+    expect(map).toEqual([
+      { start: 0, end: 6, text: 'הזה', glossId: null, target: false },
+      { start: 7, end: 11, text: 'הבית', glossId: 'g-casa', target: false },
+      { start: 12, end: 17, text: 'החדש', glossId: null, target: false },
+      { start: 20, end: 25, text: 'מאוד', glossId: null, target: true },
+      { start: 26, end: 32, text: 'גדול', glossId: null, target: false },
+    ]);
+  });
+
+  it('makes the target exactly the gap, and drops an entry that crosses it (Review Focus 2)', () => {
+    const map = italianWordMap(input([
+      { hebrew: 'הבית', translation: 'casa', word: 'w1' },
+      { hebrew: 'גדול מאוד', translation: 'molto grande', word: '' },
+    ]));
+    expect(map).toEqual([
+      { start: 7, end: 11, text: 'הבית', glossId: 'g-casa', target: false },
+      { start: 20, end: 25, text: 'גדול מאוד', glossId: null, target: true },
+    ]);
+  });
+
+  it('gives the target the meaning when no entry covers it', () => {
+    expect(italianWordMap(input([{ hebrew: 'הבית', translation: 'casa', word: '' }]))).toEqual([
+      { start: 7, end: 11, text: 'הבית', glossId: null, target: false },
+      { start: 20, end: 25, text: 'מאוד', glossId: null, target: true },
+    ]);
+  });
+
+  it('drops a free entry whose Hebrew holds the card\'s answer, so a tap never shows it (Review Focus 3)', () => {
+    // A word card for poi: dopo would show אחר כך, the answer.
+    const map = italianWordMap({
+      text: 'Mangiamo e poi dopo usciamo.', translation: 'אוכלים ואחר כך אחר כך יוצאים.', target: { start: 11, end: 14 }, meaning: 'אחר כך',
+      entries: [
+        { hebrew: 'אוכלים', translation: 'Mangiamo', word: '' },
+        { hebrew: 'אחר כך', translation: 'dopo', word: '' },
+        { hebrew: 'יוצאים', translation: 'usciamo', word: '' },
+      ],
+      learner: [], ownGlossId: 'g-poi',
+    });
+    expect(map?.map((word) => word.text)).toEqual(['אוכלים', 'אחר כך', 'יוצאים']);
+    expect(map?.find((word) => word.text === 'אחר כך')).toMatchObject({ start: 11, end: 14, target: true });
+  });
+
+  // Final review: a prefix hides the answer from a whole-word match (ואחר כך holds אחר כך).
+  it('drops a free entry whose Hebrew holds the answer behind a prefix, so a tap never shows it', () => {
+    // poi is the target; dopo, a word apart from it, would show ואחר כך.
+    const map = italianWordMap({
+      text: 'Mangiamo poi, e dopo usciamo.', translation: 'אוכלים אחר כך, ואחר כך יוצאים.', target: { start: 9, end: 12 }, meaning: 'אחר כך',
+      entries: [
+        { hebrew: 'אוכלים', translation: 'Mangiamo', word: '' },
+        { hebrew: 'אחר כך', translation: 'poi', word: '' },
+        { hebrew: 'ואחר כך', translation: 'e dopo', word: '' },
+        { hebrew: 'יוצאים', translation: 'usciamo', word: '' },
+      ],
+      learner: [], ownGlossId: 'g-poi',
+    });
+    expect(map?.map((word) => [word.text, word.target])).toEqual([['אוכלים', false], ['אחר כך', true], ['יוצאים', false]]);
+  });
+
+  it('drops an entry whose Hebrew is not in the translation, or whose Italian is not in the sentence, or with an empty side', () => {
+    const map = italianWordMap(input([
+      { hebrew: 'בית', translation: 'casa', word: '' },
+      { hebrew: 'החדש', translation: 'nuovissima', word: '' },
+      { hebrew: 'הזה', translation: '', word: '' },
+      { hebrew: '', translation: 'grande', word: '' },
+    ]));
+    expect(map).toEqual([{ start: 20, end: 25, text: 'מאוד', glossId: null, target: true }]);
+  });
+
+  it('names no gloss for an unknown key or the card\'s own', () => {
+    const map = italianWordMap(input([{ hebrew: 'הבית', translation: 'casa', word: 'w9' }]));
+    expect(map?.[0]).toMatchObject({ text: 'הבית', glossId: null });
+  });
+
+  // Final review: a line whose word the server could not mark (it occurs twice) would
+  // tap that word, inflected, as a free word (ניסר on a saw card): no map at all.
+  it('maps nothing with no target: the practised word could not be found, so no tap is safe', () => {
+    expect(italianWordMap(input([{ hebrew: 'הבית', translation: 'casa', word: '' }], { target: null }))).toBeNull();
+  });
+
+  it('is null with no entries, or nothing usable and no target', () => {
+    expect(italianWordMap(input([], {}))).toEqual([{ start: 20, end: 25, text: 'מאוד', glossId: null, target: true }]);
+    expect(italianWordMap(input([], { entries: undefined }))).toBeNull();
+
   });
 });
 

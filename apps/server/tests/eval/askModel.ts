@@ -259,7 +259,7 @@ export async function askAccept(
  *  session would go on without it, ruling R11, but the prompt has failed). */
 export async function askContext(
   llm: LlmClient,
-  input: { from: LanguageCode; to: LanguageCode; items: ContextItem[] },
+  input: { from: LanguageCode; to: LanguageCode; items: ContextItem[]; learnerWords?: readonly LearnerWord[] },
 ): Promise<LlmContext> {
   const raw = await llm({ ...buildContextPrompt(input), record: { kind: 'context' } });
   const answer = raw === '' ? null : parseLlmContext(raw);

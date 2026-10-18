@@ -18,7 +18,7 @@ import {
 } from '../db/schema';
 import { SessionOpen } from '../errors';
 import { isUniqueViolation } from './pgErrors';
-import { decodeAnswer, type AnswerRow } from './progress';
+import { decodeAnswer, tapMissType, type AnswerRow } from './progress';
 import { canonicalOptions, questionColumns, questionFrom, withBoards } from './questions';
 
 // `sessions.id` is a `uuid` column: a malformed value makes Postgres raise
@@ -290,10 +290,12 @@ export function createSessionRepo(tx: Tx) {
           FROM answers a
           JOIN questions q ON q.id = a.question_id
           UNION ALL
-          SELECT tp.session_id, tp.gloss_id, 'sentence_translation', NULL::jsonb, NULL::integer, 'wrong', NULL::text, false,
+          SELECT tp.session_id, tp.gloss_id, ${tapMissType}, NULL::jsonb, NULL::integer, 'wrong', NULL::text, false,
                  a.answered_at, tp.position, tp.word_index
           FROM answer_taps tp
           JOIN answers a ON a.session_id = tp.session_id AND a.position = tp.position
+          -- Phase 62 (spec D4): the card the tap was on decides what it missed.
+          JOIN questions q ON q.id = a.question_id
           WHERE tp.kind = 'list'
         ) e
         JOIN sessions s            ON s.id = e.session_id

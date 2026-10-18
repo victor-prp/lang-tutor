@@ -3,7 +3,7 @@ import type { ChoiceQuestion } from '@lang-tutor/core/domain';
 import { useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { ContextLine } from '@/components/ContextLine';
+import { ContextLine, type SentenceTaps } from '@/components/ContextLine';
 import { ListenPrompt } from '@/components/ListenPrompt';
 import { OptionButton, type OptionVisualState } from '@/components/OptionButton';
 import { SpeakButton } from '@/components/SpeakButton';
@@ -23,12 +23,14 @@ type Props = {
   language: string;
   selectedOption: number | null;
   onSelect: (optionIndex: number) => void;
+  /** Phase 62 (spec D3). A multiple choice's context line is tapped word by word. */
+  taps?: SentenceTaps;
 };
 
 // Phase 23. Today's card asks a target word and offers Hebrew meanings; the
 // reversed card asks a Hebrew meaning and offers target words. Only the text
 // directions differ (spec D10).
-export function MultipleChoiceView({ question, instruction, language, selectedOption, onSelect, prompt }: Props) {
+export function MultipleChoiceView({ question, instruction, language, selectedOption, onSelect, prompt, taps }: Props) {
   const reversed = question.type === 'reverse_choice';
   // The options are target words on a reversed or gap card: left to right.
   const optionsLtr = reversed || question.type === 'cloze_choice';
@@ -76,7 +78,7 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
       {/* Phase 34 (spec D6): the sentence that pins the prompt's sense. A card
           that brings its own prompt (phase 39's new meaning) places it there. */}
       {prompt === undefined && 'context' in question && question.context ? (
-        <ContextLine context={question.context} language={contextLanguage(question.type, language)} />
+        <ContextLine context={question.context} language={contextLanguage(question.type, language)} taps={taps} />
       ) : null}
       <View style={styles.options}>
         {question.options.map((option, index) => (

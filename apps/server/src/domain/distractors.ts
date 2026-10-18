@@ -9,8 +9,9 @@ import {
   MAX_ALTERNATIVES,
   MAX_AVOID,
   MAX_GAP_ALTERNATIVES,
-  SENTENCE_MAX_WORDS,
   SENTENCE_MIN_WORDS,
+  SHORT_SENTENCE_MAX_WORDS,
+  SHORT_SENTENCE_MIN_ASKED,
   TRANSLATE_MAX_WORDS,
   validateSentenceItem,
   validateTranslateItem,
@@ -230,7 +231,8 @@ export type DistractorVerdict = { byKey: Map<string, Generated>; refused: Map<st
  *  example's Hebrew, so the example is not written back as the sentence. */
 function avoidFor(row: GenerationContext, task: Task, recent: RecentSentences): string[] {
   const seen = recent.get(row.glossId);
-  if (task === 'sentence') {
+  // Phase 62 (spec D1): a gap item writes its sentence as a sentence item does.
+  if (task === 'sentence' || task === 'gap') {
     return [...(row.example ? [row.example] : []), ...(seen?.cloze ?? []).slice(0, MAX_AVOID)];
   }
   if (task === 'translate') {
@@ -292,7 +294,7 @@ export function buildDistractorPrompt(input: {
   from: string;
   to: string;
   others: readonly OtherRow[];
-  /** Phase 59 (spec D1): sent only when an item translates. */
+  /** Phase 59 (spec D1): sent only when an item writes a sentence (phase 62: a gap or sentence item too). */
   learnerWords?: readonly LearnerWord[];
 }): DistractorPrompt {
   const learned = language(input.from);
@@ -311,8 +313,8 @@ export function buildDistractorPrompt(input: {
     `- "meaning": the learner sees the ${learned.name} word and picks its ${answers.name} translation. Write ${DISTRACTOR_MARKER} in ${answers.name} as distractors.`,
     `- "word": the learner sees the ${answers.name} translation and picks the ${learned.name} word. Write ${DISTRACTOR_MARKER} in ${learned.name} as distractors.`,
     `- "typed": the learner sees the ${answers.name} translation and types the ${learned.name} word. Leave distractors empty. As alternatives, list every other ${learned.name} word or phrase that translates it equally well in this sense, at most ${MAX_ALTERNATIVES}, or none.`,
-    `- "gap": the learner sees the example sentence with the ${learned.name} word blanked, and picks the missing word. Write ${DISTRACTOR_MARKER} in ${learned.name}: words of the same part of speech and in the same form as the blanked word, but from a different field of meaning, each of which makes this sentence wrong or meaningless, so that a learner who reads the sentence alone can rule it out. Read each candidate into the sentence and drop it if the sentence still makes sense, however differently: never a word that also fits. In an example where many words make sense in the blank (anything one puts in a drink, any adjective for a city), none of those words may be a wrong answer of this item: its wrong answers clash with the other words of the sentence (an object, subject, place or time they cannot go with).`,
-    `- "sentence": write a new, natural, everyday ${learned.name} sentence of ${SENTENCE_MIN_WORDS} to ${SENTENCE_MAX_WORDS} words that uses the word in the meaning given by correct and shown by the example, never in another sense. Use whatever form of the word the sentence needs, written as consecutive words, as many as the word has. Write it so that its other words point to the word: someone reading it without its translation and without the word should guess that word, or one of the same meaning; never a sentence that many different words would complete, such as "Please ___ the file." It must differ from every sentence in avoid. Put it in sentence; the word exactly as written in the sentence in gap; the whole sentence in natural ${answers.name}, which fixes its person, number and tense, in translation; and in alternatives every other ${learned.name} word that would fill the gap with the sentence read on its own, without its translation, leaving a correct and natural sentence whatever it then means, not only words of the same meaning, in the form the gap needs, agreeing in gender, number and case with the words around it, the likeliest first, at most ${MAX_GAP_ALTERNATIVES}, or none. Leave distractors empty.`,
+    `- "gap": the learner sees a sentence with the ${learned.name} word blanked, and picks the missing word. Write a new sentence exactly as a "sentence" item does, following every rule of that task, in sentence, gap and translation, and leave alternatives empty; write it so that the words around the gap rule out most other words of its part of speech, with an object, a place or a time few words go with, as "Lei parla tre lingue." does for parla: one cannot sing or sleep three languages; ruling out the wrong words comes before the learner's words. Write the word itself in sentence, never a blank. Then write ${DISTRACTOR_MARKER} in ${learned.name} for its gap: words of the same part of speech and in the same form as the word in gap, but from a different field of meaning, each of which makes your sentence wrong or meaningless, so that a learner who reads the sentence alone can rule it out. Read each candidate into the sentence and drop it if the sentence still makes sense, however differently: never a word that also fits. In a sentence where many words make sense in the blank (anything one puts in a drink, any adjective for a city), none of those words may be a wrong answer of this item: its wrong answers clash with the other words of the sentence (an object, subject, place or time they cannot go with).`,
+    `- "sentence": write a new, natural, everyday ${learned.name} sentence of ${SHORT_SENTENCE_MIN_ASKED} to ${SHORT_SENTENCE_MAX_WORDS} words that uses the word in the meaning given by correct and shown by the example, never in another sense. Use whatever form of the word the sentence needs, written as consecutive words, as many as the word has. Write it so that its other words point to the word: someone reading it without its translation and without the word should guess that word, or one of the same meaning; never a sentence that many different words would complete, such as "Please ___ the file." Short is not enough: "The ___ is green." or "Where is my ___?" points to nothing, while "I bought a ___ for my balcony." points to plant: give it the phrase that makes the word the likeliest guess (what it does, where it is, what goes with it), within the limit. When learner_words is given, the learner knows only those ${learned.name} words and the word itself: build the sentence from the word and learner_words, in whatever form each needs, adding another word only where the sentence cannot stand, or cannot point to the word, without it, and then a simple one (a pronoun, an article, a preposition, or the verb to be or to have); pointing to the word comes first, then a short sentence, then the learner's words. learner_words limits the sentence only: alternatives are every word that fits the gap, whether the learner knows it or not. Count its words: never more than ${SHORT_SENTENCE_MAX_WORDS}. It must differ from every sentence in avoid. Put it in sentence; the word exactly as written in the sentence in gap; the whole sentence in natural ${answers.name}, which fixes its person, number and tense, in translation; and in alternatives every other ${learned.name} word that would fill the gap with the sentence read on its own, without its translation, leaving a correct and natural sentence whatever it then means, not only words of the same meaning, in the form the gap needs, agreeing in gender, number and case with the words around it, the likeliest first, at most ${MAX_GAP_ALTERNATIVES}, or none. Leave distractors empty.`,
     `- "translate": write a short, natural, everyday ${answers.name} sentence of ${SENTENCE_MIN_WORDS} to ${TRANSLATE_MAX_WORDS} words that uses the meaning in correct, in the sense the example shows. It must differ from every sentence in avoid. Put it in sentence; a natural ${learned.name} translation of it that uses the word, in whatever form the translation needs, in translation; and that word exactly as written in the translation in gap. Leave distractors empty. Count the words of a translate item's sentence: never more than ${TRANSLATE_MAX_WORDS} (this limit is the translate task's alone). When learner_words is given, the learner knows only those ${learned.name} words and the word itself: write the ${learned.name} translation first, from the word and learner_words alone, in whatever form each needs, adding another word only where the sentence cannot stand without it, and then a simple one (a pronoun, an article, a preposition, or the verb to be or to have); then write sentence as its ${answers.name} translation.`,
     'A wrong answer of a "meaning" or "word" item must be plausible: the same part of speech, the same register and a',
     'similar length as the correct answer. A "gap" item\'s wrong answers follow the gap rule above instead.',
@@ -332,7 +334,8 @@ export function buildDistractorPrompt(input: {
     ...learned.writing,
   ].join('\n');
 
-  const translates = input.items.some((item) => item.task === 'translate');
+  // Phase 62 (spec D1): every item that writes a sentence builds it from the learner's words.
+  const translates = input.items.some((item) => item.task === 'translate' || item.task === 'sentence' || item.task === 'gap');
   const learnerWords = translates && input.learnerWords && input.learnerWords.length > 0 ? input.learnerWords : null;
   const user = JSON.stringify({
     items: input.items.map((item) => ({
@@ -345,7 +348,6 @@ export function buildDistractorPrompt(input: {
       ...(item.task === 'gap' || item.task === 'sentence' || item.task === 'translate'
         ? { example: item.example, example_translation: item.exampleTranslation }
         : {}),
-      ...(item.task === 'gap' ? { sentence: item.example, blank: item.blank } : {}),
       ...(item.avoid.length > 0 ? { avoid: item.avoid } : {}),
     })),
     ...(related.length > 0
@@ -564,7 +566,19 @@ export function validateDistractors(
       refused.set(item.key, `no answer for ${item.key}`);
       continue;
     }
-    const { usable, refusal } = usableChoices(item, items, others, found.distractors, explanationLetters, known);
+    // Phase 62 (spec D1, ruling R7). A gap item's sentence is its own: an unusable
+    // one refuses the card, and its wrong words are checked against its gap.
+    let written: SentenceContent | null = null;
+    if (item.task === 'gap') {
+      const checked = validateSentenceItem({ form: item.form, target, explanation: explanation as LanguageCode, avoid: item.avoid }, found);
+      if (!checked.ok) {
+        refused.set(item.key, checked.reason);
+        continue;
+      }
+      written = { ...checked.content, alternatives: [] };
+    }
+    const asked = written ? { ...item, blank: written.sentence.slice(written.gap.start, written.gap.end) } : item;
+    const { usable, refusal } = usableChoices(asked, items, others, found.distractors, explanationLetters, known);
     if (usable.length < KEPT_DISTRACTORS) {
       refused.set(
         item.key,
@@ -578,6 +592,7 @@ export function validateDistractors(
       ...NOTHING_GENERATED,
       distractors: usable.slice(0, KEPT_DISTRACTORS),
       spares: usable.slice(KEPT_DISTRACTORS, ASKED_DISTRACTORS),
+      sentence: written,
     });
   }
   return { byKey, refused };
@@ -627,10 +642,8 @@ export function boardMeanings(
 export type Extras = {
   tiles: string[] | null;
   board: { meanings: string[]; own: number } | null;
-  /** Phase 27 (spec D7). A cloze_choice card's gap in the saved example. */
-  gap: { start: number; end: number } | null;
 };
-export const NO_EXTRAS: Extras = { tiles: null, board: null, gap: null };
+export const NO_EXTRAS: Extras = { tiles: null, board: null };
 export const NOTHING_GENERATED: Generated = { distractors: [], spares: [], alternatives: [], sentence: null, translate: null, degraded: null };
 
 export type QuestionContent = {
@@ -698,12 +711,13 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
       // Phase 54 (spec D7). A meet card asks nothing: its prompt is the meaning it shows.
       return { ...none, prompt: row.translation };
     case 'cloze_choice': {
-      // Spec D7: the saved example, the form's own text blanked, correct option first.
-      const gap = extras.gap;
-      if (!row.example || !gap) throw new Error(`the cloze card for ${row.form} has no example or gap`);
+      // Phase 62 (spec D1): the sentence written for the session, its gap's text correct first.
+      const content = generated.sentence;
+      if (!content) throw new Error(`the cloze card for ${row.form} has no sentence`);
+      const { gap } = content;
       // The right option keeps the sentence's case (capital when the word opens
       // it), so the wrong ones take the blank's first-letter case: it is no tell.
-      const blank = row.example.slice(gap.start, gap.end);
+      const blank = content.sentence.slice(gap.start, gap.end);
       const upper = blank.charAt(0) !== blank.charAt(0).toLowerCase();
       const cased = generated.distractors.map((text) =>
         text === '' ? text : (upper ? text.charAt(0).toUpperCase() : text.charAt(0).toLowerCase()) + text.slice(1),
@@ -712,8 +726,8 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
         ...none,
         prompt: row.translation,
         options: optionsFor(blank, cased),
-        sentence: row.example,
-        sentenceTranslation: row.exampleTranslation,
+        sentence: content.sentence,
+        sentenceTranslation: content.translation,
         gapStart: gap.start,
         gapEnd: gap.end,
       };

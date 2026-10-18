@@ -1,4 +1,4 @@
-import type { Mark, Question } from '@lang-tutor/core/api';
+import type { Context, Mark, Question } from '@lang-tutor/core/api';
 
 import { splitAtGap } from '@/sentence';
 
@@ -19,4 +19,11 @@ const HEBREW_CONTEXT: ReadonlySet<Question['type']> = new Set(['typed_translatio
  *  multiple choice). */
 export function contextLanguage(type: Question['type'], target: string): string {
   return HEBREW_CONTEXT.has(type) ? 'he' : target;
+}
+
+/** Phase 62 (spec D5). A context line's whole translation, shown once the card is
+ *  answered: with its word map or, for a saved example or a card stored before,
+ *  without one. Null before the answer, or when the line came with none. */
+export function wholeSentenceOf(context: Context, answered: boolean): string | null {
+  return answered ? (context.translation ?? null) : null;
 }

@@ -117,7 +117,8 @@ export type CheckReading = { byKey: Map<string, CheckFinding>; unjudged: Map<str
 
 /**
  * The answer, item by item. A choice or gap item whose booleans are missing, or
- * do not number its options, is unjudged (phase 48, spec D2, ruling R3): which
+ * do not number its options, is unjudged (phase 48, spec D2, ruling R3; phase
+ * 62: a gap item's are read from `options` when `gap_fits` is missing): which
  * option is right could only be guessed, so the item gets no finding and every
  * other item is still read. A sentence item with no answer
  * reads as an empty one, which the rules below then refuse: a hint the checker
@@ -134,7 +135,8 @@ export function readCheck(items: readonly CheckItem[], answer: LlmCheck): CheckR
     switch (item.task) {
       case 'choice':
       case 'gap': {
-        const said = item.task === 'choice' ? got?.options : got?.gap_fits;
+        // Phase 62: a gap item's booleans under the choice field's name are the same answer.
+        const said = item.task === 'choice' ? got?.options : (got?.gap_fits ?? got?.options);
         if (!said || said.length !== item.options.length) {
           unjudged.set(item.key, `the checker did not say which of ${item.key}'s ${item.options.length} options are right`);
           break;

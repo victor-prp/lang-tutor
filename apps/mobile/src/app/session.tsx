@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { MarkedText } from '@/components/ContextLine';
+import { MarkedText, type SentenceTaps } from '@/components/ContextLine';
 import { FeedbackBanner } from '@/components/FeedbackBanner';
 import { LetterTilesView } from '@/components/LetterTilesView';
 import { MatchingBoardView } from '@/components/MatchingBoardView';
@@ -35,11 +35,35 @@ import { scriptGate } from '@/typedSubmit';
 // a typed gap's Hebrew line is a hint, a button until it is opened.
 type GapHint = { open: boolean; retrying: boolean; onOpen: () => void };
 
-function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered: boolean, language: string, testID?: string, hint?: GapHint) {
+// Phase 62 (spec D3). A gap card's sentence is tapped word by word when its map
+// holds the gap as its practised word; otherwise, a card from before the phase
+// or one the server could not map, it is the plain sentence with its blank.
+const mapsGap = (question: ClozeChoiceQuestion | ClozeTypedQuestion) =>
+  question.words?.some((word) => word.target && word.start === question.gap.start && word.end === question.gap.end) ?? false;
+
+function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, taps: SentenceTaps, language: string, testID?: string, hint?: GapHint) {
+  const answered = taps.answered;
   const shown = showsSentenceTranslation(question.type, { answered, hintOpen: hint?.open ?? false, retrying: hint?.retrying ?? false });
   return (
     <View style={styles.gapCard} testID={testID}>
-      <SentenceGap sentence={question.sentence} gap={question.gap} filled={answered} />
+      {mapsGap(question) ? (
+        <TappableSentence
+          text={question.sentence}
+          words={question.words}
+          mark={null}
+          tapped={taps.tapped}
+          onTap={answered ? null : taps.onTap}
+          hint={answered ? null : strings.tapWordHint(taps.learner)}
+          style={styles.gapSentence}
+          testID="sentence-gap"
+          direction="ltr"
+          reveal={answered}
+          gap
+          targetTappable={false}
+        />
+      ) : (
+        <SentenceGap sentence={question.sentence} gap={question.gap} filled={answered} />
+      )}
       {shown ? (
         <MarkedText
           text={question.translation}
@@ -76,6 +100,8 @@ function translatePrompt(question: SentenceTranslationQuestion, session: Session
         hint={answered || !question.words ? null : strings.tapWordHint(language)}
         style={styles.hebrewPrompt}
         testID="sentence-translation"
+        // Phase 62 (spec D5): once answered, every word's Italian.
+        reveal={answered}
       />
       {answered ? (
         <View style={styles.reference}>
@@ -92,6 +118,11 @@ function translatePrompt(question: SentenceTranslationQuestion, session: Session
       ) : null}
     </View>
   );
+}
+
+// Phase 62 (spec D3, D5). What a card that taps a sentence needs of the session.
+function tapsOf(session: SessionValue, learner: string): SentenceTaps {
+  return { tapped: session.tapped, onTap: session.pressWord, answered: session.answered, learner };
 }
 
 // Phase 56 (spec D5, D6). Help on a card, the count the session keeps for it.
@@ -120,7 +151,7 @@ function retypeOf(question: Question, session: SessionValue) {
 // Phase 38 (spec D1, D4). The typed gap card holds whether its hint is open, and
 // sends it with the first answer. Keyed by question id, so a new card starts closed.
 // Phase 56 (spec D1): letter help beside the hint, which stays recorded and ungraded.
-function ClozeTypedCard({ question, session, language, answerLanguage }: { question: ClozeTypedQuestion; session: SessionValue; language: string; answerLanguage: LanguageCode | null }) {
+function ClozeTypedCard({ question, session, language, learner, answerLanguage }: { question: ClozeTypedQuestion; session: SessionValue; language: string; learner: string; answerLanguage: LanguageCode | null }) {
   const [hintOpen, setHintOpen] = useState(false);
   return (
     <TypedAnswerView
@@ -135,7 +166,7 @@ function ClozeTypedCard({ question, session, language, answerLanguage }: { quest
       checking={session.judging === 'checking'}
       failed={session.judging === 'failed'}
       retry={session.retry}
-      prompt={gapPrompt(question, session.answered, language, undefined, {
+      prompt={gapPrompt(question, tapsOf(session, learner), language, undefined, {
         open: hintOpen,
         retrying: session.retry !== null,
         onOpen: () => setHintOpen(true),
@@ -162,6 +193,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           language={language}
           selectedOption={session.selectedOption}
           onSelect={session.select}
+          taps={tapsOf(session, learner)}
         />
       );
     case 'new_meaning':
@@ -170,7 +202,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <MultipleChoiceView
           question={question}
           instruction={strings.questionInstructionNewMeaning}
-          prompt={<NewMeaningPrompt question={question} language={language} />}
+          prompt={<NewMeaningPrompt question={question} language={language} taps={tapsOf(session, learner)} />}
           language={language}
           selectedOption={session.selectedOption}
           onSelect={session.select}
@@ -218,12 +250,12 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           language={language}
           selectedOption={session.selectedOption}
           onSelect={session.select}
-          prompt={gapPrompt(question, session.answered, language, 'cloze-card')}
+          prompt={gapPrompt(question, tapsOf(session, learner), language, 'cloze-card')}
         />
       );
     case 'cloze_typed':
       // Judged on the phone against the gap's word, as a typed translation is.
-      return <ClozeTypedCard key={question.id} question={question} session={session} language={language} answerLanguage={answerLanguage} />;
+      return <ClozeTypedCard key={question.id} question={question} session={session} language={language} learner={learner} answerLanguage={answerLanguage} />;
     case 'sentence_translation':
       // Phase 56 (spec D1): help reveals the practised word, never the reference; no retype.
       return (
@@ -263,6 +295,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           retry={session.retry}
           help={helpOf(session)}
           {...retypeOf(question, session)}
+          taps={tapsOf(session, learner)}
         />
       );
     case 'listen_choice':
@@ -501,6 +534,8 @@ const styles = StyleSheet.create({
   hebrewLine: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, textAlign: 'center', writingDirection: 'rtl' },
   hint: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.primary, fontWeight: '700', writingDirection: 'rtl' },
   hebrewPrompt: { fontSize: fontSizes.xl, lineHeight: lineHeights.xl, color: colors.text, textAlign: 'center', writingDirection: 'rtl' },
+  // Phase 62 (spec D3): a gap sentence tapped word by word, as SentenceGap sets it.
+  gapSentence: { fontSize: fontSizes.xl, lineHeight: lineHeights.xl, color: colors.text, textAlign: 'center', writingDirection: 'ltr' },
   reference: { gap: spacing.xs, alignItems: 'center' },
   referenceLabel: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, writingDirection: 'rtl' },
   referenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },

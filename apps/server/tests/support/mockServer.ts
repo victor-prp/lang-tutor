@@ -310,7 +310,8 @@ export const STUB_ALTERNATIVE = 'volume';
  *  picks plan other cards (phase 35, spec D6) passes its own. */
 const CYCLE_TASKS: Task[] = Array.from({ length: 10 }, (_, i) => (['meaning', 'word', 'typed'] as const)[i % 3]);
 
-export const STUB_SENTENCE = 'Tome sprint lantern kettle pillow ladder bucket violin turtle lizard';
+// Phase 62 (spec D1): six words, the most a gap sentence keeps.
+export const STUB_SENTENCE = 'Tome sprint lantern kettle pillow ladder';
 export const STUB_SENTENCE_HEBREW = 'אני רואה ספר ופנס בבית';
 export const STUB_GAP = 'lantern';
 
@@ -348,8 +349,9 @@ function stubItem(task: Task, key: string, opts: { alternatives?: string[] }) {
       return { key, distractors: STUB_WRONG_ENGLISH };
     case 'typed':
       return { key, distractors: [], alternatives: opts.alternatives ?? [STUB_ALTERNATIVE] };
+    // Phase 62 (spec D1): a gap item writes its own sentence, as a sentence item does.
     case 'gap':
-      return { key, distractors: STUB_WRONG_ENGLISH };
+      return { key, distractors: STUB_WRONG_ENGLISH, sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW };
     // Phase 27 Part B. One sentence holds every word the tests save, once, so
     // whichever word a position asks, `gap` is a word of it. The sentence
     // is English (the enrollment's target), its translation Hebrew.

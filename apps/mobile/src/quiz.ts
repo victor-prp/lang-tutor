@@ -8,12 +8,13 @@ import type {
   SessionProgressItem,
   SessionView,
 } from '@lang-tutor/core/api';
-import { SESSION_LENGTH, takesHelp } from '@lang-tutor/core/domain';
+import { SESSION_LENGTH, TAPPABLE_TYPES, takesHelp } from '@lang-tutor/core/domain';
 
 import { checksFit, opensRetry, type CardAnswer } from '@/feedback';
 import type { JudgeAttempt } from '@/judging';
 import { opensRetype, retypeChecked, retypeTyping, startRetype, type Retype } from '@/retype';
 import { IDLE_ATTEMPT, type SpeakingOff, type SpeechAttempt } from '@/speaking';
+import type { ServedWord } from '@/taps';
 import { wholeForm } from '@/typedHelp';
 
 // What the background next-step call resolved to, waiting to be applied when
@@ -141,13 +142,28 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
   };
 }
 
+/** Phase 62 (spec D3). The word map of the sentence a card taps: a gap card's
+ *  or a translation's own, a word card's on its context line; none elsewhere. */
+export function tapWordsOf(question: Question): readonly ServedWord[] | null {
+  if (!TAPPABLE_TYPES.has(question.type)) return null;
+  if ('words' in question) return question.words ?? null;
+  return 'context' in question ? (question.context?.words ?? null) : null;
+}
+
 /** Phase 59 (spec D3). A word of the sentence translation on screen tapped: its
  *  index, kept once; `'mark'` is the practised word on a card with no word map.
  *  A tap on the practised word is help that shows the whole form. An answered
- *  card, another card and an index the map has no word at take none. */
+ *  card, another card and an index the map has no word at take none. Phase 62
+ *  (spec D3): any card that taps a sentence, whose practised word, though, is
+ *  the gap or the question itself, so only a translation's can be tapped. */
 export function wordTappedState(current: QuizState, tap: number | 'mark'): QuizState {
   const question = current.question;
-  if (current.answer !== null || question?.type !== 'sentence_translation') return current;
+  if (current.answer !== null || !question) return current;
+  if (question.type !== 'sentence_translation') {
+    const word = tap === 'mark' ? null : tapWordsOf(question)?.[tap];
+    if (!word || word.target || current.tapped.includes(tap as number)) return current;
+    return { ...current, tapped: [...current.tapped, tap as number] };
+  }
   const word = tap === 'mark' ? null : question.words?.[tap];
   if (tap !== 'mark' && !word) return current;
   const target = tap === 'mark' || word!.target;
@@ -155,10 +171,10 @@ export function wordTappedState(current: QuizState, tap: number | 'mark'): QuizS
   return { ...current, tapped, help: target ? Math.max(current.help, wholeForm(question.answer)) : current.help };
 }
 
-/** Phase 59 (spec D5). The `tapped` a judged answer to `question` carries: none
- *  on another card, or with no taps. */
+/** Phase 59 (spec D5). The `tapped` an answer to `question` carries: none on a
+ *  card that taps no sentence (phase 62: every other one carries them), or with no taps. */
 export function tappedFor(question: Question, tapped: readonly number[]): number[] | undefined {
-  return question.type === 'sentence_translation' && tapped.length > 0 ? [...tapped] : undefined;
+  return TAPPABLE_TYPES.has(question.type) && tapped.length > 0 ? [...tapped] : undefined;
 }
 
 /** Phase 56 (spec D5). Help pressed on the card on screen: one more character
@@ -213,6 +229,8 @@ export function nextStepRequest(
   retry: PendingRetry | null,
   hintOpened?: boolean,
   checkFit = false,
+  /** Phase 62 (spec D6). The words tapped on the card, sent with its option or its text. */
+  tapped?: readonly number[],
 ): NextStepRequest {
   // Phase 54 (spec D6). A meet card is tapped through once: it is never held for a second try.
   if ('seen' in input) return { question_id: questionId, seen: true };
@@ -225,7 +243,8 @@ export function nextStepRequest(
   const hinted = 'text' in input && retry === null && hintOpened !== undefined ? { ...request, hint_opened: hintOpened } : request;
   // Phase 41 (spec D3): only a first answer is checked against the gap.
   const checked = 'text' in input && retry === null && checkFit ? { ...hinted, check_fit: true } : hinted;
-  return retried(checked, retry);
+  const taps = tapped && tapped.length > 0 && ('text' in input || 'option_index' in input) ? { ...checked, tapped: [...tapped] } : checked;
+  return retried(taps, retry);
 }
 
 /** Phase 55 (spec D7). The retype a card's answer opens: a first answer to a

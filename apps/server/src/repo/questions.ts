@@ -31,8 +31,10 @@ export type QuestionRow = {
   answerForm: string | null;
   /** Phase 34 (spec D6, D8, D12). The sentence shown beside a bare word and its
    *  marked word, and the practised word marked in a sentence card's Hebrew.
-   *  The context's other half is the judge's and is not read here. */
+   *  Phase 62 (spec D5): its other half is read too, for a tapped line to show
+   *  once the card is answered. */
   context: string | null;
+  contextTranslation: string | null;
   contextMarkStart: number | null;
   contextMarkEnd: number | null;
   sentenceMarkStart: number | null;
@@ -40,7 +42,8 @@ export type QuestionRow = {
   /** Phase 39 (spec D6). The meanings a new_meaning card lists as known; null
    *  on every other type (questions_known_meanings_valid). */
   knownMeanings: string[] | null;
-  /** Phase 59 (spec D2). A sentence translation's word map; null on every other card. */
+  /** Phase 59 (spec D2). A sentence translation's word map. Phase 62: any tapped
+   *  sentence's, the gap sentence's or the context line's; null on every other card. */
   words: MapWord[] | null;
   form: string;
   lemma: string;
@@ -69,6 +72,7 @@ export const questionColumns = {
   sentenceMarkEnd: questions.sentenceMarkEnd,
   knownMeanings: questions.knownMeanings,
   words: questions.words,
+  contextTranslation: questions.contextTranslation,
   form: dictVariants.form,
   lemma: dictLexemes.lemma,
   partOfSpeech: dictLexemes.partOfSpeech,
@@ -99,6 +103,8 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
   // card's marked word: a pair of offsets is a mark, half of one is none.
   const markOf = (start: number | null, end: number | null) => (start !== null && end !== null ? { start, end } : null);
   const context = row.context === null ? null : { text: row.context, mark: markOf(row.contextMarkStart, row.contextMarkEnd) };
+  // Phase 62 (spec D2, D5). A tapped context line also carries its map and its Hebrew.
+  const tappedContext = context && { ...context, words: servedWords(row.words), translation: row.contextTranslation };
   const mark = markOf(row.sentenceMarkStart, row.sentenceMarkEnd);
   switch (row.type) {
     case 'typed_translation':
@@ -139,7 +145,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         question: row.form,
         part_of_speech: row.partOfSpeech,
         meaning: row.prompt!,
-        context,
+        context: tappedContext,
       };
     case 'cloze_typed':
       // Phase 27 (spec D5). The gap's text is the answer; the client judges it.
@@ -153,6 +159,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         answer: row.sentence!.slice(row.gapStart!, row.gapEnd!),
         alternatives: row.alternatives ?? [],
         mark,
+        words: servedWords(row.words),
       };
     case 'sentence_translation':
       // Phase 27 (spec D6). The Hebrew sentence is asked; `sentence` is the reference.
@@ -193,6 +200,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         translation: row.sentenceTranslation!,
         meaning: row.prompt!,
         ...choice,
+        words: servedWords(row.words),
       };
     case 'reverse_choice':
       return { ...base, type: 'reverse_choice', question: row.prompt!, part_of_speech: row.partOfSpeech, ...choice, context };
@@ -201,7 +209,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
       return { ...base, type: 'listen_choice', question: asked, part_of_speech: row.partOfSpeech, ...choice };
     case 'new_meaning':
       // Phase 39 (spec D6): a multiple choice's card, with the meanings already known.
-      return { ...base, type: 'new_meaning', question: asked, known_meanings: row.knownMeanings!, ...choice, context };
+      return { ...base, type: 'new_meaning', question: asked, known_meanings: row.knownMeanings!, ...choice, context: tappedContext };
     case 'matching':
       return {
         ...base,
@@ -217,7 +225,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         },
       };
     default:
-      return { ...base, type: 'multiple_choice', question: asked, ...choice, context };
+      return { ...base, type: 'multiple_choice', question: asked, ...choice, context: tappedContext };
   }
 }
 
@@ -351,9 +359,10 @@ export function createQuestionRepo(tx: Tx) {
      * enrollment's last sessions asked, newest first by creation, so a new
      * sentence is never last time's: a typed cloze's `sentence`, and a
      * translation's Hebrew sentence (its `sentence_translation` column; its
-     * `sentence` is the reference). A cloze choice shows the saved example and
-     * is not a written sentence, so it is left out. At most `limit` of each; a
-     * gloss with none has no entry.
+     * `sentence` is the reference). Phase 62 (spec D1): a cloze choice's sentence
+     * is written for the session too, and is filed with the typed cloze's, the
+     * two gap cards' one list. At most `limit` of each list; a gloss with none
+     * has no entry.
      */
     findRecentSentences: async (input: {
       enrollmentId: string;
@@ -362,21 +371,22 @@ export function createQuestionRepo(tx: Tx) {
     }): Promise<RecentSentences> => {
       const recent: RecentSentences = new Map();
       if (input.glossIds.length === 0) return recent;
-      const rows = await tx.execute<{ gloss_id: string; type: string; sentence: string }>(sql`
-        SELECT gloss_id, type, sentence FROM (
-          SELECT q.gloss_id, q.type,
+      const rows = await tx.execute<{ gloss_id: string; kind: 'cloze' | 'translate'; sentence: string }>(sql`
+        SELECT gloss_id, kind, sentence FROM (
+          SELECT q.gloss_id, kind.kind,
                  CASE WHEN q.type = 'sentence_translation' THEN q.sentence_translation ELSE q.sentence END AS sentence,
-                 row_number() OVER (PARTITION BY q.gloss_id, q.type ORDER BY q.created_at DESC, q.id DESC) AS recency
+                 row_number() OVER (PARTITION BY q.gloss_id, kind.kind ORDER BY q.created_at DESC, q.id DESC) AS recency
           FROM questions q
+          CROSS JOIN LATERAL (SELECT CASE WHEN q.type = 'sentence_translation' THEN 'translate' ELSE 'cloze' END AS kind) kind
           WHERE q.enrollment_id = ${input.enrollmentId}
-            AND q.type IN ('cloze_typed', 'sentence_translation')
+            AND q.type IN ('cloze_choice', 'cloze_typed', 'sentence_translation')
             AND q.gloss_id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})
         ) ranked
         WHERE recency <= ${input.limit}
-        ORDER BY gloss_id, type, recency`);
+        ORDER BY gloss_id, kind, recency`);
       for (const row of rows.rows) {
         const entry = recent.get(row.gloss_id) ?? { cloze: [], translate: [] };
-        (row.type === 'cloze_typed' ? entry.cloze : entry.translate).push(row.sentence);
+        (row.kind === 'cloze' ? entry.cloze : entry.translate).push(row.sentence);
         recent.set(row.gloss_id, entry);
       }
       return recent;
@@ -598,6 +608,7 @@ export function createQuestionRepo(tx: Tx) {
             gapEnd: question.gapEnd ?? null,
             answerForm: question.answerForm ?? null,
             context: question.context ?? null,
+            contextTranslation: question.contextTranslation ?? null,
             contextMarkStart: question.contextMarkStart ?? null,
             contextMarkEnd: question.contextMarkEnd ?? null,
             sentenceMarkStart: question.sentenceMarkStart ?? null,

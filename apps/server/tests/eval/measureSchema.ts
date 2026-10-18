@@ -52,6 +52,7 @@ import { CHECKER_CALL_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, SESSION_GENERATION_THIN
 import {
   buildContextPrompt,
   contextItemFor,
+  italianWordMap,
   markFor,
   parseLlmContext,
   resolveContext,
@@ -67,6 +68,7 @@ import {
   type RecentSentences,
   type Task,
 } from '../../src/domain/distractors';
+import { findMarks } from '../../src/domain/marks';
 import { createGeminiClient, toGeminiSchema } from '../../src/providers/gemini';
 
 /** The session batch's production budget (composition.ts: sessionGenerationTimeoutMs). */
@@ -110,11 +112,18 @@ const ROWS: { row: GenerationContext; task: Task }[] = [
   { task: 'gap', row: row('prenotare', 'prenotare', 'verb', 'להזמין', 'Voglio prenotare un tavolo per due.', 'אני רוצה להזמין שולחן לשניים.') },
   { task: 'sentence', row: row('pianta', 'pianta', 'noun', 'צמח', 'Questa pianta ha bisogno di luce.', 'הצמח הזה צריך אור.') },
   { task: 'translate', row: row('campo', 'campo', 'noun', 'שדה', 'Il contadino lavora nel campo.', 'האיכר עובד בשדה.') },
-  { task: 'meaning', row: row('bella', 'bello', 'adjective', 'יפה', 'Che bella giornata!', 'איזה יום יפה!') },
+  // Phase 62 (spec D1): two gap and two sentence items, each writing a sentence from the learner's words.
+  { task: 'sentence', row: row('bella', 'bello', 'adjective', 'יפה', 'Che bella giornata!', 'איזה יום יפה!') },
   { task: 'word', row: row('finestra', 'finestra', 'noun', 'חלון', 'Apri la finestra, per favore.', 'פתח את החלון, בבקשה.') },
   { task: 'gap', row: row('compro', 'comprare', 'verb', 'לקנות', 'Compro il pane ogni mattina.', 'אני קונה לחם כל בוקר.') },
   { task: 'translate', row: row('parla', 'parlare', 'verb', 'לדבר', 'Lei parla tre lingue.', 'היא מדברת בשלוש שפות.') },
 ];
+
+/** Phase 59, 62. The learner's practised words, as the prompts are sent them. */
+const LEARNER_WORDS = ['contadino:איכר', 'lavora:עובד', 'tre:שלוש', 'lingue:שפות', 'madre:אמא', 'casa:בית'].map((pair, index) => {
+  const [word, meaning] = pair.split(':');
+  return { key: `w${index + 1}`, glossId: `g-w${index + 1}`, word, meaning };
+});
 
 /** The card each row's context item is for, with --context: every kind the call
  *  answers, a target sentence, a Hebrew one and a sentence card's mark. */
@@ -187,7 +196,7 @@ async function main(): Promise<number> {
     ROWS.map((entry) => entry.task),
     recent,
   );
-  const prompt = buildDistractorPrompt({ items, from: 'it', to: 'he', others: [] });
+  const prompt = buildDistractorPrompt({ items, from: 'it', to: 'he', others: [], learnerWords: LEARNER_WORDS });
 
   // The provider throws only `responded 400`; the reason is in the body, so a
   // wrapping fetch prints it. The body never carries the key (it travels in a header).
@@ -251,6 +260,11 @@ async function main(): Promise<number> {
       return Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value !== '';
     }).length;
   console.log(`parse     ok, ${answer.items.length} items`);
+  // Phase 62 (spec D1): what each sentence-writing item wrote, to read by eye.
+  for (const item of items.filter((asked) => asked.task === 'gap' || asked.task === 'sentence' || asked.task === 'translate')) {
+    const got = answer.items.find((found) => found.key === item.key);
+    console.log(`  ${item.key} ${item.task.padEnd(9)} ${got?.sentence ?? '(none)'} | gap ${got?.gap ?? '-'} | ${got?.translation ?? '-'}${item.task === 'gap' ? ` | wrong ${got?.distractors.join(', ')}` : ''}`);
+  }
   console.log(`distractors per item  ${answer.items.map((item) => item.distractors.length).join(' ')}`);
   for (const field of ['alternatives', 'sentence', 'gap', 'translation']) {
     console.log(`filled    ${field.padEnd(20)} ${filled(field)} of ${answer.items.length}`);
@@ -319,10 +333,15 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
     if (item.task === 'mark') {
       const mark = markFor(item, got);
       console.log(`${item.key} mark        ${got?.sentence_word ?? '(none)'} -> ${mark ? item.sentence.slice(mark.start, mark.end) : 'unmarked'}`);
-      if (item.map) {
+      if (item.map && item.sentence === ROWS[Number(item.key.slice(1)) - 1].row.exampleTranslation && CONTEXT_TYPES[ROWS[Number(item.key.slice(1)) - 1].task] === 'sentence_translation') {
         const map = wordMapFor(item, got, mark, learnerWords, 'g-own');
         console.log(`${item.key} map         ${JSON.stringify(got?.sentence_words ?? null)}`);
         console.log(`${item.key} kept        ${map ? map.map((word) => `${item.sentence.slice(word.start, word.end)}=${word.text}${word.target ? '*' : ''}${word.glossId ? `(${word.glossId})` : ''}`).join(' ') : 'none'}`);
+      } else if (item.map) {
+        // Phase 62 (spec D2): a gap card's map, turned onto its target-language sentence.
+        const gap = findMarks(item.translation, item.word)[0] ?? null;
+        const map = italianWordMap({ text: item.translation, translation: item.sentence, target: gap, meaning: item.meaning, entries: got?.sentence_words, learner: learnerWords, ownGlossId: 'g-own' });
+        console.log(`${item.key} gap map     ${map ? map.map((word) => `${item.translation.slice(word.start, word.end)}=${word.text}${word.target ? '*' : ''}${word.glossId ? `(${word.glossId})` : ''}`).join(' ') : 'none'}`);
       }
       continue;
     }
@@ -332,6 +351,12 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
       `${item.key} ${item.task.padEnd(11)} ${outcome.dropped ? `DROPPED (${outcome.dropped})` : 'kept'}: ${got?.context ?? '(none)'}` +
         ` [${got?.context_word ?? ''}${mark && outcome.context ? ` -> ${outcome.context.text.slice(mark.start, mark.end)}` : ''}] = ${got?.context_translation ?? ''}`,
     );
+    // Phase 62 (spec D2): a target-language line's map.
+    if (item.map && !outcome.dropped && outcome.context?.translation) {
+      const line = outcome.context;
+      const map = italianWordMap({ text: line.text, translation: line.translation!, target: line.mark, meaning: item.meaning, entries: got?.sentence_words, learner: learnerWords, ownGlossId: 'g-own' });
+      console.log(`${item.key} line map    ${map ? map.map((word) => `${line.text.slice(word.start, word.end)}=${word.text}${word.target ? '*' : ''}${word.glossId ? `(${word.glossId})` : ''}`).join(' ') : 'none'}`);
+    }
   }
   for (const field of CONTEXT_FIELDS) {
     console.log(`filled    ${field.padEnd(20)} ${answer.items.filter((item) => (item as Record<string, unknown>)[field]).length} of ${answer.items.length}`);

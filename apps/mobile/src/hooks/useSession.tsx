@@ -75,7 +75,8 @@ export type SessionValue = {
   help: number;
   /** Help pressed: one more character. Every answer to the card then says it was helped. */
   pressHelp: () => void;
-  /** Phase 59 (spec D3, D5). The sentence translation's words tapped, by index. */
+  /** Phase 59 (spec D3, D5). The sentence translation's words tapped, by index.
+   *  Phase 62 (spec D3): any tapped sentence's. */
   tapped: number[];
   /** A word of the sentence tapped: its index, or `'mark'` on a card with no word map. */
   pressWord: (tap: number | 'mark') => void;
@@ -247,8 +248,10 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       const input = 'text' in given ? (helped === undefined ? { text: given.text } : { text: given.text, helped }) : given;
       // Phase 34 (spec D9): the second try at a held card carries retry: true,
       // and an answer meeting a hold it could not have opened goes again as one.
+      // Phase 62 (spec D6): and the words tapped on its sentence.
+      const tapped = tappedFor(question, state.tapped);
       const call = settle(question, retry, (as) =>
-        api.nextStep(sessionId, nextStepRequest(question.id, input, as, hintOpened, checksFit(question, input))).then((next) => ({ answer: input, next })),
+        api.nextStep(sessionId, nextStepRequest(question.id, input, as, hintOpened, checksFit(question, input), tapped)).then((next) => ({ answer: input, next })),
       );
 
       // Phase 34 (spec D9). Another accepted word, or any answer after a failed
