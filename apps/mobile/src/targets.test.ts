@@ -4,7 +4,13 @@ import type { Target, TargetList, TargetSummary, TargetWord } from '@lang-tutor/
 import { ApiError } from './api/client';
 import {
   actionFailureMessage,
+  countdownBig,
   dateHasCome,
+  fuseOf,
+  isUrgent,
+  stackDots,
+  targetButtonSolid,
+  urgencyOf,
   dueDateChoices,
   dueDayLabel,
   daysLeftLabel,
@@ -582,5 +588,89 @@ describe('screenGroups', () => {
   it('lists nothing for a target with no word', () => {
     expect(screenGroups(target(0, 'due_today', []))).toEqual([]);
     expect(screenGroups(target(5, 'owed', []))).toEqual([]);
+  });
+});
+
+// Phase 64 (spec D4, D5). The card's blue header: the countdown's big line, the fuse that burns
+// from the day the target was made to its date, the "not ready" line of the last two days, the
+// button's solid or pale look, and the stack's dots.
+describe('countdownBig (phase 64, spec D4)', () => {
+  it('is the days left with ימים, then מחר, then היום', () => {
+    expect(countdownBig(5)).toEqual({ big: ltr('5'), unit: 'ימים' });
+    expect(countdownBig(2)).toEqual({ big: ltr('2'), unit: 'ימים' });
+    expect(countdownBig(1)).toEqual({ big: 'מחר', unit: null });
+    expect(countdownBig(0)).toEqual({ big: 'היום', unit: null });
+  });
+});
+
+describe('fuseOf (phase 64, spec D5)', () => {
+  const fuse = (created_on: string, due_on: string, days_left: number) => fuseOf({ created_on, due_on, days_left });
+
+  it('is the share of the time left, white before the last two days', () => {
+    expect(fuse('2026-10-13', '2026-10-23', 5)).toEqual({ share: 0.5, hot: false, label: null });
+  });
+
+  it('turns hot in the last two days, with a label', () => {
+    expect(fuse('2026-10-13', '2026-10-23', 1)).toEqual({ share: 0.1, hot: true, label: 'יום אחד' });
+    expect(fuse('2026-10-13', '2026-10-23', 0)).toEqual({ share: 0, hot: true, label: 'היום' });
+  });
+
+  it('never divides by zero nor runs past whole, for a target made on its date or the day before', () => {
+    expect(fuse('2026-10-23', '2026-10-23', 0)).toEqual({ share: 0, hot: true, label: 'היום' });
+    expect(fuse('2026-10-22', '2026-10-23', 1)).toEqual({ share: 1, hot: true, label: 'יום אחד' });
+    expect(fuse('2026-10-22', '2026-10-23', 3).share).toBe(1);
+  });
+});
+
+describe('urgencyOf (phase 64, spec D5)', () => {
+  const of = (kind: 'exam' | 'homework', days_left: number, word_count: number, ready_count: number) =>
+    urgencyOf({ kind, days_left, word_count, ready_count });
+
+  it('names the words not ready in the last two days', () => {
+    expect(of('exam', 1, 8, 5)).toEqual({ kind: 'not-ready', text: `הבוחן מחר ו-${ltr('3')} מילים עוד לא מוכנות. עוד תרגול אחד יעזור.` });
+    expect(of('homework', 0, 6, 4)).toEqual({ kind: 'not-ready', text: `שיעורי הבית היום ו-${ltr('2')} מילים עוד לא מוכנות. חזרה אחרונה תעזור.` });
+    expect(of('exam', 1, 8, 7)).toEqual({ kind: 'not-ready', text: 'הבוחן מחר ומילה אחת עוד לא מוכנה. עוד תרגול אחד יעזור.' });
+  });
+
+  it('says every word is ready once none is missing', () => {
+    expect(of('exam', 1, 8, 8)).toEqual({ kind: 'ready', text: 'כל המילים מוכנות לבוחן ✓' });
+    expect(of('homework', 0, 6, 6)).toEqual({ kind: 'ready', text: 'כל המילים מוכנות לשיעורי הבית ✓' });
+  });
+
+  it('says nothing before the last two days, nor for a target with no word', () => {
+    expect(of('exam', 2, 8, 0)).toBeNull();
+    expect(of('exam', 1, 0, 0)).toBeNull();
+  });
+
+  it('marks a card urgent in its last two days', () => {
+    expect(isUrgent({ days_left: 2 })).toBe(false);
+    expect(isUrgent({ days_left: 1 })).toBe(true);
+    expect(isUrgent({ days_left: 0 })).toBe(true);
+  });
+});
+
+describe('targetButtonSolid (phase 64, spec D4)', () => {
+  it('is solid while work is owed, and on the date below 100%', () => {
+    expect(targetButtonSolid(summary('t', 'owed', '2026-10-20'))).toBe(true);
+    expect(targetButtonSolid(summary('t', 'done', '2026-10-20'))).toBe(false);
+    expect(targetButtonSolid(summary('t', 'rest', '2026-10-20'))).toBe(false);
+    expect(targetButtonSolid(summary('t', 'due_today', '2026-10-15', { readiness_pct: 99 }))).toBe(true);
+    expect(targetButtonSolid(summary('t', 'due_today', '2026-10-15', { readiness_pct: 100 }))).toBe(false);
+  });
+});
+
+describe('stackDots (phase 64, spec D3, D5)', () => {
+  it('draws no dots for one card', () => {
+    expect(stackDots(['main'], [])).toEqual([]);
+  });
+
+  it('draws a dot per card in order, amber for a target in its last two days', () => {
+    const soon = summary('t2', 'done', '2026-10-16', { days_left: 1 });
+    const later = summary('t1', 'owed', '2026-10-20');
+    expect(stackDots(['t1', 'main', 't2'], [later, soon])).toEqual([
+      { card: 't1', urgent: false },
+      { card: 'main', urgent: false },
+      { card: 't2', urgent: true },
+    ]);
   });
 });

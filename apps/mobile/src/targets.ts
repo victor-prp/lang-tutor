@@ -168,6 +168,63 @@ export function homeOrder(targets: readonly TargetSummary[]): { first: HomeCard;
   return { first, order };
 }
 
+/** Phase 64 (spec D4). The countdown as the card's header draws it: the days left large with
+ *  "ימים" beside it, then "מחר", then "היום" on the date itself. */
+export function countdownBig(daysLeft: number): { big: string; unit: string | null } {
+  if (daysLeft < 1) return { big: strings.countdownToday, unit: null };
+  if (daysLeft === 1) return { big: strings.countdownTomorrow, unit: null };
+  return { big: strings.countdownNumber(daysLeft), unit: strings.countdownDays };
+}
+
+/** The days from one `YYYY-MM-DD` to another, from the strings alone, in UTC. */
+const daysBetweenDays = (from: string, to: string): number =>
+  Math.round((dayStart(to).getTime() - dayStart(from).getTime()) / DAY_MS);
+
+/** Whether a target is in its last two days (R9): tomorrow, or the date itself. */
+export function isUrgent(target: Pick<TargetSummary, 'days_left'>): boolean {
+  return target.days_left <= 1;
+}
+
+/** Phase 64 (spec D5). The fuse at the bottom of the header: the share of the target's time
+ *  still left, from the day it was made to its date, between 0 and 1. In the last two days it
+ *  is hot (amber, glowing) and labelled. */
+export type Fuse = { share: number; hot: boolean; label: string | null };
+
+export function fuseOf(target: Pick<TargetSummary, 'created_on' | 'due_on' | 'days_left'>): Fuse {
+  const whole = Math.max(1, daysBetweenDays(target.created_on, target.due_on));
+  const share = Math.max(0, Math.min(1, target.days_left / whole));
+  if (!isUrgent(target)) return { share, hot: false, label: null };
+  return { share, hot: true, label: target.days_left < 1 ? strings.fuseToday : strings.fuseOneDay };
+}
+
+/** Phase 64 (spec D5). The line under the header in the last two days: the words not ready
+ *  yet, or that every word is. None before, and none for a target with no word. */
+export type Urgency = { kind: 'not-ready' | 'ready'; text: string } | null;
+
+export function urgencyOf(target: Pick<TargetSummary, 'kind' | 'days_left' | 'word_count' | 'ready_count'>): Urgency {
+  if (!isUrgent(target) || target.word_count === 0) return null;
+  const missing = target.word_count - target.ready_count;
+  if (missing <= 0) return { kind: 'ready', text: strings.targetAllReady(target.kind) };
+  return { kind: 'not-ready', text: strings.targetNotReady(target.kind, target.days_left, missing) };
+}
+
+/** Phase 64 (spec D4). A target's button is solid when pressing it is the thing to do now:
+ *  work owed today, or the last review on the date below 100% (phase 57 D10). */
+export function targetButtonSolid(target: TargetSummary): boolean {
+  if (target.today.state === 'owed') return true;
+  return target.today.state === 'due_today' && target.readiness_pct < 100;
+}
+
+/** Phase 64 (spec D3, D5). The stack's dots, one per card in home's order, amber for a target
+ *  in its last two days. One card has none. */
+export function stackDots(order: readonly HomeCard[], targets: readonly TargetSummary[]): { card: HomeCard; urgent: boolean }[] {
+  if (order.length <= 1) return [];
+  return order.map((card) => {
+    const target = targets.find((candidate) => candidate.id === card);
+    return { card, urgent: target !== undefined && isUrgent(target) };
+  });
+}
+
 /** Phase 57 (spec D10, D11). What a target's card shows: its title (the countdown, or the
  *  date itself), the line under it, today's line, its readiness and its button's label.
  *  Readiness shows in every state; the card draws it with its bar. */

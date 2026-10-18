@@ -60,6 +60,8 @@ const TARGET_KIND_NAMES: Record<TargetKind, string> = { homework: 'שיעורי 
 // and with ל, for what the card's lines are about ("מוכנות לבוחן").
 const TARGET_DUE_TODAY: Record<TargetKind, string> = { homework: 'שיעורי הבית היום', exam: 'הבוחן היום' };
 const TARGET_FOR: Record<TargetKind, string> = { homework: 'לשיעורי הבית', exam: 'לבוחן' };
+// Phase 64 (spec D5). The kind with its article, the subject of the "not ready" line.
+const TARGET_THE: Record<TargetKind, string> = { homework: 'שיעורי הבית', exam: 'הבוחן' };
 
 /** Phase 57 (spec D11, option B). A countdown title in three parts, so the card can draw
  *  the number large in the accent colour. `number` is null when the title has none. */
@@ -556,6 +558,29 @@ export const strings = {
     days === 1 ? 'נתחיל מחר' : `נתחיל בעוד ${isolateLtr(String(days))} ימים`,
   targetReadinessPct: (kind: TargetKind, pct: number) => `מוכנות ${TARGET_FOR[kind]}: ${isolateLtr(`${pct}%`)}`,
   practiceNow: 'לתרגל עכשיו',
+  // Phase 64 (spec D4, D5). The card's blue header: the countdown's big line, the fuse's label
+  // in the last two days, the "not ready" line and the line once every word is ready.
+  countdownDays: 'ימים',
+  countdownNumber: (days: number) => isolateLtr(String(days)),
+  /** My words' big number. */
+  countNumber: (count: number) => isolateLtr(String(count)),
+  countdownTomorrow: 'מחר',
+  countdownToday: 'היום',
+  fuseLabel: 'הזמן שנשאר',
+  fuseOneDay: 'יום אחד',
+  fuseToday: 'היום',
+  /** `daysLeft` is 1 (tomorrow) or 0 (the date itself); `missing` the words not ready, at least 1. */
+  targetNotReady: (kind: TargetKind, daysLeft: number, missing: number): string => {
+    const day = daysLeft < 1 ? 'היום' : 'מחר';
+    const words = missing === 1 ? 'ומילה אחת עוד לא מוכנה' : `ו-${isolateLtr(String(missing))} מילים עוד לא מוכנות`;
+    const help = daysLeft < 1 ? 'חזרה אחרונה תעזור.' : 'עוד תרגול אחד יעזור.';
+    return `${TARGET_THE[kind]} ${day} ${words}. ${help}`;
+  },
+  targetAllReady: (kind: TargetKind): string => `כל המילים מוכנות ${TARGET_FOR[kind]} ✓`,
+  // My words' header: the number, and what it counts.
+  myWordsDue: (count: number) => (count === 1 ? 'מילה מחכה לחזרה' : 'מילים מחכות לחזרה'),
+  myWordsSeed: (language: string) => `מילים ב${language}`,
+  myWordsSaved: (language: string) => `משמעויות שמורות ב${language}`,
   practiceMore: 'לתרגל עוד',
   targetDonePraise: 'כל הכבוד! סיימת להיום. נתראה מחר',
   /** A rest day. `nextIn` is the days to the next practice day, null when none is known. */
