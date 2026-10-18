@@ -11,7 +11,8 @@ type IconName = ComponentProps<typeof Ionicons>['name'];
 /** Phase 64 (spec D1). Each tab's name, icon and testID. מילים keeps the testID of home's
  *  old vocabulary button, and אני the profile button's, so a test reaches the same place. */
 const TABS: Record<string, { label: string; icon: IconName; testID: string }> = {
-  index: { label: strings.tabPractice, icon: 'play', testID: 'tab-practice' },
+  // Phase 64b (spec D1): home, which may hold more than practice later.
+  index: { label: strings.tabHome, icon: 'home-outline', testID: 'tab-home' },
   words: { label: strings.tabWords, icon: 'book-outline', testID: 'vocabulary-entry' },
   me: { label: strings.tabMe, icon: 'person-outline', testID: 'profile-button' },
   settings: { label: strings.tabSettings, icon: 'settings-outline', testID: 'settings-tab' },

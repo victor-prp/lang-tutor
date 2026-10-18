@@ -126,6 +126,10 @@ test('a photo of an Italian list goes to My words, as the review decided', async
 
   // Back on תרגול with the count, and the two ticked words in מילים.
   await expect(page.getByTestId('home-photo-saved')).toContainText('נשמרו');
+  // Phase 64b (spec D2): the notice sits above the cards, not under them.
+  const notice = await page.getByTestId('home-photo-saved').boundingBox();
+  const card = await page.getByTestId('home-my-words').boundingBox();
+  expect((notice?.y ?? Infinity) + (notice?.height ?? 0)).toBeLessThanOrEqual(card?.y ?? -Infinity);
   expect(await savedLemmas(page.request, enrollmentId)).toEqual(['cane', 'casa']);
   expect(await openImports(page.request, enrollmentId)).toEqual([]);
   await tapUntil(page, 'vocabulary-entry', 'vocabulary-word');
@@ -155,7 +159,7 @@ test('a photo makes a new exam, and a second photo joins it as a prep already op
   const [exam] = (await activeTargets(page.request, enrollmentId)).targets;
   expect(exam.kind).toBe('exam');
   expect(exam.word_count).toBe(3);
-  await expect(page.getByTestId(`home-dot-${exam.id}`)).toBeVisible();
+  await expect(page.getByTestId(`home-bar-${exam.id}`)).toBeVisible();
 
   // 2. A second photo, into the exam already open: the choice lists it, and Done adds the words.
   // The first photo's read stub would answer this read too: it goes first.

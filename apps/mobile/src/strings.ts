@@ -52,6 +52,8 @@ const PART_OF_SPEECH_LOOKUP: Record<string, string> = { ...PART_OF_SPEECH_NAMES,
 // Phase 52 (spec D8). The letter of the day, by ISO weekday 1 (Monday) to 7 (Sunday):
 // Sunday is the first day (א׳) in Hebrew.
 const REMINDER_DAY_NAMES = ['ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳', 'א׳'];
+// Phase 64b. The same letters by JavaScript's weekday, 0 (Sunday) to 6 (Saturday).
+const DAY_LETTERS = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
 
 // Phase 53 (spec D4, D11). Records over the closed wire sets, so the compiler refuses
 // a third kind that has no Hebrew name.
@@ -593,8 +595,12 @@ export const strings = {
       : `${today} התרגול הבא בעוד ${isolateLtr(String(nextIn))} ימים`;
   },
   myWords: 'המילים שלי',
+  // Phase 64b (spec D4). A due day's letter, by JavaScript's weekday (0 = Sunday), and what a
+  // screen reader says of a bar under the cards: the card and its place.
+  dayLetter: (weekday: number): string => DAY_LETTERS[weekday] ?? '',
+  barSpoken: (name: string, place: number, total: number) => `${name}, ${place} מתוך ${total}`,
   // Phase 64 (spec D1, D7). The bar's four tabs, and the groups of אני and הגדרות.
-  tabPractice: 'תרגול',
+  tabHome: 'בית',
   tabWords: 'מילים',
   tabMe: 'אני',
   tabSettings: 'הגדרות',

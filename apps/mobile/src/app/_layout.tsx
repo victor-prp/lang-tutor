@@ -316,7 +316,7 @@ export default function RootLayout() {
   // Phase 52 (spec D8). A tapped reminder opens /?start=reminder, and Home starts
   // the ready session; the tap that launched the app is read once from the last
   // response. Phase 64: dismissed to the tabs when a screen is over them, rather than
-  // a second Home pushed over a session in progress; navigated to תרגול when a tab is
+  // a second Home pushed over a session in progress; navigated to בית when a tab is
   // on top (openReminderTap).
   useEffect(() => reminders.onTap(() => openReminderTap(router)), []);
 

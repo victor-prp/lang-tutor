@@ -9,7 +9,7 @@ import {
   dotLook,
   fuseOf,
   isUrgent,
-  stackDots,
+  stackBars,
   targetButtonSolid,
   urgencyOf,
   dueDateChoices,
@@ -647,19 +647,57 @@ describe('targetButtonSolid (phase 64, spec D4)', () => {
   });
 });
 
-describe('stackDots (phase 64, spec D3, D5)', () => {
-  it('draws no dots for one card', () => {
-    expect(stackDots(['main'], [])).toEqual([]);
+// Phase 64b (spec D4). The bars under the cards: a name each up to four cards, with the due
+// day's letter when two targets share a kind; from five, the kind's icon and the day.
+// 2026-10-18 is a Sunday: the 20th is ג׳, the 22nd ה׳, the 23rd ו׳.
+describe('stackBars (phase 64b, spec D4)', () => {
+  const exam = summary('t1', 'owed', '2026-10-20', { days_left: 2 });
+  const homework = (id: string, due: string, days = 5) => summary(id, 'owed', due, { kind: 'homework', days_left: days });
+
+  it('draws no bars for one card', () => {
+    expect(stackBars(['main'], [])).toEqual([]);
   });
 
-  it('draws a dot per card in order, amber for a target in its last two days', () => {
-    const soon = summary('t2', 'done', '2026-10-16', { days_left: 1 });
-    const later = summary('t1', 'owed', '2026-10-20');
-    expect(stackDots(['t1', 'main', 't2'], [later, soon])).toEqual([
-      { card: 't1', urgent: false },
-      { card: 'main', urgent: false },
-      { card: 't2', urgent: true },
+  it('names each card, up to four, and says where it is', () => {
+    expect(stackBars(['t1', 'main'], [exam])).toEqual([
+      { card: 't1', urgent: false, label: 'בוחן', icon: null, spoken: 'בוחן, 1 מתוך 2' },
+      { card: 'main', urgent: false, label: 'המילים שלי', icon: null, spoken: 'המילים שלי, 2 מתוך 2' },
     ]);
+  });
+
+  it('adds the due day to two targets of a kind', () => {
+    const bars = stackBars(['h1', 'h2', 'main'], [homework('h1', '2026-10-22'), homework('h2', '2026-10-23')]);
+    expect(bars.map((bar) => bar.label)).toEqual(['שיעורי בית ה׳', 'שיעורי בית ו׳', 'המילים שלי']);
+    expect(bars.map((bar) => bar.spoken)).toEqual(['שיעורי בית ה׳, 1 מתוך 3', 'שיעורי בית ו׳, 2 מתוך 3', 'המילים שלי, 3 מתוך 3']);
+  });
+
+  it('leaves two of a kind due on the same weekday alike, told apart by their place', () => {
+    const bars = stackBars(['h1', 'h2'], [homework('h1', '2026-10-22'), homework('h2', '2026-10-29')]);
+    expect(bars.map((bar) => bar.label)).toEqual(['שיעורי בית ה׳', 'שיעורי בית ה׳']);
+    expect(bars.map((bar) => bar.spoken)).toEqual(['שיעורי בית ה׳, 1 מתוך 2', 'שיעורי בית ה׳, 2 מתוך 2']);
+  });
+
+  it('turns to the kind\'s icon and the day from five cards, and speaks the full name', () => {
+    const soon = summary('t1', 'owed', '2026-10-20', { days_left: 1 });
+    const bars = stackBars(
+      ['t1', 'h1', 'h2', 'main', 'h3'],
+      [soon, homework('h1', '2026-10-22'), homework('h2', '2026-10-23'), homework('h3', '2026-10-30', 12)],
+    );
+    expect(bars.map((bar) => [bar.icon, bar.label])).toEqual([
+      ['exam', 'ג׳'],
+      ['homework', 'ה׳'],
+      ['homework', 'ו׳'],
+      ['main', ''],
+      ['homework', 'ו׳'],
+    ]);
+    expect(bars.map((bar) => bar.spoken)).toEqual([
+      'בוחן ג׳, 1 מתוך 5',
+      'שיעורי בית ה׳, 2 מתוך 5',
+      'שיעורי בית ו׳, 3 מתוך 5',
+      'המילים שלי, 4 מתוך 5',
+      'שיעורי בית ו׳, 5 מתוך 5',
+    ]);
+    expect(bars.map((bar) => bar.urgent)).toEqual([true, false, false, false, false]);
   });
 });
 
