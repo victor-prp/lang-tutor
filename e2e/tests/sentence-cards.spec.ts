@@ -118,7 +118,7 @@ async function reachSentenceSession(
   request: APIRequestContext,
   username: string,
   gapAlternatives: string[] = [],
-  sentenceWords: { hebrew: string; translation: string; word: string }[] | null = null,
+  sentenceWords: { shown: string; translation: string; word: string }[] | null = null,
 ) {
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
@@ -134,7 +134,7 @@ async function reachSentenceSession(
   // no sentence falls back on its saved example, as by default.
   await expectContext(
     request,
-    // Phase 59 (spec D2): and, when given, the translation card's word map.
+    // Phase 59 (spec D2): and, when given, a card's word map (phase 62b: of the sentence it shows).
     Array.from({ length: CARDS }, (_, i) => ({ key: `q${i + 1}`, sentence_word: MARKED, ...(sentenceWords ? { sentence_words: sentenceWords } : {}) })),
   );
   // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
@@ -426,10 +426,10 @@ test('a tap shows a word of the sentence to translate, and the practised word\'s
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
   await reachSentenceSession(page, request, 'e2e_sentences_taps_ru', [], [
-    { hebrew: 'אתמול', translation: 'Вчера', word: '' },
-    { hebrew: 'היא', translation: 'она', word: '' },
-    { hebrew: MARKED, translation: STUB_GAP, word: '' },
-    { hebrew: 'הספר', translation: 'книгу', word: '' },
+    { shown: 'אתמול', translation: 'Вчера', word: '' },
+    { shown: 'היא', translation: 'она', word: '' },
+    { shown: MARKED, translation: STUB_GAP, word: '' },
+    { shown: 'הספר', translation: 'книгу', word: '' },
   ]);
 
   const seen: string[] = [];
@@ -470,10 +470,10 @@ test('a tap shows a word of a gap sentence, and the answer shows every word', as
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
   await reachSentenceSession(page, request, 'e2e_sentences_gap_taps_ru', [], [
-    { hebrew: 'אתמול', translation: 'Вчера', word: '' },
-    { hebrew: 'היא', translation: 'она', word: '' },
-    { hebrew: MARKED, translation: STUB_GAP, word: '' },
-    { hebrew: 'הספר', translation: 'книгу', word: '' },
+    { shown: 'Вчера', translation: 'אתמול', word: '' },
+    { shown: 'она', translation: 'היא', word: '' },
+    { shown: STUB_GAP, translation: MARKED, word: '' },
+    { shown: 'эту книгу', translation: 'את הספר', word: '' },
   ]);
 
   const seen: string[] = [];

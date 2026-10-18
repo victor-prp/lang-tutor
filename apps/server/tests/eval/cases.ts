@@ -1686,6 +1686,9 @@ export type ContextCase = {
   /** Phase 62 (spec D1). The learner's practised words, which a target-language
    *  line is built from as much as it can. */
   learner?: { word: string; meaning: string }[];
+  /** Phase 62b. A target-language sentence's map, run by run: whether a tap shows
+   *  the run, and a Hebrew word its translation holds. */
+  runs?: { shown: string; tappable: boolean; hebrew?: string }[];
 };
 
 /** לנסר's root in any form: לנסר, ינסר, מנסר, נוסר, ניסר, נסרתי. */
@@ -1737,6 +1740,22 @@ export const CONTEXT_CASES: ContextCase[] = [
     target: 'it', type: 'cloze_typed', form: 'fratello', lemma: 'fratello', partOfSpeech: 'noun', translation: 'אח',
     example: null, exampleTranslation: null,
     sentence: { hebrew: 'אחי גר כאן עם אמא.', target: 'Mio fratello abita qui con la mamma.', word: 'fratello', marked: 'אחי' },
+    // Phase 62b: a possessive has its own Hebrew, though the sentence joins it to אחי.
+    runs: [{ shown: 'Mio', tappable: true, hebrew: 'שלי' }, { shown: 'abita', tappable: true }],
+  },
+  // Phase 62b. Victor's card of 2026-10-18: un is rendered by nothing, and bravo and
+  // ragazzo, rendered together as ילד טוב but not next to each other, each by its own word.
+  {
+    label: 'context it, a gap mapped: Mio fratello è un bravo ragazzo on a cloze choice',
+    target: 'it', type: 'cloze_choice', form: 'fratello', lemma: 'fratello', partOfSpeech: 'noun', translation: 'אח',
+    example: null, exampleTranslation: null,
+    sentence: { hebrew: 'אחי הוא ילד טוב.', target: 'Mio fratello è un bravo ragazzo.', word: 'fratello', marked: 'אחי' },
+    runs: [
+      { shown: 'Mio', tappable: true, hebrew: 'שלי' },
+      { shown: 'un', tappable: false },
+      { shown: 'bravo', tappable: true, hebrew: 'טוב' },
+      { shown: 'ragazzo', tappable: true, hebrew: 'ילד' },
+    ],
   },
   // F, eb95d246: the practised word, named in the sentence the card shows.
   {

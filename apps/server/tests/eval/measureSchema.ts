@@ -340,7 +340,7 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
       } else if (item.map) {
         // Phase 62 (spec D2): a gap card's map, turned onto its target-language sentence.
         const gap = findMarks(item.translation, item.word)[0] ?? null;
-        const map = italianWordMap({ text: item.translation, translation: item.sentence, target: gap, meaning: item.meaning, entries: got?.sentence_words, learner: learnerWords, ownGlossId: 'g-own' });
+        const map = italianWordMap({ text: item.translation, explanation: 'he', target: gap, meaning: item.meaning, entries: got?.sentence_words, learner: learnerWords, ownGlossId: 'g-own' });
         console.log(`${item.key} gap map     ${map ? map.map((word) => `${item.translation.slice(word.start, word.end)}=${word.text}${word.target ? '*' : ''}${word.glossId ? `(${word.glossId})` : ''}`).join(' ') : 'none'}`);
       }
       continue;
@@ -354,7 +354,7 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
     // Phase 62 (spec D2): a target-language line's map.
     if (item.map && !outcome.dropped && outcome.context?.translation) {
       const line = outcome.context;
-      const map = italianWordMap({ text: line.text, translation: line.translation!, target: line.mark, meaning: item.meaning, entries: got?.sentence_words, learner: learnerWords, ownGlossId: 'g-own' });
+      const map = italianWordMap({ text: line.text, explanation: 'he', target: line.mark, meaning: item.meaning, entries: got?.sentence_words, learner: learnerWords, ownGlossId: 'g-own' });
       console.log(`${item.key} line map    ${map ? map.map((word) => `${line.text.slice(word.start, word.end)}=${word.text}${word.target ? '*' : ''}${word.glossId ? `(${word.glossId})` : ''}`).join(' ') : 'none'}`);
     }
   }
