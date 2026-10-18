@@ -205,6 +205,23 @@ the final checker as today (my call: a miscount is no fault of the sentence).
 - **R2 (Victor, 2026-10-18).** The temperature stays at 0 in this change.
 - **R3 (Victor, 2026-10-18, play-back).** The scope of D2–D6 as played back, validation refusals
   included; a card that fails twice is refused as today.
+- **R4 (building, measured).** Both budgets are 60 s. Over the eval runs the gap check took 4–19 s
+  (60 calls) and the rewrite 7–21 s (23 calls): three times the slowest, capped at D1's 60 s. The
+  prepare-session job now expires at 840 s, which `updateQueue` applies to the existing queue on
+  deploy. A rescue therefore adds about 10–20 s to a session whose gap card fails, not the 5–10 s
+  first guessed, and nothing to one where none does.
+- **R5 (building, the rule's wording).** Four drafts, each judged over three gap runs. An Italian
+  example resting on grammar ("mio tavolo" lacks its article) was copied, and the checker still
+  called tavolo right. Banning the words in `fits` pushed fratello's rewrite to a sentence with none
+  of the learner's words. The kept rule asks for another verb or phrase that only the word's kind
+  goes with, by part of speech, and for at least half the other words from `learner_words`. Its
+  example is *madre*, not *fratello*, so the eval's row is not handed its answer.
+- **R6 (eval results, for Victor).** Gap group: 15, 16 and 14 of 16 in three runs, and 14 and 16 in
+  two full-suite runs, where master scores 13–15; tier 1 clean throughout; every other row moves
+  within master's own run-to-run spread. Fratello's checker row passes in every run (master: none).
+  The trade-off D6 named appeared: in one gap run and one full run, the rescued sentence pointed but
+  left his list ("Mio fratello parla con me.", 33% list words), so the list-share check failed where
+  the checker's no longer does. Neither check was loosened.
 
 ## Left to the builder
 
