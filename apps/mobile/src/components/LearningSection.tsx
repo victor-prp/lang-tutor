@@ -297,10 +297,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
 
   return (
     <>
-      <CardStack
-        resetKey={order.join(',')}
-        cards={order.map((card, at) => ({ key: card, urgent: bars[at]?.urgent ?? false, node: cardNode(card) }))}
-      />
+      <CardStack resetKey={order.join(',')} bars={bars} cards={order.map((card) => ({ key: card, node: cardNode(card) }))} />
 
       {photoSaved ? (
         <Text testID="home-photo-saved" style={styles.notice}>

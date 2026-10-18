@@ -155,7 +155,7 @@ test('a photo makes a new exam, and a second photo joins it as a prep already op
   const [exam] = (await activeTargets(page.request, enrollmentId)).targets;
   expect(exam.kind).toBe('exam');
   expect(exam.word_count).toBe(3);
-  await expect(page.getByTestId(`home-dot-${exam.id}`)).toBeVisible();
+  await expect(page.getByTestId(`home-bar-${exam.id}`)).toBeVisible();
 
   // 2. A second photo, into the exam already open: the choice lists it, and Done adds the words.
   // The first photo's read stub would answer this read too: it goes first.

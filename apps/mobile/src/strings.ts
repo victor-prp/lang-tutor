@@ -600,7 +600,7 @@ export const strings = {
   dayLetter: (weekday: number): string => DAY_LETTERS[weekday] ?? '',
   barSpoken: (name: string, place: number, total: number) => `${name}, ${place} מתוך ${total}`,
   // Phase 64 (spec D1, D7). The bar's four tabs, and the groups of אני and הגדרות.
-  tabPractice: 'תרגול',
+  tabHome: 'בית',
   tabWords: 'מילים',
   tabMe: 'אני',
   tabSettings: 'הגדרות',

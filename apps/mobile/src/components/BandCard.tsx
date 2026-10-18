@@ -21,6 +21,10 @@ const gradient = Platform.select<ViewStyle>({
  * its top (the kind with its icon, the big line, a pale line under it, a target's fuse) and a
  * white body. Blue for every kind (R8). `info` is drawn under the header and, with `onOpen`,
  * pressable with it, as a target's card opens its screen; `footer` (the button) is not.
+ *
+ * Phase 64b (spec D2, R2). The card fills the height it is given, every card of the stack the
+ * same: the header grows into whatever the card's own lines leave, its lines centred, and the
+ * footer stays at the card's bottom.
  */
 export function BandCard({
   testID,
@@ -76,11 +80,11 @@ export function BandCard({
   return (
     <View testID={testID} style={styles.card}>
       {onOpen ? (
-        <Pressable accessibilityRole="button" testID={openTestID} onPress={onOpen}>
+        <Pressable accessibilityRole="button" testID={openTestID} onPress={onOpen} style={styles.top}>
           {top}
         </Pressable>
       ) : (
-        top
+        <View style={styles.top}>{top}</View>
       )}
       {footer ? <View style={styles.footer}>{footer}</View> : null}
     </View>
@@ -131,8 +135,11 @@ export const cardButton = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: colors.surface, borderRadius: radii.card, overflow: 'hidden', ...shadows.card },
+  card: { flexGrow: 1, backgroundColor: colors.surface, borderRadius: radii.card, overflow: 'hidden', ...shadows.card },
+  top: { flexGrow: 1 },
   band: {
+    flexGrow: 1,
+    justifyContent: 'center',
     backgroundColor: colors.primary,
     paddingHorizontal: 15,
     paddingTop: 16,

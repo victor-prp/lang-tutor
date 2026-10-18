@@ -1,88 +1,162 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Animated, PanResponder, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
+import { Animated, PanResponder, Platform, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 
-import { dotLook } from '@/targets';
-import { colors, radii, shadows } from '@/theme';
+import { dotLook, type StackBar } from '@/targets';
+import { colors } from '@/theme';
 
 /** How far a drag goes before it turns the card, in points. */
-const SWIPE = 60;
+const SWIPE = 50;
+/** The gap between two cards in the row. */
+const GAP = 12;
+/** The stage's side padding, the room the cards' shadows need inside its overflow. */
+const SHADOW_ROOM = 8;
+const SLIDE_MS = 280;
+/** How long after a drag a click is the drag's own, not a tap (the web's). */
+const CLICK_AFTER_DRAG_MS = 500;
+
+/** The DOM node a View is on the web, as much of it as the click guard uses. */
+type ClickTarget = {
+  addEventListener: (type: 'click', listener: (event: { stopPropagation: () => void; preventDefault: () => void }) => void, capture: boolean) => void;
+  removeEventListener: (type: 'click', listener: (event: { stopPropagation: () => void; preventDefault: () => void }) => void, capture: boolean) => void;
+};
+
+type IconName = ComponentProps<typeof Ionicons>['name'];
+const BAR_ICONS: Record<NonNullable<StackBar['icon']>, IconName> = {
+  main: 'book-outline',
+  exam: 'calendar-outline',
+  homework: 'document-text-outline',
+};
 
 /**
- * Phase 64 (spec D3, home-carousel.html option 3). Home's cards one at a time, as a stack:
- * the top card, the edges of two more under its bottom edge, and a dot per card (the top
- * one long and blue, a card in its last two days amber). Swiping the top card sideways
- * turns to the next; in RTL the next sits to the left, so a drag to the right brings it,
- * and a drag to the left goes back. The stack cycles. The dots are buttons too, so a mouse
- * reaches every card.
+ * Phase 64 (spec D3), phase 64b (spec D2–D4). Home's cards, one in view: every card sits in one
+ * row, so each is as tall as the tallest, and the row fills the space it is given (no card or
+ * control moves when the card changes). The card follows the finger and slides to its
+ * neighbour; in RTL the next card is to the left, so a drag to the right brings it, and the row
+ * stops at either end. Under it, a named bar per card (StackBar): tapping one brings its card.
  *
  * Back on the first card whenever the order changes (a session finished, a target made) and
- * whenever home comes back into focus.
+ * whenever home comes back into focus (R5).
  */
 export function CardStack({
   cards,
+  bars,
   resetKey,
 }: {
-  cards: { key: string; urgent: boolean; node: ReactNode }[];
+  cards: { key: string; node: ReactNode }[];
+  bars: StackBar[];
   resetKey: string;
 }) {
   const [index, setIndex] = useState(0);
+  const [width, setWidth] = useState(0);
   const count = cards.length;
   const at = count === 0 ? 0 : Math.min(index, count - 1);
 
   useEffect(() => setIndex(0), [resetKey]);
   useFocusEffect(useCallback(() => setIndex(0), []));
 
-  const pan = useRef(new Animated.Value(0)).current;
-  const countRef = useRef(count);
-  countRef.current = count;
-  const responder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gesture) =>
-          countRef.current > 1 && Math.abs(gesture.dx) > 12 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
-        onPanResponderMove: (_, gesture) => pan.setValue(gesture.dx),
-        onPanResponderRelease: (_, gesture) => {
-          const total = countRef.current;
-          if (Math.abs(gesture.dx) >= SWIPE && total > 1) {
-            const step = gesture.dx > 0 ? 1 : -1;
-            setIndex((current) => (((current + step) % total) + total) % total);
-            pan.setValue(0);
-            return;
-          }
-          Animated.spring(pan, { toValue: 0, useNativeDriver: false }).start();
-        },
-        onPanResponderTerminate: () => Animated.spring(pan, { toValue: 0, useNativeDriver: false }).start(),
-      }),
-    [pan],
-  );
+  // The row's offset: the card in view at the stage's start, and the finger's drag on top.
+  const offset = useRef(new Animated.Value(0)).current;
+  const step = width + GAP;
+  useEffect(() => {
+    Animated.timing(offset, { toValue: at * step, duration: SLIDE_MS, useNativeDriver: false }).start();
+  }, [at, step, offset]);
+
+  // On the web a Pressable presses on the DOM's click, which follows a drag that ends on it as
+  // well (react-native-web's PressResponder): the click a drag leaves behind is swallowed here,
+  // before it reaches the card. On a phone the responder's capture already keeps the card out.
+  const stageRef = useRef<View>(null);
+  const draggedAt = useRef(0);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return undefined;
+    const node = stageRef.current as unknown as ClickTarget | null;
+    if (!node?.addEventListener) return undefined;
+    const swallow = (event: { stopPropagation: () => void; preventDefault: () => void }) => {
+      if (Date.now() - draggedAt.current < CLICK_AFTER_DRAG_MS) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+    };
+    node.addEventListener('click', swallow, true);
+    return () => node.removeEventListener('click', swallow, true);
+  }, []);
+
+  // Read through refs: the responder is made once and must see the latest index and size.
+  const live = useRef({ at, step, count });
+  live.current = { at, step, count };
+  const responder = useMemo(() => {
+    // A sideways drag is the stack's, claimed in the capture phase, before the card's own
+    // pressable: otherwise the card it starts on takes it as a press on release as well. A tap
+    // (no move) and a vertical scroll stay the card's and the screen's.
+    const sideways = (_: unknown, gesture: { dx: number; dy: number }) =>
+      live.current.count > 1 && Math.abs(gesture.dx) > 12 && Math.abs(gesture.dx) > Math.abs(gesture.dy);
+    return PanResponder.create({
+      onMoveShouldSetPanResponderCapture: sideways,
+      onMoveShouldSetPanResponder: sideways,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderMove: (_, gesture) => offset.setValue(live.current.at * live.current.step + gesture.dx),
+      onPanResponderRelease: (_, gesture) => {
+        draggedAt.current = Date.now();
+        const { at: current, step: stride, count: total } = live.current;
+        const next = gesture.dx >= SWIPE ? current + 1 : gesture.dx <= -SWIPE ? current - 1 : current;
+        const target = Math.max(0, Math.min(total - 1, next));
+        if (target !== current) setIndex(target);
+        else Animated.spring(offset, { toValue: current * stride, useNativeDriver: false }).start();
+      },
+      onPanResponderTerminate: () => {
+        draggedAt.current = Date.now();
+        Animated.spring(offset, { toValue: live.current.at * live.current.step, useNativeDriver: false }).start();
+      },
+      });
+  }, [offset]);
+
+  const onLayout = (event: LayoutChangeEvent) => {
+    const measured = event.nativeEvent.layout.width - 2 * SHADOW_ROOM;
+    if (measured !== width) {
+      setWidth(measured);
+      offset.setValue(at * (measured + GAP));
+    }
+  };
 
   if (count === 0) return null;
-  const several = count > 1;
   return (
     <View style={styles.stack}>
-      <View style={[styles.deck, several && styles.deckWithEdges]}>
-        {several ? <View style={[styles.edge, styles.edgeBack]} /> : null}
-        {several ? <View style={[styles.edge, styles.edgeFront]} /> : null}
-        <Animated.View style={[styles.top, { transform: [{ translateX: pan }] }]} {...responder.panHandlers}>
-          {cards[at].node}
+      <View ref={stageRef} style={styles.stage} onLayout={onLayout} {...responder.panHandlers}>
+        <Animated.View style={[styles.row, { transform: [{ translateX: offset }] }]}>
+          {cards.map((card) => (
+            <View key={card.key} style={[styles.slot, { width }]}>
+              {card.node}
+            </View>
+          ))}
         </Animated.View>
       </View>
-      {several ? (
-        <View style={styles.dots}>
-          {cards.map((card, i) => {
-            const look = dotLook({ onTop: i === at, urgent: card.urgent });
+      {bars.length > 0 ? (
+        <View style={styles.bars}>
+          {bars.map((bar, i) => {
+            const look = dotLook({ onTop: i === at, urgent: bar.urgent });
+            const tint = look === 'on' ? colors.primary : look === 'urgent' ? colors.amber : colors.tabInactive;
             return (
               <Pressable
-                key={card.key}
+                key={bar.card}
                 accessibilityRole="button"
+                accessibilityLabel={bar.spoken}
                 accessibilityState={{ selected: i === at }}
                 aria-selected={i === at}
-                testID={`home-dot-${card.key}`}
-                hitSlop={8}
+                testID={`home-bar-${bar.card}`}
                 onPress={() => setIndex(i)}
-                style={[styles.dot, look === 'on' && styles.dotOn, look === 'urgent' && styles.dotUrgent]}
-              />
+                style={styles.bar}
+              >
+                <View style={[styles.line, look === 'on' && styles.lineOn, look === 'urgent' && styles.lineUrgent]} />
+                <View style={styles.label}>
+                  {bar.icon ? <Ionicons name={BAR_ICONS[bar.icon]} size={13} color={tint} /> : null}
+                  {bar.label ? (
+                    <Text numberOfLines={1} style={[styles.labelText, { color: tint }, look === 'on' && styles.labelOn]}>
+                      {bar.label}
+                    </Text>
+                  ) : null}
+                </View>
+              </Pressable>
             );
           })}
         </View>
@@ -92,20 +166,26 @@ export function CardStack({
 }
 
 const styles = StyleSheet.create({
-  stack: { gap: 10 },
-  deck: { position: 'relative' },
-  deckWithEdges: { paddingBottom: 24 },
-  top: { zIndex: 3 },
-  edge: {
-    position: 'absolute',
-    height: 40,
-    backgroundColor: colors.surface,
-    ...shadows.card,
+  // Grown from their content, not from zero: the tallest card sets the least height, and the
+  // space home gives the stack stretches every card past it.
+  stack: { flexGrow: 1, gap: 6 },
+  // The cards' shadows need the room the overflow would cut.
+  stage: {
+    flexGrow: 1,
+    overflow: 'hidden',
+    marginHorizontal: -SHADOW_ROOM,
+    paddingHorizontal: SHADOW_ROOM,
+    paddingTop: 2,
+    paddingBottom: 14,
   },
-  edgeFront: { left: 12, right: 12, bottom: 12, borderRadius: 18, zIndex: 2 },
-  edgeBack: { left: 24, right: 24, bottom: 0, borderRadius: 16, zIndex: 1, opacity: 0.7 },
-  dots: { flexDirection: 'row', justifyContent: 'center', gap: 6 },
-  dot: { width: 7, height: 7, borderRadius: radii.pill, backgroundColor: '#D0D5DD' },
-  dotOn: { width: 18, backgroundColor: colors.primary },
-  dotUrgent: { backgroundColor: colors.amber },
+  row: { flexGrow: 1, flexDirection: 'row', alignItems: 'stretch', gap: GAP },
+  slot: { flexDirection: 'column' },
+  bars: { flexDirection: 'row', gap: 6 },
+  bar: { flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center', gap: 5 },
+  line: { height: 5, borderRadius: 3, backgroundColor: '#D0D5DD' },
+  lineOn: { backgroundColor: colors.primary },
+  lineUrgent: { backgroundColor: colors.amber },
+  label: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 3 },
+  labelText: { fontSize: 11, lineHeight: 15, writingDirection: 'rtl' },
+  labelOn: { fontWeight: '700' },
 });

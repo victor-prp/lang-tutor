@@ -522,7 +522,7 @@ test('practice more starts the next words early, and the target screen groups th
   expect(before.today).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 0 });
   const more = await readyPathSession(page.request, enrollmentId, target.id);
   // Done for today, the homework is under My words: its dot, not its card, is on show.
-  await openApp(page, `home-dot-${target.id}`);
+  await openApp(page, `home-bar-${target.id}`);
 
   // 1. Done for today: the card is below My words, and its button starts another session of
   // the homework, which starts later words early and asks only the homework's words. It goes

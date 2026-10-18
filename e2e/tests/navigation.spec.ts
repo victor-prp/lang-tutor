@@ -4,7 +4,7 @@ import { expectGeneration } from './support/cards';
 import { BOARD_WORDS } from './support/lexemes';
 import { clearGemini } from './support/mockServer';
 import { enrollmentIdOf } from './support/sessions';
-import { lookUpEntries, saveEntries } from './support/targets';
+import { addDays, createTarget, lookUpEntries, readTargets, saveEntries } from './support/targets';
 import { openApp, signUpLearner } from './support/users';
 
 // Phase 64 (spec D1, D2, D10). The bar's four tabs reach each other without home; the header's
@@ -46,7 +46,7 @@ test('the four tabs reach each other, translate returns to its tab, and a sessio
   await expect(page.getByTestId('vocabulary-entry')).toHaveAttribute('aria-selected', 'true');
 
   // A session covers the bar (Victor: "we want the learner to be focused").
-  await page.getByTestId('tab-practice').click();
+  await page.getByTestId('tab-home').click();
   await startSession(page);
   await expect(page.getByTestId('settings-tab')).toBeHidden();
   await page.getByTestId('session-back').click();
@@ -75,4 +75,52 @@ test('the language switched from the header on מילים switches the list with
   await expect(page.getByTestId('enrollment-switcher')).toHaveText('רוסית ▾');
   await expect(page.getByTestId('vocabulary-word')).toHaveCount(1);
   await expect(page.getByTestId('vocabulary-word')).toContainText(BOARD_WORDS[0].form);
+});
+
+// Phase 64b (spec D1, D2, D4). The first tab is בית. Under the cards, a named bar per card:
+// tapping one brings its card, and every card is as tall as the others.
+test('the first tab is בית, named bars bring their cards, and the cards are one height', async ({ page, request }) => {
+  await signUpLearner(page, 'e2e_tabs_bars', 'ru');
+  const enrollmentId = await enrollmentIdOf(page.request);
+  const [mine, examWord] = await lookUpEntries(page.request, enrollmentId, BOARD_WORDS.slice(0, 2));
+  await expectGeneration(request);
+  await saveEntries(page.request, enrollmentId, mine);
+  const { today } = await readTargets(page.request, enrollmentId);
+  const exam = await createTarget(page.request, enrollmentId, { kind: 'exam', due_on: addDays(today, 5), entries: examWord });
+  await openApp(page, `home-bar-${exam.id}`);
+
+  await expect(page.getByTestId('tab-home')).toContainText('בית');
+  await expect(page.getByTestId(`home-bar-${exam.id}`)).toHaveText('בוחן');
+  await expect(page.getByTestId('home-bar-main')).toHaveText('המילים שלי');
+  await expect(page.getByTestId('home-bar-main')).toHaveAttribute('aria-label', 'המילים שלי, 2 מתוך 2');
+
+  const examCard = page.getByTestId(`target-card-${exam.id}`);
+  const examBox = await examCard.boundingBox();
+  await page.getByTestId('home-bar-main').click();
+  await expect(page.getByTestId('home-bar-main')).toHaveAttribute('aria-selected', 'true');
+  const mineCard = page.getByTestId('home-my-words');
+  await expect(mineCard).toBeInViewport();
+  const mineBox = await mineCard.boundingBox();
+  expect(Math.round(mineBox?.height ?? 0)).toBe(Math.round(examBox?.height ?? -1));
+
+  // A drag across a card slides to its neighbour (right brings the next, left goes back) and
+  // never presses the card it starts on.
+  await page.getByTestId(`home-bar-${exam.id}`).click();
+  const drag = async (by: number) => {
+    const box = await page.getByTestId(`target-card-${exam.id}`).boundingBox();
+    if (!box) throw new Error('no exam card');
+    // From the card's middle, on its header: the part a tap opens the target from.
+    const y = box.y + 120;
+    const x = box.x + box.width / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + by, y, { steps: 12 });
+    await page.mouse.up();
+  };
+  await drag(180);
+  await expect(page.getByTestId('home-bar-main')).toHaveAttribute('aria-selected', 'true');
+  // A press would open the target's screen a moment after the release: give it that moment.
+  await page.waitForTimeout(1_000);
+  await expect(page.getByTestId('target-title')).toHaveCount(0);
+  await expect(page.getByTestId('home-bar-main')).toBeVisible();
 });
