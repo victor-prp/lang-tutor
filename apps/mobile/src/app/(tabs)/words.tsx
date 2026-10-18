@@ -1,5 +1,5 @@
-import { Redirect, router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { Redirect, router, useFocusEffect, useIsFocused } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -58,6 +58,13 @@ export default function WordsTab() {
   // On every focus, including the return from a drill-down: that is what makes
   // a change made there appear here.
   useFocusEffect(useCallback(() => reload(), [reload]));
+  // Phase 64 (spec D2, D6). The header's switcher works from this tab too, and a switch resets
+  // the list after the focus reload has started (the provider's effect runs after this screen's),
+  // throwing that read away: an idle list on show is read again.
+  const focused = useIsFocused();
+  useEffect(() => {
+    if (focused && v.status === 'idle') reload();
+  }, [focused, v.status, reload]);
   if (!active) return <Redirect href="/" />;
   const language = active.target_language;
 

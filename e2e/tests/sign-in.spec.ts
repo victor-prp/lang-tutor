@@ -36,7 +36,9 @@ test('a new learner signs up with a code, onboards, signs out and back in, and k
   await page.getByTestId('enroll-ru').click();
   await page.getByTestId('enroll-submit').click();
   await expect(page.getByTestId('start-button')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('profile-button')).toHaveText('יוני');
+  await page.getByTestId('profile-button').click();
+  await expect(page.getByTestId('profile-name')).toHaveText('יוני');
+  await page.getByTestId('tab-practice').click();
 
   // One saved word, through the app, as vocabulary.spec saves one.
   await tapUntil(page, 'translate-entry', 'translate-input');
@@ -44,7 +46,7 @@ test('a new learner signs up with a code, onboards, signs out and back in, and k
   await tapAndWaitForWrite(page, page.getByTestId('translate-save').first());
 
   await openApp(page);
-  await page.getByTestId('profile-button').click();
+  await page.getByTestId('settings-tab').click();
   await page.getByTestId('sign-out-button').click();
   await expect(page.getByTestId('sign-in-email')).toBeVisible({ timeout: 30_000 });
   // Signed out means the API refuses this browser now.

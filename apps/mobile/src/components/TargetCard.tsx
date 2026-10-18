@@ -59,9 +59,11 @@ export function TargetCard({
       fuseTestID={`target-fuse-${id}`}
       strip={
         urgency?.kind === 'not-ready' ? (
-          <View testID={`target-urgency-${id}`} style={styles.urgency}>
+          <View style={styles.urgency}>
             <Text style={styles.urgencyIcon}>⚠</Text>
-            <Text style={styles.urgencyText}>{urgency.text}</Text>
+            <Text testID={`target-urgency-${id}`} style={styles.urgencyText}>
+              {urgency.text}
+            </Text>
           </View>
         ) : null
       }

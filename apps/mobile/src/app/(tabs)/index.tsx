@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { cardButton } from '@/components/BandCard';
 import { InvitesSection } from '@/components/InvitesSection';
 import { LearningSection } from '@/components/LearningSection';
+import { StudentsSection } from '@/components/StudentsSection';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { strings } from '@/strings';
 import { spacing } from '@/theme';
@@ -38,7 +39,15 @@ export default function PracticeTab() {
     <SafeAreaView style={styles.screen} edges={[]}>
       <ScrollView contentContainerStyle={styles.content}>
         <InvitesSection />
-        {active ? <LearningSection active={active} /> : <StartLearning />}
+        {active ? (
+          <LearningSection active={active} />
+        ) : (
+          <>
+            {/* A tutor with no course of their own: home is their students (spec §5). */}
+            <StudentsSection />
+            <StartLearning />
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
