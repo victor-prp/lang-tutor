@@ -335,20 +335,26 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
           accessibilityRole="button"
           accessibilityState={{ disabled: busy }}
           disabled={busy}
+          accessibilityLabel={strings.back}
           testID="wizard-back"
+          hitSlop={8}
           onPress={back}
+          style={[styles.headerIcon, busy && styles.linkDisabled]}
         >
-          <Text style={[styles.link, busy && styles.linkDisabled]}>{strings.back}</Text>
+          <Ionicons name="arrow-forward" size={24} color={colors.text} />
         </Pressable>
         <Text style={styles.title}>{wizardTitle(state.mode)}</Text>
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: work?.kind === 'saving' || work?.kind === 'leaving' }}
           disabled={work?.kind === 'saving' || work?.kind === 'leaving'}
+          accessibilityLabel={strings.cancel}
           testID="wizard-cancel"
+          hitSlop={8}
           onPress={() => void leave()}
+          style={styles.headerIcon}
         >
-          <Text style={styles.link}>{strings.cancel}</Text>
+          <Ionicons name="close" size={24} color={colors.text} />
         </Pressable>
       </View>
 
@@ -614,15 +620,16 @@ function savedCount(results: PromiseSettledResult<{ saved_gloss_ids: string[] }>
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.sm },
+  screen: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: spacing.sm },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  title: { flexShrink: 1, fontSize: fontSizes.lg, fontWeight: '700', color: colors.text, writingDirection: 'rtl' },
+  title: { flex: 1, fontSize: fontSizes.lg, fontWeight: '800', color: colors.text, writingDirection: 'rtl' },
+  headerIcon: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   link: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
   linkDisabled: { opacity: 0.4 },
   stepTitle: {
-    fontSize: fontSizes.xl,
-    lineHeight: lineHeights.xl,
-    fontWeight: '700',
+    fontSize: fontSizes.lg,
+    lineHeight: lineHeights.lg,
+    fontWeight: '800',
     color: colors.text,
     writingDirection: 'rtl',
   },
@@ -670,8 +677,7 @@ const styles = StyleSheet.create({
     height: 128,
     borderRadius: radii.sm,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     backgroundColor: colors.surface,
   },
   thumbImage: { width: '100%', height: '100%' },
@@ -708,8 +714,7 @@ const styles = StyleSheet.create({
   date: {
     backgroundColor: colors.surface,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
   },
@@ -730,8 +735,7 @@ const styles = StyleSheet.create({
   secondaryButton: {
     backgroundColor: colors.surface,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     paddingVertical: spacing.md,
     alignItems: 'center',
   },

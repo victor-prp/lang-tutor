@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '@/components/ScreenHeader';
 import { Bar, TodayBar } from '@/components/TargetCard';
 import { confirm } from '@/confirm';
 import { useApi } from '@/hooks/useApi';
@@ -22,7 +23,7 @@ import {
   wordTodayLine,
 } from '@/targets';
 import type { WizardMode } from '@/targetWizard';
-import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { colors, fontSizes, lineHeights, radii, spacing, shadows } from '@/theme';
 
 /**
  * Phase 53 (spec D11). One target: its kind and date, how many of its words are ready,
@@ -139,16 +140,12 @@ export default function TargetScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" testID="target-back" onPress={() => router.back()}>
-          <Text style={styles.link}>{strings.back}</Text>
-        </Pressable>
-        {target ? (
-          <Text testID="target-title" style={styles.title}>
-            {targetTitle(target.kind)}
-          </Text>
-        ) : null}
-      </View>
+      <ScreenHeader
+        title={target ? targetTitle(target.kind) : ''}
+        titleTestID={target ? 'target-title' : undefined}
+        onBack={() => router.back()}
+        backTestID="target-back"
+      />
 
       {!target ? (
         loadFailed ? (
@@ -335,8 +332,7 @@ const styles = StyleSheet.create({
   skills: {
     backgroundColor: colors.surface,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     padding: spacing.md,
     gap: spacing.sm,
   },
@@ -344,17 +340,14 @@ const styles = StyleSheet.create({
   skillName: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.text, writingDirection: 'rtl' },
   skillTrack: { flexDirection: 'row', height: 8, borderRadius: radii.pill, backgroundColor: colors.border, overflow: 'hidden' },
   capLine: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: colors.text },
-  screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.sm },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { fontSize: fontSizes.lg, fontWeight: '700', color: colors.text, writingDirection: 'rtl' },
+  screen: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: spacing.sm },
   link: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
   failed: { gap: spacing.sm, alignItems: 'center', paddingTop: spacing.xl },
   content: { gap: spacing.sm, paddingBottom: spacing.xl },
   summary: {
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     padding: spacing.lg,
     gap: spacing.xs,
   },
@@ -366,8 +359,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     backgroundColor: colors.surface,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     alignItems: 'center',
@@ -381,8 +373,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     backgroundColor: colors.surface,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     padding: spacing.md,
   },
   wordText: { flex: 1, gap: spacing.xs },

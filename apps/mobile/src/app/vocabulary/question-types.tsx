@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '@/components/ScreenHeader';
 import { ApiError } from '@/api/client';
 import { useApi } from '@/hooks/useApi';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -12,7 +13,7 @@ import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
 import { initialSelection, pollPrepared, toggled } from '@/questionTypes';
 import { strings } from '@/strings';
-import { colors, fontSizes, radii, spacing } from '@/theme';
+import { colors, fontSizes, radii, spacing, shadows } from '@/theme';
 
 /** How often the screen reads a preparing session. */
 const POLL_MS = 1_000;
@@ -140,10 +141,11 @@ export default function QuestionTypesScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <Pressable accessibilityRole="button" testID="question-types-back" onPress={() => router.back()}>
-        <Text style={styles.link}>{strings.back}</Text>
-      </Pressable>
-      <Text style={styles.title}>{translation ? `${strings.questionTypesTitle}: ${translation}` : strings.questionTypesTitle}</Text>
+      <ScreenHeader
+        title={translation ? `${strings.questionTypesTitle}: ${translation}` : strings.questionTypesTitle}
+        onBack={() => router.back()}
+        backTestID="question-types-back"
+      />
       {loadFailed ? <Text style={styles.notice}>{strings.questionTypesLoadFailed}</Text> : null}
       {notice ? (
         <Text testID="question-types-notice" style={styles.notice}>
@@ -219,7 +221,7 @@ export default function QuestionTypesScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.sm },
+  screen: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: spacing.sm },
   link: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
   title: { fontSize: fontSizes.lg, fontWeight: '700', color: colors.text, writingDirection: 'rtl' },
   list: { gap: spacing.xs, paddingBottom: spacing.lg },
@@ -229,8 +231,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     backgroundColor: colors.surface,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     padding: spacing.sm,
   },
   rowOff: { backgroundColor: colors.background },
