@@ -13,10 +13,10 @@ const shown = `dev (${APP_COMMIT.replace(/-dirty$/, ', uncommitted changes')})`;
 // copy button puts the same three lines on the clipboard.
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
 
-test('About, opened from the profile, names the exact release and copies it', async ({ page }) => {
+test('About, opened from הגדרות, names the exact release and copies it', async ({ page }) => {
   await signUpLearner(page, 'e2e_about');
   await openApp(page);
-  await page.getByTestId('profile-button').click();
+  await page.getByTestId('settings-tab').click();
   await expect(page.getByTestId('app-version')).toContainText(shown);
   await page.getByTestId('app-version').click();
 

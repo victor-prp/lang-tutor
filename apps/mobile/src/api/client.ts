@@ -315,6 +315,11 @@ export function createApiClient({
       patchJson<PhotoImportItem>(`/api/photo-imports/${encodeURIComponent(id)}/items/${position}`, update),
     savePhotoImport: (id: string) =>
       postJson<SaveVocabularyResponse>(`/api/photo-imports/${encodeURIComponent(id)}/save`, {}),
+    // Phase 64 (final review I2). The photo flow's My words: its imports, saved as a prep saves them.
+    savePhotoImports: (enrollmentId: string, importIds: string[]) =>
+      postJson<SaveVocabularyResponse>(`/api/enrollments/${encodeURIComponent(enrollmentId)}/photo-imports/save`, {
+        photo_import_ids: importIds,
+      }),
     discardPhotoImport: (id: string) => postNoContent(`/api/photo-imports/${encodeURIComponent(id)}/discard`, {}),
 
     // Phase 52 (spec D1, D2, D4, D6). Practice reminders: the schedule, the zone its

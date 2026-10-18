@@ -7,6 +7,7 @@ import {
   PhotoImportListSchema,
   PhotoImportSchema,
   PhotoImportSummarySchema,
+  SavePhotoImportsRequestSchema,
   SaveVocabularyResponseSchema,
 } from '@lang-tutor/core/api/schemas';
 import { bodyLimit } from 'hono/body-limit';
@@ -127,6 +128,28 @@ const saveImportRoute = createRoute({
   },
 });
 
+// Phase 64 (final review I2). The photo flow's My words.
+const saveImportsRoute = createRoute({
+  method: 'post',
+  path: '/enrollments/{id}/photo-imports/save',
+  tags: ['photo-imports'],
+  summary: "Save several imports' words to the learner's list",
+  description:
+    "All or nothing, in one transaction, as a prep saves its photos: the first row of each gloss across the imports, the row the review shows, if it is ticked. A failed import saves nothing; every import becomes saved.",
+  request: {
+    params: enrollmentParams,
+    body: { required: true, content: { 'application/json': { schema: SavePhotoImportsRequestSchema } } },
+  },
+  responses: {
+    200: json(SaveVocabularyResponseSchema, 'The glosses saved.'),
+    400: json(ErrorSchema, 'The body did not validate (one to ten ids), or a gloss cannot be saved in this enrollment.'),
+    404: json(ErrorSchema, 'No enrollment has this id, or one of the imports is not found in it.'),
+    409: json(ErrorSchema, 'An import is not ready: still reading or looking up, discarded, or already saved.'),
+    ...learnerResponses,
+    403: NOT_YOURS,
+  },
+});
+
 const discardImportRoute = createRoute({
   method: 'post',
   path: '/photo-imports/{id}/discard',
@@ -197,6 +220,20 @@ export function createPhotoImportsRouter(photoImports: PhotoImportService) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof PhotoImportNotFound) return c.json({ error: 'photo import not found' }, 404);
       if (error instanceof InvalidPhotoImportItem) return c.json({ error: 'invalid row change' }, 400);
+      if (error instanceof PhotoImportConflict) return c.json({ error: 'photo import conflict' }, 409);
+      throw error;
+    }
+  });
+
+  router.openapi(saveImportsRoute, async (c) => {
+    const { id } = c.req.valid('param');
+    try {
+      return c.json(await photoImports.saveMany(c.var.actor, id, c.req.valid('json').photo_import_ids), 200);
+    } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
+      if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
+      if (error instanceof PhotoImportNotFound) return c.json({ error: 'photo import not found' }, 404);
+      if (error instanceof InvalidVocabularyEntry) return c.json({ error: 'invalid vocabulary entry' }, 400);
       if (error instanceof PhotoImportConflict) return c.json({ error: 'photo import conflict' }, 409);
       throw error;
     }

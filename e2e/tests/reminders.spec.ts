@@ -14,9 +14,9 @@ test.setTimeout(120_000);
 // reload. The web build has no push, so the screen says so, and the schedule is
 // still stored for the phone.
 
-/** Home, then Profile, then Reminders: what a learner taps. */
+/** הגדרות, then Reminders: what a learner taps (phase 64, spec D7). */
 async function openReminders(page: Page): Promise<void> {
-  await page.getByTestId('profile-button').click();
+  await page.getByTestId('settings-tab').click();
   await page.getByTestId('profile-reminders').click();
   await expect(page.getByTestId('reminders-target')).toBeVisible();
 }

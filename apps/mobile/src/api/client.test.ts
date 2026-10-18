@@ -613,6 +613,7 @@ describe('photo imports', () => {
     await client.getPhotoImport('i1');
     await client.updatePhotoImportItem('i1', 3, { ticked: false });
     await client.savePhotoImport('i1');
+    await client.savePhotoImports('e 1', ['i1', 'i2']);
     await client.discardPhotoImport('i1');
     expect(calls.map(({ url, method }) => [method ?? 'GET', url.replace('http://test.local', '')])).toEqual([
       ['POST', '/api/enrollments/e%201/photo-imports'],
@@ -620,9 +621,12 @@ describe('photo imports', () => {
       ['GET', '/api/photo-imports/i1'],
       ['PATCH', '/api/photo-imports/i1/items/3'],
       ['POST', '/api/photo-imports/i1/save'],
+      ['POST', '/api/enrollments/e%201/photo-imports/save'],
       ['POST', '/api/photo-imports/i1/discard'],
     ]);
     expect(calls[3].body).toEqual({ ticked: false });
+    // Phase 64 (final review I2): the photo flow's My words saves its imports together.
+    expect(calls[5].body).toEqual({ photo_import_ids: ['i1', 'i2'] });
   });
 
   it('abandons a photo upload that stalls, so the screen is not stuck uploading', async () => {

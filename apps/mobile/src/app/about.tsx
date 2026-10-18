@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '@/components/ScreenHeader';
 import { useApi } from '@/hooks/useApi';
 import { useAppRelease } from '@/hooks/useAppUpdates';
 import {
@@ -16,7 +17,7 @@ import {
   type ServerRelease,
 } from '@/release';
 import { strings } from '@/strings';
-import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { colors, fontSizes, lineHeights, radii, spacing, shadows } from '@/theme';
 
 // Phase 49 (spec D4). The exact release of each part: this bundle, the server
 // it calls and the native binary, and one tap that copies all three for a bug
@@ -54,7 +55,7 @@ export default function AboutScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <Text style={styles.title}>{strings.aboutTitle}</Text>
+      <ScreenHeader title={strings.aboutTitle} onBack={() => router.back()} backTestID="about-back" />
 
       <View style={styles.card}>
         <Line label="Mobile App" value={mobileAppLine(release)} testID="about-mobile-app" />
@@ -71,28 +72,16 @@ export default function AboutScreen() {
       >
         <Text style={styles.buttonLabel}>{copied ? strings.aboutCopied : strings.aboutCopy}</Text>
       </Pressable>
-
-      <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.secondary}>
-        <Text style={styles.secondaryLabel}>{strings.back}</Text>
-      </Pressable>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.md },
-  title: {
-    fontSize: fontSizes.xxl,
-    lineHeight: lineHeights.xxl,
-    fontWeight: '700',
-    color: colors.text,
-    writingDirection: 'rtl',
-  },
+  screen: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: spacing.md },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
@@ -120,6 +109,4 @@ const styles = StyleSheet.create({
     lineHeight: lineHeights.md,
     fontWeight: '700',
   },
-  secondary: { paddingVertical: spacing.sm, alignItems: 'center' },
-  secondaryLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
 });

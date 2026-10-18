@@ -60,6 +60,8 @@ const TARGET_KIND_NAMES: Record<TargetKind, string> = { homework: 'שיעורי 
 // and with ל, for what the card's lines are about ("מוכנות לבוחן").
 const TARGET_DUE_TODAY: Record<TargetKind, string> = { homework: 'שיעורי הבית היום', exam: 'הבוחן היום' };
 const TARGET_FOR: Record<TargetKind, string> = { homework: 'לשיעורי הבית', exam: 'לבוחן' };
+// Phase 64 (spec D5). The kind with its article, the subject of the "not ready" line.
+const TARGET_THE: Record<TargetKind, string> = { homework: 'שיעורי הבית', exam: 'הבוחן' };
 
 /** Phase 57 (spec D11, option B). A countdown title in three parts, so the card can draw
  *  the number large in the accent colour. `number` is null when the title has none. */
@@ -476,19 +478,21 @@ export const strings = {
   /** `weekday` is JavaScript's (0 = Sunday), `month` is 1 = January. */
   targetDueDay: (weekday: number, day: number, month: number) =>
     `יום ${TARGET_WEEKDAY_NAMES[weekday]}, ${isolateLtr(String(day))} ${TARGET_MONTH_NAMES[month - 1]}`,
-  // Home's button, which says what a target is for.
-  targetNew: 'הכנה לשיעורי בית או לבוחן',
   // The wizard: its title for each action, and each step's (spec D10).
-  targetWizardCreate: 'הכנה חדשה',
   targetWizardAddPhotos: 'מילים מתמונות',
   targetWizardAddWords: 'הוספת מילים',
   targetWizardChangeDate: 'שינוי התאריך',
-  targetStepKind: 'למה מתכוננים?',
+  // Phase 64 (spec D8). The photo flow's choice, once the words are marked.
+  targetStepChoose: 'מה לעשות עם המילים החדשות?',
+  targetChooseMyWords: 'להוסיף למילים שלי',
+  targetChooseNewExam: 'הכנה חדשה לבוחן',
+  targetChooseNewHomework: 'הכנה חדשה לשיעורי בית',
+  targetChooseExisting: 'או להוסיף להכנה קיימת',
+  targetWordCount: (count: number) => (count === 1 ? 'מילה אחת' : `${isolateLtr(String(count))} מילים`),
   targetStepPhotos: 'תמונות של רשימת המילים',
   targetStepReview: 'המילים מהתמונות',
   targetStepWords: 'עוד מילים',
   targetStepDate: 'באיזה תאריך?',
-  targetPhotosHint: 'אפשר לצלם או לבחור כמה תמונות, או לדלג על השלב.',
   // A target screen's add photos, whose Next needs a photo: no skipping there.
   targetPhotosHintAdd: 'אפשר לצלם או לבחור כמה תמונות.',
   targetReviewHint: 'אפשר להוריד סימון ממילה או לבחור לה משמעות אחרת.',
@@ -524,7 +528,6 @@ export const strings = {
   targetSaveFailed: 'השמירה נכשלה. נסו שוב.',
   targetClosed: 'ההכנה הזו כבר הסתיימה.',
   // The target screen (spec D11).
-  targetAddPhotos: 'הוספת מילים מתמונות',
   targetAddWord: 'הוספת מילה',
   targetChangeDate: 'שינוי התאריך',
   targetEnd: 'סיום ההכנה',
@@ -556,6 +559,29 @@ export const strings = {
     days === 1 ? 'נתחיל מחר' : `נתחיל בעוד ${isolateLtr(String(days))} ימים`,
   targetReadinessPct: (kind: TargetKind, pct: number) => `מוכנות ${TARGET_FOR[kind]}: ${isolateLtr(`${pct}%`)}`,
   practiceNow: 'לתרגל עכשיו',
+  // Phase 64 (spec D4, D5). The card's blue header: the countdown's big line, the fuse's label
+  // in the last two days, the "not ready" line and the line once every word is ready.
+  countdownDays: 'ימים',
+  countdownNumber: (days: number) => isolateLtr(String(days)),
+  /** My words' big number. */
+  countNumber: (count: number) => isolateLtr(String(count)),
+  countdownTomorrow: 'מחר',
+  countdownToday: 'היום',
+  fuseLabel: 'הזמן שנשאר',
+  fuseOneDay: 'יום אחד',
+  fuseToday: 'היום',
+  /** `daysLeft` is 1 (tomorrow) or 0 (the date itself); `missing` the words not ready, at least 1. */
+  targetNotReady: (kind: TargetKind, daysLeft: number, missing: number): string => {
+    const day = daysLeft < 1 ? 'היום' : 'מחר';
+    const words = missing === 1 ? 'ומילה אחת עוד לא מוכנה' : `ו-${isolateLtr(String(missing))} מילים עוד לא מוכנות`;
+    const help = daysLeft < 1 ? 'חזרה אחרונה תעזור.' : 'עוד תרגול אחד יעזור.';
+    return `${TARGET_THE[kind]} ${day} ${words}. ${help}`;
+  },
+  targetAllReady: (kind: TargetKind): string => `כל המילים מוכנות ${TARGET_FOR[kind]} ✓`,
+  // My words' header: the number, and what it counts.
+  myWordsDue: (count: number) => (count === 1 ? 'מילה מחכה לחזרה' : 'מילים מחכות לחזרה'),
+  myWordsSeed: (language: string) => `מילים ב${language}`,
+  myWordsSaved: (language: string) => `משמעויות שמורות ב${language}`,
   practiceMore: 'לתרגל עוד',
   targetDonePraise: 'כל הכבוד! סיימת להיום. נתראה מחר',
   /** A rest day. `nextIn` is the days to the next practice day, null when none is known. */
@@ -567,6 +593,13 @@ export const strings = {
       : `${today} התרגול הבא בעוד ${isolateLtr(String(nextIn))} ימים`;
   },
   myWords: 'המילים שלי',
+  // Phase 64 (spec D1, D7). The bar's four tabs, and the groups of אני and הגדרות.
+  tabPractice: 'תרגול',
+  tabWords: 'מילים',
+  tabMe: 'אני',
+  tabSettings: 'הגדרות',
+  settingsTitle: 'הגדרות',
+  myLanguagesTitle: 'השפות שלי',
   wordsWaiting: (count: number) =>
     count === 1 ? 'מילה אחת מחכה לחזרה' : `${isolateLtr(String(count))} מילים מחכות לחזרה`,
   // Phase 61 (spec D6). A tester's session of one meaning's question types.

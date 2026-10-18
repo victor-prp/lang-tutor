@@ -61,6 +61,7 @@ import type {
   QuestionSchema,
   ReverseChoiceQuestionSchema,
   SaveVocabularyRequestSchema,
+  SavePhotoImportsRequestSchema,
   SaveVocabularyResponseSchema,
   ScoreSchema,
   GlossProgressSchema,
@@ -200,6 +201,7 @@ export type LanguageCode = z.infer<typeof LanguageCodeSchema>;
 export type VocabularyEntryInput = z.infer<typeof VocabularyEntryInputSchema>;
 export type SaveVocabularyRequest = z.infer<typeof SaveVocabularyRequestSchema>;
 export type SaveVocabularyResponse = z.infer<typeof SaveVocabularyResponseSchema>;
+export type SavePhotoImportsRequest = z.infer<typeof SavePhotoImportsRequestSchema>;
 export type VocabularyPageQuery = z.infer<typeof VocabularyPageQuerySchema>;
 export type RemoveVocabularyWordsQuery = z.infer<typeof RemoveVocabularyWordsQuerySchema>;
 export type RemoveVocabularyWordsResponse = z.infer<typeof RemoveVocabularyWordsResponseSchema>;

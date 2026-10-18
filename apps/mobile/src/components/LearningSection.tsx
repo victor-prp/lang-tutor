@@ -1,14 +1,13 @@
 import type { CurrentSessionResponse, Enrollment, TargetSummary } from '@lang-tutor/core/api';
 import { router, useFocusEffect, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text } from 'react-native';
 
 import { ApiError } from '@/api/client';
+import { CardStack } from '@/components/CardStack';
+import { MyWordsCard } from '@/components/MyWordsCard';
 import { TargetCard } from '@/components/TargetCard';
-import { availableTargets } from '@/enrollments';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
-import { usePhotoImports } from '@/hooks/usePhotoImports';
 import { useSession } from '@/hooks/useSession';
 import { useTargets } from '@/hooks/useTargets';
 import {
@@ -17,7 +16,6 @@ import {
   homeActionOf,
   homeReminderStartOf,
   mainEmptyNote,
-  myWordsLine,
   openSessionOf,
   shouldAutoCreate,
   shouldPoll,
@@ -26,26 +24,12 @@ import {
   type HomeAction,
   type TargetCreate,
 } from '@/nextSession';
-import { homePhotoCard, isWorking, type HomePhotoCard } from '@/photoImports';
 import { strings } from '@/strings';
-import { homeOrder, shouldPollTargets } from '@/targets';
-import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { homeOrder, shouldPollTargets, stackDots, type HomeCard } from '@/targets';
+import { colors, fontSizes, lineHeights } from '@/theme';
 
 /** Final review N1. Create refused: the path has a started session (409 session_open). */
 const isSessionOpen = (error: unknown) => error instanceof ApiError && error.code === 'session_open';
-
-function photoCardLabel(card: NonNullable<HomePhotoCard>): string {
-  switch (card.kind) {
-    case 'working':
-      return strings.homePhotoWorking;
-    case 'ready':
-      return strings.homePhotoReady(card.count);
-    case 'failed':
-      return strings.homePhotoFailed;
-    case 'several':
-      return strings.homePhotoSeveral(card.count);
-  }
-}
 
 /** Phase 52 (spec D8), phase 57. What home holds of a tapped reminder: the main path's read it
  *  first saw, the targets read made after the tap (its list), and the create a target first
@@ -59,8 +43,6 @@ type ReminderHeld = {
 export function LearningSection({ active }: { active: Enrollment }) {
   const { enter } = useSession();
   const next = useNextSession();
-  const { enrollments, switchTo } = useCurrentUser();
-  const { imports, reload: reloadPhotos } = usePhotoImports();
   const { list: targetList, reload: reloadTargets, create: createTargetSession } = useTargets();
   // Set by the review after a save (spec D13): "28 words saved".
   const { photoSaved, start } = useLocalSearchParams<{ photoSaved?: string; start?: string }>();
@@ -69,7 +51,6 @@ export function LearningSection({ active }: { active: Enrollment }) {
   // the focused screen's.
   const navigation = useNavigation<{ setParams: (params: { start?: string }) => void }>();
   const focused = useIsFocused();
-  const [switcherOpen, setSwitcherOpen] = useState(false);
   // A ref guards re-entry (state is stale between two taps in one frame); the
   // state only drives the disabled look.
   const [busy, setBusy] = useState(false);
@@ -103,9 +84,8 @@ export function LearningSection({ active }: { active: Enrollment }) {
       attemptedFor.current = null;
       setMakeFailedFor(null);
       reload();
-      reloadPhotos();
       void reloadTargets();
-    }, [reload, reloadPhotos, reloadTargets]),
+    }, [reload, reloadTargets]),
   );
 
   // While preparing, and only while this screen is focused.
@@ -118,16 +98,6 @@ export function LearningSection({ active }: { active: Enrollment }) {
     }, [polling, reload]),
   );
 
-  // The photo card moves while an import is read or looked up, the same way.
-  const photosWorking = imports.some((summary) => isWorking(summary.status));
-  useFocusEffect(
-    useCallback(() => {
-      if (!photosWorking) return undefined;
-      const timer = setInterval(reloadPhotos, POLL_INTERVAL_MS);
-      return () => clearInterval(timer);
-    }, [photosWorking, reloadPhotos]),
-  );
-
   // Phase 57. A target's session is prepared the same way: its card moves while it is.
   const targetsPolling = shouldPollTargets(targetList);
   useFocusEffect(
@@ -138,12 +108,12 @@ export function LearningSection({ active }: { active: Enrollment }) {
     }, [targetsPolling, reloadTargets]),
   );
 
-  const canAdd = availableTargets(enrollments).length > 0;
   const action: HomeAction | null = next.current ? homeActionOf(next.current) : null;
-  const photoCard = homePhotoCard(imports);
-  // Phase 57 (spec D11). One card per path, by priority; the first one's button is filled.
+  // Phase 57 (spec D11). One card per path, by priority; phase 64 (spec D3) shows them as a
+  // stack, one at a time, in that order.
   const targets = targetList?.targets ?? [];
-  const { first, order } = homeOrder(targets);
+  const { order } = homeOrder(targets);
+  const dots = stackDots(order, targets);
 
   // Phase 43 (spec D2). A session not yet answered is started, which has the
   // next one built for this device. Not waited on: its first answer starts it too.
@@ -293,97 +263,44 @@ export function LearningSection({ active }: { active: Enrollment }) {
     if (step.kind === 'enter') enterSession(step.sessionId, step.fresh);
   });
 
+  // Phase 64 (spec D3, D4). Each card of the stack: My words with today's machinery as it was,
+  // or a target's card with its own path's button.
+  const cardNode = (card: HomeCard) => {
+    if (card === 'main') {
+      return (
+        <MyWordsCard
+          current={next.current}
+          language={strings.languageName(active.target_language)}
+          action={action}
+          emptyNote={mainEmptyNote(targetList?.targets ?? null)}
+          loadFailed={next.loadFailed}
+          busy={busy}
+          onRetry={reload}
+          makeFailed={createLook(makeFailedFor, active.id) === 'retry'}
+          onStartSeed={startSeed}
+          onMake={() => void makeNext(active.id)}
+          onEnter={enterSession}
+          onSkip={skip}
+        />
+      );
+    }
+    const target = targets.find((candidate) => candidate.id === card);
+    return target ? (
+      <TargetCard
+        target={target}
+        busy={busy}
+        onOpen={() => router.push(`/targets/${target.id}`)}
+        onPractice={() => practiceTarget(target)}
+      />
+    ) : null;
+  };
+
   return (
     <>
-      <Pressable
-        accessibilityRole="button"
-        testID="enrollment-switcher"
-        onPress={() => setSwitcherOpen((open) => !open)}
-        style={styles.switcher}
-      >
-        <Text style={styles.switcherLabel}>
-          {strings.learningLabel(strings.languageName(active.target_language))}
-        </Text>
-      </Pressable>
-
-      {switcherOpen ? (
-        <View style={styles.switcherList}>
-          {enrollments.map((enrollment) => (
-            <Pressable
-              key={enrollment.id}
-              accessibilityRole="button"
-              accessibilityState={{ selected: enrollment.id === active.id }}
-              testID={`enrollment-option-${enrollment.target_language}`}
-              onPress={() => {
-                switchTo(enrollment.id);
-                setSwitcherOpen(false);
-              }}
-              style={[styles.switcherItem, enrollment.id === active.id && styles.switcherItemActive]}
-            >
-              <Text style={styles.switcherItemLabel}>
-                {strings.languageName(enrollment.target_language)}
-              </Text>
-            </Pressable>
-          ))}
-          {canAdd ? (
-            <Pressable
-              accessibilityRole="button"
-              testID="enrollment-add"
-              onPress={() => {
-                setSwitcherOpen(false);
-                router.push('/enroll');
-              }}
-              style={styles.switcherItem}
-            >
-              <Text style={styles.switcherAddLabel}>{strings.addLanguage}</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
-
-      {order.map((card) => {
-        if (card === 'main') {
-          // Phase 57 (spec D11). My words: the main path, with today's machinery as it was.
-          return (
-            <View
-              key="main"
-              testID="home-my-words"
-              style={[styles.pathCard, first === 'main' && styles.pathCardFirst]}
-            >
-              <Text style={styles.pathTitle}>{strings.myWords}</Text>
-              {next.current ? (
-                <Text style={styles.pathLine}>
-                  {myWordsLine(next.current, strings.languageName(active.target_language))}
-                </Text>
-              ) : null}
-              <SessionAction
-                action={action}
-                emptyNote={mainEmptyNote(targetList?.targets ?? null)}
-                filled={first === 'main'}
-                loadFailed={next.loadFailed}
-                busy={busy}
-                onRetry={reload}
-                makeFailed={createLook(makeFailedFor, active.id) === 'retry'}
-                onStartSeed={startSeed}
-                onMake={() => void makeNext(active.id)}
-                onEnter={enterSession}
-                onSkip={skip}
-              />
-            </View>
-          );
-        }
-        const target = targets.find((candidate) => candidate.id === card);
-        return target ? (
-          <TargetCard
-            key={card}
-            target={target}
-            filled={first === card}
-            busy={busy}
-            onOpen={() => router.push(`/targets/${target.id}`)}
-            onPractice={() => practiceTarget(target)}
-          />
-        ) : null;
-      })}
+      <CardStack
+        resetKey={order.join(',')}
+        cards={order.map((card, at) => ({ key: card, urgent: dots[at]?.urgent ?? false, node: cardNode(card) }))}
+      />
 
       {photoSaved ? (
         <Text testID="home-photo-saved" style={styles.notice}>
@@ -391,283 +308,16 @@ export function LearningSection({ active }: { active: Enrollment }) {
         </Text>
       ) : null}
 
-      {photoCard ? (
-        <Pressable
-          accessibilityRole="button"
-          testID="home-photo-card"
-          onPress={() =>
-            router.push(photoCard.kind === 'several' ? '/photo-imports' : `/photo-imports/${photoCard.id}`)
-          }
-          style={styles.card}
-        >
-          <Text style={styles.cardLabel}>{photoCardLabel(photoCard)}</Text>
-        </Pressable>
-      ) : null}
 
-      {/* Phase 53. Shown once the first read of the targets lands, as the cards are. */}
-      {targetList ? (
-        <Pressable
-          accessibilityRole="button"
-          testID="target-new"
-          onPress={() => router.push('/targets/new')}
-          style={styles.secondaryButton}
-        >
-          <Text style={styles.secondaryButtonLabel}>{strings.targetNew}</Text>
-        </Pressable>
-      ) : null}
-
-      <Pressable
-        accessibilityRole="button"
-        testID="translate-entry"
-        onPress={() => router.push('/translate')}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryButtonLabel}>{strings.translateEntry}</Text>
-      </Pressable>
-
-      <Pressable
-        accessibilityRole="button"
-        testID="vocabulary-entry"
-        onPress={() => router.push('/vocabulary')}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryButtonLabel}>{strings.vocabularyEntry}</Text>
-      </Pressable>
-
-      <Pressable
-        accessibilityRole="button"
-        testID="photo-import-entry"
-        onPress={() => router.push('/photo-imports')}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryButtonLabel}>{strings.photoImportEntry}</Text>
-      </Pressable>
     </>
   );
-}
-
-function SessionAction({
-  action,
-  emptyNote,
-  filled,
-  loadFailed,
-  busy,
-  onRetry,
-  makeFailed,
-  onStartSeed,
-  onMake,
-  onEnter,
-  onSkip,
-}: {
-  action: HomeAction | null;
-  /** Final review M2. What My words says with nothing of its own: save words first, or that
-   *  every saved word is in the targets. */
-  emptyNote: ReturnType<typeof mainEmptyNote>;
-  /** Phase 57 (spec D11). My words is home's first card: its button is filled, else outlined. */
-  filled: boolean;
-  loadFailed: boolean;
-  busy: boolean;
-  onRetry: () => void;
-  /** Phase 43 (spec D7). Home's own create for the `create` state failed. */
-  makeFailed: boolean;
-  onStartSeed: () => void;
-  onMake: () => void;
-  onEnter: (sessionId: string, fresh: boolean) => void;
-  onSkip: (sessionId: string) => void;
-}) {
-  const box = filled ? styles.button : styles.outlinedButton;
-  const text = filled ? styles.buttonLabel : styles.outlinedButtonLabel;
-  const primary = (testID: string, label: string, onPress: () => void) => (
-    <Pressable
-      accessibilityRole="button"
-      testID={testID}
-      disabled={busy}
-      onPress={onPress}
-      style={[box, busy && styles.buttonDisabled]}
-    >
-      <Text style={text}>{label}</Text>
-    </Pressable>
-  );
-  const skip = (sessionId: string) => (
-    <Pressable
-      accessibilityRole="button"
-      testID="home-skip"
-      disabled={busy}
-      onPress={() => onSkip(sessionId)}
-      style={styles.secondaryButton}
-    >
-      <Text style={styles.secondaryButtonLabel}>{strings.skip}</Text>
-    </Pressable>
-  );
-  const preparingLabel = (
-    <View testID="preparing-label" style={[box, styles.buttonDisabled, styles.preparing]}>
-      <ActivityIndicator color={filled ? colors.onPrimary : colors.primary} />
-      <Text style={text}>{strings.preparingQuestions}</Text>
-    </View>
-  );
-  // Phase 43 (spec D7). Making the next session failed: say so and offer
-  // "try again", which makes it again; no button names creating questions.
-  const retry = (
-    <>
-      <Text testID="preparation-failed" style={styles.notice}>
-        {strings.preparationFailed}
-      </Text>
-      {primary('home-make-retry', strings.translateRetry, onMake)}
-    </>
-  );
-
-  if (!action) {
-    if (!loadFailed) return <ActivityIndicator testID="home-loading" />;
-    return (
-      <>
-        <Text testID="home-load-failed" style={styles.notice}>
-          {strings.homeLoadFailed}
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          testID="home-retry"
-          onPress={onRetry}
-          style={styles.secondaryButton}
-        >
-          <Text style={styles.secondaryButtonLabel}>{strings.translateRetry}</Text>
-        </Pressable>
-      </>
-    );
-  }
-  switch (action.kind) {
-    case 'start-seed':
-      return primary('start-button', strings.start, onStartSeed);
-    case 'create':
-      // Phase 43 (spec D7). Home sends create itself: this is how it looks.
-      return makeFailed ? retry : preparingLabel;
-    case 'save-words-first':
-      return (
-        <Text testID={emptyNote.kind === 'all-in-targets' ? 'all-words-in-targets' : 'save-words-first'} style={styles.notice}>
-          {emptyNote.text}
-        </Text>
-      );
-    case 'preparing':
-      return (
-        <>
-          {preparingLabel}
-          {skip(action.sessionId)}
-        </>
-      );
-    case 'start':
-    case 'resume':
-      return (
-        <>
-          {primary('start-button', action.kind === 'start' ? strings.start : strings.resume, () =>
-            onEnter(action.sessionId, action.kind === 'start'),
-          )}
-          {skip(action.sessionId)}
-        </>
-      );
-    case 'failed':
-      return retry;
-  }
 }
 
 const styles = StyleSheet.create({
-  // Phase 57 (spec D11). My words, a card like a target's: bordered in the accent colour
-  // while it is first.
-  pathCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  pathCardFirst: { borderColor: colors.primary },
-  pathTitle: {
-    fontSize: fontSizes.lg,
-    lineHeight: lineHeights.lg,
-    fontWeight: '700',
-    color: colors.text,
-    writingDirection: 'rtl',
-  },
-  pathLine: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, writingDirection: 'rtl' },
-  card: {
-    marginTop: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  cardLabel: {
-    fontSize: fontSizes.lg,
-    lineHeight: lineHeights.lg,
-    color: colors.text,
-    writingDirection: 'rtl',
-  },
-  button: {
-    backgroundColor: colors.primary,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  buttonLabel: {
-    color: colors.onPrimary,
-    fontSize: fontSizes.md,
-    lineHeight: lineHeights.md,
-    fontWeight: '700',
-  },
-  outlinedButton: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  outlinedButtonLabel: {
-    color: colors.primary,
-    fontSize: fontSizes.md,
-    lineHeight: lineHeights.md,
-    fontWeight: '700',
-  },
-  buttonDisabled: { opacity: 0.6 },
-  preparing: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm },
   notice: {
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     color: colors.muted,
     writingDirection: 'rtl',
   },
-  secondaryButton: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  secondaryButtonLabel: {
-    color: colors.primary,
-    fontSize: fontSizes.md,
-    lineHeight: lineHeights.md,
-    fontWeight: '700',
-  },
-  switcher: {
-    alignSelf: 'flex-start',
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  switcherLabel: { color: colors.text, fontSize: fontSizes.md, fontWeight: '700', writingDirection: 'rtl' },
-  switcherList: {
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  switcherItem: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
-  switcherItemActive: { backgroundColor: colors.background },
-  switcherItemLabel: { color: colors.text, fontSize: fontSizes.md, writingDirection: 'rtl' },
-  switcherAddLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700', writingDirection: 'rtl' },
 });

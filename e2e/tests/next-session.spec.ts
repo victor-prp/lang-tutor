@@ -45,7 +45,7 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   await expectGeneration(request);
   await page.getByTestId('translate-back').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('start-button')).toHaveText('התחל');
+  await expect(page.getByTestId('start-button')).toHaveText('לתרגל עכשיו');
 
   // 5. Every card asks one of the saved words, whichever way round it asks.
   // Phase 39 (spec D5): each word's two senses are a gloss family, and a
@@ -70,12 +70,13 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   await page.getByTestId('results-next-session').click();
   await expect(page.getByTestId('results-score')).toBeHidden();
   await expect(page.getByTestId('start-button'), `no session in stock\n${report()}`).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('start-button')).toHaveText('התחל');
+  await expect(page.getByTestId('start-button')).toHaveText('לתרגל עכשיו');
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
 
-test('leaving mid-session offers resume', async ({ page, request }) => {
+// Phase 64 (R3): the button says לתרגל עכשיו for a started session too; it resumes it.
+test('leaving mid-session offers it again, where it was left', async ({ page, request }) => {
   await withVoices(page, []);
   await signUpLearner(page, 'e2e_resume_ru', 'ru');
   await openApp(page);
@@ -86,7 +87,7 @@ test('leaving mid-session offers resume', async ({ page, request }) => {
   await expect(page.getByTestId('progress-label')).toHaveText(/2\s*\/\s*10/);
   await page.getByTestId('session-back').click();
 
-  await expect(page.getByTestId('start-button')).toHaveText('המשך');
+  await expect(page.getByTestId('start-button')).toHaveText('לתרגל עכשיו');
   await tapUntil(page, 'start-button', 'progress-label');
   await expect(page.getByTestId('progress-label')).toHaveText(/2\s*\/\s*10/);
 });

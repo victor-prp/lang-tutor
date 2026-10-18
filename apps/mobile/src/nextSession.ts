@@ -99,6 +99,22 @@ export function myWordsLine(state: CurrentSessionResponse, language: string): st
   return state.due_count > 0 ? strings.wordsWaiting(state.due_count) : strings.homeSavedLabel(state.saved_count, language);
 }
 
+/** Phase 64 (spec D4). My words' button is solid whenever pressing it starts or resumes a
+ *  session; pale while one is made or prepared, after a failure, and with nothing to start. */
+export function mainButtonSolid(action: HomeAction | null): boolean {
+  return action?.kind === 'start-seed' || action?.kind === 'start' || action?.kind === 'resume';
+}
+
+/** Phase 64 (spec D4). My words' blue header: the seed's set before the first session, else
+ *  the words due for review, else the meanings saved, each with what it counts. */
+export function myWordsBand(state: CurrentSessionResponse, language: string): { big: string; line: string } {
+  if (homeActionOf(state).kind === 'start-seed') {
+    return { big: strings.countNumber(SESSION_LENGTH), line: strings.myWordsSeed(language) };
+  }
+  if (state.due_count > 0) return { big: strings.countNumber(state.due_count), line: strings.myWordsDue(state.due_count) };
+  return { big: strings.countNumber(state.saved_count), line: strings.myWordsSaved(language) };
+}
+
 /** Phase 43 (spec D7). The `create` state is not a button: home sends create
  *  itself, once per focus and enrollment (`attemptedFor` is the enrollment it
  *  was sent for), so a create that keeps failing is never sent in a loop. */

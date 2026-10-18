@@ -228,12 +228,16 @@ describe('the target wizard and the target screen (phase 53 D10, D11)', () => {
   });
 
   it('names the wizard of each action and each of its steps', () => {
-    expect(strings.targetNew).toBe('הכנה לשיעורי בית או לבוחן');
-    expect(strings.targetWizardCreate).toBe('הכנה חדשה');
     expect(strings.targetWizardAddPhotos).toBe('מילים מתמונות');
     expect(strings.targetWizardAddWords).toBe('הוספת מילים');
     expect(strings.targetWizardChangeDate).toBe('שינוי התאריך');
-    expect(strings.targetStepKind).toBe('למה מתכוננים?');
+    expect(strings.targetStepChoose).toBe('מה לעשות עם המילים החדשות?');
+    expect(strings.targetChooseMyWords).toBe('להוסיף למילים שלי');
+    expect(strings.targetChooseNewExam).toBe('הכנה חדשה לבוחן');
+    expect(strings.targetChooseNewHomework).toBe('הכנה חדשה לשיעורי בית');
+    expect(strings.targetChooseExisting).toBe('או להוסיף להכנה קיימת');
+    expect(strings.targetWordCount(1)).toBe('מילה אחת');
+    expect(strings.targetWordCount(8)).toBe(ltr('8') + ' מילים');
     expect(strings.targetStepPhotos).toBe('תמונות של רשימת המילים');
     expect(strings.targetStepReview).toBe('המילים מהתמונות');
     expect(strings.targetStepWords).toBe('עוד מילים');
@@ -250,7 +254,6 @@ describe('the target wizard and the target screen (phase 53 D10, D11)', () => {
   });
 
   it("words the target screen's actions and the end's question", () => {
-    expect(strings.targetAddPhotos).toBe('הוספת מילים מתמונות');
     expect(strings.targetAddWord).toBe('הוספת מילה');
     expect(strings.targetChangeDate).toBe('שינוי התאריך');
     expect(strings.targetEnd).toBe('סיום ההכנה');

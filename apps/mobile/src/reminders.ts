@@ -183,3 +183,27 @@ export function createReminders({ engine, api, platform, isExpoGo, timeZone, log
 }
 
 export type Reminders = ReturnType<typeof createReminders>;
+
+/** Where a tapped reminder goes: תרגול, told to start the ready session. */
+export type ReminderHref = { pathname: '/'; params: { start: 'reminder' } };
+
+/** The part of expo-router's router a tapped reminder uses. */
+export type ReminderRouter = {
+  canDismiss: () => boolean;
+  dismissTo: (href: ReminderHref) => void;
+  navigate: (href: ReminderHref) => void;
+};
+
+/**
+ * Phase 52 (spec D8), phase 64 (final review C1). A tapped reminder opens תרגול with
+ * start=reminder, which LearningSection acts on. With a screen over the tabs (a session,
+ * translate) the stack is dismissed to them, as phase 52 did: not a second home pushed over a
+ * session. With a tab on top there is nothing to dismiss, and dismissTo's POP_TO is lost on the
+ * tab navigator (its router has no such action), so the tap navigates, which jumps to תרגול and
+ * sets the param.
+ */
+export function openReminderTap(router: ReminderRouter): void {
+  const href: ReminderHref = { pathname: '/', params: { start: 'reminder' } };
+  if (router.canDismiss()) router.dismissTo(href);
+  else router.navigate(href);
+}

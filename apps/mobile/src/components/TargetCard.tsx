@@ -1,30 +1,40 @@
 import type { TargetSummary } from '@lang-tutor/core/api';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { BandCard, cardButton } from '@/components/BandCard';
 import { targetSessionAction, type HomeAction } from '@/nextSession';
 import { strings } from '@/strings';
-import { readinessColor, targetCardState, todayBar, type TargetCardState } from '@/targets';
+import {
+  countdownBig,
+  dueDayLabel,
+  fuseOf,
+  readinessColor,
+  targetButtonSolid,
+  targetCardState,
+  targetTitle,
+  todayBar,
+  urgencyOf,
+  type TargetCardState,
+} from '@/targets';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 /**
- * Phase 57 (spec D10, D11). A target's card on home: the countdown as its title (option B,
- * the number large in the accent colour), today's line and bar, the readiness line and its
- * bar coloured by the percent, the line of its state (praise, rest, good luck), and the
- * button of its own path. Tapping anything above the button opens the target's screen.
+ * Phase 57 (spec D10, D11), phase 64 (spec D4, D5). A target's card on home: a blue header
+ * with its kind, the countdown large ("5 ימים", "מחר", "היום"), its date and the fuse; the
+ * "not ready" strip of its last two days; then phase 57's lines: its state's note, today's line
+ * and bar, the readiness line and bar, and the button of its own path. Tapping anything above
+ * the button opens the target's screen.
  *
  * The card only draws: what the button does is home's (LearningSection), which acts on
  * targetSessionAction(target) as it acts on the main path's action.
  */
 export function TargetCard({
   target,
-  filled,
   busy,
   onOpen,
   onPractice,
 }: {
   target: TargetSummary;
-  /** The first card's button is filled, every other one outlined (homeOrder's `first`). */
-  filled: boolean;
   /** Another of home's actions is in flight. */
   busy: boolean;
   onOpen: () => void;
@@ -32,43 +42,69 @@ export function TargetCard({
 }) {
   const { id } = target;
   const card = targetCardState(target);
-  const state = target.today.state;
+  const big = countdownBig(target.days_left);
+  const urgency = urgencyOf(target);
   return (
-    <View testID={`target-card-${id}`} style={[styles.card, state !== 'owed' && styles.cardSettled]}>
-      <Pressable accessibilityRole="button" testID={`target-row-${id}`} onPress={onOpen} style={styles.info}>
-        <Text testID={`target-countdown-${id}`} style={styles.title}>
-          {card.title.before}
-          {card.title.number !== null ? <Text style={styles.titleNumber}>{card.title.number}</Text> : null}
-          {card.title.after}
-        </Text>
-        {card.note ? <Note id={id} note={card.note} /> : null}
-        {card.today ? (
-          <>
-            <Text testID={`target-today-${id}`} style={styles.line}>
-              {card.today.text}
-              {card.today.check ? ` ${strings.targetTodayCheck}` : ''}
-              {card.today.extra ? <Text style={styles.extra}>{` ${card.today.extra}`}</Text> : null}
+    <BandCard
+      testID={`target-card-${id}`}
+      openTestID={`target-row-${id}`}
+      onOpen={onOpen}
+      icon={target.kind === 'exam' ? 'calendar-outline' : 'document-text-outline'}
+      kind={targetTitle(target.kind)}
+      big={big.big}
+      bigTestID={`target-countdown-${id}`}
+      unit={big.unit}
+      line={dueDayLabel(target.due_on)}
+      fuse={fuseOf(target)}
+      fuseTestID={`target-fuse-${id}`}
+      strip={
+        urgency?.kind === 'not-ready' ? (
+          <View style={styles.urgency}>
+            <Text style={styles.urgencyIcon}>⚠</Text>
+            <Text testID={`target-urgency-${id}`} style={styles.urgencyText}>
+              {urgency.text}
             </Text>
-            <TodayBar today={target.today} />
-          </>
-        ) : null}
-        <Text testID={`target-readiness-${id}`} style={styles.line}>
-          {card.readiness}
-        </Text>
-        <Bar parts={[{ share: target.readiness_pct / 100, color: readinessColor(target.readiness_pct) }]} />
-      </Pressable>
-      {/* Final review M3. A target with no word has nothing to practise: no button. */}
-      {card.button !== null ? (
-        <PracticeButton
-          testID={`target-practice-${id}`}
-          action={targetSessionAction(target)}
-          label={card.button}
-          filled={filled}
-          busy={busy}
-          onPress={onPractice}
-        />
-      ) : null}
-    </View>
+          </View>
+        ) : null
+      }
+      info={
+        <>
+          {urgency?.kind === 'ready' ? (
+            <Text testID={`target-ready-${id}`} style={styles.ready}>
+              {urgency.text}
+            </Text>
+          ) : null}
+          {card.note ? <Note id={id} note={card.note} /> : null}
+          {card.today ? (
+            <>
+              <Text testID={`target-today-${id}`} style={styles.line}>
+                {card.today.text}
+                {card.today.check ? ` ${strings.targetTodayCheck}` : ''}
+                {card.today.extra ? <Text style={styles.extra}>{` ${card.today.extra}`}</Text> : null}
+              </Text>
+              <TodayBar today={target.today} />
+            </>
+          ) : null}
+          <Text testID={`target-readiness-${id}`} style={styles.line}>
+            {card.readiness}
+          </Text>
+          <Bar parts={[{ share: target.readiness_pct / 100, color: readinessColor(target.readiness_pct) }]} />
+        </>
+      }
+      footer={
+        /* Final review M3. A target with no word has nothing to practise: no button. */
+        card.button !== null ? (
+          <PracticeButton
+            testID={`target-practice-${id}`}
+            action={targetSessionAction(target)}
+            label={card.button}
+            filled={targetButtonSolid(target)}
+            busy={busy}
+            onPress={onPractice}
+          />
+        ) : null
+      }
+    />
   );
 }
 
@@ -131,15 +167,15 @@ function PracticeButton({
   busy: boolean;
   onPress: () => void;
 }) {
-  const box = filled ? styles.filled : styles.outlined;
-  const text = filled ? styles.filledLabel : styles.outlinedLabel;
+  const box = filled ? cardButton.solid : cardButton.pale;
+  const text = filled ? cardButton.solidLabel : cardButton.paleLabel;
   if (action.kind === 'preparing') {
     return (
       <Pressable
         accessibilityRole="button"
         testID={testID}
         disabled
-        style={[box, styles.disabled, styles.preparing]}
+        style={[box, cardButton.disabled, styles.preparing]}
       >
         <ActivityIndicator color={filled ? colors.onPrimary : colors.primary} />
         <Text style={text}>{strings.preparingQuestions}</Text>
@@ -155,7 +191,7 @@ function PracticeButton({
         testID={testID}
         disabled={busy}
         onPress={onPress}
-        style={[box, busy && styles.disabled]}
+        style={[box, busy && cardButton.disabled]}
       >
         <Text style={text}>{failed ? strings.translateRetry : label}</Text>
       </Pressable>
@@ -164,52 +200,30 @@ function PracticeButton({
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  cardSettled: { borderColor: colors.correct },
-  info: { gap: spacing.sm },
-  title: {
-    fontSize: fontSizes.lg,
-    lineHeight: lineHeights.xl,
-    fontWeight: '700',
-    color: colors.text,
-    writingDirection: 'rtl',
-  },
-  titleNumber: { fontSize: fontSizes.xl, fontWeight: '800', color: colors.primary },
   line: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.text, writingDirection: 'rtl' },
   extra: { color: colors.correct, fontWeight: '800' },
+  ready: { fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '600', color: colors.correct, writingDirection: 'rtl' },
+  urgency: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingHorizontal: 15,
+    paddingVertical: 9,
+    backgroundColor: colors.amberSurface,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FEDF89',
+  },
+  urgencyIcon: { fontSize: 14, lineHeight: 20, color: colors.amber },
+  urgencyText: { flex: 1, fontSize: fontSizes.sm, lineHeight: 20, color: colors.amberText, writingDirection: 'rtl' },
   note: { borderRadius: radii.sm, paddingVertical: spacing.sm, paddingHorizontal: spacing.sm },
   noteText: { fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '700', writingDirection: 'rtl' },
   track: {
     flexDirection: 'row',
-    height: 8,
+    height: 7,
     borderRadius: radii.pill,
-    backgroundColor: colors.border,
+    backgroundColor: '#EAECF0',
     overflow: 'hidden',
   },
-  filled: {
-    backgroundColor: colors.primary,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  outlined: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  filledLabel: { color: colors.onPrimary, fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '700' },
-  outlinedLabel: { color: colors.primary, fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '700' },
-  disabled: { opacity: 0.6 },
   preparing: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm },
   failed: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, writingDirection: 'rtl' },
 });
