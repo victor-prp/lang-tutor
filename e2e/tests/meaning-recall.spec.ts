@@ -143,7 +143,7 @@ test('a meaning card: help reveals the saved meaning, and the meaning typed afte
   const { card } = await reachMeaningCard(page, request, 'e2e_meaning_help_ru', report);
 
   await expect(page.getByTestId('typed-hint')).toHaveCount(0);
-  await expect(page.getByTestId('typed-help')).toHaveText('עזרה');
+  await expect(page.getByTestId('typed-help')).toContainText('עזרה');
   await page.getByTestId('typed-help').click();
   await page.getByTestId('typed-help').click();
   const hint = page.getByTestId('typed-hint');

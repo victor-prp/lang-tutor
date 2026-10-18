@@ -28,9 +28,13 @@ export function LettersBox({ text, presses, onPress, busy, testID, hintTestID }:
   return (
     <View style={styles.box}>
       <HelpButton testID={testID} disabled={busy || done} onPress={onPress} />
-      <Text style={styles.letters} testID={hintTestID} numberOfLines={1}>
-        {shown === '' ? '' : `${shown}${done ? '' : '…'}`}
-      </Text>
+      {shown === '' ? (
+        <View style={styles.letters} />
+      ) : (
+        <Text style={styles.letters} testID={hintTestID} numberOfLines={1}>
+          {`${shown}${done ? '' : '…'}`}
+        </Text>
+      )}
     </View>
   );
 }

@@ -76,7 +76,8 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await expect(slots).toHaveCount(0);
 
   // עזרה places the first letter, which ends the wrong line; a placed tile stays put.
-  await expect(page.getByTestId('tiles-help')).toHaveText('עזרה');
+  // Phase 63 (spec D1, D5): the bulb and עזרה, at the end of the built word's box.
+  await expect(page.getByTestId('tiles-help')).toContainText('עזרה');
   await page.getByTestId('tiles-help').click();
   await expect(slots).toHaveCount(1);
   await expect(page.getByTestId('tile-slot-0')).toHaveText(letters[0]);
@@ -91,27 +92,57 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await expect(page.getByTestId('feedback-line')).toHaveCount(0);
   await page.getByTestId('continue-button').click();
 
-  // 2. The two choices, right.
-  for (const [position, kind] of [[3, 'choice'], [4, 'reverse']] as const) {
-    await answerChoice(page, await readCard(page, position, total, kind), true);
-    await expect(page.getByTestId('feedback-correct')).toBeVisible();
-    await page.getByTestId('continue-button').click();
-  }
+  // 2. Phase 63 (spec D7, D12). On the choice, help rules out a wrong option a
+  // press, down to two, then is spent; the right option after it is right with
+  // help. The reverse card, unhelped, is right.
+  const choice = await readCard(page, 3, total, 'choice');
+  const ruledOut = page.locator('[data-testid^="option-"][aria-disabled="true"]');
+  await expect(ruledOut).toHaveCount(0);
+  await page.getByTestId('choice-help').click();
+  await expect(ruledOut).toHaveCount(1);
+  await page.getByTestId('choice-help').click();
+  await expect(ruledOut).toHaveCount(2);
+  await expect(page.getByTestId('choice-help')).toBeDisabled();
+  await answerChoice(page, choice, true);
+  await expect(page.getByTestId('feedback-other')).toBeVisible();
+  await expect(page.getByTestId('feedback-title')).toHaveText('נכון, עם עזרה');
+  await page.getByTestId('continue-button').click();
+  await answerChoice(page, await readCard(page, 4, total, 'reverse'), true);
+  await expect(page.getByTestId('feedback-correct')).toBeVisible();
+  await page.getByTestId('continue-button').click();
 
-  // 3. The typed card: עזרה twice reveals two letters, apart from the input.
+  // 3. The typed card, on a phone-sized screen (phase 63, spec D2): help sits
+  // inside the answer box, in view. עזרה twice gives two letters, in grey where
+  // the typing goes; the input itself stays empty.
+  await page.setViewportSize({ width: 390, height: 844 });
   const typed = await readCard(page, 5, total, 'typed');
   expect(typed.prompt).toBe(WORD.translation);
+  await expect(page.getByTestId('typed-box').getByTestId('typed-help')).toBeInViewport();
   await expect(page.getByTestId('typed-hint')).toHaveCount(0);
-  await expect(page.getByTestId('typed-help')).toHaveText('עזרה');
+  await expect(page.getByTestId('typed-help')).toContainText('עזרה');
   await page.getByTestId('typed-help').click();
   await expect(page.getByTestId('typed-hint')).toHaveText(`${letters[0]}…`);
   await page.getByTestId('typed-help').click();
   await expect(page.getByTestId('typed-hint')).toHaveText(`${letters[0]}${letters[1]}…`);
-  await expect(page.getByTestId('typed-input')).toHaveValue('');
+  const input = page.getByTestId('typed-input');
+  await expect(input).toHaveValue('');
+
+  // Phase 63 (spec D3). Help reads the typing: after a wrong letter the grey goes,
+  // nothing is marked until help is pressed, which marks it and gives nothing;
+  // the mark goes with the next edit, and a right start brings the grey back.
+  const wrongLetter = [...'абвгдежзиклмн'].find((letter) => letter !== letters[1])!;
+  await input.fill(`${letters[0]}${wrongLetter}`);
+  await expect(page.getByTestId('typed-hint')).toHaveCount(0);
+  await page.getByTestId('typed-help').click();
+  await expect(page.getByTestId('typed-marks')).toHaveText(wrongLetter);
+  await expect(page.getByTestId('typed-ghost')).toHaveCount(0);
+  await input.fill(letters[0]);
+  await expect(page.getByTestId('typed-marks')).toHaveCount(0);
+  await expect(page.getByTestId('typed-ghost')).toHaveText(`${letters[1]}…`);
+  await input.fill('');
 
   // A wrong word opens the retype, not the banner: the right answer and the
   // notice, and the word is said, as a banner would say it.
-  const input = page.getByTestId('typed-input');
   const banner = page.getByTestId(/^(continue-button|feedback-(correct|wrong|other))$/);
   const before = (await spoken(page)).length;
   await answerTyped(page, WRONG);
@@ -148,19 +179,20 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   expect((await spoken(page)).slice(before)).toEqual([{ text: WORD.form, lang: 'ru-RU' }]);
   await page.getByTestId('continue-button').click();
 
-  // 4. Five answers sent, each card's first: the tiles' and the typed card's say
-  // they were helped, and no retype went to the server.
+  // 4. Five answers sent, each card's first: the tiles', the choice's and the
+  // typed card's say they were helped (phase 63, spec D10: a choice too), and no
+  // retype went to the server.
   await expect(page.getByTestId('results-score')).toBeVisible();
   expect(sent).toEqual([
     { question_id: expect.any(String), seen: true },
     { question_id: expect.any(String), text: WORD.form, helped: true },
-    { question_id: expect.any(String), option_index: expect.any(Number) },
-    { question_id: expect.any(String), option_index: expect.any(Number) },
+    { question_id: expect.any(String), option_index: expect.any(Number), helped: true },
+    { question_id: expect.any(String), option_index: expect.any(Number), helped: false },
     { question_id: expect.any(String), text: WRONG, helped: true },
   ]);
 
-  // The two helped cards are wrong, the choices right, the meet card no part of it.
-  expect(stripIsolates(await page.getByTestId('results-score').textContent())).toBe('2 / 4');
+  // The three helped cards are wrong, the reverse card right, the meet card no part of it.
+  expect(stripIsolates(await page.getByTestId('results-score').textContent())).toBe('1 / 4');
   await expect(page.getByTestId('missed-row')).toHaveCount(1);
   await expect(page.getByTestId('missed-row')).toContainText(WORD.form);
 

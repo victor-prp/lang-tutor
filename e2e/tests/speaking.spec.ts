@@ -179,7 +179,7 @@ test('speaking: read aloud and say the translation', async ({ page, request }) =
       // microphone. Then said and understood at once: right, with help.
       const form = FORM_OF[card.prompt];
       await expect(page.getByTestId('speak-hint')).toHaveCount(0);
-      await expect(page.getByTestId('speak-help')).toHaveText('עזרה');
+      await expect(page.getByTestId('speak-help')).toContainText('עזרה');
       await page.getByTestId('speak-help').click();
       await expect(page.getByTestId('speak-hint')).toHaveText(`${[...form][0]}…`);
       await expectTranscription(request, form);
