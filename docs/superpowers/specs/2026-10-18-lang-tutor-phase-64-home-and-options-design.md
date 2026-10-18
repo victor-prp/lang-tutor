@@ -343,3 +343,36 @@ Victor, 2026-10-18, in the chat and the mockups:
 - D7: the profile fields move to **אני** as they are.
 - D8: adding to an existing prep returns to that prep's screen.
 - D10: screens opened from a tab cover the bar and have a back arrow.
+
+### Made while building (2026-10-18)
+
+Each with what it costs if wrong.
+
+- **One header, in the tab layout.** Visited tabs stay mounted, so a header per tab made four of
+  each control. Cost: none seen.
+- **The stack's swipe:** in RTL the next card sits to the left, so a drag to the right brings it;
+  the stack cycles both ways, and its dots are buttons. Cost: the direction flipped.
+- **My words' button reads לתרגל עכשיו for start and resume alike** (R3, as a target's does), and is
+  solid whenever it can start a session (D4). Cost: one label; "resume" is no longer told apart.
+- **One due word** reads "מילה מחכה לחזרה" under the big 1. Cost: one string.
+- **Shadows are `boxShadow`**, drawn by the new architecture and the web. Cost: flat cards on an
+  old-architecture build.
+- **הגדרות shows no reminders summary** (D7): none exists without reading the settings on every
+  visit. **The מילים title has no count:** the list is paged and no total is on the wire. Cost: a
+  line and a number missing.
+- **אני shows its own invite row only with no students**; the students list brings its own button.
+  **A tutor with no course of their own** sees their students on תרגול too, as home did (spec §5).
+  Cost: none; a list shown twice for that tutor.
+- **The switcher's label is the language with ▾**, as in the mockups, not "לומד/ת: X". Cost: one label.
+- **The photo flow's My words** saves each photo's import on its own; one that saves nothing does not
+  stop the others. **A new prep returns to תרגול**; adding to an open prep returns to its screen. The
+  choice lists only preps whose date has not come. Cost: a silent partial save; one route.
+- **Removed with the old paths:** the kind step and its copy, home's new-prep, translate, vocabulary
+  and photo buttons, the photo import screens and their list, and the target screen's
+  "מילים מתמונות". Cost: none; nothing reads them.
+- **Opened screens:** a 1px border becomes the card shadow everywhere, the reminders' time chips
+  included; reminders and About lose their bottom Back for the top arrow (`reminders-back`,
+  `about-back`). Cost: heavier chips.
+- **Bug found by e2e:** a language switched from the header while on מילים reset the list after its
+  reload had started, leaving it empty. The tab now reads an idle list again while in view.
+
