@@ -49,6 +49,9 @@ export type ModelCallKind =
   | 'session_generation'
   | 'context'
   | 'checker'
+  // Phase 62c (spec D3). The gap check on its own client, and the rewrite on its own.
+  | 'gap_check'
+  | 'gap_rewrite'
   | 'gloss_merge'
   // Phase 50 (spec D2). On the judge's client.
   | 'sound_alike';

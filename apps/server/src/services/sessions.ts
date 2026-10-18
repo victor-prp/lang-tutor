@@ -1,4 +1,4 @@
-import type { AnswerRecord, Enrollment, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
+import type { AnswerRecord, Enrollment, LlmDistractors, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
 import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/schemas';
 import {
   LIVE_DIMENSIONS,
@@ -74,6 +74,7 @@ import {
   type GenerationContext,
   type Generated,
 } from '../domain/distractors';
+import { gapCheckItem, gapFaults, rewriteItems, rewriteOthers, type GapFault, type GapJudged } from '../domain/gapRewrite';
 import { glossFamilies } from '../domain/glossFamilies';
 import { familyChanges, isEmptyFamilyWrite } from '../domain/glossFamilyRecord';
 import { buildFitJudgePrompt, judgePrompt, parseFitJudge, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
@@ -248,6 +249,8 @@ export function createSessionService({
   llm,
   contextLlm,
   checkerLlm,
+  gapCheckLlm,
+  gapRewriteLlm,
   transcriber,
   judge,
   translationJudge,
@@ -264,6 +267,12 @@ export function createSessionService({
   /** Phase 34 (spec D5, ruling R12). The checker's client, likewise with a
    *  budget of its own; its failure fails the attempt, which pg-boss retries. */
   checkerLlm: LlmClient;
+  /** Phase 62c (spec D1). The gap check's client: the checker's prompt for the
+   *  session's gap cards, beside the context call, with a short budget of its own. */
+  gapCheckLlm: LlmClient;
+  /** Phase 62c (spec D3). The rewrite's client: the batch's prompt for the gap cards
+   *  asked again, with a short budget of its own. */
+  gapRewriteLlm: LlmClient;
   transcriber: SpeechTranscriber;
   judge: LlmClient;
   /** Phase 45 (spec D3). The sentence translation's judge: it thinks before it
@@ -1556,6 +1565,8 @@ export function createSessionService({
       // Phase 61 (final review): a question-types session may ask the model nothing at all (a
       // meet, tiles, dictation…); then no call is paid for, and none can fail it.
       let verdict: DistractorVerdict = { byKey: new Map(), refused: new Map() };
+      // Phase 62c (spec D3): a refused gap item's last sentence is in the raw answer.
+      let batchAnswer: LlmDistractors | null = null;
       const board = plan.board;
       if (items.length > 0) {
         try {
@@ -1568,6 +1579,7 @@ export function createSessionService({
           // unlike a lookup, there is nothing useful to serve without it.
           const answer = raw === '' ? null : parseLlmDistractors(raw);
           if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
+          batchAnswer = answer;
           // Phase 34 (spec D3, D4): the first three usable of six, none known right.
           // Phase 48 (spec D1): a card with fewer is refused, not the batch.
           verdict = validateDistractors(items, answer, read.enrolled.source_language, others, target, read.known);
@@ -1660,11 +1672,8 @@ export function createSessionService({
         }
         return null;
       };
-      const contextItems = new Map<number, ContextItem>();
-      for (const card of cards) {
-        // Phase 48 (spec D1): nothing a refused card would show is known to be good.
-        if (refusals.has(card.index)) continue;
-        const item = contextItemFor({
+      const contextItemOf = (card: (typeof cards)[number]) =>
+        contextItemFor({
           key: keyOf(card.index),
           type: generatedAs(card.type),
           row: card.row,
@@ -1673,44 +1682,143 @@ export function createSessionService({
           recent: read.recentContexts.get(card.row.glossId)?.[generatedAs(card.type)] ?? [],
           sentence: sentenceOf(card.answered),
         });
+      const contextItems = new Map<number, ContextItem>();
+      for (const card of cards) {
+        // Phase 48 (spec D1): nothing a refused card would show is known to be good.
+        if (refusals.has(card.index)) continue;
+        const item = contextItemOf(card);
         if (item) contextItems.set(card.index, item);
       }
-      let contextMs = 0;
-      let contextAnswer: ReturnType<typeof parseLlmContext> = null;
-      if (contextItems.size > 0) {
+      // Phase 62c (spec D1). The context call, for the cards it is asked of: the
+      // session's, and a rewritten card's beside the checker. It never fails the
+      // session: a failure is logged where it happens, and its cards go on without it.
+      const askContext = async (asked: ContextItem[]) => {
         const contextStarted = now();
+        let answer: ReturnType<typeof parseLlmContext> = null;
         let failure: string | null = null;
         try {
           const raw = await contextLlm({
-            ...buildContextPrompt({ items: [...contextItems.values()], from: target, to: read.enrolled.source_language, learnerWords: read.learnerWords }),
+            ...buildContextPrompt({ items: asked, from: target, to: read.enrolled.source_language, learnerWords: read.learnerWords }),
             record: record('context'),
           });
-          contextAnswer = raw === '' ? null : parseLlmContext(raw);
-          if (!contextAnswer) failure = raw === '' ? 'the model returned no content' : 'the context answer was unreadable';
+          answer = raw === '' ? null : parseLlmContext(raw);
+          if (!answer) failure = raw === '' ? 'the model returned no content' : 'the context answer was unreadable';
         } catch (error) {
           failure = error instanceof Error ? error.message : String(error);
         }
-        contextMs = now() - contextStarted;
+        const ms = now() - contextStarted;
         // Logged where it happens: the call was paid for, and the session goes on without it.
         if (failure) {
-          logger.info({
-            event: 'context_call_failed',
-            session_id: sessionId,
-            item_count: contextItems.size,
-            context_ms: contextMs,
-            reason: failure,
-          });
+          logger.info({ event: 'context_call_failed', session_id: sessionId, item_count: asked.length, context_ms: ms, reason: failure });
+        }
+        return { answer, ms };
+      };
+
+      // At most six (ASKED_DISTRACTORS), as validateDistractors keeps them: the
+      // checker numbers every option, and a miscount refuses its card (phase 48,
+      // ruling R3). Read when asked, so a rewritten card's are its new ones.
+      const candidatesOf = (index: number): string[] => {
+        const made = verdict.byKey.get(keyOf(index));
+        return made ? [...made.distractors, ...made.spares].slice(0, ASKED_DISTRACTORS) : [];
+      };
+      const shortReason = (key: string, asked: number, left: number) =>
+        `the checker calls ${asked - left} of ${key}'s ${asked} wrong options right, and ${KEPT_DISTRACTORS} must be left`;
+
+      // Phase 62c (spec D1, D2). The checker's gap test of every gap to choose
+      // validation kept, asked beside the context call: which of them the one
+      // rewrite is for. A gap check that fails rescues none it would have judged,
+      // and the checker reads their gap items below, as before it existed.
+      const gapItems: CheckItem[] = cards.flatMap((card) =>
+        !refusals.has(card.index) && generatedAs(card.type) === 'cloze_choice' && card.answered.sentence
+          ? [gapCheckItem(keyOf(card.index), card.answered.sentence, candidatesOf(card.index))]
+          : [],
+      );
+      const askGaps = async (asked: CheckItem[]) => {
+        const started = now();
+        try {
+          const raw = await gapCheckLlm({ ...buildCheckPrompt(asked, target, read.enrolled.source_language), record: record('gap_check') });
+          const answer = raw === '' ? null : parseCheck(raw);
+          if (!answer) throw new Error(raw === '' ? 'the gap check returned no content' : 'the gap check answer was unreadable');
+          return { reading: readCheck(asked, answer), ms: now() - started };
+        } catch (error) {
+          const ms = now() - started;
+          logger.info({ event: 'gap_check_failed', session_id: sessionId, gap_check_ms: ms, reason: error instanceof Error ? error.message : String(error) });
+          return { reading: null, ms };
+        }
+      };
+      // Phase 62c (spec D1–D4). The gap check, then one rewrite for every gap to choose
+      // validation refused or the gap check left short, each told what was wrong: the
+      // two in a row, beside the context call. Both only read the session's state here;
+      // what the rewrite changes is applied once both branches are back. The rescue
+      // failing never fails the attempt.
+      const rescueGaps = async () => {
+        const gapCheck = gapItems.length > 0 ? await askGaps(gapItems) : { reading: null, ms: 0 };
+        // What the gap check found of each item it judged; a miscounted one is not here.
+        const judged: GapJudged | null = gapCheck.reading
+          ? new Map(
+              gapItems.flatMap((item) => {
+                const finding = gapCheck.reading!.byKey.get(item.key);
+                return item.task === 'gap' && finding?.task === 'gap' ? [[item.key, { options: item.options, alsoRight: finding.alsoRight }] as const] : [];
+              }),
+            )
+          : null;
+        const faults = gapFaults({ items, answer: batchAnswer, verdict, judged });
+        const rewrites: { index: number; fault: GapFault; reason: string; made: Generated | null; failed: string | null }[] = [];
+        let rewriteMs = 0;
+        if (faults.length > 0) {
+          const asked = rewriteItems(items, faults);
+          const clear = rewriteOthers(items, faults, others);
+          const rewriteStarted = now();
+          let again: DistractorVerdict | null = null;
+          let failure: string | null = null;
+          try {
+            const raw = await gapRewriteLlm({
+              ...buildDistractorPrompt({ items: asked, from: target, to: read.enrolled.source_language, others: clear, learnerWords: read.learnerWords }),
+              record: record('gap_rewrite'),
+            });
+            const answer = raw === '' ? null : parseLlmDistractors(raw);
+            if (answer) again = validateDistractors(asked, answer, read.enrolled.source_language, clear, target, read.known);
+            else failure = raw === '' ? 'the rewrite returned no content' : 'the rewrite answer was unreadable';
+          } catch (error) {
+            failure = error instanceof Error ? error.message : String(error);
+          }
+          rewriteMs = now() - rewriteStarted;
+          for (const fault of faults) {
+            const found = judged?.get(fault.key);
+            const reason = found ? shortReason(fault.key, found.options.length, found.options.length - fault.rewrite.fits.length) : (fault.rewrite.problem ?? '');
+            const made = again?.byKey.get(fault.key) ?? null;
+            const index = cards.find((candidate) => keyOf(candidate.index) === fault.key)!.index;
+            rewrites.push({ index, fault, reason, made, failed: made ? null : (failure ?? again?.refused.get(fault.key) ?? `no answer for ${fault.key}`) });
+          }
+        }
+        return { gapCheck, judged, rewrites, rewriteMs };
+      };
+      const [first, { gapCheck, judged, rewrites, rewriteMs }] = await Promise.all([
+        contextItems.size > 0 ? askContext([...contextItems.values()]) : Promise.resolve({ answer: null, ms: 0 }),
+        rescueGaps(),
+      ]);
+      const contextMs = first.ms;
+      // A rescued card takes its new content and loses its refusal; any other keeps its
+      // own, and one the gap check left short is refused as the checker would refuse it.
+      for (const { index, fault, reason, made } of rewrites) {
+        if (made) {
+          verdict.byKey.set(fault.key, made);
+          verdict.refused.delete(fault.key);
+          refusals.delete(index);
+          cards[index].answered = made;
+        } else if (fault.stage === 'checker') {
+          refusals.set(index, { stage: 'checker', reason });
         }
       }
-      const found = new Map((contextAnswer?.items ?? []).map((item) => [item.key, item]));
+      const rescued = new Set(rewrites.filter((rewrite) => rewrite.made).map((rewrite) => rewrite.index));
       const languages = { target, explanation: read.enrolled.source_language as LanguageCode };
 
       // Logged once the session is written, not on an attempt a failed insert or a
       // retry repeats. Phase 48 (spec D6, ruling R5): each names its card by plan
       // index here, and is logged with the position the card was written to.
       const events: { index: number; [field: string]: unknown }[] = [];
-      const shown = cards.map((card) => {
-        const item = contextItems.get(card.index);
+      const show = (card: (typeof cards)[number], item: ContextItem | undefined, contextAnswer: ReturnType<typeof parseLlmContext>) => {
+        const found = new Map((contextAnswer?.items ?? []).map((entry) => [entry.key, entry]));
         let context: StoredContext | null = null;
         // Phase 34 (spec D5): only a sentence the model wrote is the checker's to read.
         let checkable: BareContextItem | null = null;
@@ -1759,7 +1867,17 @@ export function createSessionService({
           }
         }
         return { ...card, context, checkable, sentence, words };
-      });
+      };
+      // Phase 62c (spec D4): the first answer was of a rescued card's old sentence, so it is
+      // shown from the second, asked beside the checker; until then, from none.
+      const shown = cards.map((card) => show(card, rescued.has(card.index) ? undefined : contextItems.get(card.index), first.answer));
+      const secondItems = new Map(
+        [...rescued].flatMap((index) => {
+          const item = contextItemOf(cards[index]);
+          return item ? [[index, item] as const] : [];
+        }),
+      );
+      const second = secondItems.size > 0 ? askContext([...secondItems.values()]) : null;
 
       // Phase 34 (spec D5). The checker: a second model reads the cards as a
       // learner would, with no transaction open (ADR 0001 R8). Every usable
@@ -1768,13 +1886,7 @@ export function createSessionService({
       // its four words; each sentence the context call wrote; each sentence
       // card's Hebrew. Unlike the context call, an unreadable or failed answer
       // fails the attempt, as an unreadable batch does, and pg-boss retries it.
-      // At most six (ASKED_DISTRACTORS), as validateDistractors keeps them: the
-      // checker numbers every option, and a miscount refuses its card (phase 48,
-      // ruling R3). A card validation refused is asked nothing (phase 48, spec D1).
-      const candidatesOf = (index: number): string[] => {
-        const made = verdict.byKey.get(keyOf(index));
-        return made ? [...made.distractors, ...made.spares].slice(0, ASKED_DISTRACTORS) : [];
-      };
+      // A card validation refused is asked nothing (phase 48, spec D1).
       const boardCandidates = board && !refusals.has(board.start) ? candidatesOf(board.start) : [];
       const glossMeanings = (row: GenerationContext) => [row.translation, ...(read.known.meaningsByGloss.get(row.glossId) ?? [])];
       const checkItems: CheckItem[] = [];
@@ -1787,11 +1899,10 @@ export function createSessionService({
           checkItems.push({ key, task: 'choice', word: row.answerForm ?? row.form, options: candidatesOf(card.index) });
         } else if (type === 'reverse_choice') {
           checkItems.push({ key, task: 'choice', word: row.translation, options: candidatesOf(card.index) });
-        } else if (type === 'cloze_choice' && card.answered.sentence) {
+        } else if (type === 'cloze_choice' && card.answered.sentence && (!judged?.has(key) || rescued.has(card.index))) {
           // Phase 62 (spec D1): the sentence written for the card, its gap written ___.
-          const { sentence: written, gap } = card.answered.sentence;
-          const sentence = `${written.slice(0, gap.start)}___${written.slice(gap.end)}`;
-          checkItems.push({ key, task: 'gap', sentence, options: candidatesOf(card.index) });
+          // Phase 62c (spec D4): unless the gap check judged it, and nobody rewrote it.
+          checkItems.push(gapCheckItem(key, card.answered.sentence, candidatesOf(card.index)));
         } else if (type === 'matching' && boardCandidates.length > 0) {
           checkItems.push({ key, task: 'choice', word: row.form, options: boardCandidates });
         }
@@ -1818,7 +1929,10 @@ export function createSessionService({
 
       const checkerStarted = now();
       let checkerMs = 0;
-      let findings = new Map<string, CheckFinding>();
+      // Phase 62c (spec D4): what the gap check found of a card it judged and nobody rewrote.
+      let findings = new Map<string, CheckFinding>(
+        [...(gapCheck.reading?.byKey ?? [])].filter(([key]) => judged?.has(key) && !rewrites.some((rewrite) => rewrite.made && rewrite.fault.key === key)),
+      );
       // Phase 48 (spec D2, ruling R3): a choice or gap item the checker left unnumbered, with why.
       let unjudged = new Map<string, string>();
       let meanings: string[] | null = null;
@@ -1836,7 +1950,7 @@ export function createSessionService({
             throw new InvalidDistractors(sessionId, raw === '' ? 'the checker returned no content' : 'the checker answer was unreadable');
           }
           const reading = readCheck(checkItems, answer);
-          findings = reading.byKey;
+          findings = new Map([...findings, ...reading.byKey]);
           unjudged = reading.unjudged;
         }
         // Spec D4: a "yes" drops the option and the next spare takes its place.
@@ -1852,10 +1966,7 @@ export function createSessionService({
           }
           const left = wrongOnly(candidatesOf(card.index), alsoRight(key));
           if (left.length < KEPT_DISTRACTORS) {
-            refusals.set(card.index, {
-              stage: 'checker',
-              reason: `the checker calls ${candidatesOf(card.index).length - left.length} of ${key}'s ${candidatesOf(card.index).length} wrong options right, and ${KEPT_DISTRACTORS} must be left`,
-            });
+            refusals.set(card.index, { stage: 'checker', reason: shortReason(key, candidatesOf(card.index).length, left.length) });
             continue;
           }
           survivors.set(card.index, left);
@@ -1893,6 +2004,11 @@ export function createSessionService({
           reason: error instanceof Error ? error.message : String(error),
         });
         throw error;
+      }
+      // Phase 62c (spec D4). A rescued card's map, of its new sentence; none when that call failed.
+      if (second) {
+        const { answer } = await second;
+        for (const [index, item] of secondItems) shown[index] = show(cards[index], item, answer);
       }
 
       // Phase 48 (spec D3). Which cards the session keeps: every unit nobody
@@ -2093,6 +2209,20 @@ export function createSessionService({
         }
         logNotGenerated();
       }
+      // Phase 62c (spec D5). Every card asked again, written or not, and what came of it.
+      for (const { index, fault, reason, made, failed } of rewrites) {
+        const position = written ? kept.findIndex((card) => card.index === index) : -1;
+        logger.info({
+          event: 'gap_rewritten',
+          session_id: sessionId,
+          key: fault.key,
+          ...(position >= 0 ? { position } : {}),
+          stage: fault.stage,
+          reason,
+          old_sentence: fault.rewrite.sentence,
+          ...(made ? { new_sentence: made.sentence?.sentence ?? null } : { failed }),
+        });
+      }
       logger.info({
         event: written ? 'session_prepared' : 'session_preparation_dropped',
         session_id: sessionId,
@@ -2105,6 +2235,10 @@ export function createSessionService({
         context_ms: contextMs,
         check_count: checkItems.length,
         checker_ms: checkerMs,
+        // Phase 62c (spec D5).
+        gap_check_ms: gapCheck.ms,
+        rewrite_ms: rewriteMs,
+        rewrite_count: rewrites.length,
         ...(written ? {} : { stage: 'write' }),
       });
     },

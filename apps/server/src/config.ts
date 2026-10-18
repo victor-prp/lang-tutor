@@ -1,6 +1,8 @@
 import {
   CHECKER_CALL_BUDGET_MS,
   CONTEXT_CALL_BUDGET_MS,
+  GAP_CHECK_BUDGET_MS,
+  GAP_REWRITE_BUDGET_MS,
   PHOTO_READ_BUDGET_MS,
   SESSION_GENERATION_BUDGET_MS,
   STOCK_SAVE_DELAY_SECONDS,
@@ -19,6 +21,8 @@ export type Config = {
   sessionGenerationTimeoutMs: number;
   contextCallTimeoutMs: number;
   checkerCallTimeoutMs: number;
+  gapCheckTimeoutMs: number;
+  gapRewriteTimeoutMs: number;
   speechTimeoutMs: number;
   judgeTimeoutMs: number;
   photoReadTimeoutMs: number;
@@ -89,6 +93,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       Number(env.CHECKER_CALL_TIMEOUT_MS) || CHECKER_CALL_BUDGET_MS,
       CHECKER_CALL_BUDGET_MS,
     ),
+    // Phase 62c (spec D1). The gap check and the rewrite, capped the same way.
+    gapCheckTimeoutMs: Math.min(Number(env.GAP_CHECK_TIMEOUT_MS) || GAP_CHECK_BUDGET_MS, GAP_CHECK_BUDGET_MS),
+    gapRewriteTimeoutMs: Math.min(Number(env.GAP_REWRITE_TIMEOUT_MS) || GAP_REWRITE_BUDGET_MS, GAP_REWRITE_BUDGET_MS),
     speechTimeoutMs: Number(env.SPEECH_TIMEOUT_MS) || DEFAULT_SPEECH_TIMEOUT_MS,
     judgeTimeoutMs: Number(env.JUDGE_TIMEOUT_MS) || DEFAULT_JUDGE_TIMEOUT_MS,
     // Phase 26 (spec D6). A read's budget, capped like generation's: the

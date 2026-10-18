@@ -14,6 +14,8 @@ import {
 import {
   CHECKER_CALL_BUDGET_MS,
   CONTEXT_CALL_BUDGET_MS,
+  GAP_CHECK_BUDGET_MS,
+  GAP_REWRITE_BUDGET_MS,
   PREPARE_SESSION_CALL_BUDGETS_MS,
   PREPARE_SESSION_EXPIRY_SECONDS,
   SESSION_GENERATION_BUDGET_MS,
@@ -32,6 +34,8 @@ describe('loadConfig', () => {
       sessionGenerationTimeoutMs: 120_000,
       contextCallTimeoutMs: 60_000,
       checkerCallTimeoutMs: 60_000,
+      gapCheckTimeoutMs: 60_000,
+      gapRewriteTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
@@ -102,6 +106,8 @@ describe('loadConfig', () => {
       sessionGenerationTimeoutMs: 120_000,
       contextCallTimeoutMs: 60_000,
       checkerCallTimeoutMs: 60_000,
+      gapCheckTimeoutMs: 60_000,
+      gapRewriteTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
@@ -137,13 +143,40 @@ describe('loadConfig', () => {
   it('expires a prepare-session job no sooner than twice the sum of its calls’ default budgets', () => {
     const config = loadConfig({});
     expect(PREPARE_SESSION_EXPIRY_SECONDS * 1000).toBeGreaterThanOrEqual(
-      2 * (config.sessionGenerationTimeoutMs + config.contextCallTimeoutMs + config.checkerCallTimeoutMs),
+      2 *
+        (config.sessionGenerationTimeoutMs +
+          2 * config.contextCallTimeoutMs +
+          config.gapCheckTimeoutMs +
+          config.gapRewriteTimeoutMs +
+          config.checkerCallTimeoutMs),
     );
   });
 
-  it('expires a prepare-session job at exactly twice the batch’s, the context call’s and the checker’s budgets (ruling R12)', () => {
-    expect(PREPARE_SESSION_CALL_BUDGETS_MS).toEqual([SESSION_GENERATION_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, CHECKER_CALL_BUDGET_MS]);
-    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (120_000 + 60_000 + 60_000)) / 1000);
+  // Phase 62c (spec D1): the gap check, the rewrite and the rewritten cards' word maps add theirs.
+  it('expires a prepare-session job at exactly twice the budgets of every call an attempt may make (ruling R12, phase 62c)', () => {
+    expect(PREPARE_SESSION_CALL_BUDGETS_MS).toEqual([
+      SESSION_GENERATION_BUDGET_MS,
+      CONTEXT_CALL_BUDGET_MS,
+      GAP_CHECK_BUDGET_MS,
+      GAP_REWRITE_BUDGET_MS,
+      CONTEXT_CALL_BUDGET_MS,
+      CHECKER_CALL_BUDGET_MS,
+    ]);
+    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (120_000 + 60_000 + GAP_CHECK_BUDGET_MS + GAP_REWRITE_BUDGET_MS + 60_000 + 60_000)) / 1000);
+  });
+
+  it('defaults the gap check’s budget to its own, reads GAP_CHECK_TIMEOUT_MS, and never above it (phase 62c)', () => {
+    expect(loadConfig({}).gapCheckTimeoutMs).toBe(GAP_CHECK_BUDGET_MS);
+    expect(loadConfig({ GAP_CHECK_TIMEOUT_MS: '2000' }).gapCheckTimeoutMs).toBe(2_000);
+    expect(loadConfig({ GAP_CHECK_TIMEOUT_MS: '300000' }).gapCheckTimeoutMs).toBe(GAP_CHECK_BUDGET_MS);
+    expect(loadConfig({ GAP_CHECK_TIMEOUT_MS: 'nonsense' }).gapCheckTimeoutMs).toBe(GAP_CHECK_BUDGET_MS);
+  });
+
+  it('defaults the rewrite’s budget to its own, reads GAP_REWRITE_TIMEOUT_MS, and never above it (phase 62c)', () => {
+    expect(loadConfig({}).gapRewriteTimeoutMs).toBe(GAP_REWRITE_BUDGET_MS);
+    expect(loadConfig({ GAP_REWRITE_TIMEOUT_MS: '2000' }).gapRewriteTimeoutMs).toBe(2_000);
+    expect(loadConfig({ GAP_REWRITE_TIMEOUT_MS: '300000' }).gapRewriteTimeoutMs).toBe(GAP_REWRITE_BUDGET_MS);
+    expect(loadConfig({ GAP_REWRITE_TIMEOUT_MS: 'nonsense' }).gapRewriteTimeoutMs).toBe(GAP_REWRITE_BUDGET_MS);
   });
 
   it('defaults the checker’s budget to a minute, reads CHECKER_CALL_TIMEOUT_MS, and never above a minute', () => {

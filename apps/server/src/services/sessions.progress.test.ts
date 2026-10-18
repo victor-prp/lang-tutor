@@ -177,6 +177,8 @@ function world(opts: {
     llm: createFakeLlmClient(''),
     contextLlm: createFakeLlmClient(''),
     checkerLlm: createFakeLlmClient(''),
+    gapCheckLlm: createFakeLlmClient(''),
+    gapRewriteLlm: createFakeLlmClient(''),
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
     translationJudge: createFakeLlmClient(''),

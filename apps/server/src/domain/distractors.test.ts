@@ -15,6 +15,7 @@ import {
   generatedContent,
   optionsFor,
   parseLlmDistractors,
+  REWRITE_MARKER,
   taskFor,
   tasksFor,
   validateDistractors,
@@ -1134,5 +1135,31 @@ describe('phase 34: the known-right set and the spares (spec D3, D4)', () => {
     const words = known({ wordsByPrompt: new Map([['תֵּכֶף.', ['presto']], ['תכף', ['subito']], ['מיד', ['subito', 'immediatamente']]]) });
     expect(knownWords(words, 'תכף')).toEqual(['presto', 'subito']);
     expect(knownWords(words, 'עכשיו')).toEqual([]);
+  });
+});
+
+// Phase 62c (spec D3). The rewrite's rule and fields reach only a call that carries a rewrite.
+describe('buildDistractorPrompt (phase 62c)', () => {
+  const gapRow: GenerationContext = { ...CONTEXT[1], form: 'fratello', lemma: 'fratello', translation: 'אח', example: 'Mio fratello abita qui.', exampleTranslation: 'אחי גר כאן.' };
+  const [gap] = distractorItems([gapRow], ['gap'], NO_RECENT);
+  const userItem = (prompt: { user: string }) => (JSON.parse(prompt.user) as { items: Record<string, unknown>[] }).items[0];
+
+  it('a prompt with no rewrite item says nothing of a rewrite', () => {
+    const prompt = buildDistractorPrompt({ items: [gap, ...ITEMS], from: 'it', to: 'he', others: [] });
+    expect(prompt.system).not.toContain(REWRITE_MARKER);
+    expect(prompt.user).not.toContain('"rewrite"');
+  });
+
+  it('a rewrite item carries its old sentence and what fit, and the rule is added', () => {
+    const rewrite = { sentence: 'Io ho un fratello qui ora.', fits: ['tavolo', 'amico'], problem: null };
+    const prompt = buildDistractorPrompt({ items: [{ ...gap, rewrite }], from: 'it', to: 'he', others: [] });
+    expect(prompt.system).toContain(REWRITE_MARKER);
+    expect(userItem(prompt).rewrite).toEqual({ old_sentence: 'Io ho un fratello qui ora.', fits: ['tavolo', 'amico'] });
+  });
+
+  it('a rewrite after a refusal carries why, and no old sentence when there was none', () => {
+    const rewrite = { sentence: null, fits: [], problem: 'the sentence repeats one it was told to avoid' };
+    const prompt = buildDistractorPrompt({ items: [{ ...gap, rewrite }], from: 'it', to: 'he', others: [] });
+    expect(userItem(prompt).rewrite).toEqual({ problem: 'the sentence repeats one it was told to avoid' });
   });
 });

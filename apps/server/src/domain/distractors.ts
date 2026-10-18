@@ -196,7 +196,16 @@ export type DistractorItem = {
   avoid: string[];
   /** A gap item's blanked text in `example` (spec D7); null for every other task. */
   blank: string | null;
+  /** Phase 62c (spec D3). Set only on a gap item asked again: what its last sentence got wrong. */
+  rewrite?: GapRewrite;
 };
+
+/** Phase 62c (spec D3). Why a gap item is asked again: its last sentence, if it wrote one,
+ *  and the wrong answers the checker found it fits, or why validation refused it. */
+export type GapRewrite = { sentence: string | null; fits: string[]; problem: string | null };
+
+/** Phase 62c. A phrase of the rewrite's rule, which a prompt carries only when an item is a rewrite. */
+export const REWRITE_MARKER = 'its last sentence';
 
 /** Structurally LlmJsonRequest; services/sessions.ts is where the two meet,
  *  as with TranslationPrompt. */
@@ -316,6 +325,13 @@ export function buildDistractorPrompt(input: {
     `- "gap": the learner sees a sentence with the ${learned.name} word blanked, and picks the missing word. Write a new sentence exactly as a "sentence" item does, following every rule of that task, in sentence, gap and translation, and leave alternatives empty; write it so that the words around the gap rule out most other words of its part of speech, with an object, a place or a time few words go with, as "Lei parla tre lingue." does for parla: one cannot sing or sleep three languages; ruling out the wrong words comes before the learner's words. Write the word itself in sentence, never a blank. Then write ${DISTRACTOR_MARKER} in ${learned.name} for its gap: words of the same part of speech and in the same form as the word in gap, but from a different field of meaning, each of which makes your sentence wrong or meaningless, so that a learner who reads the sentence alone can rule it out. Read each candidate into the sentence and drop it if the sentence still makes sense, however differently: never a word that also fits. In a sentence where many words make sense in the blank (anything one puts in a drink, any adjective for a city), none of those words may be a wrong answer of this item: its wrong answers clash with the other words of the sentence (an object, subject, place or time they cannot go with).`,
     `- "sentence": write a new, natural, everyday ${learned.name} sentence of ${SHORT_SENTENCE_MIN_ASKED} to ${SHORT_SENTENCE_MAX_WORDS} words that uses the word in the meaning given by correct and shown by the example, never in another sense. Use whatever form of the word the sentence needs, written as consecutive words, as many as the word has. Write it so that its other words point to the word: someone reading it without its translation and without the word should guess that word, or one of the same meaning; never a sentence that many different words would complete, such as "Please ___ the file." Short is not enough: "The ___ is green." or "Where is my ___?" points to nothing, while "I bought a ___ for my balcony." points to plant: give it the phrase that makes the word the likeliest guess (what it does, where it is, what goes with it), within the limit. When learner_words is given, the learner knows only those ${learned.name} words and the word itself: build the sentence from the word and learner_words, in whatever form each needs, adding another word only where the sentence cannot stand, or cannot point to the word, without it, and then a simple one (a pronoun, an article, a preposition, or the verb to be or to have); pointing to the word comes first, then a short sentence, then the learner's words. learner_words limits the sentence only: alternatives are every word that fits the gap, whether the learner knows it or not. Count its words: never more than ${SHORT_SENTENCE_MAX_WORDS}. It must differ from every sentence in avoid. Put it in sentence; the word exactly as written in the sentence in gap; the whole sentence in natural ${answers.name}, which fixes its person, number and tense, in translation; and in alternatives every other ${learned.name} word that would fill the gap with the sentence read on its own, without its translation, leaving a correct and natural sentence whatever it then means, not only words of the same meaning, in the form the gap needs, agreeing in gender, number and case with the words around it, the likeliest first, at most ${MAX_GAP_ALTERNATIVES}, or none. Leave distractors empty.`,
     `- "translate": write a short, natural, everyday ${answers.name} sentence of ${SENTENCE_MIN_WORDS} to ${TRANSLATE_MAX_WORDS} words that uses the meaning in correct, in the sense the example shows. It must differ from every sentence in avoid. Put it in sentence; a natural ${learned.name} translation of it that uses the word, in whatever form the translation needs, in translation; and that word exactly as written in the translation in gap. Leave distractors empty. Count the words of a translate item's sentence: never more than ${TRANSLATE_MAX_WORDS} (this limit is the translate task's alone). When learner_words is given, the learner knows only those ${learned.name} words and the word itself: write the ${learned.name} translation first, from the word and learner_words alone, in whatever form each needs, adding another word only where the sentence cannot stand without it, and then a simple one (a pronoun, an article, a preposition, or the verb to be or to have); then write sentence as its ${answers.name} translation.`,
+    // Phase 62c (spec D3): only a call that asks a gap item again carries its rule, so the
+    // session's own batch prompt is exactly what it was.
+    ...(input.items.some((item) => item.rewrite)
+      ? [
+          `- An item with rewrite is a "gap" item written before, and ${REWRITE_MARKER} (rewrite.old_sentence) could not be used: the words in rewrite.fits made it correct as wrong answers, or rewrite.problem says why it was refused. Write a new sentence for its word around another verb or phrase, never the last sentence with a word changed or added: the words next to the gap must be ones that only the word's kind goes with, so that its wrong answers cannot. For a person, a verb only people do (speaks, works, studies), and things as the wrong answers (a table, a book, a wall), never animals or people; for a thing, what only that kind of thing does or has done to it; for an adjective, a noun its wrong answers cannot describe at all, not even figuratively (a carbonated or a paved man); for a verb, an object only it takes. Then keep the learner's words: count them, and at least half of the sentence's other words of three letters or more come from learner_words wherever it still points with them; a word outside learner_words, of any kind, is added only where pointing needs it. "Io ho una madre qui ora." points to nothing, since any noun fits; "Ora mia madre parla con me." points, and most of its words are the learner's. Its six wrong answers follow the gap rule and must each be wrong in the new sentence.`,
+        ]
+      : []),
     'A wrong answer of a "meaning" or "word" item must be plausible: the same part of speech, the same register and a',
     'similar length as the correct answer. A "gap" item\'s wrong answers follow the gap rule above instead.',
     'A wrong answer must never be right: not the correct answer itself, not a synonym of it, and',
@@ -349,6 +365,7 @@ export function buildDistractorPrompt(input: {
         ? { example: item.example, example_translation: item.exampleTranslation }
         : {}),
       ...(item.avoid.length > 0 ? { avoid: item.avoid } : {}),
+      ...(item.rewrite ? { rewrite: rewriteJson(item.rewrite) } : {}),
     })),
     ...(related.length > 0
       ? { also_in_session: related.map((other) => ({ word: other.form, correct: other.translation })) }
@@ -358,6 +375,13 @@ export function buildDistractorPrompt(input: {
 
   return { system, user, schema: LlmDistractorsSchema };
 }
+
+/** Phase 62c (spec D3). A rewrite as the item's JSON carries it: only what is known. */
+const rewriteJson = (rewrite: GapRewrite) => ({
+  ...(rewrite.sentence ? { old_sentence: rewrite.sentence } : {}),
+  ...(rewrite.fits.length > 0 ? { fits: rewrite.fits } : {}),
+  ...(rewrite.problem ? { problem: rewrite.problem } : {}),
+});
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
