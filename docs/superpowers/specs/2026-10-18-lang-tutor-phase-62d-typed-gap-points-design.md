@@ -111,22 +111,24 @@ His verdicts, which the eval keeps as the check's own cases:
                  → gap check (choice) → [rewrite] → [validate] ───────────────────┴→ checker
                                                                                    + rescued cards' word maps
 
-62d:  generation → context call (word maps) ─────────────────────────────────────┐
-                 → gap check (choice)   → [gap rewrite]      → [validate] ────────┤
-                 → point check (typed)  → [sentence rewrite] → [validate] ────────┴→ checker
-                                                                                   + rescued cards' word maps
-                                                                                   + point check of rewritten typed gaps
+62d:  generation → context call (word maps) ─────────────────────────────────────────────────────┐
+                 → gap check (choice)  → [gap rewrite] → [validate] ──────────────────────────────┤
+                 → point check (typed) → [rewrite 1] → [validate] → [re-check] → [rewrite 2] ─────┴→ checker
+                                                                                                   + rescued cards' word maps
+                                                                                                   + re-check of the last rewrites
 ```
 
 - **The point check** runs beside the gap check, both beside the context call, once the batch is
-  validated: one call with every typed gap validation kept.
+  validated: one call per typed gap validation kept, side by side (ruling R6).
 - **Two rewrite calls, side by side** (my call, from the builder check): 62c's, for gap items
   only, exactly as today; and a sentence rewrite for typed gaps only. One mixed call would send
   62c's rewrite a prompt no eval measures, and its rule ("an item with rewrite is a gap item")
   would be false for half the call.
-- **The re-check** asks the point check again for the rewritten typed gaps only, beside the final
-  checker and the second word-map call. A session where nothing fails waits for nothing new: the
-  point check is small and ends inside the context call.
+- **The re-check** asks the point check again for the rewritten typed gaps only. A first rewrite is
+  re-checked beside the context call, and one that still does not point is rewritten once more
+  (ruling R7); the last rewrites are re-checked beside the final checker and the second word-map
+  call. A session where nothing fails waits for nothing new: the point check takes about 3 s and
+  ends inside the context call.
 
 ### D2. The point check (`domain/pointing.ts`)
 
@@ -134,22 +136,24 @@ A call of its own, with a prompt written for this, not a task added to the check
 (adding one would change every checker call's prompt). It is **blind**: each item is the sentence
 with `___` and its key, never the word, so the reader cannot be led to it.
 
-- **Asks, per item:** `guesses`, the three words a native reader would most likely put in the
-  gap, likeliest first, in the form the gap needs; `meaning`, the first guess in the learner's
-  language; `clear`, true when one meaning is clearly the likeliest (the words a reader would put
-  first all mean about the same), false when words of different meanings fit about as well.
+- **Asks, per sentence:** `guesses`, the three words a native reader would most likely put in the
+  gap, likeliest first, in the form the gap needs, each with `readers`: of ten native readers who
+  see only the sentence, how many would write it, the three counts adding up to ten at most;
+  and `meaning`, the first guess in the learner's language (ruling R5).
 - **Schema:** every field required, no optional strings (memory `gemini-optional-strings-hang`).
-- **Passes** when `clear` is true and the first guess is the word, or means the same:
+- **Passes** when at least `POINT_READERS` (6) of ten would write the first guess, and the first
+  guess is the word, or means the same:
   - **the word:** `judgeTyped` against the gap's form, the row's form, lemma and answer form,
     and its accepted answers. Never the card's generated `alternatives`, which for a sentence that
     points to nothing are exactly the unrelated words.
   - **the same meaning:** `meaningFits(meaning, glossMeanings(row))`, as the context line's check
     reads a meaning.
-- **Fails** otherwise, with the feedback the rewrite is told: the guesses, and whether it failed
-  because several meanings fit (`clear` false) or because the reader guessed another word.
-- **Client:** the gap check's (`gapCheckLlm`), its budget and model. **Kind:** a new
-  `ModelCallKind`, `gap_point`, for both the check and the re-check. `kind` is plain text in
-  `model_calls`, so no migration.
+- **Fails** otherwise, with the feedback the rewrite is told: the guesses, and whether the
+  reader guessed another word first or too few readers would write this one.
+- **Client:** one of its own (`pointCheckLlm`), on the gap check's budget and model, with its
+  thinking capped at `POINT_CHECK_THINKING` (512; ruling R6). **Kind:** a new `ModelCallKind`,
+  `gap_point`, for the check and every re-check. `kind` is plain text in `model_calls`, so no
+  migration.
 - **Marker:** a phrase only this prompt carries, exported for MockServer stubs.
 
 ### D3. The rewrite of a typed gap
@@ -161,21 +165,26 @@ with `___` and its key, never the word, so the reader cannot be led to it.
 - **The fault** is a `GapFault` with a new stage, `pointing`. Its `rewrite` carries the old
   sentence, the reader's guesses in `fits`, and in `problem` why (several meanings fit, or the
   reader guessed another word). The old sentence is added to the item's `avoid`.
-- **Prompt:** `buildDistractorPrompt` with the rewritten typed gaps alone, on the rewrite's client
-  (`gapRewriteLlm`, kind `gap_rewrite`), in a call of its own (D1). A rule of its own for
-  a rewritten **sentence** item is added only when one is asked: the old sentence could not be
-  used, because a reader who covers the word guesses the words in `rewrite.fits`; write a new one
-  around another verb or phrase that makes this word, or one of its meaning, the clear first
-  guess (what only it does, where only it is, what goes only with it), never the old sentence
-  with a word changed; words outside `learner_words` are allowed wherever pointing needs them,
-  since the learner can tap any word; keep the learner's words where it still points with them;
-  up to 12 words. 62c's gap rule is added only when a **gap** item is asked again, so every call
-  that exists today sends exactly today's prompt (a unit test pins it).
+- **Prompt:** `buildDistractorPrompt` with one rewritten typed gap, on the rewrite's client
+  (`gapRewriteLlm`, kind `gap_rewrite`): a call per typed gap, side by side, never mixed with
+  62c's gap items (D1, ruling R7). A rule of its own for a rewritten **sentence** item is added
+  only when one is asked: the old sentence could not be used, because readers who cover the word
+  write the words in `rewrite.fits`; write a completely new one, not the old frame, on something
+  only this word fits (what only it does, where only it is, what is done only to it; for an
+  adjective, what is known to be so; for a small word, what it is always said with); cover the
+  word and reread it as a stranger, and write another if a word of another meaning fits as well;
+  words outside `learner_words` wherever pointing needs them, since the learner can tap any word;
+  then at least half its other words from `learner_words` where it still points; up to 12 words.
+  62c's gap rule is added only when a **gap** item is asked again, so every call that exists
+  today sends exactly today's prompt (a unit test pins both by hash).
+- **Two rounds** (`POINT_REWRITE_ROUNDS`, ruling R7): a first rewrite the re-check still cannot
+  place is written once more, told what its readers wrote, avoiding both old sentences.
 - **Validation:** `validateDistractors` as in 62c, with a rewritten sentence item allowed up to
   `SENTENCE_MAX_WORDS` (12) words instead of `SHORT_SENTENCE_MAX_WORDS` (8). Every other check is
   unchanged.
 - **Examples in the rule** use no word the eval asks (62c R5: examples get copied): "Il ___ è qui."
-  points to nothing; "Leggo un ___ prima di dormire." points to libro.
+  points to nothing; "Ora leggo un ___ e poi dormo." points to libro, half its other words the
+  learner's; "Lo zucchero è ___." points to dolce; "Ogni sera mi ___ i denti." points to lavo.
 
 ### D4. After the rewrite
 
@@ -194,14 +203,16 @@ with `___` and its key, never the word, so the reader cannot be led to it.
 
 ### D5. Logs and budgets
 
-- `gap_rewritten` (62c's event) for a typed gap too, with `type: 'cloze_typed'`, `reason`
-  (`pointing`, with the guesses), `old_sentence`, and `new_sentence` or `failed`.
-- `point_check_failed` when the call fails, as `gap_check_failed`.
-- `session_prepared` gains `point_check_ms`, `point_count` (typed gaps checked) and
-  `unpointed_count` (failed the first check).
-- `PREPARE_SESSION_CALL_BUDGETS_MS` gains the gap check's budget twice (the point check and the
-  re-check) and the rewrite's once (the sentence rewrite), counted as if one after another, as
-  that list's rule says; the job's expiry rises with it (840 s to 1200 s).
+- `gap_rewritten` (62c's event) for a typed gap too, once per rewrite asked, with `type`
+  (every such event now names its card's type), `stage: 'pointing'`, `round`, `reason` (what the
+  readers wrote), `old_sentence`, and `new_sentence` or `failed`.
+- `point_check_failed`, with the card's `key`, when one sentence's call fails.
+- `session_prepared` gains `point_check_ms` (every point call the session waited for),
+  `point_count` (typed gaps checked) and `unpointed_count` (failed the first check).
+- `PREPARE_SESSION_CALL_BUDGETS_MS` gains the gap check's budget three times (the point check and
+  the two re-checks) and the rewrite's twice (the two rounds), counted as if one after another,
+  as that list's rule says; side-by-side calls of one step count once. The job's expiry rises
+  with it, from 840 s to 1440 s.
 
 ### D6. Eval
 
@@ -224,7 +235,7 @@ with `___` and its key, never the word, so the reader cannot be led to it.
   - Over all 41 cases (23 no, 18 yes), a check that says no to everything scores 56% and one
     that says yes 44%: both fail the group.
 - **The typed gap rows** (the `sentence` group's `sentence` cases) run production's rescue through
-  the same domain functions: point check, one rewrite of what failed, validation, re-check. Every
+  the same domain functions: point check, up to two rewrites of what failed, validation, re-checks. Every
   tier-2 check reads the sentence production would show. A card production would degrade fails
   exactly one check, a new one, "the point check passes the sentence shown" (my call, as 62c
   counts a lost card once), and the row's other checks read the last sentence written for it.
@@ -264,6 +275,31 @@ with `___` and its key, never the word, so the reader cannot be led to it.
   the point of tap to translate". The learner's words come second.
 - **R3 (Victor, play-back).** A typed gap that cannot be made clear becomes a typed translation,
   never an unclear gap. Only the typed gap card changes. A rewrite may use up to 12 words.
+- **R4 (building, the eval).** A typed gap row's list share gates the batch's first answer, as on
+  master; a rescued sentence's share is printed, not gated. R2 puts pointing before the list, and
+  gating the rescued sentence failed exactly the sentences Victor asked for ("Mi siedo sulla
+  ___.", 0% list words). 62c's gap rows keep gating their rescued sentence.
+- **R5 (building, measured).** The reader estimates and the code decides. A `clear` boolean swung
+  between calling "Il ___ è qui." clear and calling every sentence unclear; one count for the
+  first guess inflated to 8 of 10 asked alone ("Il ___ arriva ora."). Ten readers split between
+  the guesses, judged at 6, agreed with Victor's verdicts on 39–40 of 41 in five runs. A meaning
+  per guess, so a synonym's readers would join the word's, dropped it to 34 (big and large
+  passing "The city is ___.") and was taken out: a sentence whose readers split across synonyms
+  (felice, contento) costs a rewrite.
+- **R6 (building, measured).** One point call per sentence, side by side, thinking capped at 512.
+  Ten sentences in one call compressed the split ("Il ___ è blu ora." from 6 to 4); uncapped, one
+  sentence took 3–5 s and sometimes ran past the eval's 30 s; at 512, 2.3–3.5 s.
+- **R7 (building, measured).** One rewrite call per typed gap, and up to two rounds. Eight typed
+  gaps in one rewrite call came back pointing about half as often as one alone.
+- **R8 (building).** The eval case from Victor's session carries no avoid lists: with them,
+  master's unchanged batch writes an avoided sentence back for sedia and felice, which validation
+  degrades to a typed translation (a tier-1 failure), a path this phase leaves alone (non-goals).
+  Left for Victor as a follow-up.
+- **R9 (eval results).** Full suite: tier 1 clean, every group above 85%; pointing check 40 of 41,
+  sentence 88 of 97 (master 0.94 without the new case and checks). Of the 41 point cases, only
+  "Ci sono uccelli nel ___." fails steadily: the reader puts nido first, so my label (points) is
+  likely wrong. Kept, not relabelled. Every row master passes still passes; campo, лук and
+  pianta now point after their rescue.
 
 ## Left to the builder
 
