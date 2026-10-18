@@ -179,6 +179,7 @@ const targetWith = (session: CurrentSessionResponse['current']): TargetSummary =
   id: 't1',
   kind: 'exam',
   due_on: '2026-10-21',
+  created_on: '2026-10-11',
   days_left: 5,
   word_count: 8,
   ready_count: 0,

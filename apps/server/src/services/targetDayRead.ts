@@ -51,5 +51,5 @@ export async function readTargetDay(
     rightToday,
     answeredToday: answers.some((answer) => answer.targetId === target.id),
   });
-  return { day, glossIds, live, canSay: (glossId: string) => speakable(formOf.get(glossId)!) };
+  return { day, createdOn, glossIds, live, canSay: (glossId: string) => speakable(formOf.get(glossId)!) };
 }

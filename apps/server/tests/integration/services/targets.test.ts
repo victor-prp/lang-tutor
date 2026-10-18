@@ -133,6 +133,28 @@ describe('create (spec D10, ruling R-D9)', () => {
   });
 });
 
+// Phase 64 (spec D5). Home's fuse burns from the day a target was made: its summary carries
+// that learner day, also once no saved word is left in it (no target day is read then).
+describe('created_on (phase 64, spec D5)', () => {
+  it('is the learner day the target was created on, in the create answer and the list', async () => {
+    const apple = await word('apple', 'תפוח');
+    const made = await deps.targets.create('u_1', E, { kind: 'exam', due_on: DUE, photo_import_ids: [], entries: [typed(apple)] });
+
+    expect(made.created_on).toBe(DAY);
+    expect((await deps.targets.list('u_1', E)).targets[0].created_on).toBe(DAY);
+  });
+
+  it('is there for a target whose every word was unsaved', async () => {
+    const apple = await word('apple', 'תפוח');
+    const made = await deps.targets.create('u_1', E, { kind: 'homework', due_on: DUE, photo_import_ids: [], entries: [typed(apple)] });
+
+    await deps.vocabulary.unsave('u_1', E, apple.gloss_id);
+
+    const listed = (await deps.targets.list('u_1', E)).targets.find((target) => target.id === made.id);
+    expect(listed).toMatchObject({ word_count: 0, created_on: DAY });
+  });
+});
+
 describe('unsave (spec D1)', () => {
   it('takes the word out of the target, with words_removed in its log, and keeps the others', async () => {
     const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];

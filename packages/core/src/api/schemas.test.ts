@@ -1445,6 +1445,7 @@ describe('the target read models', () => {
     id: 't1',
     kind: 'homework',
     due_on: '2030-01-13',
+    created_on: '2030-01-03',
     days_left: 5,
     word_count: 2,
     ready_count: 1,
@@ -1465,6 +1466,13 @@ describe('the target read models', () => {
 
   it('names two kinds', () => {
     expect(TargetKindSchema.options).toEqual(['homework', 'exam']);
+  });
+
+  it('carries the learner day a target was created on (phase 64, spec D5)', () => {
+    expect(TargetSummarySchema.parse(summary).created_on).toBe('2030-01-03');
+    const { created_on: _, ...without } = summary;
+    expect(TargetSummarySchema.safeParse(without).success).toBe(false);
+    expect(TargetSummarySchema.safeParse({ ...summary, created_on: '2030-02-30' }).success).toBe(false);
   });
 
   it('parses a target day, a path session and a word day, in points and percent', () => {

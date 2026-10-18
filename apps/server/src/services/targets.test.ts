@@ -392,6 +392,7 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
       id: 't_new',
       kind: 'exam',
       due_on: DUE,
+      created_on: TODAY,
       days_left: 5,
       word_count: 4,
       ready_count: 0,

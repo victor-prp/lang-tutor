@@ -1061,6 +1061,9 @@ export const TargetSummarySchema = z.object({
   id: z.string(),
   kind: TargetKindSchema,
   due_on: LearnerDaySchema,
+  // Phase 64 (spec D5). The learner day the target was created on: home's fuse burns from it
+  // to `due_on`.
+  created_on: LearnerDaySchema,
   days_left: z.number().int(),
   word_count: z.number().int(),
   // Words at 100% readiness.

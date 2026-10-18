@@ -157,7 +157,7 @@ const DAY = {
 describe('targetsFor', () => {
   const list: TargetList = {
     today: '2026-10-15',
-    targets: [{ id: 't1', kind: 'exam', due_on: '2026-10-20', days_left: 5, word_count: 4, ready_count: 1, ...DAY }],
+    targets: [{ id: 't1', kind: 'exam', due_on: '2026-10-20', created_on: '2026-10-10', days_left: 5, word_count: 4, ready_count: 1, ...DAY }],
   };
   const stored: StoredTargets = { enrollmentId: 'e1', list };
 
@@ -268,6 +268,7 @@ describe('withoutWord', () => {
     id: 't1',
     kind: 'exam',
     due_on: '2026-10-20',
+    created_on: '2026-10-10',
     days_left: 5,
     word_count: 3,
     ready_count: 1,
@@ -308,6 +309,7 @@ const summary = (
   id,
   kind: 'exam',
   due_on,
+  created_on: '2026-10-10',
   days_left: 5,
   word_count: 8,
   ready_count: 0,

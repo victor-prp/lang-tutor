@@ -600,7 +600,7 @@ describe('the target endpoints in the published document (phase 53)', () => {
     const doc = await openApiDocument();
     const list = doc.paths[TARGETS].get.responses['200'].content['application/json'].schema;
     expect(list.required.sort()).toEqual(['targets', 'today']);
-    const SUMMARY = ['days_left', 'due_on', 'id', 'kind', 'readiness_pct', 'ready_count', 'session', 'today', 'word_count'];
+    const SUMMARY = ['created_on', 'days_left', 'due_on', 'id', 'kind', 'readiness_pct', 'ready_count', 'session', 'today', 'word_count'];
     expect(list.properties.targets.items.required.sort()).toEqual(SUMMARY);
     expect(list.properties.targets.items.properties.today.properties.state.enum).toEqual(['owed', 'done', 'rest', 'due_today']);
     for (const [path, method, status] of [

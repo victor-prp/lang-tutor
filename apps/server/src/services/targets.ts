@@ -14,7 +14,7 @@ import { InvalidTarget, TargetClosed, TargetNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { TargetRow } from '../repo/targets';
 import { authorizeEnrollment } from './access';
-import { learnerDay } from './learnerDay';
+import { learnerDay, learnerDays } from './learnerDay';
 import { readTargetDay } from './targetDayRead';
 import { logImportSaved, saveImportsInTx, type ImportSaved } from './photoImports';
 import { lockPaths, logTargetRetired, requestStocks, restockAfterTargetChange, retireStocks } from './stock';
@@ -133,6 +133,9 @@ export function createTargetService({
     const out: Target[] = [];
     for (const target of targets) {
       const read = await readTargetDay(repos, enrolled, target, devices, today, saved);
+      // Phase 64 (spec D5). The day it was made, for home's fuse; read on its own when no
+      // saved word is left and so no target day was read.
+      const createdOn = read?.createdOn ?? (await learnerDays(repos, enrolled.user_id, [target.createdAt.getTime()]))[0];
       const day =
         read?.day ??
         targetDay({ today, createdOn: today, dueOn: target.dueOn, words: [], skills: [], rightToday: new Set(), answeredToday: false });
@@ -161,6 +164,7 @@ export function createTargetService({
         id: target.id,
         kind: target.kind,
         due_on: target.dueOn,
+        created_on: createdOn,
         days_left: daysBetween(today, target.dueOn),
         word_count: words.length,
         ready_count: day.readyCount,
