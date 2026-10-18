@@ -398,6 +398,16 @@ describe('wordMapFor (phase 59 D2)', () => {
     expect(map!.map((word) => word.text)).toEqual(['La sedia', 'vicino a']);
   });
 
+  it('reads a word named like an object\'s own property as a word, never a contraction', () => {
+    const builder: MarkItem = { key: 'q1', task: 'mark', word: 'house', meaning: 'בית', sentence: 'הבנאי בנה בית.', translation: 'The constructor built a house.', map: 'sentence' };
+    const map = wordMapFor(builder, { key: 'q1', sentence_words: [
+      { shown: 'הבנאי', translation: 'The constructor', word: '' },
+      { shown: 'בנה', translation: 'built', word: '' },
+      { shown: 'בית', translation: 'a house', word: '' },
+    ] }, { start: 10, end: 13 }, [], 'g-house', 'en');
+    expect(map!.map((word) => word.text)).toEqual(['The constructor', 'built', 'a house']);
+  });
+
   it('reads contractions only in a language that has them', () => {
     const map = wordMapFor(chair, { key: 'q1', sentence_words: chairAt('è vicino a', 'il tavolo') }, { start: 0, end: 5 }, tavolo, 'g-sedia', 'en');
     expect(map!.map((word) => word.text)).toEqual(['La sedia']);

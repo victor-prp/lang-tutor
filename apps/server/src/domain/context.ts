@@ -272,13 +272,15 @@ const ASTRAL = /[\u{10000}-\u{10FFFF}]/u;
 type Contractions = Language['contractions'];
 const NO_CONTRACTIONS: Contractions = {};
 
-/** Words with each contraction written apart: al is a, il; all'ufficio is a, l'ufficio. */
+/** Words with each contraction written apart: al is a, il; all'ufficio is a, l'ufficio.
+ *  Only the table's own keys: "constructor" is a word, never Object's. */
 function apart(words: readonly string[], contractions: Contractions): string[] {
+  const joined = (word: string) => (Object.hasOwn(contractions, word) ? contractions[word] : undefined);
   return words.flatMap((word) => {
-    const whole = contractions[word];
+    const whole = joined(word);
     if (whole) return [...whole];
     const cut = word.indexOf("'") + 1;
-    const elided = cut > 0 ? contractions[word.slice(0, cut)] : undefined;
+    const elided = cut > 0 ? joined(word.slice(0, cut)) : undefined;
     return elided ? [elided[0], elided[1] + word.slice(cut)] : [word];
   });
 }
@@ -415,7 +417,8 @@ const overlaps = (a: Mark, b: Mark) => a.start < b.end && b.start < a.end;
  * that word its tap. Each Hebrew word is found after the one before it; an entry
  * whose Italian is not in the reference, or that overlaps one already kept, is
  * dropped. Both are read with `target`'s contractions apart: in "vicino al
- * tavolo", ליד's "vicino a" and השולחן's "il tavolo" are each in the reference. The target is every entry over the mark, or with no mark the entry
+ * tavolo", ליד's "vicino a" and השולחן's "il tavolo" are each in the reference.
+ * The target is every entry over the mark, or with no mark the entry
  * whose Italian holds every word of the gap; with a mark no entry covers, the mark itself, with
  * the gap's text. Any other entry sharing a word with the gap is dropped, so a
  * free tap never shows the answer.
