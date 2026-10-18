@@ -5,13 +5,14 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '@/components/ScreenHeader';
 import { LevelBadge } from '@/components/LevelBadge';
 import { SpeakButton } from '@/components/SpeakButton';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useVocabulary } from '@/hooks/useVocabulary';
 import { dimensionRows } from '@/progress';
 import { strings } from '@/strings';
-import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { colors, fontSizes, lineHeights, radii, spacing, shadows } from '@/theme';
 import { alsoLine, keepGlossOrder, savedFromLine, toggleOptimistically } from '@/vocabulary';
 
 export default function VocabularyWordScreen() {
@@ -92,9 +93,7 @@ export default function VocabularyWordScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <Pressable accessibilityRole="button" testID="vocabulary-word-back" onPress={() => router.back()}>
-        <Text style={styles.link}>{strings.back}</Text>
-      </Pressable>
+      <ScreenHeader title={strings.myWords} onBack={() => router.back()} backTestID="vocabulary-word-back" />
 
       {loadFailed ? <Text style={styles.notice}>{strings.vocabularyLoadFailed}</Text> : null}
       {saveFailed ? <Text style={styles.notice}>{strings.translateSaveFailed}</Text> : null}
@@ -191,7 +190,7 @@ export default function VocabularyWordScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.sm },
+  screen: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: spacing.sm },
   link: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
   list: { gap: spacing.sm, paddingBottom: spacing.xl },
   lemma: { fontSize: fontSizes.xl, fontWeight: '700', color: colors.text },
@@ -199,8 +198,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     padding: spacing.md,
     gap: spacing.xs,
   },

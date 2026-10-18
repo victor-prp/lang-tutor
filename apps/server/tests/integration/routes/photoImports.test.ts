@@ -202,6 +202,41 @@ describe('save and discard', () => {
 });
 
 // Phase 29 (spec D13): an import is its list owner's alone, by either id.
+// Phase 64 (final review I2). The photo flow's My words: the flow's imports saved in one
+// transaction as a prep saves them, the first row of each gloss across the photos, which is the
+// row the review shows. A word on two photos, unticked in the review, is not saved by its other row.
+describe('POST /api/enrollments/{id}/photo-imports/save', () => {
+  it('saves the photos as the review shows them: a word on two photos, unticked, stays out', async () => {
+    const casa = await word('casa', ['בית', 'משפחה']);
+    const gatto = await word('gatto', ['חתול', 'חתולה']);
+    const first = await seedPhotoImport(t.db, {
+      enrollmentId: IT,
+      status: 'read',
+      items: [{ text: 'casa', options: casa }, { text: 'gatto', options: gatto }],
+    });
+    const second = await seedPhotoImport(t.db, { enrollmentId: IT, status: 'read', items: [{ text: 'gatto', options: gatto }] });
+    await send('PATCH', `/photo-imports/${first}/items/1`, { ticked: false });
+
+    const res = await send('POST', `/enrollments/${IT}/photo-imports/save`, { photo_import_ids: [first, second] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ saved_gloss_ids: [casa[0].gloss_id] });
+    const page = await deps.vocabulary.listWords('u_1', IT, {});
+    expect(page.items.map((item) => item.lemma)).toEqual(['casa']);
+    expect((await (await send('GET', `/enrollments/${IT}/photo-imports`)).json()) as unknown[]).toEqual([]);
+  });
+
+  it('answers 400 for no import or more than ten, 404 for one not found, and 409 for one still reading', async () => {
+    expect((await send('POST', `/enrollments/${IT}/photo-imports/save`, { photo_import_ids: [] })).status).toBe(400);
+    const eleven = Array.from({ length: 11 }, (_, at) => `i${at}`);
+    expect((await send('POST', `/enrollments/${IT}/photo-imports/save`, { photo_import_ids: eleven })).status).toBe(400);
+    expect(
+      (await send('POST', `/enrollments/${IT}/photo-imports/save`, { photo_import_ids: ['5f0e4f5e-0000-4000-8000-000000000009'] })).status,
+    ).toBe(404);
+    const reading = await seedPhotoImport(t.db, { enrollmentId: IT, status: 'reading', items: [] });
+    expect((await send('POST', `/enrollments/${IT}/photo-imports/save`, { photo_import_ids: [reading] })).status).toBe(409);
+  });
+});
+
 describe('another learner', () => {
   it('is answered 403 on every photo-import route, and nothing changes', async () => {
     await seedUser(t.db, 'u_2');
@@ -215,6 +250,7 @@ describe('another learner', () => {
       ['GET', `/photo-imports/${id}`, undefined],
       ['PATCH', `/photo-imports/${id}/items/0`, { ticked: false }],
       ['POST', `/photo-imports/${id}/save`, undefined],
+      ['POST', `/enrollments/${IT}/photo-imports/save`, { photo_import_ids: [id] }],
       ['POST', `/photo-imports/${id}/discard`, undefined],
     ] as const) {
       const res = await send(method, path, body, 'u_2');

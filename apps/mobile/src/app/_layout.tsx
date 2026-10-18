@@ -42,7 +42,7 @@ import { VocabularyProvider } from '@/hooks/useVocabulary';
 import { createPhotoPicker, type PhotoAsset } from '@/photos';
 import { createRecorder, type RecordPermission } from '@/recording';
 import type { AppRelease } from '@/release';
-import { createReminders, type NotificationsEngine, type Permission } from '@/reminders';
+import { createReminders, openReminderTap, type NotificationsEngine, type Permission } from '@/reminders';
 import { createSpeaker } from '@/speech';
 import { MAX_PHOTOS } from '@/targetWizard';
 import { colors, layout } from '@/theme';
@@ -315,10 +315,10 @@ const rtlProps = { dir: 'rtl' } as unknown as ViewProps;
 export default function RootLayout() {
   // Phase 52 (spec D8). A tapped reminder opens /?start=reminder, and Home starts
   // the ready session; the tap that launched the app is read once from the last
-  // response. dismissTo, as a saved photo import returns Home: back to the Home
-  // already at the bottom of the stack, or Home in place of the screen when it is
-  // not there, rather than a second Home pushed over a session in progress.
-  useEffect(() => reminders.onTap(() => router.dismissTo({ pathname: '/', params: { start: 'reminder' } })), []);
+  // response. Phase 64: dismissed to the tabs when a screen is over them, rather than
+  // a second Home pushed over a session in progress; navigated to בית when a tab is
+  // on top (openReminderTap).
+  useEffect(() => reminders.onTap(() => openReminderTap(router)), []);
 
   return (
     // Every screen uses SafeAreaView. The navigator happens to provide a

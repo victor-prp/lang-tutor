@@ -5,66 +5,38 @@ import type {
   PhotoImportSummary,
   SaveVocabularyResponse,
 } from '@lang-tutor/core/api';
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
 
 import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { importsFor, type StoredImports } from '@/photoImports';
 import type { Photo, PhotoPicker, PickResult } from '@/photos';
 
 type PhotoImportsValue = {
-  /** The active enrollment's open imports, newest first. */
-  imports: PhotoImportSummary[];
-  loadFailed: boolean;
-  reload: () => void;
   pick: (source: 'camera' | 'gallery') => Promise<PickResult>;
-  /** Phase 53 (spec D10). Several photos from the library at once, for the target
-   *  wizard; none when the learner cancels. */
+  /** Phase 53 (spec D10). Several photos from the library at once, for the photo flow;
+   *  none when the learner cancels. */
   pickMany: () => Promise<Photo[]>;
   upload: (photo: Photo) => Promise<PhotoImportSummary>;
   fetchImport: (id: string) => Promise<PhotoImport>;
   updateItem: (id: string, position: number, update: PhotoImportItemUpdate) => Promise<PhotoImportItem>;
   save: (id: string) => Promise<SaveVocabularyResponse>;
+  /** Phase 64 (final review I2). The photo flow's imports saved to My words together, the first
+   *  row of each gloss across them, as the review shows them and as a prep saves them. */
+  saveAll: (ids: string[]) => Promise<SaveVocabularyResponse>;
   discard: (id: string) => Promise<void>;
 };
 
 const PhotoImportsContext = createContext<PhotoImportsValue | null>(null);
 
+/** Phase 26, phase 64 (spec D8, R12). The photo flow's imports: picking, sending, the review's
+ *  reads and changes, saving and discarding. No list of open imports is kept any more: the
+ *  flow waits for its own and discards them when it is left. */
 export function PhotoImportsProvider({ api, picker, children }: { api: ApiClient; picker: PhotoPicker; children: ReactNode }) {
   const { active } = useCurrentUser();
-  // Keyed by the enrollment each list was read for, not cleared on a switch
-  // (see importsFor). `reload` changes with `active`, so home's focus effect
-  // runs again on a switch, and its read is the one that lands.
-  const [stored, setStored] = useState<StoredImports | null>(null);
-  const [failedFor, setFailedFor] = useState<string | null>(null);
-  const imports = importsFor(stored, active?.id);
-  const loadFailed = active !== null && failedFor === active.id;
-  // Reads are numbered as they start. An answer is shown unless a newer one
-  // already has been, so an older poll answering late is dropped, and a slow
-  // answer still lands while polls keep starting.
-  const started = useRef(0);
-  const applied = useRef(0);
 
-  const reload = useCallback(() => {
-    if (!active) return;
-    const enrollmentId = active.id;
-    const mine = ++started.current;
-    api
-      .listPhotoImports(enrollmentId)
-      .then((list) => {
-        if (mine < applied.current) return;
-        applied.current = mine;
-        setStored({ enrollmentId, imports: list });
-        setFailedFor((failed) => (failed === enrollmentId ? null : failed));
-      })
-      .catch(() => {
-        if (mine > applied.current) setFailedFor(enrollmentId);
-      });
-  }, [api, active]);
-
-  // Stable identities, not inline arrows in the memo below: the review screen
-  // puts fetchImport in its load callback, which its focus and poll effects
-  // depend on. New functions whenever the list changed would re-run them.
+  // Stable identities, not inline arrows in the memo below: the review puts fetchImport in
+  // its load callback, which its focus and poll effects depend on. New functions whenever
+  // the provider rendered would re-run them.
   const pick = useCallback(
     (source: 'camera' | 'gallery') => (source === 'camera' ? picker.take() : picker.choose()),
     [picker],
@@ -83,11 +55,18 @@ export function PhotoImportsProvider({ api, picker, children }: { api: ApiClient
     [api],
   );
   const save = useCallback((id: string) => api.savePhotoImport(id), [api]);
+  const saveAll = useCallback(
+    async (ids: string[]) => {
+      if (!active) throw new Error('no active enrollment');
+      return api.savePhotoImports(active.id, ids);
+    },
+    [api, active],
+  );
   const discard = useCallback((id: string) => api.discardPhotoImport(id), [api]);
 
   const value = useMemo<PhotoImportsValue>(
-    () => ({ imports, loadFailed, reload, pick, pickMany, upload, fetchImport, updateItem, save, discard }),
-    [imports, loadFailed, reload, pick, pickMany, upload, fetchImport, updateItem, save, discard],
+    () => ({ pick, pickMany, upload, fetchImport, updateItem, save, saveAll, discard }),
+    [pick, pickMany, upload, fetchImport, updateItem, save, saveAll, discard],
   );
 
   return <PhotoImportsContext.Provider value={value}>{children}</PhotoImportsContext.Provider>;

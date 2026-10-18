@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import type { CurrentSessionResponse, TargetSummary } from '@lang-tutor/core/api';
+import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import {
   createLook,
@@ -7,7 +8,9 @@ import {
   homeActionOf,
   homeReminderStartOf,
   loadFailedFor,
+  mainButtonSolid,
   mainEmptyNote,
+  myWordsBand,
   myWordsLine,
   openSessionOf,
   reminderStartOf,
@@ -179,6 +182,7 @@ const targetWith = (session: CurrentSessionResponse['current']): TargetSummary =
   id: 't1',
   kind: 'exam',
   due_on: '2026-10-21',
+  created_on: '2026-10-11',
   days_left: 5,
   word_count: 8,
   ready_count: 0,
@@ -371,5 +375,39 @@ describe('myWordsLine', () => {
 
   it("names the seed's words before the first session", () => {
     expect(myWordsLine(none('seed'), 'איטלקית')).toBe('10 מילים באיטלקית');
+  });
+});
+
+// Phase 64 (spec D4). My words' blue header and its button's look.
+describe('mainButtonSolid (phase 64, spec D4)', () => {
+  it('is solid whenever the button starts or resumes a session', () => {
+    expect(mainButtonSolid({ kind: 'start-seed' })).toBe(true);
+    expect(mainButtonSolid({ kind: 'start', sessionId: 's1' })).toBe(true);
+    expect(mainButtonSolid({ kind: 'resume', sessionId: 's1' })).toBe(true);
+  });
+
+  it('is pale while preparing, creating, failed, empty or unread', () => {
+    expect(mainButtonSolid({ kind: 'preparing', sessionId: 's1' })).toBe(false);
+    expect(mainButtonSolid({ kind: 'create' })).toBe(false);
+    expect(mainButtonSolid({ kind: 'failed' })).toBe(false);
+    expect(mainButtonSolid({ kind: 'save-words-first' })).toBe(false);
+    expect(mainButtonSolid(null)).toBe(false);
+  });
+});
+
+describe('myWordsBand (phase 64, spec D4)', () => {
+  const ltr = (text: string) => `\u2066${text}\u2069`;
+
+  it('counts the seed set before the first session', () => {
+    expect(myWordsBand(none('seed'), 'איטלקית')).toEqual({ big: ltr(String(SESSION_LENGTH)), line: 'מילים באיטלקית' });
+  });
+
+  it('counts the words due for review', () => {
+    expect(myWordsBand({ ...none('list', 64), due_count: 12 }, 'איטלקית')).toEqual({ big: ltr('12'), line: 'מילים מחכות לחזרה' });
+    expect(myWordsBand({ ...none('list', 64), due_count: 1 }, 'איטלקית')).toEqual({ big: ltr('1'), line: 'מילה מחכה לחזרה' });
+  });
+
+  it('counts the meanings saved when none is due', () => {
+    expect(myWordsBand(none('list', 64), 'איטלקית')).toEqual({ big: ltr('64'), line: 'משמעויות שמורות באיטלקית' });
   });
 });

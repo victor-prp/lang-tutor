@@ -34,7 +34,7 @@ test('a Russian learner gets a Russian session', async ({ page, request }) => {
   await signUpLearner(page, 'e2e_ru_session', 'ru');
   await openApp(page);
 
-  await expect(page.getByTestId('enrollment-switcher')).toHaveText('לומד/ת: רוסית');
+  await expect(page.getByTestId('enrollment-switcher')).toHaveText('רוסית ▾');
   await startSession(page);
   await expect(page.getByTestId('question-prompt')).toHaveText(CYRILLIC);
 });
@@ -116,7 +116,7 @@ test('a learner adds English, switches both ways, and the choice survives signin
   await page.getByTestId('enrollment-add').click();
   await page.getByTestId('enroll-en').click();
   await page.getByTestId('enroll-submit').click();
-  await expect(page.getByTestId('enrollment-switcher')).toHaveText('לומד/ת: אנגלית');
+  await expect(page.getByTestId('enrollment-switcher')).toHaveText('אנגלית ▾');
 
   await startSession(page);
   await expect(page.getByTestId('question-prompt')).toHaveText(LATIN);
@@ -124,7 +124,7 @@ test('a learner adds English, switches both ways, and the choice survives signin
 
   await page.getByTestId('enrollment-switcher').click();
   await page.getByTestId('enrollment-option-ru').click();
-  await expect(page.getByTestId('enrollment-switcher')).toHaveText('לומד/ת: רוסית');
+  await expect(page.getByTestId('enrollment-switcher')).toHaveText('רוסית ▾');
   await startSession(page);
   await expect(page.getByTestId('question-prompt')).toHaveText(CYRILLIC);
   await page.getByTestId('session-back').click();
@@ -134,12 +134,12 @@ test('a learner adds English, switches both ways, and the choice survives signin
   await page.getByTestId('translate-back').click();
 
   // Every adding of a language is remembered; the last switch was to Russian.
-  await page.getByTestId('profile-button').click();
+  await page.getByTestId('settings-tab').click();
   await page.getByTestId('sign-out-button').click();
   await expect(page.getByTestId('sign-in-email')).toBeVisible({ timeout: 30_000 });
   await signIn(page.request, 'e2e_switcher');
   await openApp(page);
-  await expect(page.getByTestId('enrollment-switcher')).toHaveText('לומד/ת: רוסית');
+  await expect(page.getByTestId('enrollment-switcher')).toHaveText('רוסית ▾');
 });
 
 test('a learner adds Italian from the switcher and gets an Italian session', async ({
@@ -153,7 +153,7 @@ test('a learner adds Italian from the switcher and gets an Italian session', asy
   await page.getByTestId('enrollment-add').click();
   await page.getByTestId('enroll-it').click();
   await page.getByTestId('enroll-submit').click();
-  await expect(page.getByTestId('enrollment-switcher')).toHaveText('לומד/ת: איטלקית');
+  await expect(page.getByTestId('enrollment-switcher')).toHaveText('איטלקית ▾');
 
   await startSession(page);
   await expect(page.getByTestId('question-prompt')).toHaveText(ITALIAN_SEED);

@@ -398,6 +398,22 @@ export function createPhotoImportService({
       return { saved_gloss_ids: outcome.entries.map((entry) => entry.gloss_id) };
     },
 
+    /**
+     * Phase 64 (final review I2). The photo flow's My words: the flow's imports saved in one
+     * transaction, as a prep's create saves them (saveImportsInTx): the first row of each gloss
+     * across the photos, the row the review shows, so a word on two photos that the review
+     * unticked is not saved by its other row. A failed photo saves nothing; one not ready is
+     * refused (409), and so is one already saved.
+     */
+    saveMany: async (actorUserId: string, enrollmentId: string, importIds: readonly string[]): Promise<SaveVocabularyResponse> => {
+      const saved = await transaction(async (repos) => {
+        const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'photo_import.manage' });
+        return saveImportsInTx(repos, logger, { enrolled, actorUserId, importIds, now: now(), stockSaveDelaySeconds });
+      });
+      for (const imported of saved.imports) logImportSaved(logger, imported);
+      return { saved_gloss_ids: saved.glossIds };
+    },
+
     /** Idempotent on a discarded import. A saved one is refused (409). */
     discard: async (actorUserId: string, importId: string): Promise<void> => {
       const discarded = await transaction(async (repos) => {

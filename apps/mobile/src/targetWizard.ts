@@ -26,16 +26,28 @@ import type { SavedState } from '@/vocabulary';
 export const MAX_PHOTOS = 10;
 export const MAX_ENTRIES = 50;
 
-/** `create` is New on home; the other three are a target screen's actions. */
-export type WizardMode = 'create' | 'add-photos' | 'add-words' | 'change-date';
-export type WizardStep = 'kind' | 'photos' | 'review' | 'words' | 'date';
+/** `photo` is the header's photo flow (phase 64, spec D8), which replaced home's New and
+ *  the photo import; the other two are a target screen's actions. */
+export type WizardMode = 'photo' | 'add-words' | 'change-date';
+export type WizardStep = 'photos' | 'review' | 'choose' | 'words' | 'date';
 
 const STEPS: Record<WizardMode, readonly WizardStep[]> = {
-  create: ['kind', 'photos', 'review', 'words', 'date'],
-  'add-photos': ['photos', 'review'],
+  photo: ['photos', 'review', 'choose', 'words', 'date'],
   'add-words': ['words'],
   'change-date': ['date'],
 };
+
+/** Phase 64 (spec D8). What to do with the words the photos gave, asked once they are marked:
+ *  save them to My words, make a new prep of a kind, or add them to a prep already open. */
+export type Destination = { kind: 'my-words' } | { kind: 'new'; targetKind: TargetKind } | { kind: 'target'; targetId: string };
+
+/** The steps a wizard walks: the photo flow ends on the choice unless it makes a new prep,
+ *  which goes on to more words and its date. */
+function walkedSteps(state: Pick<WizardState, 'mode' | 'destination'>): readonly WizardStep[] {
+  const steps = STEPS[state.mode];
+  if (state.mode !== 'photo' || state.destination?.kind === 'new') return steps;
+  return steps.slice(0, steps.indexOf('choose') + 1);
+}
 
 /** The steps of a mode in order. The last is where Done is. */
 export function stepsFor(mode: WizardMode): WizardStep[] {
@@ -45,20 +57,20 @@ export function stepsFor(mode: WizardMode): WizardStep[] {
 const MODES = Object.keys(STEPS) as WizardMode[];
 type RouteParam = string | string[] | undefined;
 
-/** A new target, or one of a target's actions with the target it acts on. */
+/** The photo flow, or one of a target's actions with the target it acts on. */
 export type WizardRoute =
-  | { mode: 'create'; targetId: null }
-  | { mode: Exclude<WizardMode, 'create'>; targetId: string };
+  | { mode: 'photo'; targetId: null }
+  | { mode: Exclude<WizardMode, 'photo'>; targetId: string };
 
 /**
- * What the wizard's route asks for. `/targets/new` alone is a new target; a target
- * screen's actions add their `mode` and the `targetId` they act on. An unknown mode is a
- * new target, and an action with no target to act on is nothing (null): the screen
- * leaves. A repeated parameter (an array) is no answer.
+ * What the wizard's route asks for. `/targets/new` alone is the photo flow; a target
+ * screen's actions add their `mode` and the `targetId` they act on. An unknown mode (the old
+ * `create` and `add-photos` among them) is the photo flow, and an action with no target to
+ * act on is nothing (null): the screen leaves. A repeated parameter (an array) is no answer.
  */
 export function wizardRouteOf(params: { mode?: RouteParam; targetId?: RouteParam }): WizardRoute | null {
-  const mode = MODES.find((candidate) => candidate === params.mode) ?? 'create';
-  if (mode === 'create') return { mode, targetId: null };
+  const mode = MODES.find((candidate) => candidate === params.mode) ?? 'photo';
+  if (mode === 'photo') return { mode, targetId: null };
   const { targetId } = params;
   return typeof targetId === 'string' && targetId.length > 0 ? { mode, targetId } : null;
 }
@@ -70,7 +82,8 @@ export type PickedEntry = { gloss_id: string; variant_id: string; form: string; 
 export type WizardState = {
   mode: WizardMode;
   step: WizardStep;
-  kind: TargetKind | null;
+  /** Phase 64 (spec D8). Where the words go, chosen on the choice step. */
+  destination: Destination | null;
   /** The photos taken or chosen, in the order they were added. */
   photos: Photo[];
   /** The photo imports made of them: `importIds[i]` is the import of `photos[i]`, and
@@ -82,7 +95,7 @@ export type WizardState = {
 };
 
 export type WizardAction =
-  | { type: 'kind'; kind: TargetKind }
+  | { type: 'destination'; destination: Destination }
   /** Adds photos after the ones held, up to MAX_PHOTOS. */
   | { type: 'photos'; photos: Photo[] }
   | { type: 'remove-photo'; index: number }
@@ -95,14 +108,14 @@ export type WizardAction =
   | { type: 'back' };
 
 export function initialWizard(mode: WizardMode): WizardState {
-  return { mode, step: STEPS[mode][0], kind: null, photos: [], importIds: [], entries: [], dueOn: null };
+  return { mode, step: STEPS[mode][0], destination: null, photos: [], importIds: [], entries: [], dueOn: null };
 }
 
 /** The step `delta` away. The review is passed over when there are no photos to review,
  *  going back as well as on, so it is never landed on empty. At either end the step is
  *  the one it is. */
 function move(state: WizardState, delta: 1 | -1): WizardStep {
-  const steps = STEPS[state.mode];
+  const steps = walkedSteps(state);
   let index = steps.indexOf(state.step) + delta;
   while (steps[index] === 'review' && state.photos.length === 0) index += delta;
   return steps[index] ?? state.step;
@@ -110,8 +123,8 @@ function move(state: WizardState, delta: 1 | -1): WizardStep {
 
 export function wizardReducer(state: WizardState, action: WizardAction): WizardState {
   switch (action.type) {
-    case 'kind':
-      return { ...state, kind: action.kind };
+    case 'destination':
+      return { ...state, destination: action.destination };
     case 'photos':
       return { ...state, photos: [...state.photos, ...action.photos].slice(0, MAX_PHOTOS) };
     case 'remove-photo': {
@@ -157,7 +170,7 @@ export function isFirstStep(state: WizardState): boolean {
 
 /** Whether the step on screen is its mode's last, where Done is instead of Next. */
 export function isLastStep(state: WizardState): boolean {
-  const steps = STEPS[state.mode];
+  const steps = walkedSteps(state);
   return steps[steps.length - 1] === state.step;
 }
 
@@ -237,10 +250,10 @@ export async function saveHolding<T>(made: MadeImports, save: () => Promise<T>):
  */
 export function canAdvance(state: WizardState, reviewSettled: boolean): boolean {
   switch (state.step) {
-    case 'kind':
-      return state.kind !== null;
     case 'photos':
-      return state.mode !== 'add-photos' || state.photos.length > 0;
+      return state.photos.length > 0;
+    case 'choose':
+      return state.destination !== null;
     case 'review':
       return reviewSettled;
     case 'words':
@@ -253,20 +266,20 @@ export function canAdvance(state: WizardState, reviewSettled: boolean): boolean 
 const entriesOf = (entries: readonly PickedEntry[]): VocabularyEntryInput[] =>
   entries.map(({ gloss_id, variant_id }) => ({ gloss_id, variant_id }));
 
-/** Done in `create`. Throws when the kind or the date was never chosen: `canAdvance`
- *  does not let the screen get there without them. */
+/** Done on a new prep: its kind is the destination's. Throws when no new prep was chosen or
+ *  the date never was: `canAdvance` does not let the screen get there without them. */
 export function createRequest(state: WizardState): CreateTargetRequest {
-  if (state.kind === null) throw new Error('a new target needs a kind');
+  if (state.destination?.kind !== 'new') throw new Error('a new target needs a kind');
   if (state.dueOn === null) throw new Error('a new target needs a due date');
   return {
-    kind: state.kind,
+    kind: state.destination.targetKind,
     due_on: state.dueOn,
     photo_import_ids: [...state.importIds],
     entries: entriesOf(state.entries),
   };
 }
 
-/** Done in `add-photos` and `add-words`. */
+/** Done adding the photo flow's words to a prep already open, and in `add-words`. */
 export function addRequest(state: WizardState): AddTargetWordsRequest {
   return { photo_import_ids: [...state.importIds], entries: entriesOf(state.entries) };
 }

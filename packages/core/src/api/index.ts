@@ -83,6 +83,7 @@ export type {
   ReverseChoiceQuestion,
   SaveVocabularyRequest,
   SaveVocabularyResponse,
+  SavePhotoImportsRequest,
   SayTranslationQuestion,
   Score,
   GlossProgress,

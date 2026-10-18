@@ -13,6 +13,7 @@ import {
   TargetListSchema,
   TargetRefusalSchema,
   TargetSchema,
+  SavePhotoImportsRequestSchema,
   TargetSummarySchema,
   TargetWordSchema,
   CreateEnrollmentRequestSchema,
@@ -1445,6 +1446,7 @@ describe('the target read models', () => {
     id: 't1',
     kind: 'homework',
     due_on: '2030-01-13',
+    created_on: '2030-01-03',
     days_left: 5,
     word_count: 2,
     ready_count: 1,
@@ -1465,6 +1467,13 @@ describe('the target read models', () => {
 
   it('names two kinds', () => {
     expect(TargetKindSchema.options).toEqual(['homework', 'exam']);
+  });
+
+  it('carries the learner day a target was created on (phase 64, spec D5)', () => {
+    expect(TargetSummarySchema.parse(summary).created_on).toBe('2030-01-03');
+    const { created_on: _, ...without } = summary;
+    expect(TargetSummarySchema.safeParse(without).success).toBe(false);
+    expect(TargetSummarySchema.safeParse({ ...summary, created_on: '2030-02-30' }).success).toBe(false);
   });
 
   it('parses a target day, a path session and a word day, in points and percent', () => {
@@ -1544,5 +1553,16 @@ describe('question-types sessions', () => {
     expect(SessionViewSchema.parse({ ...view, skipped_types: [{ type: 'cloze_typed', reason: 'not_generated' }] }).skipped_types).toEqual([
       { type: 'cloze_typed', reason: 'not_generated' },
     ]);
+  });
+});
+
+// Phase 64 (final review I2). The photo flow's My words: the flow's imports, saved together.
+describe('SavePhotoImportsRequestSchema', () => {
+  it('takes one to ten import ids', () => {
+    expect(SavePhotoImportsRequestSchema.safeParse({ photo_import_ids: ['i1'] }).success).toBe(true);
+    expect(SavePhotoImportsRequestSchema.safeParse({ photo_import_ids: Array.from({ length: 10 }, (_, at) => `i${at}`) }).success).toBe(true);
+    expect(SavePhotoImportsRequestSchema.safeParse({ photo_import_ids: [] }).success).toBe(false);
+    expect(SavePhotoImportsRequestSchema.safeParse({ photo_import_ids: Array.from({ length: 11 }, (_, at) => `i${at}`) }).success).toBe(false);
+    expect(SavePhotoImportsRequestSchema.safeParse({ photo_import_ids: [''] }).success).toBe(false);
   });
 });

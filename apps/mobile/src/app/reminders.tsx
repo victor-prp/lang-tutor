@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '@/components/ScreenHeader';
 import { useApi } from '@/hooks/useApi';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useReminders } from '@/hooks/useReminders';
@@ -32,7 +33,7 @@ import {
   toggleHour,
 } from '@/reminderSettings';
 import { strings } from '@/strings';
-import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { colors, fontSizes, lineHeights, radii, spacing, shadows } from '@/theme';
 
 // Phase 52 (spec D8). The learner's reminder schedule: on or off, the daily
 // target, the days and the hours. Each change is saved as it is made, and the
@@ -200,7 +201,7 @@ export default function RemindersScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>{strings.remindersTitle}</Text>
+        <ScreenHeader title={strings.remindersTitle} onBack={() => router.back()} backTestID="reminders-back" />
 
         {permission === 'unsupported' ? (
           <Text testID="reminders-unsupported" style={styles.notice}>
@@ -341,10 +342,6 @@ export default function RemindersScreen() {
             ) : null}
           </>
         ) : null}
-
-        <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.secondary}>
-          <Text style={styles.secondaryLabel}>{strings.back}</Text>
-        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -352,19 +349,11 @@ export default function RemindersScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  content: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.lg, gap: spacing.md },
-  title: {
-    fontSize: fontSizes.xxl,
-    lineHeight: lineHeights.xxl,
-    fontWeight: '700',
-    color: colors.text,
-    writingDirection: 'rtl',
-  },
+  content: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.lg, gap: spacing.md },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
@@ -387,8 +376,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
@@ -408,8 +396,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     backgroundColor: colors.surface,
     alignItems: 'center',
   },
@@ -437,12 +424,10 @@ const styles = StyleSheet.create({
   secondaryButton: {
     backgroundColor: colors.surface,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
   disabled: { opacity: 0.5 },
-  secondary: { paddingVertical: spacing.sm, alignItems: 'center' },
   secondaryLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
 });

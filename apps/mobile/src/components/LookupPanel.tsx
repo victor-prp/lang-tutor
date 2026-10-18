@@ -13,7 +13,7 @@ import { SpeakButton } from '@/components/SpeakButton';
 import { useTranslation } from '@/hooks/useTranslation';
 import { isVoiced } from '@/speech';
 import { strings } from '@/strings';
-import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { colors, fontSizes, lineHeights, radii, spacing, shadows } from '@/theme';
 import { alsoLine } from '@/vocabulary';
 
 /** The lookup: direction, input, results and save buttons. The translate screen
@@ -358,16 +358,14 @@ const styles = StyleSheet.create({
     height: 140,
     borderRadius: radii.lg,
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     alignItems: 'center',
     justifyContent: 'center',
   },
   notice: {
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     padding: spacing.lg,
     gap: spacing.sm,
     alignItems: 'center',
@@ -380,8 +378,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     padding: spacing.md,
   },
   cardTop: { borderColor: colors.primary, borderWidth: 2 },
@@ -431,8 +428,7 @@ const styles = StyleSheet.create({
   },
   savedLabel: { color: colors.primary },
   secondaryButton: {
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     backgroundColor: colors.surface,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
@@ -442,8 +438,7 @@ const styles = StyleSheet.create({
   correction: {
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...shadows.card,
     padding: spacing.md,
     gap: spacing.sm,
   },

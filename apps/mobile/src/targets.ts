@@ -73,20 +73,19 @@ export function dueDayLabel(day: string): string {
 }
 
 const WIZARD_TITLES: Record<WizardMode, string> = {
-  create: strings.targetWizardCreate,
-  'add-photos': strings.targetWizardAddPhotos,
+  photo: strings.targetWizardAddPhotos,
   'add-words': strings.targetWizardAddWords,
   'change-date': strings.targetWizardChangeDate,
 };
 const STEP_TITLES: Record<WizardStep, string> = {
-  kind: strings.targetStepKind,
   photos: strings.targetStepPhotos,
   review: strings.targetStepReview,
+  choose: strings.targetStepChoose,
   words: strings.targetStepWords,
   date: strings.targetStepDate,
 };
 
-/** The wizard's title: a new target, or which of a target's actions it is. */
+/** The wizard's title: the photo flow, or which of a target's actions it is. */
 export function wizardTitle(mode: WizardMode): string {
   return WIZARD_TITLES[mode];
 }
@@ -94,12 +93,6 @@ export function wizardTitle(mode: WizardMode): string {
 /** What the step on screen asks. */
 export function stepTitle(step: WizardStep): string {
   return STEP_TITLES[step];
-}
-
-/** The photos step's hint. A new target may skip its photos; a target screen's add photos is
- *  there for them, and its Next needs one (canAdvance), so it says nothing of skipping. */
-export function photosHint(mode: WizardMode): string {
-  return mode === 'add-photos' ? strings.targetPhotosHintAdd : strings.targetPhotosHint;
 }
 
 /** Whether a target's date has come, which closes it: the server refuses every change
@@ -166,6 +159,99 @@ export function homeOrder(targets: readonly TargetSummary[]): { first: HomeCard;
   );
   const first = order.find((card) => !outlined.has(card)) ?? 'main';
   return { first, order };
+}
+
+/** Phase 64 (spec D4). The countdown as the card's header draws it: the days left large with
+ *  "ימים" beside it, then "מחר", then "היום" on the date itself. */
+export function countdownBig(daysLeft: number): { big: string; unit: string | null } {
+  if (daysLeft < 1) return { big: strings.countdownToday, unit: null };
+  if (daysLeft === 1) return { big: strings.countdownTomorrow, unit: null };
+  return { big: strings.countdownNumber(daysLeft), unit: strings.countdownDays };
+}
+
+/** The days from one `YYYY-MM-DD` to another, from the strings alone, in UTC. */
+const daysBetweenDays = (from: string, to: string): number =>
+  Math.round((dayStart(to).getTime() - dayStart(from).getTime()) / DAY_MS);
+
+/** Whether a target is in its last two days (R9): tomorrow, or the date itself. */
+export function isUrgent(target: Pick<TargetSummary, 'days_left'>): boolean {
+  return target.days_left <= 1;
+}
+
+/** Phase 64 (spec D5). The fuse at the bottom of the header: the share of the target's time
+ *  still left, from the day it was made to its date, between 0 and 1. In the last two days it
+ *  is hot (amber, glowing) and labelled. */
+export type Fuse = { share: number; hot: boolean; label: string | null };
+
+export function fuseOf(target: Pick<TargetSummary, 'created_on' | 'due_on' | 'days_left'>): Fuse {
+  const whole = Math.max(1, daysBetweenDays(target.created_on, target.due_on));
+  const share = Math.max(0, Math.min(1, target.days_left / whole));
+  if (!isUrgent(target)) return { share, hot: false, label: null };
+  return { share, hot: true, label: target.days_left < 1 ? strings.fuseToday : strings.fuseOneDay };
+}
+
+/** Phase 64 (spec D5). The line under the header in the last two days: the words not ready
+ *  yet, or that every word is. None before, and none for a target with no word. */
+export type Urgency = { kind: 'not-ready' | 'ready'; text: string } | null;
+
+export function urgencyOf(target: Pick<TargetSummary, 'kind' | 'days_left' | 'word_count' | 'ready_count'>): Urgency {
+  if (!isUrgent(target) || target.word_count === 0) return null;
+  const missing = target.word_count - target.ready_count;
+  if (missing <= 0) return { kind: 'ready', text: strings.targetAllReady(target.kind) };
+  return { kind: 'not-ready', text: strings.targetNotReady(target.kind, target.days_left, missing) };
+}
+
+/** Phase 64 (spec D4). A target's button is solid when pressing it is the thing to do now:
+ *  work owed today, or the last review on the date below 100% (phase 57 D10). */
+export function targetButtonSolid(target: TargetSummary): boolean {
+  if (target.today.state === 'owed') return true;
+  return target.today.state === 'due_today' && target.readiness_pct < 100;
+}
+
+/** Phase 64 (spec D3, D5). How a dot of the stack is drawn: the top card's long and blue, a
+ *  card in its last two days that is not on top amber, any other grey. */
+export function dotLook({ onTop, urgent }: { onTop: boolean; urgent: boolean }): 'on' | 'urgent' | 'off' {
+  if (onTop) return 'on';
+  return urgent ? 'urgent' : 'off';
+}
+
+/** Phase 64b (spec D4). One bar under the cards: its card, whether it is in its last two days,
+ *  what it shows (a name, or from five cards the kind's icon and the due day's letter) and what a
+ *  screen reader says of it (the card's full name and its place). */
+export type StackBar = {
+  card: HomeCard;
+  urgent: boolean;
+  label: string;
+  icon: 'main' | 'exam' | 'homework' | null;
+  spoken: string;
+};
+
+/** From this many cards the bars show the kind's icon and the day instead of names. */
+const COMPACT_BARS = 5;
+
+/** Phase 64b (spec D4). The bars, one per card in home's order; none for one card. A target is
+ *  named by its kind, with its due day's letter when another target shares the kind or the bars
+ *  are compact; My words by its name (its icon alone when compact). */
+export function stackBars(order: readonly HomeCard[], targets: readonly TargetSummary[]): StackBar[] {
+  if (order.length <= 1) return [];
+  const compact = order.length >= COMPACT_BARS;
+  const byId = new Map(targets.map((target) => [target.id, target]));
+  const kinds = order.flatMap((card) => {
+    const target = byId.get(card);
+    return target ? [target.kind] : [];
+  });
+  return order.map((card, at) => {
+    const target = byId.get(card);
+    const place = (name: string) => strings.barSpoken(name, at + 1, order.length);
+    if (!target) {
+      return { card, urgent: false, label: compact ? '' : strings.myWords, icon: compact ? 'main' : null, spoken: place(strings.myWords) };
+    }
+    const day = strings.dayLetter(dayStart(target.due_on).getUTCDay());
+    const kind = strings.targetKindName(target.kind);
+    const shared = kinds.filter((other) => other === target.kind).length > 1;
+    const name = shared || compact ? `${kind} ${day}` : kind;
+    return { card, urgent: isUrgent(target), label: compact ? day : name, icon: compact ? target.kind : null, spoken: place(name) };
+  });
 }
 
 /** Phase 57 (spec D10, D11). What a target's card shows: its title (the countdown, or the

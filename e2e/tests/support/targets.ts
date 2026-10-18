@@ -140,13 +140,26 @@ export async function moveTargetBack(targetId: string, days: number): Promise<vo
   }
 }
 
-/** Home's path cards on show, in the order home draws them: `main` for My words, else the
- *  target's id. */
+/** Home's path cards, in the order home stacks them: `main` for My words, else the target's
+ *  id. Phase 64 (spec D3): one card shows at a time, so the order is the bars' (phase 64b); a
+ *  stack of one has no bars, and the order is the one card on show. */
 export async function homeOrder(page: Page): Promise<string[]> {
+  const bars = await page
+    .locator('[data-testid^="home-bar-"]:visible')
+    .evaluateAll((found) => found.map((bar) => bar.getAttribute('data-testid') ?? ''));
+  if (bars.length > 0) return bars.map((id) => id.slice('home-bar-'.length));
   const ids = await page
     .locator('[data-testid="home-my-words"]:visible, [data-testid^="target-card-"]:visible')
     .evaluateAll((cards) => cards.map((card) => card.getAttribute('data-testid') ?? ''));
   return ids.map((id) => (id === 'home-my-words' ? 'main' : id.slice('target-card-'.length)));
+}
+
+/** Phase 64 (spec D3), phase 64b (spec D4). Brings one of home's cards into view by its named
+ *  bar, as a finger or a mouse would: `main` for My words, else the target's id. */
+export async function showCard(page: Page, card: string): Promise<void> {
+  const bar = page.getByTestId(`home-bar-${card}`);
+  await bar.click();
+  await expect(bar).toHaveAttribute('aria-selected', 'true');
 }
 
 /** A label's text with its isolates gone, once it reads `text`. */
@@ -187,9 +200,10 @@ export async function homework(page: Page, request: APIRequestContext, username:
   return { enrollmentId, target };
 }
 
-/** The colour of a filled button (colors.primary); an outlined one is the surface's white. */
+/** The colour of a filled button (colors.primary); phase 64 (spec D4): the other is pale blue
+ *  (colors.primarySurface). */
 export const FILLED = 'rgb(59, 91, 219)';
-export const OUTLINED = 'rgb(255, 255, 255)';
+export const OUTLINED = 'rgb(238, 242, 251)';
 
 /** The session's length, from the counter on its first card. */
 async function sessionLength(page: Page): Promise<number> {

@@ -915,6 +915,12 @@ export const SaveVocabularyResponseSchema = z.object({
   saved_gloss_ids: z.array(z.string()),
 });
 
+// Phase 64 (final review I2). The photo flow's My words: its imports saved together, in one
+// transaction, as a prep saves them. Ten is a prep's own limit on photos.
+export const SavePhotoImportsRequestSchema = z.object({
+  photo_import_ids: z.array(z.string().min(1)).min(1).max(10),
+});
+
 // Query-string values arrive as strings, hence coerce. A cursor is opaque: the
 // server decodes it and answers 400 when it cannot.
 export const VocabularyPageQuerySchema = z.object({
@@ -1061,6 +1067,9 @@ export const TargetSummarySchema = z.object({
   id: z.string(),
   kind: TargetKindSchema,
   due_on: LearnerDaySchema,
+  // Phase 64 (spec D5). The learner day the target was created on: home's fuse burns from it
+  // to `due_on`.
+  created_on: LearnerDaySchema,
   days_left: z.number().int(),
   word_count: z.number().int(),
   // Words at 100% readiness.
