@@ -1011,13 +1011,14 @@ export function createSessionService({
           const askedType = loaded.questions[loaded.answers.length].type;
           const hinted = askedType === 'cloze_typed' ? { hintOpened: hintOpened ?? null } : {};
           // Phase 55 (spec D6): only a card that takes help, tiles or typed, records whether it was helped.
+          // Phase 63 (spec D11): a choice card or a board word too.
           const helps = takesHelp(askedType) ? { helped: 'helped' in answer ? answer.helped ?? null : null } : {};
           await repos.session.insertAnswer(
             sessionId,
             loaded.answers.length,
             questionId,
             'option_index' in answer
-              ? { displayIndex: answer.option_index }
+              ? { displayIndex: answer.option_index, ...helps }
               : {
                   text: recorded.answer_string,
                   verdict: recorded.verdict!,

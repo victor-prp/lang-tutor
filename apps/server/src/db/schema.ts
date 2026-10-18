@@ -1157,7 +1157,9 @@ export const answers = pgTable(
     // answer is stored wrong. Null on every other card, from an older app, and
     // never changed by a retry. Phase 56 (spec D4): also on say the translation,
     // typed meaning, sentence translation, dictation and typed cloze; a helped
-    // spoken answer is stored gave_up, with its transcript.
+    // spoken answer is stored gave_up, with its transcript. Phase 63 (spec D11):
+    // also on the four choice cards and a board word, whose option is then read
+    // as a miss (decodeAnswer, loadSession).
     helped: boolean('helped'),
     answeredAt: timestamp('answered_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1189,8 +1191,6 @@ export const answers = pgTable(
     check('answers_typed_text_length', sql`length(${t.typedText}) <= 300`),
     // Phase 38 (spec D4). A hint is opened before a typed answer, never a choice.
     check('answers_hint_opened_typed', sql`${t.hintOpened} is null or ${t.typedText} is not null`),
-    // Phase 55 (spec D6). Help is given on a typed answer, never a choice.
-    check('answers_helped_text', sql`${t.helped} is null or ${t.typedText} is not null`),
     // Phase 34 (spec D9). A retry exists only after an `alternative` verdict, so a
     // choice answer, whose verdict is null, never has one: `is true` and not a bare
     // `=`, because a CHECK passes on null. Its text and verdict are set exactly when

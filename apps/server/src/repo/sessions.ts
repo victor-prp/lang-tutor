@@ -283,15 +283,15 @@ export function createSessionRepo(tx: Tx) {
     findAnswersOn: async (enrollmentId: string, day: string): Promise<(DayAnswer & { targetId: Path })[]> => {
       // Phase 59 (spec D4): a tapped list word's miss, right after its card's answer.
       const rows = await tx.execute<AnswerRow & { session_id: string; target_id: string | null }>(sql`
-        SELECT e.session_id, s.target_id::text AS target_id, e.gloss_id, e.type, e.options, e.selected_option_position, e.verdict, e.retry_verdict, e.intro
+        SELECT e.session_id, s.target_id::text AS target_id, e.gloss_id, e.type, e.options, e.selected_option_position, e.verdict, e.retry_verdict, e.intro, e.helped
         FROM (
           SELECT a.session_id, q.gloss_id, q.type::text AS type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro,
-                 a.answered_at, a.position, -1 AS word_index
+                 a.answered_at, a.position, -1 AS word_index, coalesce(a.helped, false) AS helped
           FROM answers a
           JOIN questions q ON q.id = a.question_id
           UNION ALL
           SELECT tp.session_id, tp.gloss_id, ${tapMissType}, NULL::jsonb, NULL::integer, 'wrong', NULL::text, false,
-                 a.answered_at, tp.position, tp.word_index
+                 a.answered_at, tp.position, tp.word_index, false
           FROM answer_taps tp
           JOIN answers a ON a.session_id = tp.session_id AND a.position = tp.position
           -- Phase 62 (spec D4): the card the tap was on decides what it missed.
@@ -444,6 +444,7 @@ export function createSessionRepo(tx: Tx) {
           retryState: answers.retryState,
           retryText: answers.retryText,
           retryVerdict: answers.retryVerdict,
+          helped: answers.helped,
         })
         .from(answers)
         .where(eq(answers.sessionId, sessionId))
@@ -468,7 +469,8 @@ export function createSessionRepo(tx: Tx) {
         const chosen = canonicalOptions(questionRows[answer.position].options!)[answer.selectedOptionPosition!];
         return {
           question_id: answer.questionId,
-          is_correct: chosen.is_correct,
+          // Phase 63 (spec D11): the right option chosen after help is a miss.
+          is_correct: chosen.is_correct && answer.helped !== true,
           answer_string: chosen.text,
           retry_state: null,
           retry_answer_string: null,
@@ -519,7 +521,7 @@ export function createSessionRepo(tx: Tx) {
       position: number,
       questionId: string,
       answer:
-        | { displayIndex: number }
+        | { displayIndex: number; helped?: boolean | null }
         | { text: string; verdict: AnswerVerdict; pending?: true; hintOpened?: boolean | null; helped?: boolean | null },
     ): Promise<void> => {
       if ('text' in answer) {
@@ -549,6 +551,8 @@ export function createSessionRepo(tx: Tx) {
         position,
         questionId,
         selectedOptionPosition: row.optionOrder[answer.displayIndex],
+        // Phase 63 (spec D11): a choice after help, read back as a miss.
+        helped: answer.helped ?? null,
       });
     },
 
