@@ -15,7 +15,7 @@ import {
 import { testRng } from '../../tests/support/testRng';
 import { CHECK_MARKER } from '../domain/check';
 import { CONTEXT_MARKER, servedWords, type RecentContexts } from '../domain/context';
-import { nothingKnown, type GenerationContext, type KnownRight, type RecentSentences } from '../domain/distractors';
+import { nothingKnown, REWRITE_MARKER, type GenerationContext, type KnownRight, type RecentSentences } from '../domain/distractors';
 import type { LlmJsonRequest } from './llm';
 import type { SessionState } from '../domain/session';
 import { GlossLanguageMismatch, InvalidDistractors } from '../errors';
@@ -117,13 +117,15 @@ function world(opts: {
   siblings?: { glossId: string; lemma: string }[];
   /** Phase 34 (spec D6, D8, ruling R12). The context call's answer, on its own
    *  client; without one it names no sentence. */
-  contextReply?: string | Error;
+  contextReply?: string | Error | ((request: LlmJsonRequest) => string | Promise<string>);
+  /** Phase 62c. The context call's answers in order, when it is asked twice. */
+  contextReplies?: (string | Error)[];
   /** Phase 34 (spec D6). What findRecentContexts answers. */
   recentContexts?: RecentContexts;
   /** Phase 34 (spec D5). The checker's answer, on its own client; `checking()` by default. */
   checkReply?: string | Error | ((request: LlmJsonRequest) => string);
   /** Phase 62c. The gap check's answer, by default every gap option wrong. */
-  gapCheckReply?: string | Error | ((request: LlmJsonRequest) => string);
+  gapCheckReply?: string | Error | ((request: LlmJsonRequest) => string | Promise<string>);
   /** Phase 62c. The rewrite's answers in order; by default a call is a failure the test sees. */
   rewriteReply?: (string | Error | ((request: LlmJsonRequest) => string))[];
   /** Phase 34 (spec D3). What findKnownRight answers; nothing known by default. */
@@ -227,7 +229,7 @@ function world(opts: {
     },
   });
   const llm = createFakeLlmClient(opts.reply ?? GOOD);
-  const contextLlm = createFakeLlmClient(opts.contextReply ?? JSON.stringify({ items: [] }));
+  const contextLlm = createFakeLlmClient(...(opts.contextReplies ?? [opts.contextReply ?? JSON.stringify({ items: [] })]));
   const checkerLlm = createFakeLlmClient(opts.checkReply ?? checking());
   const gapCheckLlm = createFakeLlmClient(opts.gapCheckReply ?? checking());
   const gapRewriteLlm = createFakeLlmClient(...(opts.rewriteReply ?? [new Error('no rewrite expected')]));
@@ -1800,6 +1802,15 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     expect(events(logger, 'checker_dropped')).toEqual([]);
   });
 
+  // Phase 62c (spec D1). No gap to choose, no gap check and nothing rewritten.
+  it('asks no gap check in a session with no gap to choose', async () => {
+    const { service, logger, gapCheckLlm, gapRewriteLlm } = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), contextReply: CONTEXTS, checkReply: checking(AGREED) });
+    await service.prepareSession(payloadOf(CHOICES));
+    expect(gapCheckLlm.calls).toHaveLength(0);
+    expect(gapRewriteLlm.calls).toHaveLength(0);
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', gap_check_ms: 0, rewrite_ms: 0, rewrite_count: 0 }));
+  });
+
   it('asks no checker when no card has anything to check', async () => {
     // A typed meaning alone, its context call failed: no option, no written sentence.
     const { service, calls, checkerLlm, logger } = world({ enrollment: ENGLISH, context: [SAW], reply: JSON.stringify({ items: [] }), contextReply: new Error('down') });
@@ -1829,19 +1840,21 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     });
     const natural = { q3: { natural_translation: 'We combine the two plans today.' } };
 
-    it('sends the checker the generated sentence with its gap written ___, and every usable option (phase 62 D1)', async () => {
-      const { service, calls, checkerLlm } = world({ enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural) });
+    // Phase 62c (spec D1): the gap check asks it, beside the context call, and the checker does not again.
+    it('sends the gap check the generated sentence with its gap written ___, and every usable option (phase 62 D1, 62c D1)', async () => {
+      const { service, calls, checkerLlm, gapCheckLlm, gapRewriteLlm } = world({ enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural) });
       await service.prepareSession(payloadOf(rows, cards));
       expect(insertedOf(calls).map((q) => q.type)).toEqual(['typed_meaning', 'cloze_choice', 'cloze_typed', 'reverse_choice', 'typed_translation']);
-      expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q2')).toEqual({
-        key: 'q2', task: 'gap', sentence: 'I ___ the new file.', options: GAP_WRONG,
-      });
+      expect(checksOf(gapCheckLlm.calls[0])).toEqual([{ key: 'q2', task: 'gap', sentence: 'I ___ the new file.', options: GAP_WRONG }]);
+      expect(gapCheckLlm.calls[0].record.kind).toBe('gap_check');
+      expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q2')).toBeUndefined();
+      expect(gapRewriteLlm.calls).toHaveLength(0);
       expect(optionTexts(insertedOf(calls)[1])).toEqual(['download', 'eat', 'sleep', 'sing']);
     });
 
-    it('drops an option the checker says still fits the gap, and the next spare takes its place', async () => {
+    it('drops an option the gap check says still fits the gap, and the next spare takes its place', async () => {
       const { service, calls, logger } = world({
-        enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking({ ...natural, q2: { gap_fits: [false, true, false, false, false] } }),
+        enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), gapCheckReply: checking({ q2: { gap_fits: [false, true, false, false, false] } }),
       });
       await service.prepareSession(payloadOf(rows, cards));
       expect(optionTexts(insertedOf(calls)[1])).toEqual(['download', 'eat', 'sing', 'dance']);
@@ -1852,12 +1865,13 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
 
     // Phase 48 (spec D2, D3). Lane 0's 38b003b4 (cream) on a small session: the
     // checker says every option fits the gap, and the floor keeps the card as
-    // generated, with its first three options.
-    it('drops nothing in a five-card session when the checker says every gap option fits', async () => {
-      const { service, calls, logger } = world({
-        enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking({ ...natural, q2: { gap_fits: [true, true, true, true, true] } }),
+    // generated, with its first three options. Phase 62c: after its one rewrite failed.
+    it('drops nothing in a five-card session when every gap option fits and the rewrite fails', async () => {
+      const { service, calls, logger, gapRewriteLlm } = world({
+        enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), gapCheckReply: checking({ q2: { gap_fits: [true, true, true, true, true] } }),
       });
       await service.prepareSession(payloadOf(rows, cards));
+      expect(gapRewriteLlm.calls).toHaveLength(1);
       expect(calls.transitions).toEqual(['preparing→ready']);
       expect(insertedOf(calls).map((q) => q.type)).toEqual(['typed_meaning', 'cloze_choice', 'cloze_typed', 'reverse_choice', 'typed_translation']);
       expect(optionTexts(insertedOf(calls)[1])).toEqual(['download', 'eat', 'sleep', 'sing']);
@@ -1873,8 +1887,169 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
           shown_as: 'as_generated',
         },
       ]);
+      expect(events(logger, 'gap_rewritten')).toEqual([
+        {
+          event: 'gap_rewritten',
+          session_id: SESSION,
+          key: 'q2',
+          position: 1,
+          stage: 'checker',
+          reason: "the checker calls 5 of q2's 5 wrong options right, and 3 must be left",
+          old_sentence: 'I download the new file.',
+          failed: 'no rewrite expected',
+        },
+      ]);
       expect(events(logger, 'card_dropped')).toEqual([]);
       expect(events(logger, 'checker_dropped')).toEqual([]);
+    });
+
+    // Phase 62c (spec D1–D5). The card asked again once, with what was wrong.
+    describe("phase 62c: a gap card's one rewrite", () => {
+      const ALL_FIT = checking({ q2: { gap_fits: [true, true, true, true, true] } });
+      const NEW = 'I download songs to my phone.';
+      const rewritten = (distractors = ['eat', 'sleep', 'sing', 'dance', 'swim', 'fly']) =>
+        JSON.stringify({ items: [{ key: 'q2', distractors, sentence: NEW, gap: 'download', translation: 'אני מוריד שירים לטלפון שלי.' }] });
+      const NEW_MAP = JSON.stringify({
+        items: [
+          { key: 'q2', sentence_word: 'מוריד', sentence_words: [
+            { shown: 'I', translation: 'אני', word: '' },
+            { shown: 'download', translation: 'מוריד', word: '' },
+            { shown: 'songs', translation: 'שירים', word: '' },
+            { shown: 'to my phone', translation: 'לטלפון שלי', word: '' },
+          ] },
+        ],
+      });
+      const OLD_MAP = JSON.stringify({
+        items: [
+          { key: 'q2', sentence_word: 'מוריד', sentence_words: [
+            { shown: 'I', translation: 'אני', word: '' },
+            { shown: 'download', translation: 'מוריד', word: '' },
+            { shown: 'the new file', translation: 'את הקובץ החדש', word: '' },
+          ] },
+        ],
+      });
+      type Mapped = { sentence: string | null; words: unknown[] | null };
+      const contextKeys = (request: { user: string }) => (JSON.parse(request.user).items as { key: string }[]).map((item) => item.key);
+
+      it('asks the gap check while the context call is still out', async () => {
+        let contextAsked!: () => void;
+        let gapAsked!: () => void;
+        const contextStarted = new Promise<void>((resolve) => (contextAsked = resolve));
+        const gapStarted = new Promise<void>((resolve) => (gapAsked = resolve));
+        const { service, calls } = world({
+          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural),
+          // Each answers only once the other has been asked: one after the other, neither would.
+          contextReply: async () => {
+            contextAsked();
+            await gapStarted;
+            return JSON.stringify({ items: [] });
+          },
+          gapCheckReply: async (request) => {
+            gapAsked();
+            await contextStarted;
+            return checking()(request);
+          },
+        });
+        await service.prepareSession(payloadOf(rows, cards));
+        expect(calls.transitions).toEqual(['preparing→ready']);
+      });
+
+      it('rewrites a card the gap check left short, checks it again, and writes it with its new sentence and map', async () => {
+        const { service, calls, logger, contextLlm, checkerLlm, gapRewriteLlm } = world({
+          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), gapCheckReply: ALL_FIT,
+          rewriteReply: [rewritten()], contextReplies: [JSON.stringify({ items: [] }), NEW_MAP],
+        });
+        await service.prepareSession(payloadOf(rows, cards));
+        expect(gapRewriteLlm.calls).toHaveLength(1);
+        expect(gapRewriteLlm.calls[0].record.kind).toBe('gap_rewrite');
+        expect(gapRewriteLlm.calls[0].system).toContain(REWRITE_MARKER);
+        const [asked] = JSON.parse(gapRewriteLlm.calls[0].user).items as { key: string; avoid: string[]; rewrite: unknown }[];
+        expect(asked).toMatchObject({ key: 'q2', rewrite: { old_sentence: 'I download the new file.', fits: GAP_WRONG } });
+        expect(asked.avoid).toContain('I download the new file.');
+        expect(contextLlm.calls.map(contextKeys)).toEqual([expect.arrayContaining(['q2']), ['q2']]);
+        expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q2')).toEqual({
+          key: 'q2', task: 'gap', sentence: 'I ___ songs to my phone.', options: ['eat', 'sleep', 'sing', 'dance', 'swim', 'fly'],
+        });
+        const card = insertedOf(calls)[1] as Inserted & Mapped;
+        expect(card).toMatchObject({ type: 'cloze_choice', sentence: NEW });
+        expect(optionTexts(card)).toEqual(['download', 'eat', 'sleep', 'sing']);
+        expect(card.words).not.toBeNull();
+        expect(events(logger, 'gap_rewritten')).toEqual([
+          {
+            event: 'gap_rewritten', session_id: SESSION, key: 'q2', position: 1, stage: 'checker',
+            reason: "the checker calls 5 of q2's 5 wrong options right, and 3 must be left",
+            old_sentence: 'I download the new file.', new_sentence: NEW,
+          },
+        ]);
+        expect(events(logger, 'card_kept_refused')).toEqual([]);
+        expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', rewrite_count: 1 }));
+      });
+
+      it('rewrites a card validation refused, with why', async () => {
+        const refused = JSON.stringify({ items: [{ ...JSON.parse(batch).items[0], distractors: ['download', 'download'] }, ...JSON.parse(batch).items.slice(1)] });
+        const { service, calls, logger, gapCheckLlm, gapRewriteLlm } = world({
+          enrollment: ENGLISH, context: rows, reply: refused, checkReply: checking(natural), rewriteReply: [rewritten()],
+        });
+        await service.prepareSession(payloadOf(rows, cards));
+        expect(gapCheckLlm.calls).toHaveLength(0);
+        const [asked] = JSON.parse(gapRewriteLlm.calls[0].user).items as { rewrite: { old_sentence: string; problem: string } }[];
+        expect(asked.rewrite).toEqual({ old_sentence: 'I download the new file.', problem: expect.stringContaining('usable') });
+        expect(insertedOf(calls)[1]).toMatchObject({ type: 'cloze_choice', sentence: NEW });
+        expect(events(logger, 'gap_rewritten')).toEqual([expect.objectContaining({ key: 'q2', stage: 'validation', new_sentence: NEW })]);
+      });
+
+      it('sends the final checker the gap items of a gap check that failed', async () => {
+        const { service, calls, logger, checkerLlm, gapRewriteLlm } = world({
+          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), gapCheckReply: new Error('down'),
+        });
+        await service.prepareSession(payloadOf(rows, cards));
+        expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q2')).toEqual({ key: 'q2', task: 'gap', sentence: 'I ___ the new file.', options: GAP_WRONG });
+        expect(gapRewriteLlm.calls).toHaveLength(0);
+        expect(events(logger, 'gap_check_failed')).toEqual([expect.objectContaining({ session_id: SESSION, reason: 'down' })]);
+        expect(insertedOf(calls)[1]).toMatchObject({ type: 'cloze_choice', sentence: 'I download the new file.' });
+      });
+
+      it('sends the final checker a card the gap check miscounted, and rewrites nothing', async () => {
+        const { service, checkerLlm, gapRewriteLlm } = world({
+          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), gapCheckReply: checking({ q2: { gap_fits: [false] } }),
+        });
+        await service.prepareSession(payloadOf(rows, cards));
+        expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q2')).toEqual({ key: 'q2', task: 'gap', sentence: 'I ___ the new file.', options: GAP_WRONG });
+        expect(gapRewriteLlm.calls).toHaveLength(0);
+      });
+
+      it('writes a rewritten card whose second context call failed without a map, never the old sentence\'s', async () => {
+        const { service, calls } = world({
+          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), gapCheckReply: ALL_FIT,
+          rewriteReply: [rewritten()], contextReplies: [OLD_MAP, new Error('down')],
+        });
+        await service.prepareSession(payloadOf(rows, cards));
+        const card = insertedOf(calls)[1] as Inserted & Mapped;
+        expect(card).toMatchObject({ type: 'cloze_choice', sentence: NEW, words: null });
+      });
+
+      it('keeps the card as it was when the rewrite offers another headword of its meaning', async () => {
+        const { service, calls, logger } = world({
+          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), gapCheckReply: ALL_FIT,
+          siblings: [{ glossId: DOWNLOAD.glossId, lemma: 'fetch' }], rewriteReply: [rewritten(['fetch', 'eat', 'sleep'])],
+        });
+        await service.prepareSession(payloadOf(rows, cards));
+        expect(insertedOf(calls)[1]).toMatchObject({ type: 'cloze_choice', sentence: 'I download the new file.' });
+        expect(events(logger, 'gap_rewritten')).toEqual([expect.objectContaining({ key: 'q2', failed: expect.stringContaining('2 of 3 usable') })]);
+        expect(events(logger, 'card_kept_refused')).toEqual([expect.objectContaining({ key: 'q2', stage: 'checker' })]);
+      });
+
+      it('keeps a rewritten card the checker still refuses as the ambiguous card, with its new sentence', async () => {
+        const { service, calls, logger } = world({
+          enrollment: ENGLISH, context: rows, reply: batch, gapCheckReply: ALL_FIT, rewriteReply: [rewritten()],
+          checkReply: checking({ ...natural, q2: { gap_fits: [true, true, true, true, true, true] } }),
+        });
+        await service.prepareSession(payloadOf(rows, cards));
+        expect(insertedOf(calls)[1]).toMatchObject({ type: 'cloze_choice', sentence: NEW });
+        expect(events(logger, 'card_kept_refused')).toEqual([
+          expect.objectContaining({ key: 'q2', stage: 'checker', reason: "the checker calls 6 of q2's 6 wrong options right, and 3 must be left", shown_as: 'as_generated' }),
+        ]);
+      });
     });
   });
 

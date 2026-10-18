@@ -175,7 +175,7 @@ export function createFakeReminderTick(): NonNullable<AppDeps['reminderTick']> {
  * without a socket. Phase 34: a function in the queue answers from the request,
  * for a call whose answer must name what it was asked (the checker's).
  */
-export function createFakeLlmClient(...replies: (string | Error | ((request: LlmJsonRequest) => string))[]) {
+export function createFakeLlmClient(...replies: (string | Error | ((request: LlmJsonRequest) => string | Promise<string>))[]) {
   const calls: LlmJsonRequest[] = [];
   const queue = [...replies];
 
