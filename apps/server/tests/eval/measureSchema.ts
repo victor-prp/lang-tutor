@@ -334,7 +334,7 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
       const mark = markFor(item, got);
       console.log(`${item.key} mark        ${got?.sentence_word ?? '(none)'} -> ${mark ? item.sentence.slice(mark.start, mark.end) : 'unmarked'}`);
       if (item.map && item.sentence === ROWS[Number(item.key.slice(1)) - 1].row.exampleTranslation && CONTEXT_TYPES[ROWS[Number(item.key.slice(1)) - 1].task] === 'sentence_translation') {
-        const map = wordMapFor(item, got, mark, learnerWords, 'g-own');
+        const map = wordMapFor(item, got, mark, learnerWords, 'g-own', 'it');
         console.log(`${item.key} map         ${JSON.stringify(got?.sentence_words ?? null)}`);
         console.log(`${item.key} kept        ${map ? map.map((word) => `${item.sentence.slice(word.start, word.end)}=${word.text}${word.target ? '*' : ''}${word.glossId ? `(${word.glossId})` : ''}`).join(' ') : 'none'}`);
       } else if (item.map) {

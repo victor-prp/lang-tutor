@@ -1828,7 +1828,7 @@ export function createSessionService({
         if (item?.task === 'mark') {
           sentence = { text: item.sentence, mark: contextAnswer ? markFor(item, found.get(item.key)) : null };
           if (contextAnswer && card.type === 'sentence_translation') {
-            words = wordMapFor(item, found.get(item.key), sentence.mark, read.learnerWords, card.row.glossId);
+            words = wordMapFor(item, found.get(item.key), sentence.mark, read.learnerWords, card.row.glossId, target);
           } else if (contextAnswer && card.answered.sentence) {
             // Phase 62 (spec D2): a gap card's map, of its sentence, the gap its target.
             words = italianWordMap({
