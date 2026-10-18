@@ -13,6 +13,7 @@ import {
   TargetListSchema,
   TargetRefusalSchema,
   TargetSchema,
+  SavePhotoImportsRequestSchema,
   TargetSummarySchema,
   TargetWordSchema,
   CreateEnrollmentRequestSchema,
@@ -1552,5 +1553,16 @@ describe('question-types sessions', () => {
     expect(SessionViewSchema.parse({ ...view, skipped_types: [{ type: 'cloze_typed', reason: 'not_generated' }] }).skipped_types).toEqual([
       { type: 'cloze_typed', reason: 'not_generated' },
     ]);
+  });
+});
+
+// Phase 64 (final review I2). The photo flow's My words: the flow's imports, saved together.
+describe('SavePhotoImportsRequestSchema', () => {
+  it('takes one to ten import ids', () => {
+    expect(SavePhotoImportsRequestSchema.safeParse({ photo_import_ids: ['i1'] }).success).toBe(true);
+    expect(SavePhotoImportsRequestSchema.safeParse({ photo_import_ids: Array.from({ length: 10 }, (_, at) => `i${at}`) }).success).toBe(true);
+    expect(SavePhotoImportsRequestSchema.safeParse({ photo_import_ids: [] }).success).toBe(false);
+    expect(SavePhotoImportsRequestSchema.safeParse({ photo_import_ids: Array.from({ length: 11 }, (_, at) => `i${at}`) }).success).toBe(false);
+    expect(SavePhotoImportsRequestSchema.safeParse({ photo_import_ids: [''] }).success).toBe(false);
   });
 });

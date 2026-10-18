@@ -20,6 +20,9 @@ type PhotoImportsValue = {
   fetchImport: (id: string) => Promise<PhotoImport>;
   updateItem: (id: string, position: number, update: PhotoImportItemUpdate) => Promise<PhotoImportItem>;
   save: (id: string) => Promise<SaveVocabularyResponse>;
+  /** Phase 64 (final review I2). The photo flow's imports saved to My words together, the first
+   *  row of each gloss across them, as the review shows them and as a prep saves them. */
+  saveAll: (ids: string[]) => Promise<SaveVocabularyResponse>;
   discard: (id: string) => Promise<void>;
 };
 
@@ -52,11 +55,18 @@ export function PhotoImportsProvider({ api, picker, children }: { api: ApiClient
     [api],
   );
   const save = useCallback((id: string) => api.savePhotoImport(id), [api]);
+  const saveAll = useCallback(
+    async (ids: string[]) => {
+      if (!active) throw new Error('no active enrollment');
+      return api.savePhotoImports(active.id, ids);
+    },
+    [api, active],
+  );
   const discard = useCallback((id: string) => api.discardPhotoImport(id), [api]);
 
   const value = useMemo<PhotoImportsValue>(
-    () => ({ pick, pickMany, upload, fetchImport, updateItem, save, discard }),
-    [pick, pickMany, upload, fetchImport, updateItem, save, discard],
+    () => ({ pick, pickMany, upload, fetchImport, updateItem, save, saveAll, discard }),
+    [pick, pickMany, upload, fetchImport, updateItem, save, saveAll, discard],
   );
 
   return <PhotoImportsContext.Provider value={value}>{children}</PhotoImportsContext.Provider>;

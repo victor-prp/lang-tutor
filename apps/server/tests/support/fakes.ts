@@ -112,6 +112,7 @@ export function createFakeAppDeps(): AppDeps {
     getImport: unreachable,
     updateItem: unreachable,
     save: unreachable,
+    saveMany: unreachable,
     discard: unreachable,
     readPhoto: unreachable,
     failRead: unreachable,

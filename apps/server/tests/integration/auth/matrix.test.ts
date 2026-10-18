@@ -132,6 +132,10 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
     body: { ticked: false },
   }),
   'post /api/photo-imports/{id}/save': () => ({ url: `/api/photo-imports/${ids.photoImport}/save` }),
+  'post /api/enrollments/{id}/photo-imports/save': () => ({
+    url: `/api/enrollments/${ids.enrollment}/photo-imports/save`,
+    body: { photo_import_ids: [ids.photoImport] },
+  }),
   'post /api/photo-imports/{id}/discard': () => ({ url: `/api/photo-imports/${ids.photoImport}/discard` }),
   // Phase 53 (spec D2). A target is its list owner's alone, a tutor of the list included: the
   // tutor loop below is refused on all seven too. A call that got through would show in the

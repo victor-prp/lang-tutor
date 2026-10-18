@@ -82,7 +82,7 @@ const leaveScreen = () => (router.canGoBack() ? router.back() : router.replace('
 
 function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollment }) {
   const api = useApi();
-  const { pick, pickMany, upload, discard, save } = usePhotoImports();
+  const { pick, pickMany, upload, discard, saveAll } = usePhotoImports();
   const { list, reload: reloadTargets } = useTargets();
   const [state, dispatch] = useReducer(wizardReducer, route.mode, initialWizard);
   // The review's own answer: every import settled, and no change of a row in flight.
@@ -291,10 +291,10 @@ function Wizard({ route, enrollment }: { route: WizardRoute; enrollment: Enrollm
         if (route.mode === 'photo') {
           const destination = state.destination;
           if (destination?.kind === 'my-words') {
-            // Each photo's words saved as today's photo import saves them; back on תרגול with
-            // its "N מילים נשמרו". A photo that saves nothing (unread) does not stop the others.
-            const count = await saveHolding(made, async () => savedCount(await Promise.allSettled(state.importIds.map((id) => save(id)))));
-            if (!leaving.current) router.dismissTo({ pathname: '/', params: { photoSaved: String(count) } });
+            // The photos' words saved together, as the review shows them (the first row of each
+            // gloss) and as a prep saves them; back on תרגול with its "N מילים נשמרו".
+            const { saved_gloss_ids } = await saveHolding(made, () => saveAll(state.importIds));
+            if (!leaving.current) router.dismissTo({ pathname: '/', params: { photoSaved: String(saved_gloss_ids.length) } });
             return;
           }
           if (destination?.kind === 'target') {
@@ -609,14 +609,6 @@ function ChoiceRow({
       {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
     </Pressable>
   );
-}
-
-/** The words the photos' saves saved; with none saved and one refused, that refusal. */
-function savedCount(results: PromiseSettledResult<{ saved_gloss_ids: string[] }>[]): number {
-  const saved = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value.saved_gloss_ids.length] : []));
-  const refused = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-  if (saved.length === 0 && refused) throw refused.reason;
-  return saved.reduce((sum, count) => sum + count, 0);
 }
 
 const styles = StyleSheet.create({
