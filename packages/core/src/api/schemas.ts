@@ -1045,9 +1045,11 @@ export const CreateQuestionTypeSessionResponseSchema = z.object({
 // Phase 53 (spec D1, D4, D13). A target: a kind, a due date and words saved in the
 // enrollment, which sessions serve until the date. A learner day is ADR 0013's,
 // 'YYYY-MM-DD'. `days_left` counts from the learner's today, and a target is active
-// while it is at least 0 (phase 57: through its due date). Readiness is in percent: the
-// points of the live skills of the word (or of every word) over those they could earn,
-// rounded down, so 100 means every live skill is at its full 10 points.
+// while it is at least 0 (phase 57: through its due date). Phase 65 (spec D1, D10): readiness
+// is the grade the learner would get if the target's words were checked on its date, in
+// percent, rounded down: a word's chance is its counted skills' chances multiplied (homework:
+// write, spell, say; exam: write, spell; each only where it is live), the target's the mean
+// of its words'. On and after the date it is the eve's, final.
 export const TargetKindSchema = z.enum(['homework', 'exam']);
 // A calendar day, not only the shape of one: 2026-02-30 and 2026-13-01 match the pattern, reached
 // Postgres, which raises 22008, and answered 500. The parts must survive a round trip through UTC,
@@ -1059,6 +1061,8 @@ const isCalendarDay = (day: string): boolean => {
   utc.setUTCFullYear(year, month - 1, date);
   return utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === date;
 };
+// A whole percent, 0 to 100.
+const Percent = z.number().int().min(0).max(100);
 export const LearnerDaySchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -1072,17 +1076,32 @@ export const TargetSummarySchema = z.object({
   created_on: LearnerDaySchema,
   days_left: z.number().int(),
   word_count: z.number().int(),
-  // Words at 100% readiness.
+  // Phase 65 (spec D4). Words whose chance is at least 90%: ready.
   ready_count: z.number().int(),
-  readiness_pct: z.number().int(),
+  readiness_pct: Percent,
+  // Phase 65 (spec D5, D10). Readiness at the start of today, before today's first answers.
+  readiness_start_pct: Percent,
+  // Phase 65 (spec D9). Whether one more session today, every answer right, could add only a
+  // little (under 2 points): the app asks before practising past the day's budget.
+  practice_more_little: z.boolean(),
   // Phase 57 (spec D9, D10). Today's work on the target's path: owed, done, rest (nothing owed
-  // and nothing practised today) or due_today (the date has come).
+  // and nothing practised today) or due_today (the date has come). `done`, `planned` and
+  // `extra` count words. Phase 65 (spec D7): today is a budget of sessions, set at the path's
+  // first session of the learner day and never raised; null before it is set, when
+  // `sessions_offer` is the count it would be (else it is the budget). `sessions_done` counts
+  // the path's sessions completed today; `minutes` is about how long the budget's cards take.
+  // `done` is the budget met, or no word owed: `ended_early` when that came before the budget.
   today: z.object({
     state: z.enum(['owed', 'done', 'rest', 'due_today']),
     done: z.number().int(),
     planned: z.number().int(),
     extra: z.number().int(),
     next_practice_in: z.number().int().nullable(),
+    sessions_budget: z.number().int().nullable(),
+    sessions_offer: z.number().int(),
+    sessions_done: z.number().int(),
+    ended_early: z.boolean(),
+    minutes: z.number().int(),
   }),
   // The target path's started session, else its stock, else its newest if it failed.
   session: CurrentSessionSchema.nullable(),
@@ -1095,14 +1114,17 @@ export const TargetWordSchema = z.object({
   gloss_id: z.string(),
   form: z.string(),
   meaning: z.string(),
-  readiness_pct: z.number().int(),
+  // Phase 65 (spec D1). The word's chance of being right on the date: every counted skill right.
+  readiness_pct: Percent,
   // Phase 57 (spec D9). The word's day: owed work, done, started early (extra) or still to come.
   today: z.enum(['owed', 'done', 'extra', 'later']),
   owed: z.array(KnowledgeDimensionSchema),
   // For a later word: the days until it is introduced.
   starts_in: z.number().int().nullable(),
-  // Points, 0 to 10 in steps of a half; `cap` is today's.
-  skills: z.array(z.object({ dimension: KnowledgeDimensionSchema, value: z.number(), cap: z.number() })),
+  // Phase 65 (spec D6, D10). Its counted skills, live ones only, in the order the check asks
+  // them: each one's chance of being right on the date, in percent, and whether an exam holds it
+  // at half after a cold miss, until a right first answer on a later day.
+  skills: z.array(z.object({ dimension: KnowledgeDimensionSchema, chance: Percent, held: z.boolean() })),
 });
 // Its words in the order they were added.
 export const TargetSchema = TargetSummarySchema.extend({ words: z.array(TargetWordSchema) });

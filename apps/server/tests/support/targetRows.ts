@@ -1,8 +1,9 @@
 import { asc, eq, sql } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
-import { sessions, sessionTargets, targetEvents } from '../../src/db/schema';
+import { sessions, sessionTargets, targetBudgets, targetEvents } from '../../src/db/schema';
 import type { TargetKind } from '../../src/domain/targets';
+import { createTargetReadinessRepo } from '../../src/repo/targetReadiness';
 import { createTargetRepo } from '../../src/repo/targets';
 import { withTx } from './withTx';
 
@@ -130,7 +131,42 @@ export async function spoilTargetSkills(db: Db): Promise<void> {
   await db.execute(sql`
     insert into target_skill_events (target_id, gloss_id, dimension, session_id, before, after, why)
     select target_id, gloss_id, 'spoken_productive', gen_random_uuid(), 0, 20, 'recall' from target_words`);
+  // Phase 65. Readiness rows and a junk line of its log, which the rebuild must replace too.
+  await db.execute(sql`update target_readiness set held = not held, bonus_used = 2, missed_today = not missed_today`);
+  await db.execute(sql`
+    insert into target_readiness_events (target_id, gloss_id, dimension, session_id, day, before, after, why, position)
+    select target_id, gloss_id, 'spelling', gen_random_uuid(), '2000-01-01', 0, 1, 'bonus', 0 from target_words`);
   await db.execute(sql`update target_words set started_on = '2000-01-01'`);
+}
+
+/** Phase 65 (spec D3). What each skill read at the start of `day`, through the repo. */
+export function readFirstReadinessEvents(db: Db, targetId: string, day: string) {
+  return withTx(db, (tx) => createTargetReadinessRepo(tx).findFirstEventsOn(targetId, day));
+}
+
+/** Phase 65 (spec D2). A target's readiness rows, by gloss and dimension. */
+export async function readTargetReadiness(db: Db, targetId: string) {
+  const rows = await db.execute<{
+    glossId: string; dimension: string; stability: number; difficulty: number; lastDay: string; reps: number;
+    lapses: number; params: string; day: string; missedToday: boolean; bonusUsed: number; held: boolean; sessionId: string | null;
+  }>(sql`
+    select gloss_id as "glossId", dimension, stability, difficulty, last_day::text as "lastDay", reps, lapses, params,
+           day::text as day, missed_today as "missedToday", bonus_used as "bonusUsed", held, session_id::text as "sessionId"
+    from target_readiness where target_id = ${targetId}
+    order by gloss_id, dimension`);
+  return rows.rows;
+}
+
+/** Phase 65 (spec D3). A target's readiness log without ids and times, which a rebuild writes
+ *  anew: by the session's day, then session, gloss, dimension and what moved. */
+export async function readTargetReadinessEvents(db: Db, targetId: string) {
+  const rows = await db.execute<{ glossId: string; dimension: string; sessionId: string; day: string; why: string; before: number; after: number }>(sql`
+    select e.gloss_id as "glossId", e.dimension, e.session_id::text as "sessionId", e.day::text as day, e.why, e.before, e.after
+    from target_readiness_events e
+    left join sessions s on s.id = e.session_id
+    where e.target_id = ${targetId}
+    order by s.practice_day, e.session_id, e.gloss_id, e.dimension, e.before, e.after, e.why`);
+  return rows.rows;
 }
 
 /** Phase 57 (spec D3, D6). A target word as sessions would have left it: started on `startedOn`
@@ -145,4 +181,20 @@ export async function setTargetWord(
       insert into target_skills (target_id, gloss_id, dimension, halves) values (${input.targetId}, ${input.glossId}, ${dimension}, ${halves!})
       on conflict (target_id, gloss_id, dimension) do update set halves = excluded.halves`);
   }
+}
+
+/** Phase 65 (spec D7.2). A target's budgets, one a learner day, with when each was written. */
+export function readTargetBudgets(db: Db, targetId: string) {
+  return db
+    .select({
+      day: targetBudgets.day,
+      sessions: targetBudgets.sessions,
+      cards: targetBudgets.cards,
+      missRoom: targetBudgets.missRoom,
+      doneBefore: targetBudgets.doneBefore,
+      createdAt: targetBudgets.createdAt,
+    })
+    .from(targetBudgets)
+    .where(eq(targetBudgets.targetId, targetId))
+    .orderBy(asc(targetBudgets.day));
 }

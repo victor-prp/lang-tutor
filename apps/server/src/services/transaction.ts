@@ -12,6 +12,8 @@ import type { ReminderRepo } from '../repo/reminders';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { TargetRepo } from '../repo/targets';
+import type { TargetBudgetRepo } from '../repo/targetBudgets';
+import type { TargetReadinessRepo } from '../repo/targetReadiness';
 import type { TargetSkillRepo } from '../repo/targetSkills';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
@@ -44,6 +46,10 @@ export type Repos = {
   target: TargetRepo;
   // Phase 57 (spec D3, D4). Target skills and their log, written when a session ends.
   targetSkills: TargetSkillRepo;
+  // Phase 65 (spec D2, D3). Target readiness and its log, written when a session ends.
+  targetReadiness: TargetReadinessRepo;
+  // Phase 65 (spec D7). Today's budget per target, set at its path's first session of the day.
+  targetBudgets: TargetBudgetRepo;
 };
 
 /**

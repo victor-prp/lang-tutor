@@ -37,3 +37,18 @@ export { FSRS6_DEFAULT, retrievability, review } from './memory';
 export type { Grade, MemoryState } from './memory';
 export { dimensionsTested, gradesFor } from './memoryGrades';
 export type { GradableAnswer, GradedPiece } from './memoryGrades';
+export {
+  READINESS_BONUS_PER_DAY,
+  READINESS_BONUS_SHARE,
+  READINESS_EXAM_HOLD,
+  READINESS_LITTLE,
+  READINESS_WORD_READY,
+  applyReadiness,
+  countedSkills,
+  readinessFromMemory,
+  readinessGainBound,
+  readinessPct,
+  skillChance,
+  wordChance,
+} from './readiness';
+export type { ReadinessKind, ReadinessRow, ReadinessWhy } from './readiness';

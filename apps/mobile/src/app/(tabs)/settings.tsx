@@ -1,10 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { router } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Group, groupStyles } from '@/components/Group';
 import { useAppRelease } from '@/hooks/useAppUpdates';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { createAskSwitch } from '@/practiceMoreAsk';
 import { mobileAppLine } from '@/release';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
@@ -12,8 +15,21 @@ import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 /**
  * Phase 64 (spec D7). The הגדרות tab, how the app behaves: the practice reminders, About with
  * the release this phone runs (phase 32 D10, phase 49 D4). Sign-out is the account's, so it is אני's.
+ * Phase 65 (spec D9): whether to ask before practising past the day's budget.
  */
 export default function SettingsTab() {
+  const { user, practiceMoreAsk } = useCurrentUser();
+  // Phase 65 (spec D9). Read each time the tab is shown: the tab stays mounted, and the sheet's
+  // tick box on home can change the choice meanwhile (final review I3). A failed read says "ask",
+  // which is the default; a read that lands after the learner flipped the switch is ignored.
+  const [askBefore, setAskBefore] = useState(true);
+  const username = user?.username;
+  const askSwitch = useMemo(
+    () => (username ? createAskSwitch(practiceMoreAsk, username, setAskBefore) : null),
+    [username, practiceMoreAsk],
+  );
+  useFocusEffect(useCallback(() => askSwitch?.read(), [askSwitch]));
+  const changeAsk = (ask: boolean) => (askSwitch ? askSwitch.flip(ask) : setAskBefore(ask));
   const { release } = useAppRelease();
 
   return (
@@ -49,6 +65,19 @@ export default function SettingsTab() {
               {mobileAppLine(release)}
             </Text>
           </Pressable>
+        </Group>
+
+        <Group>
+          <View style={groupStyles.row}>
+            <Text style={groupStyles.label}>{strings.settingsPracticeMoreAsk}</Text>
+            <Switch
+              testID="settings-practice-more-ask"
+              accessibilityLabel={strings.settingsPracticeMoreAsk}
+              value={askBefore}
+              onValueChange={changeAsk}
+              trackColor={{ true: colors.primary, false: colors.border }}
+            />
+          </View>
         </Group>
       </ScrollView>
     </SafeAreaView>

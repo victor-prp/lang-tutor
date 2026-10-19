@@ -8,11 +8,14 @@ import {
   countdownBig,
   dueDayLabel,
   fuseOf,
+  readinessBar,
   readinessColor,
+  sessionDots,
+  sessionsLine,
+  sessionsSpoken,
   targetButtonSolid,
   targetCardState,
   targetTitle,
-  todayBar,
   urgencyOf,
   type TargetCardState,
 } from '@/targets';
@@ -75,20 +78,8 @@ export function TargetCard({
             </Text>
           ) : null}
           {card.note ? <Note id={id} note={card.note} /> : null}
-          {card.today ? (
-            <>
-              <Text testID={`target-today-${id}`} style={styles.line}>
-                {card.today.text}
-                {card.today.check ? ` ${strings.targetTodayCheck}` : ''}
-                {card.today.extra ? <Text style={styles.extra}>{` ${card.today.extra}`}</Text> : null}
-              </Text>
-              <TodayBar today={target.today} />
-            </>
-          ) : null}
-          <Text testID={`target-readiness-${id}`} style={styles.line}>
-            {card.readiness}
-          </Text>
-          <Bar parts={[{ share: target.readiness_pct / 100, color: readinessColor(target.readiness_pct) }]} />
+          <Readiness target={target} readiness={card.readiness} />
+          <Sessions target={target} />
         </>
       }
       footer={
@@ -109,7 +100,6 @@ export function TargetCard({
 }
 
 const NOTE_STYLES = {
-  praise: { box: { backgroundColor: colors.correctSurface }, text: { color: colors.correct } },
   rest: { box: { backgroundColor: colors.primarySurface }, text: { color: colors.text } },
   'due-today': { box: { backgroundColor: colors.warmSurface }, text: { color: colors.warmText } },
 } as const;
@@ -123,19 +113,88 @@ function Note({ id, note }: { id: string; note: NonNullable<TargetCardState['not
   );
 }
 
-/** Today's bar: the planned words done (green once all are), then the extra words in a
- *  lighter green past the plan. */
-export function TodayBar({ today }: { today: TargetSummary['today'] }) {
-  const shares = todayBar(today);
+/** Phase 65 (spec D4, D5). The big readiness in its colour with its label beside it, then its
+ *  bar: the start of the day pale, the day's gain bright at its end, with the gain's label. */
+export function Readiness({ target, readiness }: { target: TargetSummary; readiness: string }) {
+  const { id } = target;
+  const bar = readinessBar(target);
+  const color = readinessColor(target.readiness_pct);
+  // A lower day leaves the bar at where it is now; the drop is only in the label.
+  const pale = Math.min(bar.start, target.readiness_pct);
+  const gain = Math.max(0, bar.gain);
   return (
-    <Bar
-      parts={[
-        { share: shares.done, color: today.state === 'done' ? colors.correct : colors.primary },
-        { share: shares.extra, color: colors.correctLight },
-      ]}
-    />
+    <>
+      <View testID={`target-readiness-${id}`} accessible accessibilityLabel={readiness} style={styles.hero}>
+        <Text testID="target-readiness-big" style={[styles.heroNumber, { color }]}>
+          {target.readiness_pct}
+          <Text style={styles.heroPercent}>%</Text>
+        </Text>
+        <View>
+          <Text style={styles.heroLabel}>{strings.targetReadinessLabel}</Text>
+          <Text style={styles.heroLabel}>{strings.targetReadinessFor(target.kind)}</Text>
+        </View>
+      </View>
+      <Bar
+        parts={[
+          { share: pale / 100, color: paleOf(color) },
+          { share: gain / 100, color },
+        ]}
+      />
+      <Text
+        testID="target-readiness-gain"
+        style={[styles.gain, bar.gain < 0 ? styles.gainDown : null]}
+      >
+        {bar.label ?? ' '}
+      </Text>
+    </>
   );
 }
+
+/** The start of the day's colour, softened. */
+const paleOf = (hsl: string) => hsl.replace('hsl(', 'hsla(').replace(/\)$/, ', 0.45)');
+
+/** Phase 65 (spec D7). Today as a budget: its words and what is left or why it ended, then a
+ *  dot per session (green done, grey to do, dashed when faded, blue bonus). A screen reader reads
+ *  the row as one Hebrew sentence (sessionsSpoken) and not the dots, which are drawing only; each
+ *  dot's kind is in its testID (`target-session-dot-<kind>`). */
+export function Sessions({ target }: { target: TargetSummary }) {
+  const { id } = target;
+  const line = sessionsLine(target);
+  const dots = sessionDots(target);
+  if (!line.text && !line.side && dots.length === 0) return null;
+  const met = line.kind === 'met' || line.kind === 'early';
+  return (
+    <View testID={`target-sessions-${id}`} accessible accessibilityLabel={sessionsSpoken(target)} style={styles.sessions}>
+      <View style={styles.sessionsLine}>
+        <Text
+          testID={met ? `target-praise-${id}` : `target-today-${id}`}
+          style={[styles.line, styles.sessionsText, met ? styles.met : null]}
+        >
+          {line.text}
+        </Text>
+        {line.side ? <Text testID={`target-sessions-${id}-side`} style={met ? styles.sideMet : styles.side}>{line.side}</Text> : null}
+      </View>
+      <View
+        testID="target-sessions"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        aria-hidden
+        style={styles.dots}
+      >
+        {dots.map((dot, at) => (
+          <View key={at} testID={`target-session-dot-${dot}`} style={[styles.dot, DOT_STYLES[dot]]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const DOT_STYLES = {
+  done: { backgroundColor: colors.progress },
+  todo: { backgroundColor: '#EAECF0' },
+  faded: { height: 4, borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#D0D5DD' },
+  bonus: { backgroundColor: colors.primary },
+} as const;
 
 /** A bar of coloured parts from the start of the line (the right, in RTL), each a share
  *  of the whole; the rest of the track is left empty. */
@@ -201,7 +260,20 @@ function PracticeButton({
 
 const styles = StyleSheet.create({
   line: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.text, writingDirection: 'rtl' },
-  extra: { color: colors.correct, fontWeight: '800' },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
+  heroNumber: { fontSize: 54, lineHeight: 58, fontWeight: '900' },
+  heroPercent: { fontSize: 26, fontWeight: '800' },
+  heroLabel: { fontSize: fontSizes.md, lineHeight: 19, color: '#475467', fontWeight: '600', writingDirection: 'rtl' },
+  gain: { minHeight: 14, fontSize: 11.5, lineHeight: 14, fontWeight: '700', color: colors.correct, textAlign: 'right', writingDirection: 'rtl' },
+  gainDown: { color: colors.muted },
+  sessions: { gap: spacing.sm },
+  sessionsLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
+  sessionsText: { fontSize: fontSizes.sm },
+  met: { color: colors.correct, fontWeight: '700' },
+  side: { fontSize: fontSizes.sm, color: '#344054', fontWeight: '600', writingDirection: 'rtl' },
+  sideMet: { fontSize: fontSizes.sm, color: colors.muted, writingDirection: 'rtl' },
+  dots: { flexDirection: 'row', gap: 5, alignItems: 'center' },
+  dot: { width: 22, height: 7, borderRadius: radii.pill },
   ready: { fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '600', color: colors.correct, writingDirection: 'rtl' },
   urgency: {
     flexDirection: 'row',

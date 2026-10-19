@@ -138,6 +138,8 @@ describe('POST /api/enrollments/{id}/targets', () => {
         word_count: 3,
         ready_count: 0,
         readiness_pct: 0,
+        readiness_start_pct: 0,
+        practice_more_little: false,
         today: expect.objectContaining({ state: 'owed' }),
         session: null,
         words: [
@@ -239,6 +241,15 @@ describe('POST /api/enrollments/{id}/targets', () => {
 });
 
 describe('GET /api/enrollments/{id}/targets', () => {
+  /** Phase 65 (spec D7). Today before its first session: no budget, the offer in its place. */
+  const UNSET = {
+    sessions_budget: null,
+    sessions_offer: expect.any(Number),
+    sessions_done: 0,
+    ended_early: false,
+    minutes: expect.any(Number),
+  };
+
   it('answers the active targets, nearest date first, with the learner’s today and no words', async () => {
     const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
     const later = await made('homework', '2030-01-20', apple);
@@ -258,7 +269,9 @@ describe('GET /api/enrollments/{id}/targets', () => {
             word_count: 2,
             ready_count: 0,
             readiness_pct: 0,
-            today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1 },
+            readiness_start_pct: 0,
+            practice_more_little: false,
+            today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1, ...UNSET },
             session: null,
           },
           {
@@ -270,7 +283,9 @@ describe('GET /api/enrollments/{id}/targets', () => {
             word_count: 1,
             ready_count: 0,
             readiness_pct: 0,
-            today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 3 },
+            readiness_start_pct: 0,
+            practice_more_little: false,
+            today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 3, ...UNSET },
             session: null,
           },
         ],
@@ -301,6 +316,38 @@ describe('GET /api/enrollments/{id}/targets', () => {
 });
 
 describe('GET /api/targets/{id}', () => {
+  // Phase 65 (spec D1, D7, D10). A new exam: no word answered, so readiness 0 from the start of
+  // today, every first try left; each word counted on write and spell; and today's offer, the
+  // picker played forward (one word planned of two: its ladder of 4 cards, whose practice cards
+  // take its written skills to 4 half-points (ruling T9-a), then one card to the cap of 7 in a
+  // second session) with one session of room at the default miss rate: ceil(2 / 0.8) = 3.
+  it('answers readiness, where today started, and today as an offer of sessions before the first', async () => {
+    const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
+    const exam = await made('exam', DUE, apple, bread);
+
+    const body = await read(exam.id);
+
+    expect(body).toMatchObject({ readiness_pct: 0, readiness_start_pct: 0, ready_count: 0, practice_more_little: false });
+    expect(body.today).toEqual({
+      state: 'owed',
+      done: 0,
+      planned: 1,
+      extra: 0,
+      next_practice_in: 1,
+      sessions_budget: null,
+      sessions_offer: 3,
+      sessions_done: 0,
+      ended_early: false,
+      minutes: 3,
+    });
+    for (const shown of body.words) {
+      expect(shown.skills).toEqual([
+        { dimension: 'written_productive', chance: 0, held: false },
+        { dimension: 'spelling', chance: 0, held: false },
+      ]);
+    }
+  });
+
   it('answers the target with its words, as the create answered it', async () => {
     const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
     const created = await made('exam', DUE, apple, bread);
@@ -488,7 +535,9 @@ describe('POST /api/targets/{id}/end', () => {
     expect(await call('POST', '/targets/' + created.id + '/end')).toEqual({ status: 204, body: '' });
 
     expect((await listed()).targets).toEqual([]);
-    expect(await read(created.id)).toEqual(created);
+    // Phase 65 (spec D7): ended, it offers no session today.
+    expect(await read(created.id)).toEqual({ ...created, today: { ...created.today, sessions_offer: 0, minutes: 0 } });
+    expect(created.today.sessions_offer).toBeGreaterThan(0);
     expect(await readSavedGlossIds(t.db, E)).toEqual([apple.gloss_id]);
     expect(await eventKinds(created.id)).toEqual(['created', 'ended_early']);
   });

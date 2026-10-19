@@ -419,6 +419,8 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     reminders: repos.reminders ?? unreachableRepo('reminders repo'),
     target: repos.target ?? createFakeTargetRepo(),
     targetSkills: repos.targetSkills ?? unreachableRepo('target skill repo'),
+    targetReadiness: repos.targetReadiness ?? unreachableRepo('target readiness repo'),
+    targetBudgets: repos.targetBudgets ?? unreachableRepo('target budget repo'),
   };
   return (run) => run(bound);
 }

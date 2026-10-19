@@ -6,7 +6,9 @@ import { Alert, StyleSheet, Text } from 'react-native';
 import { ApiError } from '@/api/client';
 import { CardStack } from '@/components/CardStack';
 import { MyWordsCard } from '@/components/MyWordsCard';
+import { PracticeMoreSheet } from '@/components/PracticeMoreSheet';
 import { TargetCard } from '@/components/TargetCard';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
 import { useTargets } from '@/hooks/useTargets';
@@ -25,7 +27,7 @@ import {
   type TargetCreate,
 } from '@/nextSession';
 import { strings } from '@/strings';
-import { homeOrder, shouldPollTargets, stackBars, type HomeCard } from '@/targets';
+import { askBeforePracticeMore, homeOrder, shouldPollTargets, stackBars, type HomeCard } from '@/targets';
 import { colors, fontSizes, lineHeights } from '@/theme';
 
 /** Final review N1. Create refused: the path has a started session (409 session_open). */
@@ -59,6 +61,11 @@ export function LearningSection({ active }: { active: Enrollment }) {
   // focus, and the one whose create failed: a missing session is made once per
   // focus, then offered as a retry.
   const attemptedFor = useRef<string | null>(null);
+  const { user, practiceMoreAsk } = useCurrentUser();
+  const [asking, setAsking] = useState<{
+    target: TargetSummary;
+    press: Extract<ReturnType<typeof targetPress>, { kind: 'create' }>;
+  } | null>(null);
   const [makeFailedFor, setMakeFailedFor] = useState<string | null>(null);
   // Phase 52 (spec D8). `start=reminder` is acted on once: the param is cleared
   // as it is, and this holds the render or two before the clear reaches `start`.
@@ -178,10 +185,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
   // Final review N1: a create refused with session_open means the path has a started session
   // after all (the card's list predates the start); the list read again names it, and it is
   // entered as it is.
-  const practiceTarget = (target: TargetSummary) => {
-    const press = targetPress(targetSessionAction(target));
-    if (press.kind === 'enter') enterSession(press.sessionId, press.fresh);
-    if (press.kind !== 'create') return;
+  const startTarget = (target: TargetSummary, press: Extract<ReturnType<typeof targetPress>, { kind: 'create' }>) => {
     void run(async () => {
       try {
         const created = await createTargetSession(target.id, { waitForVoices: press.waitForVoices });
@@ -192,6 +196,26 @@ export function LearningSection({ active }: { active: Enrollment }) {
         if (open) enterSession(open, false);
       }
     });
+  };
+
+  // Phase 65 (spec D9). Past the day's budget, when another session adds little, the press asks
+  // first (unless the learner turned that off); a storage failure reads as "ask".
+  const practiceTarget = (target: TargetSummary) => {
+    const press = targetPress(targetSessionAction(target));
+    if (press.kind === 'enter') enterSession(press.sessionId, press.fresh);
+    if (press.kind !== 'create') return;
+    if (!askBeforePracticeMore(target, false)) return startTarget(target, press);
+    void (async () => {
+      const ask = user ? await practiceMoreAsk.shouldAsk(user.username) : true;
+      if (askBeforePracticeMore(target, !ask)) setAsking({ target, press });
+      else startTarget(target, press);
+    })();
+  };
+  const answerAsk = (stopAsking: boolean, start: boolean) => {
+    const held = asking;
+    setAsking(null);
+    if (stopAsking && user) void practiceMoreAsk.stopAsking(user.username);
+    if (start && held) startTarget(held.target, held.press);
   };
 
   // Phase 43 (spec D7). A missing session is made, not offered as a button.
@@ -304,9 +328,11 @@ export function LearningSection({ active }: { active: Enrollment }) {
         </Text>
       ) : null}
       <CardStack resetKey={order.join(',')} bars={bars} cards={order.map((card) => ({ key: card, node: cardNode(card) }))} />
-
-
-
+      <PracticeMoreSheet
+        visible={asking !== null}
+        onLater={(stop) => answerAsk(stop, false)}
+        onAnyway={(stop) => answerAsk(stop, true)}
+      />
     </>
   );
 }

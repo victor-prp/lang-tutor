@@ -1,5 +1,5 @@
 import type { PartOfSpeech, TargetKind, UnavailableReason } from '@lang-tutor/core/api';
-import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
+import { READINESS_WORD_READY, type Dimension, type QuestionType } from '@lang-tutor/core/domain';
 
 // U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
 //
@@ -472,7 +472,7 @@ export const strings = {
   // Phase 53 (spec D10, D11). Preparing for homework or a test.
   targetKindName: (kind: TargetKind): string => TARGET_KIND_NAMES[kind],
   // Phase 57 (spec D9, D12). A word's readiness is a percent, and "ready" at 100%.
-  targetReadinessName: (readinessPct: number): string => (readinessPct >= 100 ? 'מוכנה' : isolateLtr(`${readinessPct}%`)),
+  targetReadinessName: (readinessPct: number): string => (readinessPct >= READINESS_WORD_READY ? 'מוכנה' : isolateLtr(`${readinessPct}%`)),
   targetTomorrow: 'מחר',
   targetInDays: (days: number) => `בעוד ${isolateLtr(String(days))} ימים`,
   // A target read after its date has come is no longer counted down to.
@@ -548,19 +548,35 @@ export const strings = {
   targetDueToday: (kind: TargetKind): string => TARGET_DUE_TODAY[kind],
   targetGoodLuck: 'בהצלחה!',
   lastReview: 'חזרה אחרונה',
-  targetToday: (done: number, planned: number) =>
-    `היום: ${isolateLtr(String(done))} מתוך ${isolateLtr(String(planned))} מילים`,
-  // After today's line once every planned word is done.
-  targetTodayCheck: '✓',
-  // The words started early today, after the check (extra-words.html).
-  targetExtra: (count: number) => `${isolateLtr(`+${count}`)} נוספות`,
   // The target screen's word groups and each word's line for today (spec D12).
   targetGroupTitle: { owed: 'נשאר להיום', done: 'סיימת להיום', extra: 'נוספו היום', later: 'בהמשך' } as const,
   targetWordOwed: (names: string[]) => `היום נשאר: ${names.join(', ')}`,
   targetWordDone: 'היום ✓',
+  targetSkillHeld: 'חצי עד שתענה נכון מחר',
+  // Phase 65 (spec D6). A counted skill's chance beside its name.
+  targetSkillChance: (chance: number) => isolateLtr(`${chance}%`),
   targetWordExtra: 'בונוס ✓',
   targetWordStartsIn: (days: number) =>
     days === 1 ? 'נתחיל מחר' : `נתחיל בעוד ${isolateLtr(String(days))} ימים`,
+  // Phase 65 (spec D4, D5). The card's big readiness: its label beside the number, the gain
+  // under the bar, and today as a budget of sessions.
+  targetReadinessLabel: 'מוכנות',
+  targetReadinessFor: (kind: TargetKind): string => TARGET_FOR[kind],
+  targetGainUp: (pct: number) => `${isolateLtr(`+${pct}%`)} היום`,
+  targetGainDown: (pct: number) => `${isolateLtr(`−${pct}%`)} היום`,
+  targetSessionsOffer: (offer: number) => `היום: ${isolateLtr(String(offer))} תרגולים`,
+  targetSessionsMinutes: (minutes: number) => `כ-${isolateLtr(String(minutes))} דקות`,
+  targetSessionsProgress: (done: number, budget: number) =>
+    `היום: ${isolateLtr(String(done))} מתוך ${isolateLtr(String(budget))} תרגולים`,
+  targetSessionsLeft: (left: number) => `עוד ${isolateLtr(String(left))}`,
+  targetSessionsMet: 'סיימת להיום ✓',
+  targetSessionsEarly: (done: number, budget: number) => `${isolateLtr(String(done))} במקום ${isolateLtr(String(budget))}`,
+  targetSessionsBonus: (extra: number) => `${isolateLtr(`+${extra}`)} בונוס`,
+  // What a screen reader says of the sessions row, its dots hidden: the count they draw.
+  targetSessionsSpoken: (done: number, budget: number, bonus: number) =>
+    `${isolateLtr(String(done))} מתוך ${isolateLtr(String(budget))} תרגולים היום` +
+    (bonus > 0 ? ` ועוד ${isolateLtr(String(bonus))} בונוס` : ''),
+  targetSessionsMetSpoken: 'סיימת להיום',
   targetReadinessPct: (kind: TargetKind, pct: number) => `מוכנות ${TARGET_FOR[kind]}: ${isolateLtr(`${pct}%`)}`,
   practiceNow: 'לתרגל עכשיו',
   // Phase 64 (spec D4, D5). The card's blue header: the countdown's big line, the fuse's label
@@ -587,7 +603,13 @@ export const strings = {
   myWordsSeed: (language: string) => `מילים ב${language}`,
   myWordsSaved: (language: string) => `משמעויות שמורות ב${language}`,
   practiceMore: 'לתרגל עוד',
-  targetDonePraise: 'כל הכבוד! סיימת להיום. נתראה מחר',
+  // Phase 65 (spec D9). The sheet that asks before practising past the day's budget; no number.
+  practiceMoreSheetTitle: 'סיימת את התרגול של היום',
+  practiceMoreSheetBody: 'עוד תרגול היום יעלה את המוכנות רק מעט. מחר, אחרי לילה, התרגול יעזור הרבה יותר.',
+  practiceMoreLater: 'אחזור מחר',
+  practiceMoreAnyway: 'לתרגל בכל זאת',
+  practiceMoreStopAsking: 'אל תציג לי את זה שוב',
+  settingsPracticeMoreAsk: 'לשאול לפני תרגול נוסף',
   /** A rest day. `nextIn` is the days to the next practice day, null when none is known. */
   targetRest: (kind: TargetKind, nextIn: number | null): string => {
     const today = `היום אין תרגול ${TARGET_FOR[kind]}.`;

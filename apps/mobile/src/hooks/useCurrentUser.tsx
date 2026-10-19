@@ -14,6 +14,7 @@ import type { AppAuthClient } from '@/auth/client';
 import type { AuthEvents } from '@/authEvents';
 import type { RememberedEnrollmentStore } from '@/currentUser';
 import { chooseActive } from '@/enrollments';
+import type { PracticeMoreAskStore } from '@/practiceMoreAsk';
 import { NO_GRANTS, normalizeUsername } from '@/grants';
 import { cleanCode } from '@/signIn';
 import { signOutWithin, startStateOf, startUp, type StartState } from '@/startState';
@@ -47,6 +48,8 @@ export type CurrentUserValue = {
   invite: (username: string, target: LanguageCode) => Promise<Grant>;
   acceptInvite: (grantId: string) => Promise<void>;
   endGrant: (grantId: string) => Promise<void>;
+  /** Phase 65 (spec D9). Whether to ask before practising past the day's budget, per device. */
+  practiceMoreAsk: PracticeMoreAskStore;
 };
 
 const CurrentUserContext = createContext<CurrentUserValue | null>(null);
@@ -56,12 +59,14 @@ export function CurrentUserProvider({
   auth,
   authEvents,
   enrollmentStore,
+  practiceMoreAsk,
   children,
 }: {
   api: ApiClient;
   auth: AppAuthClient;
   authEvents: AuthEvents;
   enrollmentStore: RememberedEnrollmentStore;
+  practiceMoreAsk: PracticeMoreAskStore;
   children: ReactNode;
 }) {
   const [status, setStatus] = useState<StartState>('loading');
@@ -263,6 +268,7 @@ export function CurrentUserProvider({
       invite,
       acceptInvite,
       endGrant,
+      practiceMoreAsk,
     }),
     [
       status,
@@ -282,6 +288,7 @@ export function CurrentUserProvider({
       invite,
       acceptInvite,
       endGrant,
+      practiceMoreAsk,
     ],
   );
 

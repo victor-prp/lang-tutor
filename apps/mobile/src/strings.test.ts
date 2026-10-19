@@ -164,8 +164,9 @@ describe('targets (phase 53 D10, D11)', () => {
     expect(strings.targetKindName('homework')).toBe('שיעורי בית');
     expect(strings.targetKindName('exam')).toBe('בוחן');
     expect(strings.targetReadinessName(40)).toBe(ltr('40%'));
-    // Spec D9, D12: a word at 100% is ready.
-    expect(strings.targetReadinessName(100)).toBe('מוכנה');
+    // Phase 65: a word from 90% is ready.
+    expect(strings.targetReadinessName(89)).toBe(ltr('89%'));
+    expect(strings.targetReadinessName(90)).toBe('מוכנה');
   });
 
   // Final review M2. My words with nothing of its own while targets hold every saved word.
@@ -286,11 +287,14 @@ describe("home's cards (phase 57 D10, D11)", () => {
     expect(strings.lastReview).toBe('חזרה אחרונה');
   });
 
-  it("words today's line, its check and the extra words, isolating each number", () => {
-    expect(strings.targetToday(3, 8)).toBe('היום: ' + ltr('3') + ' מתוך ' + ltr('8') + ' מילים');
-    expect(strings.targetTodayCheck).toBe('✓');
-    // The plus sign is inside the isolate: alone in an RTL line it would land after the digit.
-    expect(strings.targetExtra(2)).toBe(ltr('+2') + ' נוספות');
+  it("says today's sessions row for a screen reader, isolating each number (phase 65)", () => {
+    expect(strings.targetSessionsSpoken(3, 5, 0)).toBe(ltr('3') + ' מתוך ' + ltr('5') + ' תרגולים היום');
+    expect(strings.targetSessionsSpoken(5, 5, 2)).toBe(ltr('5') + ' מתוך ' + ltr('5') + ' תרגולים היום ועוד ' + ltr('2') + ' בונוס');
+    expect(strings.targetSessionsMetSpoken).toBe('סיימת להיום');
+  });
+
+  it("words a counted skill's chance, the percent isolated (phase 65, spec D6)", () => {
+    expect(strings.targetSkillChance(47)).toBe(ltr('47%'));
   });
 
   it("words the readiness for the target's kind, the percent isolated", () => {
@@ -301,7 +305,6 @@ describe("home's cards (phase 57 D10, D11)", () => {
   it('words the buttons, the praise and the rest day', () => {
     expect(strings.practiceNow).toBe('לתרגל עכשיו');
     expect(strings.practiceMore).toBe('לתרגל עוד');
-    expect(strings.targetDonePraise).toBe('כל הכבוד! סיימת להיום. נתראה מחר');
     expect(strings.targetRest('exam', 3)).toBe('היום אין תרגול לבוחן. התרגול הבא בעוד ' + ltr('3') + ' ימים');
     expect(strings.targetRest('homework', 2)).toBe('היום אין תרגול לשיעורי הבית. התרגול הבא בעוד ' + ltr('2') + ' ימים');
     expect(strings.targetRest('exam', 1)).toBe('היום אין תרגול לבוחן. התרגול הבא מחר');

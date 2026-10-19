@@ -1,9 +1,11 @@
 import { applySession } from '../domain/memoryUpdate';
 import { evaluateSession } from '../domain/progress';
+import { readinessSessionWrite } from '../domain/readinessWrite';
 import { targetSessionWrite } from '../domain/targetSkills';
 import { createMemoryRepo } from '../repo/memory';
 import { createProgressRepo } from '../repo/progress';
 import { createTargetRepo } from '../repo/targets';
+import { createTargetReadinessRepo } from '../repo/targetReadiness';
 import { createTargetSkillRepo } from '../repo/targetSkills';
 import type { Db } from './client';
 import { createTransaction } from './transaction';
@@ -49,12 +51,14 @@ export async function recomputeProgress(db: Db): Promise<{ sessions: number }> {
     memory: createMemoryRepo(tx),
     target: createTargetRepo(tx),
     targetSkills: createTargetSkillRepo(tx),
+    targetReadiness: createTargetReadinessRepo(tx),
   }));
-  return inTransaction(async ({ progress, memory, target, targetSkills }) => {
+  return inTransaction(async ({ progress, memory, target, targetSkills, targetReadiness }) => {
     await progress.lockSessions();
     await progress.resetAll();
     await memory.deleteAll();
     await targetSkills.deleteAll();
+    await targetReadiness.deleteAll();
     await target.clearStarted();
     const ended = await progress.listEndedSessions();
     for (const sessionId of ended) {
@@ -66,6 +70,24 @@ export async function recomputeProgress(db: Db): Promise<{ sessions: number }> {
         glossIds,
         savedBy: evidence.lastAnsweredAt,
       });
+      // Phase 65 (spec D2, R1). recordReadiness in services/sessionEnd.ts, call for call: before
+      // the memory below, which it reads as it stood before this session.
+      const targets = await target.listActiveHolding(evidence.enrollmentId, glossIds, evidence.day, evidence.lastAnsweredAt);
+      if (targets.length > 0) {
+        const readinessBefore = await targetReadiness.findRows(targets.map((held) => held.id), glossIds);
+        const memoryBefore = await memory.findRows({ enrollmentId: evidence.enrollmentId, glossIds });
+        const readiness = readinessSessionWrite({
+          sessionId,
+          day: evidence.day,
+          targets,
+          before: readinessBefore,
+          memory: memoryBefore,
+          answers: evidence.answers,
+        });
+        await targetReadiness.upsertRows(readiness.rows);
+        await targetReadiness.insertEvents(readiness.events, evidence.lastAnsweredAt);
+      }
+
       if (rows.length > 0) {
         const outcome = evaluateSession(rows, evidence.answers, evidence.day);
         await progress.updateRows({ enrollmentId: evidence.enrollmentId, rows: outcome.changed });
@@ -83,7 +105,6 @@ export async function recomputeProgress(db: Db): Promise<{ sessions: number }> {
       }
 
       // Phase 57 (spec D4). recordTargetSkills in services/sessionEnd.ts, call for call.
-      const targets = await target.listActiveHolding(evidence.enrollmentId, glossIds, evidence.day, evidence.lastAnsweredAt);
       if (targets.length === 0) continue;
       const before = await targetSkills.findRows(targets.map((held) => held.id), glossIds);
       const write = targetSessionWrite({ sessionId, day: evidence.day, targets, before, answers: evidence.answers });

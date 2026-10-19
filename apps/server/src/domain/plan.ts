@@ -72,20 +72,25 @@ export const RUNGS: Readonly<Record<Dimension, readonly [readonly QuestionType[]
   spoken_productive: [['read_aloud'], ['say_translation']],
 };
 
+/** Phase 55 (spec D2). A ladder's practice cards, in the order its first session asks
+ *  them: the graded part of a ladder (its intro stage grades nothing). Always eligible.
+ *  Phase 65 (ruling T9-a): today's budget plays a ladder as these, answered right. */
+export const LADDER_PRACTICE: readonly QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_translation'];
+
 /** Phase 55 (spec D2). A ladder's cards: the intro stage, then the three practice
  *  cards a new word is asked in its first session, in this order. The intro is
  *  the meet card; the read aloud, when the session can speak and the form can be
  *  said; and the card that has the learner write the word, letter tiles or, when
  *  the form takes none, typed. `speaking` is the session's, not the plan's
- *  one-word rule: a session of one ladder still says its word. All three
- *  practice types are always eligible. */
+ *  one-word rule: a session of one ladder still says its word. The practice
+ *  cards are LADDER_PRACTICE. */
 export function ladderCards(
   pick: Pick<PlanPick, 'tiles' | 'speakable'>,
   speaking: boolean,
 ): { intro: QuestionType[]; practice: QuestionType[] } {
   return {
     intro: ['meet', ...(speaking && pick.speakable ? (['read_aloud'] as const) : []), pick.tiles ? 'letter_tiles' : 'typed_translation'],
-    practice: ['multiple_choice', 'reverse_choice', 'typed_translation'],
+    practice: [...LADDER_PRACTICE],
   };
 }
 

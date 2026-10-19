@@ -1,5 +1,6 @@
 import { applySession } from '../domain/memoryUpdate';
 import { evaluateSession } from '../domain/progress';
+import { readinessSessionWrite } from '../domain/readinessWrite';
 import { targetSessionWrite } from '../domain/targetSkills';
 import type { SessionEvidence } from '../repo/progress';
 import { learnerDay } from './learnerDay';
@@ -34,6 +35,8 @@ export async function recordProgress(repos: Repos, sessionId: string, enrollment
   await repos.progress.lockSessionGlosses(sessionId);
   const evidence = await repos.progress.findSessionEvidence(sessionId);
   if (!evidence) return;
+  // Phase 65 (spec R1): readiness starts from the memory as it stood before this session.
+  await recordReadiness(repos, sessionId, evidence);
   await recordLevelsAndMemory(repos, sessionId, evidence);
   await recordTargetSkills(repos, sessionId, evidence);
 }
@@ -60,6 +63,23 @@ async function recordLevelsAndMemory(repos: Repos, sessionId: string, evidence: 
     evidence.day,
   );
   await repos.memory.upsertRows({ enrollmentId: evidence.enrollmentId, rows: memory });
+}
+
+/**
+ * Phase 65 (spec D2, D3, R1). The readiness of every target active on the session's day that
+ * holds a word it asked: each counted skill moved by the answers in order. Runs before
+ * recordLevelsAndMemory, because a skill with no row starts from gloss_memory as it stood before
+ * this session. The recompute (db/progressRecompute.ts) repeats it, call for call.
+ */
+async function recordReadiness(repos: Repos, sessionId: string, evidence: SessionEvidence): Promise<void> {
+  const glossIds = [...new Set(evidence.answers.map((answer) => answer.glossId))];
+  const targets = await repos.target.listActiveHolding(evidence.enrollmentId, glossIds, evidence.day, evidence.lastAnsweredAt);
+  if (targets.length === 0) return;
+  const before = await repos.targetReadiness.findRows(targets.map((target) => target.id), glossIds);
+  const memory = await repos.memory.findRows({ enrollmentId: evidence.enrollmentId, glossIds });
+  const write = readinessSessionWrite({ sessionId, day: evidence.day, targets, before, memory, answers: evidence.answers });
+  await repos.targetReadiness.upsertRows(write.rows);
+  await repos.targetReadiness.insertEvents(write.events, evidence.lastAnsweredAt);
 }
 
 /**

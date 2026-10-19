@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { Bar, TodayBar } from '@/components/TargetCard';
+import { Readiness, Sessions } from '@/components/TargetCard';
 import { confirm } from '@/confirm';
 import { useApi } from '@/hooks/useApi';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -16,6 +16,7 @@ import {
   dueDayLabel,
   readinessColor,
   readinessName,
+  skillRows,
   screenGroups,
   targetCardState,
   targetTitle,
@@ -266,8 +267,8 @@ export default function TargetScreen() {
   );
 }
 
-/** The header, as home's card draws a target: the countdown, the date, today's line and
- *  bar, and the readiness line with its bar. */
+/** The header, as home's card draws a target (phase 65, spec D6): the countdown, the date, then
+ *  the card's own readiness with its gain bar and its sessions line. */
 function Summary({ target }: { target: Target }) {
   const card = targetCardState(target);
   return (
@@ -280,41 +281,32 @@ function Summary({ target }: { target: Target }) {
       <Text testID="target-due" style={styles.due}>
         {dueDayLabel(target.due_on)}
       </Text>
-      {card.today ? (
-        <>
-          <Text testID="target-today" style={styles.when}>
-            {card.today.text}
-            {card.today.check ? ` ${strings.targetTodayCheck}` : ''}
-            {card.today.extra ? <Text style={styles.extra}>{` ${card.today.extra}`}</Text> : null}
-          </Text>
-          <TodayBar today={target.today} />
-        </>
-      ) : null}
-      <Text testID="target-readiness" style={styles.when}>
-        {card.readiness}
-      </Text>
-      <Bar parts={[{ share: target.readiness_pct / 100, color: readinessColor(target.readiness_pct) }]} />
+      <Readiness target={target} readiness={card.readiness} />
+      <Sessions target={target} />
     </View>
   );
 }
 
-/** A tapped word's live skills (option B): a bar out of 10 filled to the value, a thin
- *  line at the cap, green once the value reaches it, and the skill's name. */
+/** A tapped word's counted skills (phase 65, spec D6): each a bar out of 100 filled to its
+ *  chance, green from READINESS_WORD_READY, with the chance and, under a held skill, its note. */
 function Skills({ word }: { word: TargetWord }) {
   return (
     <View testID={`target-word-skills-${word.gloss_id}`} style={styles.skills}>
-      {word.skills.map((skill) => (
-        <View key={skill.dimension} style={styles.skill}>
-          <Text style={styles.skillName}>{strings.dimensionName(skill.dimension)}</Text>
+      {skillRows(word).map((row) => (
+        <View key={row.dimension} testID={`target-word-skill-${row.dimension}`} style={styles.skill}>
+          <View style={styles.skillHead}>
+            <Text style={styles.skillName}>{row.name}</Text>
+            <Text style={styles.skillName}>{strings.targetSkillChance(row.chance)}</Text>
+          </View>
           <View style={styles.skillTrack}>
             <View
               style={{
-                width: `${(skill.value / 10) * 100}%`,
-                backgroundColor: skill.value >= skill.cap ? colors.correct : colors.primary,
+                width: `${row.chance}%`,
+                backgroundColor: row.ready ? colors.correct : colors.primary,
               }}
             />
-            <View style={[styles.capLine, { start: `${(skill.cap / 10) * 100}%` }]} />
           </View>
+          {row.note ? <Text style={styles.skillNote}>{row.note}</Text> : null}
         </View>
       ))}
     </View>
@@ -324,7 +316,6 @@ function Skills({ word }: { word: TargetWord }) {
 const styles = StyleSheet.create({
   countdown: { fontSize: fontSizes.lg, lineHeight: lineHeights.xl, fontWeight: '700', color: colors.text, writingDirection: 'rtl' },
   countdownNumber: { fontSize: fontSizes.xl, fontWeight: '800', color: colors.primary },
-  extra: { color: colors.correct, fontWeight: '800' },
   group: { gap: spacing.sm },
   groupTitle: { fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '700', color: colors.muted, writingDirection: 'rtl', marginTop: spacing.sm },
   wordBox: { gap: spacing.xs },
@@ -337,9 +328,10 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   skill: { gap: spacing.xs },
+  skillHead: { flexDirection: 'row', justifyContent: 'space-between' },
+  skillNote: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, writingDirection: 'rtl' },
   skillName: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.text, writingDirection: 'rtl' },
   skillTrack: { flexDirection: 'row', height: 8, borderRadius: radii.pill, backgroundColor: colors.border, overflow: 'hidden' },
-  capLine: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: colors.text },
   screen: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: spacing.sm },
   link: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
   failed: { gap: spacing.sm, alignItems: 'center', paddingTop: spacing.xl },
@@ -352,7 +344,6 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   due: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, fontWeight: '700', color: colors.text, writingDirection: 'rtl' },
-  when: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, writingDirection: 'rtl' },
   ready: { fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '700', color: colors.primary, writingDirection: 'rtl' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   action: {

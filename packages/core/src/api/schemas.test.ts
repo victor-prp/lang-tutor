@@ -1451,7 +1451,20 @@ describe('the target read models', () => {
     word_count: 2,
     ready_count: 1,
     readiness_pct: 60,
-    today: { state: 'owed', done: 1, planned: 2, extra: 0, next_practice_in: null },
+    readiness_start_pct: 47,
+    practice_more_little: false,
+    today: {
+      state: 'owed',
+      done: 1,
+      planned: 2,
+      extra: 0,
+      next_practice_in: null,
+      sessions_budget: 5,
+      sessions_offer: 5,
+      sessions_done: 3,
+      ended_early: false,
+      minutes: 25,
+    },
     session: { session_id: 's1', status: 'ready', source: 'list', answered: 0, total: 10, started: false },
   };
   const word = {
@@ -1462,7 +1475,7 @@ describe('the target read models', () => {
     today: 'done',
     owed: [],
     starts_in: null,
-    skills: [{ dimension: 'written_receptive', value: 10, cap: 3.5 }],
+    skills: [{ dimension: 'written_productive', chance: 100, held: false }],
   };
 
   it('names two kinds', () => {
@@ -1476,7 +1489,7 @@ describe('the target read models', () => {
     expect(TargetSummarySchema.safeParse({ ...summary, created_on: '2030-02-30' }).success).toBe(false);
   });
 
-  it('parses a target day, a path session and a word day, in points and percent', () => {
+  it('parses a target day, a path session and a word day, in percent', () => {
     expect(TargetSummarySchema.parse(summary)).toEqual(summary);
     expect(TargetSummarySchema.parse({ ...summary, session: null, today: { ...summary.today, state: 'due_today', next_practice_in: 3 } }).session).toBeNull();
     for (const state of ['owed', 'done', 'rest', 'due_today']) {
@@ -1489,9 +1502,40 @@ describe('the target read models', () => {
     }
     expect(TargetWordSchema.safeParse({ ...word, today: 'soon' }).success).toBe(false);
     expect(TargetWordSchema.safeParse({ ...word, owed: ['listening'] }).success).toBe(false);
-    expect(TargetWordSchema.safeParse({ ...word, skills: [{ dimension: 'spelling', value: 0.5, cap: 10 }] }).success).toBe(true);
     // The old four-level enum is gone.
     expect(TargetWordSchema.parse({ ...word, readiness: 'ready' })).not.toHaveProperty('readiness');
+  });
+
+  // Phase 65 (spec D10). Readiness is the expected grade, with where today started; today is a
+  // budget of sessions; a word's skills are its counted skills' chances.
+  it("carries readiness at the start of today, today's budget, and whether more practice adds little", () => {
+    expect(TargetSummarySchema.parse(summary)).toEqual(summary);
+    // Before the day's first session no budget is set: the offer is the count shown.
+    const unset = { ...summary, today: { ...summary.today, sessions_budget: null, sessions_done: 0 } };
+    expect(TargetSummarySchema.parse(unset).today.sessions_budget).toBeNull();
+    expect(TargetSummarySchema.safeParse({ ...summary, today: { ...summary.today, ended_early: true, state: 'done' } }).success).toBe(true);
+    for (const key of ['readiness_start_pct', 'practice_more_little'] as const) {
+      const { [key]: _, ...without } = summary;
+      expect(TargetSummarySchema.safeParse(without).success).toBe(false);
+    }
+    for (const key of ['sessions_budget', 'sessions_offer', 'sessions_done', 'ended_early', 'minutes'] as const) {
+      const { [key]: _, ...today } = summary.today;
+      expect(TargetSummarySchema.safeParse({ ...summary, today }).success).toBe(false);
+    }
+    for (const bad of [{ readiness_start_pct: 12.5 }, { readiness_pct: 101 }, { readiness_start_pct: -1 }, { practice_more_little: 'yes' }]) {
+      expect(TargetSummarySchema.safeParse({ ...summary, ...bad }).success).toBe(false);
+    }
+    expect(TargetSummarySchema.safeParse({ ...summary, today: { ...summary.today, sessions_offer: 2.5 } }).success).toBe(false);
+  });
+
+  it("reads a word's skills as chances out of 100, each held or not, in place of points under a cap", () => {
+    const held = { ...word, readiness_pct: 42, skills: [{ dimension: 'spelling', chance: 42, held: true }] };
+    expect(TargetWordSchema.parse(held)).toEqual(held);
+    expect(TargetWordSchema.safeParse({ ...word, skills: [{ dimension: 'spelling', value: 0.5, cap: 10 }] }).success).toBe(false);
+    expect(TargetWordSchema.safeParse({ ...word, skills: [{ dimension: 'spelling', chance: 42.5, held: false }] }).success).toBe(false);
+    expect(TargetWordSchema.safeParse({ ...word, skills: [{ dimension: 'spelling', chance: 101, held: false }] }).success).toBe(false);
+    expect(TargetWordSchema.safeParse({ ...word, skills: [{ dimension: 'spelling', chance: 42 }] }).success).toBe(false);
+    expect(TargetWordSchema.safeParse({ ...word, readiness_pct: 100.5 }).success).toBe(false);
   });
 
   it('parses the list of active targets with the learner day it was read on', () => {

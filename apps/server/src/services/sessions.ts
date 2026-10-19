@@ -11,7 +11,6 @@ import {
   wrongScript,
   shuffleSession,
   soundPairs,
-  speakable,
   spokenTarget,
   spokenVerdict,
   takesHelp,
@@ -38,7 +37,7 @@ import {
   type CheckItem,
 } from '../domain/check';
 import { chooseWords, dueGlosses, liveDimensions, type ChoiceInput } from '../domain/choose';
-import { DAY_NEW_CAP, NEW_PER_SESSION } from '../domain/chooseConstants';
+import { NEW_PER_SESSION } from '../domain/chooseConstants';
 import {
   buildContextPrompt,
   contextColumns,
@@ -76,7 +75,6 @@ import {
   type Generated,
 } from '../domain/distractors';
 import { candidateItems, gapCheckItem, gapFaults, pointFaults, rewriteItems, rewriteOthers, type GapFault, type GapJudged } from '../domain/gapRewrite';
-import { glossFamilies } from '../domain/glossFamilies';
 import { familyChanges, isEmptyFamilyWrite } from '../domain/glossFamilyRecord';
 import { buildFitJudgePrompt, judgePrompt, parseFitJudge, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import {
@@ -112,7 +110,7 @@ import { classifyTaps } from '../domain/taps';
 import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
-import { chooseTargetPicks, owedWords, stockServes, stockToCheck, targetMode, type StockChoice, type TargetPickInput } from '../domain/targetPicker';
+import { chooseTargetPicks, owedWords, stockServes, stockToCheck, type StockChoice } from '../domain/targetPicker';
 import { activeOn, readinessOf, recallOnDue } from '../domain/targets';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
@@ -135,7 +133,7 @@ import {
 import type { Logger } from '../logger';
 import { authorizeEnrollment } from './access';
 import { learnerDay } from './learnerDay';
-import { readTargetDay } from './targetDayRead';
+import { readFamilies, readTargetDay, readTargetPickInput, readTodayBudget } from './targetDayRead';
 import type { LlmClient, ModelCallRecord } from './llm';
 import type { SpeechTranscriber } from './speech';
 import { closeOpenSession, lastAnswerDay, recordProgress, skipOpenSession } from './sessionEnd';
@@ -357,35 +355,6 @@ export function createSessionService({
   }
 
   /**
-   * Phase 39 (spec D4, D5). The families of every saved gloss, derived from the dictionary and
-   * `memory` (every saved gloss's) with the session's live skills. Phase 46 (spec D3): known_at
-   * is the gloss's own, family or not. Phase 57 (ruling T5-k): the same for every path; only a
-   * main-path stock records what changed.
-   */
-  async function readFamilies(
-    repos: Repos,
-    all: readonly SavedGloss[],
-    memory: Parameters<typeof glossFamilies>[0]['memory'],
-    devices: Devices,
-  ) {
-    const forms = await repos.dict.findLexemeForms({ lexemeIds: [...new Set(all.map((gloss) => gloss.lexemeId))] });
-    const formsOf = new Map<string, string[]>();
-    for (const row of forms) formsOf.set(row.lexemeId, [...(formsOf.get(row.lexemeId) ?? []), row.form]);
-    const members = all.map((gloss) => ({
-      glossId: gloss.glossId,
-      lexemeId: gloss.lexemeId,
-      lemma: gloss.lemma,
-      key: gloss.key,
-      savedAt: gloss.savedAt,
-      forms: formsOf.get(gloss.lexemeId) ?? [],
-      order: gloss.order,
-      speakable: speakable(gloss.form),
-      knownAt: gloss.knownAt,
-    }));
-    return glossFamilies({ saved: members, memory, live: liveDimensions(devices.listening, devices.speaking) });
-  }
-
-  /**
    * Phase 35, 43, 53; phase 57 (spec D1): the main path's choice, read on the owner's learner
    * day: the picker's input over the saved glosses in no target active that day, and the
    * families the choice refreshes, which are every saved gloss's. Null when the path has no
@@ -447,45 +416,20 @@ export function createSessionService({
 
   /**
    * Phase 57 (spec D1, D6–D9, rulings T3-j, T3-m, T3-n). A target path's choice, read on the
-   * owner's learner day: its day (readTargetDay), and the picks its picker makes of it beside
-   * the path's started session, whose graded cards it credits; owed work first, and practice
-   * more when the session in flight covers all of it, so the path always has a next session.
-   * With what its stock records of the day: the cap, readiness, the words at 100% and by FSRS
-   * on the date, and the words owed (none for practice more). Null when the target is no
-   * longer active or has no word.
+   * owner's learner day: its picker input (readTargetPickInput: its day, beside the path's
+   * started session, whose graded cards it credits), and the picks made of it; owed work
+   * first, and practice more when the session in flight covers all of it, so the path always
+   * has a next session. With what its stock records of the day: the cap, readiness, the words
+   * at 100% and by FSRS on the date, and the words owed (none for practice more). Null when the
+   * target is no longer active or has no word.
    */
   async function readTarget(repos: Repos, enrolled: Enrollment, target: TargetRow, devices: Devices) {
-    const enrollmentId = enrolled.id;
     const at = now();
     const today = await learnerDay(repos, enrolled.user_id, at);
-    if (!activeOn(target, today)) return null;
-    const saved = await repos.vocabulary.listSavedGlosses(enrollmentId);
-    const read = await readTargetDay(repos, enrolled, target, devices, today, saved);
-    if (!read) return null;
-    const { day, glossIds, live, canSay } = read;
-    // Phase 60 (spec D1, "targets too"). The families, over every saved gloss as the main path
-    // reads them: a family's new meaning starts with its new_meaning card, never a ladder.
-    const memory = await repos.memory.findRows({ enrollmentId, glossIds: saved.map((gloss) => gloss.glossId) });
-    const families = await readFamilies(repos, saved, memory, devices);
-    const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
-    const { started } = await repos.session.findOpen(enrollmentId, target.id);
-    const cards = started ? await repos.session.findSessionCards(started.id) : [];
-    // Ruling T3-n (spec D8). The day's room for new words: the cap less every path's first
-    // meetings today and this path's session in flight's.
-    const introduced = await repos.session.findIntroducedOn(enrollmentId, today);
-    const met = new Set([...memory.map((row) => row.glossId), ...introduced]);
-    const meeting = new Set(cards.map((card) => card.glossId).filter((glossId) => glossIds.includes(glossId) && !met.has(glossId)));
-    const input: TargetPickInput = {
-      day,
-      mode: targetMode(day),
-      levels: new Map(levels.map((row) => [`${row.glossId}|${row.dimension}`, row.level])),
-      known: new Set(memory.map((row) => row.glossId)),
-      newMeanings: families.newMeanings,
-      keys: new Map(saved.map((gloss) => [gloss.glossId, gloss.key])),
-      // Ruling T3-j: a ladder's intro stage grades nothing.
-      inFlight: cards.filter((card) => !card.intro),
-      newRoom: Math.max(0, DAY_NEW_CAP - introduced.length - meeting.size),
-    };
+    const picked = await readTargetPickInput(repos, enrolled, target, devices, today);
+    if (!picked) return null;
+    const { input } = picked;
+    const { day, glossIds, live, canSay, saved, memory, families } = picked.read;
     let mode = input.mode;
     let picks = chooseTargetPicks(input);
     // Ruling T3-m. Owed work all asked by the session in flight: practice more instead.
@@ -751,6 +695,19 @@ export function createSessionService({
     return dueGlosses(memory, liveDimensions(devices.listening, devices.speaking), today).length;
   }
 
+  /**
+   * Phase 65 (spec D7.1, D7.2). A target's budget for the learner's today, set once: when the day
+   * has none, the one readTodayBudget reads now; a day set already keeps its own, so the count
+   * never grows. A target no longer active, or with no saved word, gets none. Takes no lock.
+   */
+  async function setTodayBudget(repos: Repos, enrolled: Enrollment, targetId: string, devices: Devices): Promise<void> {
+    const today = await learnerDay(repos, enrolled.user_id, now());
+    if (await repos.targetBudgets.find(targetId, today)) return;
+    const target = await repos.target.findTarget(targetId);
+    const budget = target ? await readTodayBudget(repos, enrolled, target, devices, today) : null;
+    if (budget) await repos.targetBudgets.insert(budget);
+  }
+
   const service = {
     /**
      * The next session to play (phase 43, spec D5), on a path (phase 57, spec D1: the main
@@ -817,7 +774,9 @@ export function createSessionService({
      * stock, built for the device that started this one (ruling R2). Started
      * already: a no-op. A session that is not ready has nothing to start;
      * another started session of its path is SessionOpen. Phase 57 (spec D2): the stock
-     * asked for is the next of the session's path only.
+     * asked for is the next of the session's path only. Phase 65 (spec D7.1, D7.2): a target
+     * path's first session of the learner day sets the target's budget for it
+     * (readTodayBudget, for this device), before the stock is asked for; a later one leaves it.
      */
     startSession: async (actorUserId: string, sessionId: string, devices: Devices): Promise<{ sessionId: string; status: SessionStatus }> => {
       const started = await transaction(async (repos) => {
@@ -826,6 +785,7 @@ export function createSessionService({
         if (!state) throw new SessionNotFound(sessionId);
         if (state.status !== 'ready') throw new SessionNotReady(sessionId, state.status);
         const changed = await repos.session.markStarted(sessionId);
+        if (changed && state.targetId !== null) await setTodayBudget(repos, enrolled, state.targetId, devices);
         if (changed) await requestStock(repos, { enrollment_id: enrolled.id, reason: 'start', ...devices, ...pathPayload(state.targetId) });
         return changed;
       });
@@ -1012,6 +972,22 @@ export function createSessionService({
           return { result: { ...outcome.record, progress }, justCompleted: false, tapsLogged: null };
         }
 
+        // Phase 43 (spec D2). A first answer starts a session no start call
+        // started (an older app, a bot, or the app's own start still waiting on
+        // the device's voices), and asks for the next one in stock (below).
+        // Another started session of its path refuses it here, before anything
+        // commits. Phase 57 (spec D2): the stock asked for is its path's.
+        // Phase 65 (spec D7.1): it sets a target's budget for the day as the start
+        // call does, before this answer is stored, so the day is read as it stood
+        // when the session began; for the devices the session was built for.
+        const pathOf = async () => (await repos.session.findState(sessionId))?.targetId ?? null;
+        const startedByAnswer = outcome.recorded === 'answer' && loaded.answers.length === 0 && (await repos.session.markStarted(sessionId));
+        const path = startedByAnswer ? await pathOf() : null;
+        if (path !== null) {
+          const builtFor = await repos.session.findStockChoice(sessionId);
+          await setTodayBudget(repos, enrolled, path, { listening: builtFor?.listening ?? false, speaking: builtFor?.speaking ?? false });
+        }
+
         // Phase 34 (spec D9). A retry resolves the pending answer in its place; a
         // first answer is a new row, held for its second try when it opens one.
         // Either may complete the session: the last card's answer only when it
@@ -1048,13 +1024,8 @@ export function createSessionService({
         // second try re-sending them adds only the new ones.
         const added = taps.length > 0 ? await repos.session.insertTaps(sessionId, tappedAt, taps) : [];
 
-        // Phase 43 (spec D2). A first answer starts a session no start call
-        // started (an older app, a bot), and asks for the next one in stock.
-        // Another started session of its path refuses it here, before anything
-        // commits. Phase 57 (spec D2): the stock asked for is its path's.
-        const pathOf = async () => (await repos.session.findState(sessionId))?.targetId ?? null;
-        if (outcome.recorded === 'answer' && loaded.answers.length === 0 && (await repos.session.markStarted(sessionId))) {
-          await requestStock(repos, { enrollment_id: enrolled.id, reason: 'answer', ...pathPayload(await pathOf()) });
+        if (startedByAnswer) {
+          await requestStock(repos, { enrollment_id: enrolled.id, reason: 'answer', ...pathPayload(path) });
         }
 
         if (outcome.justCompleted) {

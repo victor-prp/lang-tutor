@@ -106,8 +106,9 @@ const PICKS_PER_WORD = 2;
 /** The card a skill is asked at a rung as the picker reads it: the rung's first type in RUNGS
  *  (typed translation for written productive and spelling at rung 2, dictation for listening,
  *  say translation for speaking). The prepare job may choose another type of the rung; only the
- *  tie-breaks and the skills a pick serves read this one. */
-const cardOf = (dimension: Dimension, rung: 1 | 2): QuestionType => RUNGS[dimension][rung - 1][0];
+ *  tie-breaks and the skills a pick serves read this one, and (phase 65, spec D7.1) the budget's
+ *  play-forward, which answers it. */
+export const cardOf = (dimension: Dimension, rung: 1 | 2): QuestionType => RUNGS[dimension][rung - 1][0];
 
 type Word = {
   glossId: string;

@@ -25,6 +25,18 @@ const ACTOR = 'u_1';
 const E = 'e_1';
 const T = '5f0e4f5e-0000-4000-8000-000000000001';
 
+const TODAY: Target['today'] = {
+  state: 'owed',
+  done: 0,
+  planned: 1,
+  extra: 0,
+  next_practice_in: 1,
+  sessions_budget: null,
+  sessions_offer: 4,
+  sessions_done: 0,
+  ended_early: false,
+  minutes: 9,
+};
 const TARGET: Target = {
   id: T,
   kind: 'exam',
@@ -34,7 +46,9 @@ const TARGET: Target = {
   word_count: 1,
   ready_count: 0,
   readiness_pct: 0,
-  today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1 },
+  readiness_start_pct: 0,
+  practice_more_little: false,
+  today: TODAY,
   session: null,
   words: [
     {
@@ -45,7 +59,7 @@ const TARGET: Target = {
       today: 'owed',
       owed: [],
       starts_in: null,
-      skills: [{ dimension: 'written_receptive', value: 0, cap: 3.5 }],
+      skills: [{ dimension: 'written_productive', chance: 0, held: false }],
     },
   ],
 };
@@ -61,7 +75,9 @@ const LIST: TargetList = {
       word_count: 1,
       ready_count: 0,
       readiness_pct: 0,
-      today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1 },
+      readiness_start_pct: 0,
+      practice_more_little: false,
+      today: TODAY,
       session: { session_id: 's1', status: 'ready', source: 'list', answered: 0, total: 10, started: false },
     },
   ],

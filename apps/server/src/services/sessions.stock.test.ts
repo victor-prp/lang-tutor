@@ -25,6 +25,7 @@ import type { GlossFamiliesRepo } from '../repo/glossFamilies';
 import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
 import type { SessionRepo } from '../repo/sessions';
+import type { TargetBudgetRepo } from '../repo/targetBudgets';
 import type { TargetSkillRepo } from '../repo/targetSkills';
 import type { UserRepo } from '../repo/users';
 import type { VocabularyRepo } from '../repo/vocabulary';
@@ -494,8 +495,14 @@ describe('the main path (spec D1, D2)', () => {
 describe("a target's path (spec D1, D2, D10)", () => {
   const ownState = { id: 's1', userId: 'u1', enrollmentId: E, status: 'ready' as const, source: 'list' as const, targetId: 't_exam' };
 
+  /** Today's budget for t_exam, set already. */
+  const SET = { targetId: 't_exam', day: TODAY, sessions: 4, cards: 30, missRoom: 1, doneBefore: 0 };
+
   it("starts a target's session and asks for that path's next stock only, under its own key", async () => {
-    const { service, jobs } = world({ findEnrollmentId: async () => E, findState: async () => ownState, markStarted: async () => true });
+    const { service, jobs } = world(
+      { findEnrollmentId: async () => E, findState: async () => ownState, markStarted: async () => true },
+      { targetBudgets: stub<TargetBudgetRepo>({ find: async () => SET }) },
+    );
     await service.startSession('u1', 's1', { listening: true, speaking: false });
     expect(jobs.enqueued).toEqual([
       {
@@ -504,6 +511,108 @@ describe("a target's path (spec D1, D2, D10)", () => {
         options: { singletonKey: `${E}:t_exam` },
       },
     ]);
+  });
+
+  // Phase 65 (spec D7.1, D7.2). The path's first session of the learner day sets today's budget,
+  // in the transaction that starts it and before its next stock is asked for; a later one leaves
+  // it as it is.
+  describe("today's budget (phase 65, spec D7)", () => {
+    /** Three days left: the cap is 10 half-points. g_b, started a week ago, owes its written
+     *  productive skill alone, 8 below the cap: two typed translations, one a session. */
+    const exam = target('t_exam', '2026-10-15', ['g_b']);
+    const skills = stub<TargetSkillRepo>({
+      findRows: async () =>
+        (
+          [
+            ['written_receptive', 10],
+            ['written_productive', 2],
+            ['spelling', 10],
+          ] as const
+        ).map(([dimension, halves]) => ({ targetId: 't_exam', glossId: 'g_b', dimension, halves, sessionId: null, day: '2026-10-06' })),
+    });
+    const right = { glossId: 'g_a', sessionId: 's_old', targetId: null, type: 'typed_translation' as const, verdict: 'exact' as const };
+
+    function budgetWorld(found: typeof SET | undefined, recent: Awaited<ReturnType<SessionRepo['findRecentAnswers']>> = [], done = 0) {
+      const inserted: unknown[] = [];
+      const asked: unknown[][] = [];
+      const counted: unknown[][] = [];
+      let enqueuedAtInsert: number | null = null;
+      const made = world(
+        {
+          findEnrollmentId: async () => E,
+          findState: async () => ownState,
+          markStarted: async () => true,
+          findOpen: async () => ({ started: summary('s1', 'ready') }),
+          findSessionCards: async () => [],
+          findRecentAnswers: async (...args) => {
+            asked.push(args);
+            return recent;
+          },
+          countCompletedOn: async (...args) => {
+            counted.push(args);
+            return done;
+          },
+        },
+        {
+          target: createFakeTargetRepo({
+            findTarget: async () => exam,
+            listWords: async () => [{ glossId: 'g_b', addedAt: exam.createdAt, startedOn: '2026-10-05' }],
+          }),
+          targetSkills: skills,
+          targetBudgets: stub<TargetBudgetRepo>({
+            find: async () => found,
+            insert: async (budget) => {
+              inserted.push(budget);
+              enqueuedAtInsert = made.jobs.enqueued.length;
+            },
+          }),
+        },
+      );
+      return { ...made, inserted, asked, counted, enqueuedAtInsert: () => enqueuedAtInsert };
+    }
+
+    /** A miss the learner gave on an earlier day. */
+    const wrong = { ...right, verdict: 'wrong' as const };
+
+    it.each([
+      ['no recent answer: the default miss rate, one session of room', [], 0, 3, 1],
+      ['twenty right answers: no miss, no room', Array.from({ length: 20 }, () => right), 0, 2, 0],
+      // Ruling T5-b: a rate of 0.5 is read at MISS_RATE_CAP, 0.25, so the play's two sessions double.
+      ['twenty answers, half missed: the rate capped, the play doubled', [...Array.from({ length: 10 }, () => right), ...Array.from({ length: 10 }, () => wrong)], 0, 4, 2],
+      // Coordinator's ruling on Review Focus 4: a session started yesterday and ended today is one
+      // of today's sessions done, so the promise counts it too.
+      ['a session of the path already completed today, started yesterday', [], 1, 4, 1],
+    ])('is set at the first session, from the picker played forward: %s', async (_, recent, doneBefore, sessions, missRoom) => {
+      const { service, inserted, asked, counted, enqueuedAtInsert, jobs } = budgetWorld(undefined, recent, doneBefore);
+      await service.startSession('u1', 's1', NO_DEVICES);
+      expect(inserted).toEqual([{ targetId: 't_exam', day: TODAY, sessions, cards: 2, missRoom, doneBefore }]);
+      // The miss rate reads the enrollment's last three practice days, up to today; the sessions
+      // done, the path's completed today.
+      expect(asked).toEqual([[E, TODAY, 3]]);
+      expect(counted).toEqual([[E, 't_exam', TODAY]]);
+      // Written before the next stock is asked for.
+      expect(enqueuedAtInsert()).toBe(0);
+      expect(jobs.enqueued).toHaveLength(1);
+    });
+
+    it('is left as it is by a later session the same day, which reads nothing to remake it', async () => {
+      // The target repo's findTarget and listWords are not stubbed: remaking the budget would throw.
+      const inserted: unknown[] = [];
+      const { service, jobs } = world(
+        { findEnrollmentId: async () => E, findState: async () => ownState, markStarted: async () => true },
+        { targetBudgets: stub<TargetBudgetRepo>({ find: async () => SET, insert: async (budget) => void inserted.push(budget) }) },
+      );
+      await service.startSession('u1', 's1', NO_DEVICES);
+      expect(inserted).toEqual([]);
+      expect(jobs.enqueued).toHaveLength(1);
+    });
+
+    it('is not looked for when the session was started already', async () => {
+      // targetBudgets is not given: a read of it would throw.
+      const { service, jobs } = world({ findEnrollmentId: async () => E, findState: async () => ownState, markStarted: async () => false });
+      await service.startSession('u1', 's1', NO_DEVICES);
+      expect(jobs.enqueued).toEqual([]);
+    });
   });
 
   it.each([

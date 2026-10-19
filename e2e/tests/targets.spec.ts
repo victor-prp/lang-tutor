@@ -18,6 +18,7 @@ import { BOARD_WORDS } from './support/lexemes';
 import { clearGemini, expectGeminiMatching, userText } from './support/mockServer';
 import { answerSessionRight, enrollmentIdOf, readCurrent, readyPathSession, skipSeed } from './support/sessions';
 import {
+  DONE_TODAY,
   EVERY_WORD,
   FILLED,
   HOMEWORK_WORDS,
@@ -25,16 +26,20 @@ import {
   addDays,
   createTarget,
   expectLabel,
+  expectReadiness,
+  expectSessions,
   formsOf,
   homeOrder,
   homework,
   lookUpEntries,
   moveDueDateToToday,
   moveTargetBack,
+  offerOf,
   playSessionRight,
   readTarget,
   readTargets,
   saveEntries,
+  screenHeader,
   showCard,
 } from './support/targets';
 import { openApp, signUpLearner } from './support/users';
@@ -52,6 +57,11 @@ import { withVoices } from './support/voices';
 // on home, first while work is owed; its session, of its words alone; the praise once the day
 // is done, with My words first again; practice more; the target screen's groups and a word's
 // skills; and the due date's good luck.
+//
+// Phase 65 (spec D4–D7). The card reads readiness as its big number, with today's gain on its
+// bar, and today as a budget of sessions: the offer before the day's first session, then the
+// sessions done, and "סיימת להיום ✓" once the day is done. The sheet before practising past the
+// budget is practice-more.spec.ts.
 test.setTimeout(240_000);
 test.beforeEach(async ({ request }) => {
   await clearGemini(request);
@@ -290,8 +300,9 @@ test('an exam is prepared from a photo and a typed word; a word goes, the date m
   expect(await openImports(page.request, enrollmentId)).toEqual([]);
 
   // 5. Done returns to home (phase 64, spec D8), whose card is the exam's: its kind, how soon,
-  // today's words and its readiness. Due tomorrow with nothing ready, the fuse burns amber and
-  // the card names the words not ready (spec D5).
+  // its readiness and today as sessions (phase 65, spec D5): before the day's first session, the
+  // offer, a dot to do for each. Due tomorrow with nothing ready, the fuse burns amber and the
+  // card names the words not ready (spec D5).
   const wordOf = (form: string) => {
     const word = target.words.find((candidate) => candidate.form === form);
     if (!word) throw new Error(`the target holds no ${form}: ${JSON.stringify(target.words)}`);
@@ -300,8 +311,13 @@ test('an exam is prepared from a photo and a typed word; a word goes, the date m
   const row = page.getByTestId(`target-row-${target.id}`);
   await expect(row, report()).toContainText('בוחן');
   await expect(row).toContainText('מחר');
-  await expectLabel(page.getByTestId(`target-today-${target.id}`), 'היום: 0 מתוך 3 מילים');
-  await expectLabel(page.getByTestId(`target-readiness-${target.id}`), 'מוכנות לבוחן: 0%');
+  const offered = await read<Target>(page.request, `/api/targets/${target.id}`);
+  expect(offered.today, report()).toMatchObject({ state: 'owed', sessions_budget: null, sessions_done: 0 });
+  expect(offered.today.sessions_offer).toBeGreaterThan(0);
+  expect(offered).toMatchObject({ readiness_pct: 0, readiness_start_pct: 0 });
+  const card = page.getByTestId(`target-card-${target.id}`);
+  await expectReadiness(card, offered);
+  await expectSessions(card, target.id, offerOf(offered.today));
   await expectLabel(
     page.getByTestId(`target-urgency-${target.id}`),
     'הבוחן מחר ו-3 מילים עוד לא מוכנות. עוד תרגול אחד יעזור.',
@@ -310,13 +326,14 @@ test('an exam is prepared from a photo and a typed word; a word goes, the date m
 
   // 6. Its screen lists the ticked words and the typed one, with the date chosen.
   // Phase 57 (spec D12): the header is the card's, and an exam due tomorrow plans every word
-  // for today, so all three are owed.
+  // for today, so all three are owed. Phase 65 (spec D6): the card's readiness and sessions.
   await row.click();
   await expect(page.getByTestId('target-title'), report()).toHaveText('בוחן');
   await expect(page.getByTestId('target-due')).toHaveText(first.label);
   await expectLabel(page.getByTestId('target-countdown'), 'בוחן מחר');
-  await expectLabel(page.getByTestId('target-today'), 'היום: 0 מתוך 3 מילים');
-  await expectLabel(page.getByTestId('target-readiness'), 'מוכנות לבוחן: 0%');
+  const header = screenHeader(page);
+  await expectReadiness(header, offered);
+  await expectSessions(header, target.id, offerOf(offered.today));
   await expect(page.getByTestId('target-word-readiness')).toHaveCount(3);
   await expect(page.getByTestId('target-group-owed')).toContainText('נשאר להיום');
   for (const form of ['campo', 'sedia', 'tavolo']) {
@@ -331,9 +348,11 @@ test('an exam is prepared from a photo and a typed word; a word goes, the date m
   await expect(page.getByTestId(`target-word-${sedia.gloss_id}`)).toBeVisible();
   await tapAndWaitForResponse(page, page.getByTestId(`target-word-remove-${sedia.gloss_id}`), WORD_REMOVE);
   await expect(page.getByTestId(`target-word-${sedia.gloss_id}`)).toHaveCount(0);
-  await expectLabel(page.getByTestId('target-today'), 'היום: 0 מתוך 2 מילים');
+  // Two words owe less than three: the offer is read again, and the header shows it.
   const removed = await read<Target>(page.request, `/api/targets/${target.id}`);
   expect(removed.words.map((word) => word.form).sort()).toEqual(['campo', 'tavolo']);
+  expect(removed.today.sessions_offer, report()).toBeLessThan(offered.today.sessions_offer);
+  await expectSessions(header, target.id, offerOf(removed.today));
   expect(await savedLemmas(page.request, enrollmentId)).toEqual(['campo', 'sedia', 'tavolo']);
 
   // 8. The date moves: the wizard offers its date step alone, and the screen shows the new day.
@@ -439,12 +458,16 @@ test('a new homework comes first with practice now, which asks its words alone; 
   const stock = await readyPathSession(page.request, enrollmentId, target.id);
   await openApp(page, `target-card-${target.id}`);
 
-  // 1. Work is owed today: the homework's card is first, its button filled.
+  // 1. Work is owed today: the homework's card is first, its button filled. Phase 65 (spec D5):
+  // nothing answered yet, readiness is 0 with no gain on its bar, and today is the offer.
   const practice = page.getByTestId(`target-practice-${target.id}`);
+  const card = page.getByTestId(`target-card-${target.id}`);
   await expect.poll(() => homeOrder(page), { message: report() }).toEqual([target.id, 'main']);
   await expectLabel(page.getByTestId(`target-countdown-${target.id}`), '40 ימים');
-  await expectLabel(page.getByTestId(`target-today-${target.id}`), 'היום: 0 מתוך 2 מילים');
-  await expectLabel(page.getByTestId(`target-readiness-${target.id}`), 'מוכנות לשיעורי הבית: 0%');
+  const offered = await readTarget(page.request, target.id);
+  expect(offered.today, report()).toMatchObject({ state: 'owed', sessions_budget: null, sessions_done: 0 });
+  await expectReadiness(card, offered);
+  await expectSessions(card, target.id, offerOf(offered.today));
   await expect(page.getByTestId(`target-praise-${target.id}`)).toHaveCount(0);
   await expectLabel(practice, 'לתרגל עכשיו');
   await expect(practice).toHaveCSS('background-color', FILLED);
@@ -489,22 +512,39 @@ test('a new homework comes first with practice now, which asks its words alone; 
   const asked = await playSessionRight(page, request, EVERY_WORD);
   expect([...new Set(asked)].sort(), asked.join(', ')).toEqual(formsOf(target, 'owed'));
 
-  // 3. Every owed word is done: the card praises, its today line is ticked, and it moves below
-  // My words, whose button is now the filled one; its own offers practice more, outlined.
-  // Back on home the stack shows its first card, now My words (Review Focus 3).
+  // 3. Every owed word is done: the card says the day is done, and it moves below My words,
+  // whose button is now the filled one; its own offers practice more, outlined. Back on home the
+  // stack shows its first card, now My words (Review Focus 3).
+  // Phase 65 (spec D5, D7): the session set the day's budget as it started, the offer then. Every
+  // answer was right, so the work ran out inside the room the budget keeps for misses: the day
+  // ended early, one session in place of the budget, its unused dots faded. Readiness rose from 0,
+  // and its bar says by how much today.
   await backHome(page);
   await expect.poll(() => homeOrder(page), { message: report() }).toEqual(['main', target.id]);
   await expect(page.getByTestId('start-button')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('start-button')).toHaveCSS('background-color', FILLED);
   await showCard(page, target.id);
-  await expect(page.getByTestId(`target-praise-${target.id}`), report()).toBeVisible();
-  await expectLabel(page.getByTestId(`target-praise-${target.id}`), 'כל הכבוד! סיימת להיום. נתראה מחר');
-  await expectLabel(page.getByTestId(`target-today-${target.id}`), 'היום: 2 מתוך 2 מילים ✓');
+  const done = await readTarget(page.request, target.id);
+  expect(done.today, report()).toMatchObject({
+    state: 'done',
+    done: 2,
+    planned: 2,
+    extra: 0,
+    sessions_budget: offered.today.sessions_offer,
+    sessions_done: 1,
+    ended_early: true,
+  });
+  expect(done.readiness_pct).toBeGreaterThan(0);
+  expect(done.readiness_start_pct).toBe(0);
+  const budget = offered.today.sessions_offer;
+  await expectSessions(card, target.id, {
+    line: DONE_TODAY,
+    side: `1 במקום ${budget}`,
+    dots: ['done', ...Array<string>(budget - 1).fill('faded')],
+  });
+  await expectReadiness(card, done);
   await expectLabel(practice, 'לתרגל עוד');
   await expect(practice).toHaveCSS('background-color', OUTLINED);
-  const done = await readTarget(page.request, target.id);
-  expect(done.today).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 0 });
-  expect(done.readiness_pct).toBeGreaterThan(0);
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
 
@@ -516,10 +556,19 @@ test('practice more starts the next words early, and the target screen groups th
   const report = () => diagnosticReport(diagnostics);
   const { enrollmentId, target } = await homework(page, request, 'e2e_paths_more');
 
-  // Today's owed work, answered over the API; the path's next session is practice more.
+  // Today's owed work, answered over the API; the path's next session is practice more. Its
+  // first answer started it (no start call), which set the day's budget (phase 65, spec D7.1).
   await answerSessionRight(page.request, await readyPathSession(page.request, enrollmentId, target.id));
   const before = await readTarget(page.request, target.id);
-  expect(before.today).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 0 });
+  expect(before.today).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 0, sessions_done: 1, ended_early: true });
+  const budget = before.today.sessions_budget;
+  if (budget === null) throw new Error(`the first answer set no budget: ${JSON.stringify(before.today)}`);
+  // The day's owed work, two ladders, is one session of the play (their practice cards take the
+  // words to the cap, ruling T9-a), and the default miss rate keeps one more for misses:
+  // ceil(1 / 0.8) = 2. The practice-more session below is that second one, and meets it (D7.6).
+  expect(budget).toBe(2);
+  // Later words are still to start, which one more session would raise a lot: no sheet (spec D9).
+  expect(before.practice_more_little).toBe(false);
   const more = await readyPathSession(page.request, enrollmentId, target.id);
   // Done for today, the homework is under My words: its dot, not its card, is on show.
   await openApp(page, `home-bar-${target.id}`);
@@ -538,21 +587,25 @@ test('practice more starts the next words early, and the target screen groups th
   const homeworkForms = HOMEWORK_WORDS.map((word) => word.form);
   for (const form of asked) expect(homeworkForms, asked.join(', ')).toContain(form);
 
-  // 2. The words it started are today's extra: home says so after the tick.
+  // 2. The words it started are today's extra. Phase 65 (spec D5, D7): the day is still done, and
+  // with its two sessions the budget is met, not ended early; readiness rose with the words started.
   await backHome(page);
   const after = await readTarget(page.request, target.id);
-  expect(after.today, report()).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 2 });
+  expect(after.today, report()).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 2, sessions_budget: budget, sessions_done: 2, ended_early: false });
+  expect(after.readiness_pct).toBeGreaterThan(before.readiness_pct);
   const extra = formsOf(after, 'extra');
   for (const form of extra) expect(asked).toContain(form);
   await showCard(page, target.id);
-  await expectLabel(page.getByTestId(`target-today-${target.id}`), 'היום: 2 מתוך 2 מילים ✓ +2 נוספות');
-  await expect(page.getByTestId(`target-praise-${target.id}`)).toBeVisible();
+  const sessions = { line: DONE_TODAY, side: null, dots: ['done', 'done'] };
+  await expectSessions(page.getByTestId(`target-card-${target.id}`), target.id, sessions);
+  await expectReadiness(page.getByTestId(`target-card-${target.id}`), after);
 
   // 3. The target screen: the card's header, then its words in groups, each with its line.
   await page.getByTestId(`target-row-${target.id}`).click();
   await expectLabel(page.getByTestId('target-countdown'), 'שיעורי בית בעוד 40 ימים');
-  await expectLabel(page.getByTestId('target-today'), 'היום: 2 מתוך 2 מילים ✓ +2 נוספות');
-  await expectLabel(page.getByTestId('target-readiness'), `מוכנות לשיעורי הבית: ${after.readiness_pct}%`);
+  const header = screenHeader(page);
+  await expectSessions(header, target.id, sessions);
+  await expectReadiness(header, after);
   await expect(page.getByTestId('target-group-owed')).toHaveCount(0);
   const groups = { done: 'סיימת להיום', extra: 'נוספו היום', later: 'בהמשך' } as const;
   for (const [today, title] of Object.entries(groups)) {
@@ -568,17 +621,23 @@ test('practice more starts the next words early, and the target screen groups th
     }
   }
 
-  // 4. A tapped word opens its live skills, the written three on a device with no voice and no
-  // microphone, each a bar to its cap; tapped again, they close.
+  // 4. A tapped word opens the skills its readiness counts (phase 65, spec D1, D6): homework's
+  // writing and spelling on a device with no voice and no microphone (speaking is not live), each
+  // its chance out of 100 on the date; recognition never counts. Tapped again, they close.
   const [word] = after.words.filter((candidate) => candidate.today === 'done');
   const skills = page.getByTestId(`target-word-skills-${word.gloss_id}`);
   await expect(skills).toHaveCount(0);
   await page.getByTestId(`target-word-toggle-${word.gloss_id}`).click();
   await expect(skills).toBeVisible();
-  for (const name of ['זיהוי בכתב', 'כתיבה', 'איות']) await expect(skills).toContainText(name);
-  for (const name of ['הבנת הנשמע', 'דיבור']) await expect(skills).not.toContainText(name);
-  expect(word.skills.map((skill) => skill.dimension).sort()).toEqual(['spelling', 'written_productive', 'written_receptive']);
-  for (const skill of word.skills) expect(skill.value, skill.dimension).toBe(skill.cap);
+  for (const name of ['כתיבה', 'איות']) await expect(skills).toContainText(name);
+  for (const name of ['זיהוי בכתב', 'הבנת הנשמע', 'דיבור']) await expect(skills).not.toContainText(name);
+  expect(word.skills.map((skill) => skill.dimension).sort()).toEqual(['spelling', 'written_productive']);
+  const names: Record<string, string> = { written_productive: 'כתיבה', spelling: 'איות' };
+  for (const skill of word.skills) {
+    expect(skill.chance, skill.dimension).toBeGreaterThan(0);
+    expect(skill.held, skill.dimension).toBe(false);
+    await expectLabel(skills.getByTestId(`target-word-skill-${skill.dimension}`), `${names[skill.dimension]}${skill.chance}%`);
+  }
   await page.getByTestId(`target-word-toggle-${word.gloss_id}`).click();
   await expect(skills).toHaveCount(0);
   expect(diagnostics.pageErrors, report()).toEqual([]);
@@ -615,7 +674,13 @@ test('home orders its paths: the exam due today first with good luck, then work 
   await readyPathSession(page.request, enrollmentId, exam.id);
   await moveDueDateToToday(exam.id, today);
   const { targets } = await readTargets(page.request, enrollmentId);
-  const stateOf = (id: string) => targets.find((target) => target.id === id)?.today;
+  const summaryOf = (id: string) => {
+    const found = targets.find((target) => target.id === id);
+    if (!found) throw new Error(`home lists no target ${id}: ${JSON.stringify(targets)}`);
+    return found;
+  };
+  const stateOf = (id: string) => summaryOf(id).today;
+  const cardOf = (id: string) => page.getByTestId(`target-card-${id}`);
   expect(targets.map((target) => [target.id, target.today.state]), report()).toEqual(
     expect.arrayContaining([
       [exam.id, 'due_today'],
@@ -643,7 +708,8 @@ test('home orders its paths: the exam due today first with good luck, then work 
   await showCard(page, exam.id);
 
   // 2. On its date the exam says so and wishes good luck; nothing is owed, so there is no
-  // today line, and its button is the optional last review, filled while not yet ready.
+  // sessions line (phase 65, spec D5), and its button is the optional last review, filled while
+  // not yet ready.
   await expectLabel(page.getByTestId(`target-countdown-${exam.id}`), 'היום');
   await expectLabel(page.getByTestId(`target-due-today-${exam.id}`), 'בהצלחה!');
   // On its date with its word not ready, the card says so (phase 64, spec D5).
@@ -651,28 +717,38 @@ test('home orders its paths: the exam due today first with good luck, then work 
     page.getByTestId(`target-urgency-${exam.id}`),
     'הבוחן היום ומילה אחת עוד לא מוכנה. חזרה אחרונה תעזור.',
   );
-  await expect(page.getByTestId(`target-today-${exam.id}`)).toHaveCount(0);
-  await expectLabel(page.getByTestId(`target-readiness-${exam.id}`), 'מוכנות לבוחן: 0%');
+  await expect(page.getByTestId(`target-sessions-${exam.id}`)).toHaveCount(0);
+  expect(summaryOf(exam.id)).toMatchObject({ readiness_pct: 0, readiness_start_pct: 0 });
+  await expectReadiness(cardOf(exam.id), summaryOf(exam.id));
   await expectLabel(practice(exam.id), 'חזרה אחרונה');
   await expect(practice(exam.id)).toHaveCSS('background-color', FILLED);
 
-  // 3. The owed homework calls to practise now; the done one praises; the resting one says
-  // when it practises next, with no today line. Both offer practice more.
+  // 3. The owed homework calls to practise now, today's sessions offered; the done one says the
+  // day is done, its one session in place of the budget its first answer set (phase 65, spec
+  // D7); the resting one says when it practises next, with no sessions line. Both offer practice
+  // more.
   await showCard(page, owed.id);
   await expectLabel(practice(owed.id), 'לתרגל עכשיו');
-  await expectLabel(page.getByTestId(`target-today-${owed.id}`), 'היום: 0 מתוך 1 מילים');
+  expect(stateOf(owed.id)).toMatchObject({ sessions_budget: null, sessions_done: 0 });
+  await expectSessions(cardOf(owed.id), owed.id, offerOf(stateOf(owed.id)));
   await showCard(page, done.id);
-  await expectLabel(page.getByTestId(`target-praise-${done.id}`), 'כל הכבוד! סיימת להיום. נתראה מחר');
-  await expectLabel(page.getByTestId(`target-today-${done.id}`), 'היום: 1 מתוך 1 מילים ✓');
+  const doneBudget = stateOf(done.id).sessions_budget;
+  expect(stateOf(done.id), report()).toMatchObject({ sessions_done: 1, ended_early: true });
+  if (doneBudget === null) throw new Error(`the first answer set no budget: ${JSON.stringify(stateOf(done.id))}`);
+  await expectSessions(cardOf(done.id), done.id, {
+    line: DONE_TODAY,
+    side: `1 במקום ${doneBudget}`,
+    dots: ['done', ...Array<string>(doneBudget - 1).fill('faded')],
+  });
   await expectLabel(practice(done.id), 'לתרגל עוד');
-  const next = stateOf(resting.id)?.next_practice_in;
+  const next = stateOf(resting.id).next_practice_in;
   expect(next, report()).toBeGreaterThan(1);
   await showCard(page, resting.id);
   await expectLabel(
     page.getByTestId(`target-rest-${resting.id}`),
     `היום אין תרגול לשיעורי הבית. התרגול הבא בעוד ${next} ימים`,
   );
-  await expect(page.getByTestId(`target-today-${resting.id}`)).toHaveCount(0);
+  await expect(page.getByTestId(`target-sessions-${resting.id}`)).toHaveCount(0);
   await expectLabel(practice(resting.id), 'לתרגל עוד');
 
   // 4. The exam's screen says the same, and offers no change: the date has come. Nothing is
@@ -680,7 +756,8 @@ test('home orders its paths: the exam due today first with good luck, then work 
   await showCard(page, exam.id);
   await page.getByTestId(`target-row-${exam.id}`).click();
   await expectLabel(page.getByTestId('target-countdown'), 'הבוחן היום');
-  await expect(page.getByTestId('target-today')).toHaveCount(0);
+  await expectReadiness(screenHeader(page), summaryOf(exam.id));
+  await expect(screenHeader(page).getByTestId(`target-sessions-${exam.id}`)).toHaveCount(0);
   const [examOnly] = exam.words;
   await expect(page.getByTestId('target-group-all').getByTestId(`target-word-${examOnly.gloss_id}`), report()).toBeVisible();
   await expect(page.getByTestId('target-group-owed')).toHaveCount(0);

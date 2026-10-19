@@ -652,6 +652,31 @@ describe('phase 37: answers and introductions on a day', () => {
     expect(await read((repo) => repo.findAnswersOn(enrollmentOf('u_2'), D2))).toEqual([]);
   });
 
+  // Phase 65 (spec D7.1). The budget's miss rate reads the answers of the enrollment's last
+  // practice days: the days its ended sessions hold an answer on, up to the day asked about.
+  it('reads the answers of the last practice days up to a day: no later day, no open session, no day without an answer', async () => {
+    const a = await savedWord('apple', 'תפוח');
+    const b = await savedWord('bread', 'לחם');
+    const c = await savedWord('cheese', 'גבינה');
+    const d = await savedWord('dates', 'תמרים');
+    await playTyped([a], '2026-10-07', ['exact']);
+    const s1 = await playTyped([b], '2026-10-08', ['wrong']);
+    // Skipped before any answer: a day with no practice.
+    await playTyped([c], '2026-10-09', []);
+    const s2 = await playTyped([c, a], D1, ['exact', 'near_miss']);
+    const s3 = await playTyped([d], D2, ['exact']);
+    await playTyped([a], '2026-10-12', ['wrong']);
+    await playTyped([b], 'open', ['exact']);
+    expect(await read((repo) => repo.findRecentAnswers(E, D2, 3))).toEqual([
+      { glossId: b.glossId, sessionId: s1, type: 'typed_translation', verdict: 'wrong', targetId: null },
+      { glossId: c.glossId, sessionId: s2, type: 'typed_translation', verdict: 'exact', targetId: null },
+      { glossId: a.glossId, sessionId: s2, type: 'typed_translation', verdict: 'near_miss', targetId: null },
+      { glossId: d.glossId, sessionId: s3, type: 'typed_translation', verdict: 'exact', targetId: null },
+    ]);
+    await seedUser(t.db, 'u_2');
+    expect(await read((repo) => repo.findRecentAnswers(enrollmentOf('u_2'), D2, 3))).toEqual([]);
+  });
+
   // Phase 57 (spec D1). A target path's session's answers name its target.
   it("names each answer's path", async () => {
     const a = await savedWord('apple', 'תפוח');

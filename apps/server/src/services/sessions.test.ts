@@ -13,6 +13,8 @@ import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { TargetRepo } from '../repo/targets';
+import type { TargetBudgetRepo } from '../repo/targetBudgets';
+import type { TargetReadinessRepo } from '../repo/targetReadiness';
 import type { TargetSkillRepo } from '../repo/targetSkills';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
@@ -46,6 +48,8 @@ describe('repos', () => {
       transition: notStubbed,
       findLatest: notStubbed,
       findAnswersOn: notStubbed,
+      findRecentAnswers: notStubbed,
+      countCompletedOn: notStubbed,
       findIntroducedOn: notStubbed,
       // Phase 34 (spec D9).
       resolveRetry: notStubbed,
@@ -335,6 +339,8 @@ describe('repos', () => {
         reminders: stub<ReminderRepo>({}),
         target: stub<TargetRepo>({}),
         targetSkills: stub<TargetSkillRepo>({}),
+        targetReadiness: stub<TargetReadinessRepo>({}),
+        targetBudgets: stub<TargetBudgetRepo>({}),
         // Phase 43 (spec D3). The one job an answer may ask for: the next session in stock.
         jobs,
       });
