@@ -24,7 +24,7 @@ const row = (memory: MemoryState, over: Partial<ReadinessRow> = {}): ReadinessRo
 const rowsOf = (glossId: string, dims: readonly Dimension[], r: ReadinessRow) => dims.map((dimension) => ({ glossId, dimension, row: r }));
 
 const read = (over: Partial<Parameters<typeof readinessSummary>[0]> = {}) =>
-  readinessSummary({ kind: 'homework', dueOn: DUE, today: TODAY, words: [], rows: [], memory: [], firstToday: [], ...over });
+  readinessSummary({ kind: 'homework', dueOn: DUE, today: TODAY, plan: 'done', words: [], rows: [], memory: [], firstToday: [], ...over });
 
 describe('readinessSummary (spec D1, D4)', () => {
   it("counts a homework word on write, spell and say, in the check's order, each from its row", () => {
@@ -162,6 +162,16 @@ describe('readinessSummary: practice more adds little (spec D9)', () => {
     const spent = row(AT_84, { day: TODAY, bonusUsed: 2 });
     const summary = read({ words: [{ glossId: 'g1', live: SILENT }], rows: rowsOf('g1', SILENT, spent) });
     expect(summary.practiceMoreLittle).toBe(true);
+  });
+
+  it('is false while the plan still owes work, every bonus spent: the next session asks it (spec D7.8)', () => {
+    const spent = row(AT_84, { day: TODAY, bonusUsed: 2 });
+    const words = [{ glossId: 'g1', live: SILENT }];
+    const rows = rowsOf('g1', SILENT, spent);
+    expect(read({ plan: 'owed', words, rows }).practiceMoreLittle).toBe(false);
+    // A day with nothing owed, done or resting, asks.
+    expect(read({ plan: 'done', words, rows }).practiceMoreLittle).toBe(true);
+    expect(read({ plan: 'rest', words, rows }).practiceMoreLittle).toBe(true);
   });
 
   it('is false while a bonus is left on a skill that is far from 100', () => {

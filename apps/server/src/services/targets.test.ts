@@ -1156,13 +1156,21 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
     expect(read.readiness_start_pct).toBe(25);
   });
 
-  it('says more practice adds little only once every skill has had its first try today and both bonuses (spec D9)', async () => {
-    const little = async (row: Partial<ReadinessRow>) =>
+  it('says more practice adds little only once every skill has had its first try today and both bonuses, and the plan owes nothing (spec D9, D7.8)', async () => {
+    const little = async (row: Partial<ReadinessRow>, plan: 'owed' | 'done' = 'done') =>
       (
         await world({
           saved: ['g_sole'],
           targets: [target({ words: ['g_sole'] })],
           readiness: readinessRows('g_sole', WRITE_SPELL, fading, row),
+          // Started two days ago, every skill at its full points: the plan owes nothing today.
+          // Else the word is still to start, which the plan owes.
+          ...(plan === 'done'
+            ? {
+                startedOn: { g_sole: '2026-10-13' },
+                skills: ALL_SKILLS.map((dimension) => ({ targetId: 't1', glossId: 'g_sole', dimension, halves: 20, sessionId: null, day: null })),
+              }
+            : {}),
         }).service.getTarget(OWNER, 't1')
       ).practice_more_little;
 
@@ -1170,6 +1178,8 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
     expect(await little({})).toBe(false);
     expect(await little({ day: TODAY, bonusUsed: 1 })).toBe(false);
     expect(await little({ day: TODAY, bonusUsed: 2 })).toBe(true);
+    // Every bonus spent, but the plan still owes work: the next session asks it, and can add more.
+    expect(await little({ day: TODAY, bonusUsed: 2 }, 'owed')).toBe(false);
   });
 
   it('is owed before the budget is met and done once it is, a word still owed; the budget is the offer', async () => {

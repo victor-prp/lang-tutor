@@ -39,12 +39,17 @@ const percent = (chance: number) => Math.floor(100 * chance);
  * first line today instead, where it has one. Spec D3.7: the rows freeze on the date by
  * themselves (the rule ignores answers from it on), but the main memory does not, and a review
  * on or after the date reads as certain; so from the date on, a memory last moved on or after it
- * is not read (its eve's value is gone): the skill reads as no state.
+ * is not read (its eve's value is gone): the skill reads as no state. Spec D9, D7.8: more practice
+ * adds little only when the plan owes nothing today (else the next session asks owed work, which
+ * can add more) and even every right answer still countable today would add under
+ * READINESS_LITTLE points (readinessGainBound, an upper bound).
  */
 export function readinessSummary(input: {
   kind: ReadinessKind;
   dueOn: string;
   today: string;
+  /** The plan's state today (targetDay's). */
+  plan: TargetDay['state'];
   /** The target's words, each with its live skills. */
   words: readonly { glossId: string; live: readonly Dimension[] }[];
   /** The target's readiness rows. */
@@ -80,6 +85,7 @@ export function readinessSummary(input: {
     readinessStartPct: readinessPct(counted.map((word) => wordChance(word.skills.map((skill) => skill.start)))),
     readyCount: counted.filter((word) => percent(word.chance) >= READINESS_WORD_READY).length,
     practiceMoreLittle:
+      input.plan !== 'owed' &&
       readinessGainBound(
         counted.map((word) => word.skills.map((skill) => skill.row)),
         today,

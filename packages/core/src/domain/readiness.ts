@@ -141,7 +141,26 @@ export function readinessPct(wordChances: readonly number[]): number {
   );
 }
 
-/** The most readiness one more right on every skill today could add, in points. */
+/** A skill's row after every right answer still countable today: a first right when it has no
+ *  answer today, then each bonus left (READINESS_BONUS_PER_DAY at most). */
+function withEveryRight(
+  row: ReadinessRow | null,
+  today: string,
+  dueOn: string,
+  kind: ReadinessKind,
+): ReadinessRow | null {
+  let at = row;
+  // A first right and the day's bonuses: applyReadiness answers null past them.
+  for (let i = 0; i <= READINESS_BONUS_PER_DAY; i++) {
+    const next = applyReadiness(at, 3, today, dueOn, kind);
+    if (next === null) break;
+    at = next.row;
+  }
+  return at;
+}
+
+/** Spec D9. The most readiness more practice today could add, in points: an upper bound, with
+ *  every skill given every right answer still countable today (withEveryRight). */
 export function readinessGainBound(
   words: readonly (readonly (ReadinessRow | null)[])[],
   today: string,
@@ -155,10 +174,7 @@ export function readinessGainBound(
     words.map((skills) =>
       wordChance(
         skills.map((r) =>
-          skillChance(
-            applyReadiness(r, 3, today, dueOn, kind)?.row ?? r,
-            dueOn,
-          ),
+          skillChance(withEveryRight(r, today, dueOn, kind), dueOn),
         ),
       ),
     ),

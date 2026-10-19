@@ -160,6 +160,7 @@ export function createTargetService({
         kind: target.kind,
         dueOn: target.dueOn,
         today,
+        plan: day.state,
         words: shown.map((glossId) => ({ glossId, live: liveOf.get(glossId) ?? [] })),
         rows: readinessRows.filter((row) => row.targetId === target.id),
         memory,
