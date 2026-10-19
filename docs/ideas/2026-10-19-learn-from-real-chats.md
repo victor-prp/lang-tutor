@@ -3,9 +3,8 @@
 - **Status:** parked on 2026-10-19. Too early: there are no real users yet.
 - **Revisit when:** there are real users, and either they ask for help with their own chats or
   Victor finds himself sharing WhatsApp messages into the app every day.
-- **Research:** `docs/superpowers/research/reports/Messenger language learning apps.md`, with its
-  notes in `docs/superpowers/research/research_notes/Messenger language learning apps/`
-  (October 2026, competitive landscape and integration routes).
+- **Research:** a competitive landscape and the integration routes, researched on 2026-10-19.
+  The findings are summarised below; the full report was not kept.
 
 ## The idea
 
