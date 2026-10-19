@@ -32,6 +32,15 @@ export class AnswerKindMismatch extends Error {
   }
 }
 
+// Phase 66 (spec D2). An explanation asked for a card held for its second try:
+// the text that will be graded is not known yet.
+export class RetryPending extends Error {
+  constructor(readonly questionId: string) {
+    super(`question ${questionId} waits for its second try`);
+    this.name = 'RetryPending';
+  }
+}
+
 // Phase 39 (spec D10). A typed answer written in another alphabet than the card's
 // answer language: refused ungraded, the card stays as it was.
 export class WrongScript extends Error {

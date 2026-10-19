@@ -69,6 +69,7 @@ export function createFakeAppDeps(): AppDeps {
     submitAnswer: unreachable,
     answerBySpeech: unreachable,
     answerJudged: unreachable,
+    explainAnswer: unreachable,
     answerText: unreachable,
     prepareSession: unreachable,
     failPreparation: unreachable,

@@ -3,7 +3,7 @@ import { isChoice, type ChoiceQuestion, type QuestionType } from '@lang-tutor/co
 import { asc, eq } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
-import { answerTaps, answers, pronunciationScores, questions, sessionQuestions } from '../../src/db/schema';
+import { answerExplanations, answerTaps, answers, pronunciationScores, questions, sessionQuestions } from '../../src/db/schema';
 import { findGap } from '../../src/domain/cloze';
 import { NOTHING_GENERATED, generatedContent, type Generated, type QuestionContent } from '../../src/domain/distractors';
 import { LANGUAGES } from '../../src/domain/languages';
@@ -135,6 +135,21 @@ export async function insertListSession(
 export async function readStoredAnswers(db: Db, sessionId: string) {
   const record = await withTx(db, (tx) => createSessionRepo(tx).loadSession(sessionId));
   return record?.answers ?? [];
+}
+
+/** Phase 66 (spec D2). A session's stored explanations, in position order, as
+ *  route tests read them: they may not reach past composition for a repository. */
+export async function readExplanations(db: Db, sessionId: string) {
+  return db
+    .select({
+      position: answerExplanations.position,
+      text: answerExplanations.text,
+      corrected: answerExplanations.corrected,
+      mistakes: answerExplanations.mistakes,
+    })
+    .from(answerExplanations)
+    .where(eq(answerExplanations.sessionId, sessionId))
+    .orderBy(asc(answerExplanations.position));
 }
 
 /** Phase 50 (spec D3). Every stored pronunciation score, as route tests read

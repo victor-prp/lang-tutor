@@ -44,6 +44,7 @@ import { createSessionService, type SessionService } from './services/sessions';
 import { createTargetService, type TargetService } from './services/targets';
 import type { SpeechTranscriber } from './services/speech';
 import type { Repos } from './services/transaction';
+import { EXPLAIN_THINKING } from './domain/explain';
 import { TRANSLATION_JUDGE_THINKING } from './domain/judge';
 import { POINT_CHECK_THINKING, SESSION_GENERATION_THINKING } from './domain/jobs';
 import { createTranslationService, type TranslationService } from './services/translations';
@@ -351,6 +352,18 @@ export function createServerDeps(io: {
     timeoutMs: io.judgeTimeoutMs,
     thinkingBudget: TRANSLATION_JUDGE_THINKING,
   });
+  // Phase 66 (spec D2). The explainer: the judge's budget, and more thinking, since
+  // nothing waits on it.
+  const explainer: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    onCall,
+    now: io.now,
+    timeoutMs: io.judgeTimeoutMs,
+    thinkingBudget: EXPLAIN_THINKING,
+  });
 
   // Phase 29 (spec D16). The one place that names both the Resend provider and
   // the SendCode contract it satisfies (ADR 0001 R11).
@@ -402,6 +415,7 @@ export function createServerDeps(io: {
       transcriber,
       judge,
       translationJudge,
+      explainer,
       soundAlikeThreshold: io.soundAlikeThreshold,
     }),
     questionTypes: createQuestionTypesService({ transaction, logger: io.logger }),

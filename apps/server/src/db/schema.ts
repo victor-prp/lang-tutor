@@ -1237,6 +1237,27 @@ export const answerTaps = pgTable(
   ],
 );
 
+// Phase 66 (spec D2). What the explain call said about a sentence translation
+// card's final text: the learner's sentence minimally corrected, and each mistake
+// with its fix and why. Information for the learner, never read by grading,
+// memory, readiness or the recompute. One per answer: the first stored stands.
+export const answerExplanations = pgTable(
+  'answer_explanations',
+  {
+    sessionId: uuid('session_id').notNull(),
+    position: integer('position').notNull(),
+    // The text explained: the retry's when the card had one, else the answer's.
+    text: text('text').notNull(),
+    corrected: text('corrected').notNull(),
+    mistakes: jsonb('mistakes').$type<{ wrong: string; right: string; why: string }[]>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.sessionId, t.position] }),
+    foreignKey({ columns: [t.sessionId, t.position], foreignColumns: [answers.sessionId, answers.position] }).onDelete('cascade'),
+  ],
+);
+
 /**
  * Phase 20, keyed on the gloss since phase 31. What one ended session did to
  * each progress row of each saved gloss it practised: all five dimensions,

@@ -1,4 +1,4 @@
-import type { AnswerRecord, Enrollment, LlmDistractors, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
+import type { AnswerRecord, Enrollment, LlmDistractors, SentenceTranslationQuestion, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
 import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/schemas';
 import {
   LIVE_DIMENSIONS,
@@ -76,6 +76,7 @@ import {
 } from '../domain/distractors';
 import { candidateItems, gapCheckItem, gapFaults, pointFaults, rewriteItems, rewriteOthers, type GapFault, type GapJudged } from '../domain/gapRewrite';
 import { familyChanges, isEmptyFamilyWrite } from '../domain/glossFamilyRecord';
+import { buildExplainPrompt, explainRuleResult, parseExplain, type Explanation } from '../domain/explain';
 import { buildFitJudgePrompt, judgePrompt, parseFitJudge, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import {
   ACCEPT_RENDERING,
@@ -122,6 +123,7 @@ import {
   NoSavedWords,
   OptionOutOfRange,
   QuestionDesynced,
+  RetryPending,
   SessionNotFound,
   SessionNotReady,
   SessionNotSkippable,
@@ -255,6 +257,7 @@ export function createSessionService({
   transcriber,
   judge,
   translationJudge,
+  explainer,
   soundAlikeThreshold,
 }: {
   transaction: Transaction;
@@ -282,6 +285,9 @@ export function createSessionService({
   /** Phase 45 (spec D3). The sentence translation's judge: it thinks before it
    *  answers, which a dropped detail needs, and the meaning judge does not. */
   translationJudge: LlmClient;
+  /** Phase 66 (spec D2). Explains a translation card's answer, on its own client:
+   *  nothing waits on it, so it thinks longer than the judge. */
+  explainer: LlmClient;
   /** Phase 50 (spec D4). The pronunciation score at which an unheard
    *  transcript is the card's word; its pairs are scored on `judge`. */
   soundAlikeThreshold: number;
@@ -1355,6 +1361,76 @@ export function createSessionService({
       // the first, so report the verdict stored for this card, not our own.
       const stored = session.answers.find((a) => a.question_id === input.questionId);
       return { verdict: (stored && judgedVerdictOf(stored, retry ? 'retry' : 'answer')) ?? verdict, session };
+    },
+
+    /**
+     * Phase 66 (spec D2). The mistakes in a sentence translation card's final
+     * text, for the learner to read: they grade nothing. The text is the
+     * record's, the retry's when there was one. A stored explanation, an empty
+     * text and the reference as typed cost no call. Otherwise the model is called
+     * outside any transaction (ADR 0001 R8) and what it says is stored, the first
+     * stored standing, so two overlapping requests answer the same.
+     */
+    explainAnswer: async (actorUserId: string, sessionId: string, input: { questionId: string }): Promise<Explanation> => {
+      type Checked =
+        | { done: Explanation }
+        | {
+            question: SentenceTranslationQuestion;
+            position: number;
+            text: string;
+            context: JudgeContext;
+            owner: { enrollmentId: string; userId: string };
+          };
+      const checked = await transaction(async (repos): Promise<Checked> => {
+        const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
+        const loaded = await repos.session.loadSession(sessionId);
+        if (!loaded) throw new SessionNotFound(sessionId);
+        const position = loaded.answers.findIndex((a) => a.question_id === input.questionId);
+        const question = loaded.questions[position];
+        const answer = loaded.answers[position];
+        if (!question || !answer || question.type !== 'sentence_translation') throw new AnswerKindMismatch(input.questionId);
+        if (answer.retry_state === 'pending') throw new RetryPending(input.questionId);
+        const stored = await repos.session.findExplanation(sessionId, position);
+        if (stored) return { done: stored };
+        const text = answer.retry_answer_string ?? answer.answer_string;
+        const ruled = explainRuleResult(question.sentence, text);
+        if (ruled) return { done: ruled };
+        const found = await repos.question.findJudgeContext(question.id);
+        if (!found) throw new SessionNotFound(sessionId);
+        return {
+          question,
+          position,
+          text,
+          context: { language: enrolled.target_language as LanguageCode, explanation: enrolled.source_language as LanguageCode, ...found },
+          owner: { enrollmentId: enrolled.id, userId: enrolled.user_id },
+        };
+      });
+      if ('done' in checked) return checked.done;
+
+      const started = now();
+      let explained: Explanation | null;
+      try {
+        const raw = await explainer({
+          ...buildExplainPrompt(checked.question, checked.context, checked.text),
+          record: { kind: 'sentence_explain', sessionId, ...checked.owner },
+        });
+        explained = parseExplain(raw);
+        if (explained === null) throw new LlmUnavailable('the explanation was unreadable');
+      } catch (error) {
+        logger.info({
+          event: 'answer_explain_failed',
+          session_id: sessionId,
+          explain_ms: now() - started,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+      logger.info({ event: 'answer_explained', session_id: sessionId, mistakes: explained.mistakes.length, explain_ms: now() - started });
+      const answered = explained;
+      return transaction(async (repos) => {
+        await repos.session.insertExplanation(sessionId, checked.position, { text: checked.text, ...answered });
+        return (await repos.session.findExplanation(sessionId, checked.position)) ?? answered;
+      });
     },
 
     /**
