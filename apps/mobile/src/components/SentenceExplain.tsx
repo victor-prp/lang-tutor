@@ -70,7 +70,7 @@ export function SentenceExplain({ sessionId, questionId }: Props) {
                     {mistake.wrong === '' ? null : '  →  '}
                     <Text style={styles.right}>{mistake.right}</Text>
                   </Text>
-                  <Text style={styles.why}>{mistake.why}</Text>
+                  <Text style={styles.why}>{strings.explainWhy(mistake.why)}</Text>
                 </View>
               ))}
             </>

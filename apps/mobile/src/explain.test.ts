@@ -51,6 +51,14 @@ describe('explainPanel (phase 66 D3): what a tap shows', () => {
   });
 });
 
+describe('the reason line (phase 66 review I1)', () => {
+  // writingDirection is iOS-only; Android takes a paragraph's direction from its
+  // first strong letter, so a reason that opens with the Italian word read LTR.
+  it('opens with a right-to-left mark, so Android lays it out right to left', () => {
+    expect(strings.explainWhy('tavolo הוא שם עצם בזכר')).toBe('\u200Ftavolo הוא שם עצם בזכר');
+  });
+});
+
 describe('the explain strings (phase 66 D3)', () => {
   it('words them exactly', () => {
     expect(strings.explainButton).toBe('הסבר');
