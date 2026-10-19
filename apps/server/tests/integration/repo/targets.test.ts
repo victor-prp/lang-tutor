@@ -65,6 +65,7 @@ const pathRow = (targetId: string, over: Partial<SessionTargetRow> = {}): Sessio
   wordCount: 8,
   fsrsReadyCount: 2,
   owedGlossIds: ['g_a', 'g_b'],
+  pastBudget: false,
   ...over,
 });
 
@@ -399,8 +400,8 @@ describe("a target path's session row", () => {
     await repo((r) => r.insertSessionTarget(first, pathRow(a.id)));
     await repo((r) => r.insertSessionTarget(second, pathRow(b.id, { capHalves: 20, owedGlossIds: [] })));
 
-    expect(await repo((r) => r.findSessionTarget(first, a.id))).toEqual({ capHalves: 7, owedGlossIds: ['g_a', 'g_b'] });
-    expect(await repo((r) => r.findSessionTarget(second, b.id))).toEqual({ capHalves: 20, owedGlossIds: [] });
+    expect(await repo((r) => r.findSessionTarget(first, a.id))).toEqual({ capHalves: 7, owedGlossIds: ['g_a', 'g_b'], pastBudget: false });
+    expect(await repo((r) => r.findSessionTarget(second, b.id))).toEqual({ capHalves: 20, owedGlossIds: [], pastBudget: false });
     expect(await repo((r) => r.findSessionTarget(first, b.id))).toBeUndefined();
     const stored = await t.db.execute(sql`
       select days_left, cap_halves, readiness_pct, ready_count, word_count, fsrs_ready_count, wish, slots, picked, reason
@@ -408,6 +409,24 @@ describe("a target path's session row", () => {
     expect(stored.rows).toEqual([
       { days_left: 5, cap_halves: 7, readiness_pct: 18, ready_count: 1, word_count: 8, fsrs_ready_count: 2, wish: null, slots: null, picked: null, reason: null },
     ]);
+  });
+
+  // Phase 65b (spec D2).
+  it('finds the target whose stock was chosen past its budget, with its owed words, and no other', async () => {
+    const a = await make();
+    const b = await make();
+    // Each a stock on its own target's path: one per path (ADR 0014).
+    const past = await stock('u_1', a.id);
+    const owedOnly = await stock('u_1', b.id);
+    await repo((r) => r.insertSessionTarget(past, pathRow(a.id, { pastBudget: true, owedGlossIds: ['g_a'] })));
+    await repo((r) => r.insertSessionTarget(owedOnly, pathRow(b.id)));
+
+    expect(await repo((r) => r.findPastBudget(past, [b.id, a.id]))).toEqual({ targetId: a.id, owedGlossIds: ['g_a'] });
+    expect(await repo((r) => r.findSessionTarget(past, a.id))).toEqual({ capHalves: 7, owedGlossIds: ['g_a'], pastBudget: true });
+    expect(await repo((r) => r.findPastBudget(owedOnly, [b.id]))).toBeUndefined();
+    expect(await repo((r) => r.findPastBudget(past, [b.id]))).toBeUndefined();
+    expect(await repo((r) => r.findPastBudget(past, []))).toBeUndefined();
+    expect(await repo((r) => r.findPastBudget('nope', [a.id]))).toBeUndefined();
   });
 
   it('finds nothing for an unknown or malformed id, nor for a phase 53 split row, which recorded no cap', async () => {

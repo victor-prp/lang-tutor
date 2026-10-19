@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { Dimension, GradableAnswer } from '@lang-tutor/core/domain';
 
 import { LADDER_SLOTS } from './chooseConstants';
-import { DEFAULT_MISS_RATE, MISS_RATE_CAP, PLAY_SESSIONS_MAX, budgetSessions, missRateOf, playTodayForward } from './targetBudget';
+import { DEFAULT_MISS_RATE, MISS_RATE_CAP, PLAY_SESSIONS_MAX, budgetSessions, missRateOf, pastBudget, playTodayForward } from './targetBudget';
 import type { TargetWordInput } from './targetDay';
 import type { TargetPickInput } from './targetPicker';
 import type { TargetSkillRow } from './targetSkills';
@@ -163,5 +163,22 @@ describe('missRateOf (spec D7.1)', () => {
     expect(missRateOf(of(19, 0, [{ type: 'typed_translation', verdict: 'near_miss' }]))).toBe(1 / 20);
     // Intro answers count in neither part.
     expect(missRateOf(of(41, 4, [intro, intro]))).toBe(4 / 45);
+  });
+});
+
+describe('pastBudget (phase 65b D2)', () => {
+  it('is false with no budget set yet', () => {
+    expect(pastBudget({ budget: null, done: 7, inFlight: true })).toBe(false);
+  });
+
+  it('is false while sessions are left, counting the one in flight', () => {
+    expect(pastBudget({ budget: 5, done: 3, inFlight: false })).toBe(false);
+    expect(pastBudget({ budget: 5, done: 3, inFlight: true })).toBe(false);
+  });
+
+  it('is true once the sessions done, and the one in flight, meet the budget', () => {
+    expect(pastBudget({ budget: 5, done: 4, inFlight: true })).toBe(true);
+    expect(pastBudget({ budget: 5, done: 5, inFlight: false })).toBe(true);
+    expect(pastBudget({ budget: 5, done: 6, inFlight: true })).toBe(true);
   });
 });

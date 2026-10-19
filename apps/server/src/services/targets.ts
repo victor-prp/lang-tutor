@@ -10,7 +10,7 @@ import type {
 import { daysBetween } from '../domain/progress';
 import { targetDay } from '../domain/targetDay';
 import { activeOn, openOn } from '../domain/targets';
-import { readinessSummary, todaySummary } from '../domain/targetSummary';
+import { asksBeforePracticeMore, readinessSummary, todaySummary } from '../domain/targetSummary';
 import { InvalidTarget, TargetClosed, TargetNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { TargetRow } from '../repo/targets';
@@ -166,7 +166,6 @@ export function createTargetService({
         kind: target.kind,
         dueOn: target.dueOn,
         today,
-        plan: day.state,
         words: shown.map((glossId) => ({ glossId, live: liveOf.get(glossId) ?? [] })),
         rows: readinessRows.filter((row) => row.targetId === target.id),
         memory,
@@ -211,7 +210,12 @@ export function createTargetService({
         ready_count: readiness.readyCount,
         readiness_pct: readiness.readinessPct,
         readiness_start_pct: readiness.readinessStartPct,
-        practice_more_little: readiness.practiceMoreLittle,
+        practice_more_little: asksBeforePracticeMore({
+          kind: target.kind,
+          daysLeft: daysBetween(today, target.dueOn),
+          readyCount: readiness.readyCount,
+          wordCount: words.length,
+        }),
         today: {
           state: todays.state,
           done: day.done,

@@ -2,11 +2,9 @@ import { describe, expect, it } from "@jest/globals";
 import { retrievability, review } from "./memory";
 import type { Dimension } from "./progress";
 import {
-  READINESS_LITTLE,
   applyReadiness,
   countedSkills,
   readinessFromMemory,
-  readinessGainBound,
   readinessPct,
   skillChance,
   wordChance,
@@ -195,61 +193,5 @@ describe("aggregation", () => {
   it("readinessPct floors 100 times the mean", () => {
     expect(readinessPct([0.46, 0.89])).toBe(67);
     expect(readinessPct([])).toBe(0);
-  });
-});
-
-describe("readinessGainBound", () => {
-  it("is 0 when every skill already has its first review and both bonuses today", () => {
-    const row: ReadinessRow = { ...first(3).row, bonusUsed: 2 };
-    expect(readinessGainBound([[row, row]], D1, DUE, "homework")).toBe(0);
-  });
-  it("is positive for a word whose skill has no row", () => {
-    expect(readinessGainBound([[null]], D1, DUE, "homework")).toBeGreaterThan(
-      0,
-    );
-  });
-
-  /** Readiness of one word of one skill, its row put through `grades` rights today. */
-  const pctAfter = (row: ReadinessRow | null, rights: number) => {
-    let at = row;
-    for (let i = 0; i < rights; i++)
-      at = applyReadiness(at, 3, D1, DUE, "homework")!.row;
-    return readinessPct([skillChance(at, DUE)]);
-  };
-
-  it("counts, for a skill with no answer today, its first right and both bonuses", () => {
-    // Never answered: a first right, then two bonuses, all still countable today.
-    expect(readinessGainBound([[null]], D1, DUE, "homework")).toBe(
-      pctAfter(null, 3) - pctAfter(null, 0),
-    );
-    // Answered on an earlier day: the same three.
-    const yesterday = applyReadiness(null, 3, "2026-10-16", DUE, "homework")!
-      .row;
-    expect(readinessGainBound([[yesterday]], D1, DUE, "homework")).toBe(
-      pctAfter(yesterday, 3) - pctAfter(yesterday, 0),
-    );
-    expect(pctAfter(yesterday, 3)).toBeGreaterThan(pctAfter(yesterday, 1));
-  });
-
-  it("counts, for a skill with one bonus left today, that one", () => {
-    const one = applyReadiness(first(3).row, 3, D1, DUE, "homework")!.row;
-    expect(one.bonusUsed).toBe(1);
-    const bound = readinessGainBound([[one]], D1, DUE, "homework");
-    expect(bound).toBe(pctAfter(one, 1) - pctAfter(one, 0));
-    expect(bound).toBeGreaterThan(0);
-  });
-
-  it("is not little while one word of fifteen, missed today, has both bonuses left (I2)", () => {
-    // Fourteen words with their first right and both bonuses spent today: nothing more to add.
-    let spent = first(3).row;
-    spent = applyReadiness(spent, 3, D1, DUE, "homework")!.row;
-    spent = applyReadiness(spent, 3, D1, DUE, "homework")!.row;
-    expect(spent.bonusUsed).toBe(2);
-    // One missed first today, its two bonuses unused: two rights still lift it.
-    const missed = first(1).row;
-    const words = [...Array.from({ length: 14 }, () => [spent]), [missed]];
-    expect(readinessGainBound(words, D1, DUE, "homework")).toBeGreaterThanOrEqual(
-      READINESS_LITTLE,
-    );
   });
 });

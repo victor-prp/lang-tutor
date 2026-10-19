@@ -5,7 +5,7 @@ import { SESSION_LENGTH, type Dimension, type QuestionType } from '@lang-tutor/c
 import type { ChosenPick } from './choose';
 import { LADDER_SLOTS, NEW_PER_SESSION, TARGET_SPEAKING_PER_SESSION } from './chooseConstants';
 import { targetDay, type TargetDay, type WordDay } from './targetDay';
-import { chooseTargetPicks, stockServes, stockToCheck, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
+import { chooseTargetPicks, owedWords, stockServes, stockToCheck, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
 import type { TargetSkillRow } from './targetSkills';
 
 const WR: Dimension = 'written_receptive';
@@ -380,6 +380,50 @@ describe('chooseTargetPicks, practice more', () => {
     );
     const picks = pick(day, { inFlight: [{ glossId: 'g0', type: 'typed_translation' }] });
     expect(picks.map((p) => p.glossId)).toEqual(['g1', 'g0']);
+  });
+});
+
+// Phase 65b (spec D2). Past the day's budget a session asks the owed work first, then fills with
+// practice more, so a session never ends after one owed card.
+describe('chooseTargetPicks, past the budget', () => {
+  const day = dayOf(12, [
+    { id: 'g0', state: 'owed', halves: at(12, { [WP]: 8 }) },
+    { id: 'g1', state: 'done', halves: at(12) },
+    { id: 'g2', state: 'done', halves: at(12, { [SK]: 4 }) },
+    { id: 'g3', state: 'later' },
+  ]);
+
+  it('asks only the owed card in owed mode, as before the budget', () => {
+    expect(short(pick(day))).toEqual([['g0', WP, 2]]);
+  });
+
+  it('asks the owed card first, then the practice more cards, in one session', () => {
+    const picks = pick(day, { mode: 'past_budget' });
+    expect(short(picks)[0]).toEqual(['g0', WP, 2]);
+    expect(short(picks.slice(1))).toEqual(short(pick({ ...day, words: day.words }, { mode: 'more' })).filter(([id]) => id !== 'g0'));
+    expect(picks.map((p) => p.glossId)).toEqual(expect.arrayContaining(['g1', 'g2', 'g3']));
+  });
+
+  it('stays within a session: owed work and the fill share one slot count', () => {
+    const many = dayOf(
+      12,
+      Array.from({ length: 8 }, (_, i) => ({ id: `g${i}`, state: i < 4 ? ('owed' as const) : ('done' as const), halves: at(12, i < 4 ? { [WP]: 4, [SP]: 4 } : {}) })),
+    );
+    const owedOnly = pick(many);
+    const picks = pick(many, { mode: 'past_budget' });
+    expect(slotsOf(picks)).toBeLessThanOrEqual(SESSION_LENGTH);
+    expect(picks.length).toBeGreaterThan(owedOnly.length);
+    expect(picks.slice(0, owedOnly.length)).toEqual(owedOnly);
+  });
+
+  it('asks as practice more when nothing is owed', () => {
+    const done = dayOf(12, [{ id: 'g1', state: 'done', halves: at(12) }, { id: 'g3', state: 'later' }], 'done');
+    expect(pick(done, { mode: 'past_budget' })).toEqual(pick(done, { mode: 'more' }));
+  });
+
+  it("records the day's owed words for the stock's stale check, as owed mode does", () => {
+    expect(owedWords(day, 'past_budget')).toEqual(owedWords(day, 'owed'));
+    expect(owedWords(day, 'past_budget')).toEqual(['g0']);
   });
 });
 

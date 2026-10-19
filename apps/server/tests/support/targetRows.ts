@@ -198,3 +198,11 @@ export function readTargetBudgets(db: Db, targetId: string) {
     .where(eq(targetBudgets.targetId, targetId))
     .orderBy(asc(targetBudgets.day));
 }
+
+/** Phase 65b (spec D2). Records a target path's session as chosen past the day's budget, with the
+ *  owed words its stock recorded, as readTarget's row would. */
+export async function markPastBudget(db: Db, input: { sessionId: string; targetId: string; owedGlossIds: string[] }): Promise<void> {
+  await db.execute(sql`
+    insert into session_targets (session_id, target_id, days_left, ready_count, word_count, cap_halves, owed_gloss_ids, past_budget)
+    values (${input.sessionId}, ${input.targetId}, 5, 0, ${input.owedGlossIds.length}, 20, ${`{${input.owedGlossIds.join(',')}}`}::text[], true)`);
+}

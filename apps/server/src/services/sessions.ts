@@ -110,6 +110,7 @@ import { classifyTaps } from '../domain/taps';
 import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
+import { pastBudget } from '../domain/targetBudget';
 import { chooseTargetPicks, owedWords, stockServes, stockToCheck, type StockChoice } from '../domain/targetPicker';
 import { activeOn, readinessOf, recallOnDue } from '../domain/targets';
 import { tileEligible, tilesFor } from '../domain/tiles';
@@ -429,9 +430,18 @@ export function createSessionService({
     const picked = await readTargetPickInput(repos, enrolled, target, devices, today);
     if (!picked) return null;
     const { input } = picked;
-    const { day, glossIds, live, canSay, saved, memory, families } = picked.read;
+    const { day, glossIds, live, canSay, saved, memory, families, inFlight } = picked.read;
     let mode = input.mode;
-    let picks = chooseTargetPicks(input);
+    // Phase 65b (spec D2). Past the day's budget, counting the session in flight, a session asks
+    // the owed work first and fills the rest with practice more.
+    if (mode === 'owed') {
+      const budget = await repos.targetBudgets.find(target.id, today);
+      if (budget) {
+        const done = await repos.session.countCompletedOn(enrolled.id, target.id, today);
+        if (pastBudget({ budget: budget.sessions, done, inFlight })) mode = 'past_budget';
+      }
+    }
+    let picks = chooseTargetPicks({ ...input, mode });
     // Ruling T3-m. Owed work all asked by the session in flight: practice more instead.
     if (picks.length === 0 && mode === 'owed') {
       mode = 'more';
@@ -451,6 +461,7 @@ export function createSessionService({
       wordCount: glossIds.length,
       fsrsReadyCount: fsrsReady.length,
       owedGlossIds: owedWords(day, mode),
+      pastBudget: mode === 'past_budget',
     };
     return { path: target.id, at, today, saved: saved.filter((gloss) => glossIds.includes(gloss.glossId)), families, picks, row };
   }

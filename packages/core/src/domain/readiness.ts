@@ -33,8 +33,6 @@ export const READINESS_BONUS_PER_DAY = 2;
 export const READINESS_EXAM_HOLD = 0.5;
 /** A word at or above this percent is ready. */
 export const READINESS_WORD_READY = 90;
-/** A gain of at most this many points is "a little". */
-export const READINESS_LITTLE = 2;
 
 const COUNTED: Record<ReadinessKind, readonly Dimension[]> = {
   homework: ["written_productive", "spelling", "spoken_productive"],
@@ -139,45 +137,4 @@ export function readinessPct(wordChances: readonly number[]): number {
   return Math.floor(
     (100 * wordChances.reduce((s, c) => s + c, 0)) / wordChances.length,
   );
-}
-
-/** A skill's row after every right answer still countable today: a first right when it has no
- *  answer today, then each bonus left (READINESS_BONUS_PER_DAY at most). */
-function withEveryRight(
-  row: ReadinessRow | null,
-  today: string,
-  dueOn: string,
-  kind: ReadinessKind,
-): ReadinessRow | null {
-  let at = row;
-  // A first right and the day's bonuses: applyReadiness answers null past them.
-  for (let i = 0; i <= READINESS_BONUS_PER_DAY; i++) {
-    const next = applyReadiness(at, 3, today, dueOn, kind);
-    if (next === null) break;
-    at = next.row;
-  }
-  return at;
-}
-
-/** Spec D9. The most readiness more practice today could add, in points: an upper bound, with
- *  every skill given every right answer still countable today (withEveryRight). */
-export function readinessGainBound(
-  words: readonly (readonly (ReadinessRow | null)[])[],
-  today: string,
-  dueOn: string,
-  kind: ReadinessKind,
-): number {
-  const now = readinessPct(
-    words.map((skills) => wordChance(skills.map((r) => skillChance(r, dueOn)))),
-  );
-  const after = readinessPct(
-    words.map((skills) =>
-      wordChance(
-        skills.map((r) =>
-          skillChance(withEveryRight(r, today, dueOn, kind), dueOn),
-        ),
-      ),
-    ),
-  );
-  return after - now;
 }

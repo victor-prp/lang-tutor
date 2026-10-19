@@ -107,7 +107,9 @@ export async function recomputeProgress(db: Db): Promise<{ sessions: number }> {
       // Phase 57 (spec D4). recordTargetSkills in services/sessionEnd.ts, call for call.
       if (targets.length === 0) continue;
       const before = await targetSkills.findRows(targets.map((held) => held.id), glossIds);
-      const write = targetSessionWrite({ sessionId, day: evidence.day, targets, before, answers: evidence.answers });
+      const past = await target.findPastBudget(sessionId, targets.map((held) => held.id));
+      const planOnly = past && { targetId: past.targetId, glossIds: past.owedGlossIds };
+      const write = targetSessionWrite({ sessionId, day: evidence.day, targets, before, answers: evidence.answers, planOnly });
       await targetSkills.upsertRows(write.rows);
       await targetSkills.insertEvents(write.events, evidence.lastAnsweredAt);
       for (const started of write.started) await target.markStarted(started.targetId, started.glossIds, evidence.day);
