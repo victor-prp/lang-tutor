@@ -134,7 +134,8 @@ test('a learner adds English, switches both ways, and the choice survives signin
   await page.getByTestId('translate-back').click();
 
   // Every adding of a language is remembered; the last switch was to Russian.
-  await page.getByTestId('settings-tab').click();
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.getByTestId('profile-button').click();
   await page.getByTestId('sign-out-button').click();
   await expect(page.getByTestId('sign-in-email')).toBeVisible({ timeout: 30_000 });
   await signIn(page.request, 'e2e_switcher');

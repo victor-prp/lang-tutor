@@ -31,8 +31,9 @@ test('the four tabs reach each other, translate returns to its tab, and a sessio
   await expect(page.getByTestId('vocabulary-title')).toHaveText('המילים שלי');
   await page.getByTestId('profile-button').click();
   await expect(page.getByTestId('profile-username')).toHaveText('e2e_tabs_walk');
-  await page.getByTestId('settings-tab').click();
   await expect(page.getByTestId('sign-out-button')).toBeVisible();
+  await page.getByTestId('settings-tab').click();
+  await expect(page.getByTestId('app-version')).toBeVisible();
   await page.getByTestId('vocabulary-entry').click();
   await expect(page.getByTestId('vocabulary-title')).toBeVisible();
   await expect(page.getByTestId('vocabulary-entry')).toHaveAttribute('aria-selected', 'true');

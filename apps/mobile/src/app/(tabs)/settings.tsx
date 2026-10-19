@@ -5,28 +5,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Group, groupStyles } from '@/components/Group';
 import { useAppRelease } from '@/hooks/useAppUpdates';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useReminders } from '@/hooks/useReminders';
 import { mobileAppLine } from '@/release';
-import { unregisterWithin } from '@/startState';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
 /**
  * Phase 64 (spec D7). The הגדרות tab, how the app behaves: the practice reminders, About with
- * the release this phone runs (phase 32 D10, phase 49 D4), and sign-out in a group of its own.
+ * the release this phone runs (phase 32 D10, phase 49 D4). Sign-out is the account's, so it is אני's.
  */
 export default function SettingsTab() {
-  const { signOut } = useCurrentUser();
   const { release } = useAppRelease();
-  const reminders = useReminders();
-
-  async function onSignOut() {
-    // Phase 52 (spec D4). Before the session is cleared, so the call still carries it.
-    await unregisterWithin(reminders.unregister);
-    await signOut();
-    router.replace('/sign-in');
-  }
 
   return (
     <SafeAreaView style={styles.screen} edges={[]}>
@@ -60,12 +48,6 @@ export default function SettingsTab() {
             <Text style={styles.version} numberOfLines={1}>
               {mobileAppLine(release)}
             </Text>
-          </Pressable>
-        </Group>
-
-        <Group>
-          <Pressable accessibilityRole="button" testID="sign-out-button" onPress={onSignOut} style={groupStyles.row}>
-            <Text style={groupStyles.danger}>{strings.signOut}</Text>
           </Pressable>
         </Group>
       </ScrollView>
