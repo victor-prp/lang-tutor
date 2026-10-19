@@ -104,18 +104,20 @@ export function translationRuleVerdict(reference: string, text: string): TypedVe
  *  512 judged it wrong every time, at about 2.4 s a call. */
 export const TRANSLATION_JUDGE_THINKING = 512;
 
+/** Phase 66 (spec D1). Grades the practised word alone: mistakes elsewhere in the
+ *  sentence are domain/explain.ts's to show, and cost nothing. */
 export function buildTranslationJudgePrompt(question: SentenceTranslationQuestion, context: JudgeContext, answer: string) {
   const name = LANGUAGES[context.language].name;
   const source = LANGUAGES[context.explanation].name;
   const system = [
     `Your task: ${JUDGE_MARKER}. A ${source}-speaking learner of ${name} was shown a ${source} sentence and typed its translation into ${name}.`,
     'The word practised is word, in the sense of meaning. reference_translation is one good translation, not the only one.',
-    `Judge on conveying the ${source} sentence and on the practised word, in any form the sentence needs; ignore slips in other words, and small grammar slips that do not touch the practised word. Any other detail of the sentence changed or left out (a number, a person, a tense, an object, a quality, or how something is done, such as clearly, quickly or very) means it is not conveyed.`,
+    `Judge the practised word alone: whether the answer uses it, in this sense and in a form the ${source} sentence needs (its tense, person, number or gender). ignore everything else in the answer: mistakes in other words, their grammar, and details changed or missing elsewhere in the sentence are not judged here.`,
     'Return JSON only, matching the supplied schema, with one field, verdict:',
-    '- "right": the answer conveys the sentence and uses the practised word in a form the sentence needs.',
+    '- "right": the answer uses the practised word, in this sense, in a form the sentence needs.',
     '- "misspelled": as "right", but the practised word itself has a one-letter or accent slip. A slip in any other word is still "right".',
-    '- "other_word": the answer conveys the sentence but uses another word instead of it, one that keeps the meaning. Another word that changes the meaning is "wrong".',
-    '- "wrong": the meaning is missed, the answer is not a sentence, or the practised word is left out or used wrongly, including the wrong form.',
+    `- "other_word": the practised word is not used, but another word stands in the practised word's place and means the same there. Another word that does not mean the same is "wrong".`,
+    '- "wrong": the practised word is missing, used in another sense or used wrongly, including the wrong form; or the answer is not a sentence (the word alone, or a word or two) or not an attempt at this sentence.',
   ].join('\n');
   const user = JSON.stringify({
     hebrew_sentence: question.question,
