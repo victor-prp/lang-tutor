@@ -372,3 +372,39 @@ Made while planning, 2026-10-19 (my calls, under "go till PR"):
 - **R4.** Ruling: the 17–19 Oct replay is a core test over a fixture of the answers
   (`drafts/2026-10-19-readiness-grade-evidence/answers.json`, 368 answers in 44 sessions, lemma-keyed),
   not a day-simulation scenario: it needs only core's rule.
+
+Made while building, 2026-10-19 (my calls; nine tasks, each reviewed, a final review and one fix wave):
+
+- **R5.** Ruling: a budget written at a start adds the path's sessions already completed that learner day
+  (`target_budgets.done_before`; a session started yesterday and ended today is one), so "budget met" counts
+  the same sessions `sessions_done` does (T3-a).
+- **R6.** Ruling: a session started by its first answer (an older app, a bot, a quick tap before
+  `startSession` returns) sets the day's budget the same way `startSession` does (T9-b).
+- **R7.** Ruling: the budget's miss room is a bounded expected-drift factor, not cards: budget =
+  `ceil(allRightPlay / (1 − 2·min(missRate, 0.25)))` + done before, never below the all-right play (amends
+  D7.1; T5-b). With a miss a skill moves −4 or +4 a session, so the climb is 1/(1 − 2m) slower; the cap keeps a
+  promise at most twice the all-right play. A played miss rhythm (T5-a) kept hitting the same skill and sent a
+  30%+ learner to the 30-session bound. Measured, not gated: phase 37's learner fits the budget on 57 of 60 days
+  of the 14-day scenarios, 3 of 15 on the 3-day exam, 0 of 15 on phase 60's homework; a learner who never
+  misses fits everywhere.
+- **R8.** Ruling: the play credits a new word's ladder with its practice cards (`LADDER_PRACTICE`: multiple
+  choice, reverse choice, typed translation), as a real ladder session grades them; the intro stage stays
+  ungraded (T9-a). Without it a fresh target was budgeted 3 sessions and done in 1. With it, a one-session day
+  budgets 2 at any miss rate above 0, so a fresh target's first day often ends "1 במקום 2".
+- **R9.** Ruling: from the due date on, a skill with no readiness row whose main memory moved on or after the
+  date reads 0; one last moved before reads as on the eve (T4-a, D3.7).
+- **R10.** Ruling: a day whose budget is 0 (a rest day's practice) reads done and its sessions are bonus dots
+  (T4-c).
+- **R11.** Ruling: the card drops phase 57's separate praise sentence; "סיימת להיום ✓" on the sessions line says
+  it once (T6-a).
+- **R12.** Ruling: `practice_more_little` is an upper bound — every right answer still countable today (a first
+  right, then each bonus left) — and is false while the plan still owes work (D7.8). So a learner past the budget
+  may play one or two bonus sessions before the sheet appears.
+- **R13.** Ruling: the home list plays a target's day forward only while its plan owes work, and reads the
+  enrollment-wide inputs once per list.
+- **R14.** Ruling: existing targets need a progress recompute after the release: `target_readiness` starts
+  empty, and the first session would otherwise copy raw `gloss_memory` (R1). Readiness moves once, without an
+  answer, on the day it ships.
+- **R15.** Ruling: the "first event of the day" orders a target's readiness lines by their session's last answer,
+  then position; a session ending after one whose answers came later can misplace that day's gain label
+  (display only, parked).
