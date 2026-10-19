@@ -179,6 +179,11 @@ with `___` and its key, never the word, so the reader cannot be led to it.
   today sends exactly today's prompt (a unit test pins both by hash).
 - **Two rounds** (`POINT_REWRITE_ROUNDS`, ruling R7): a first rewrite the re-check still cannot
   place is written once more, told what its readers wrote, avoiding both old sentences.
+- **Three candidates a round** (ruling R11): the round's one call writes a candidate per angle
+  (`POINT_CANDIDATE_ANGLES`), each candidate is read blind, side by side, and the one that points
+  with the most readers is kept. When none points, the likeliest feeds the next round; a candidate
+  the check could not read is kept (D3). Every rescued typed gap is so checked before the checker,
+  and the separate re-check beside it is gone.
 - **Validation:** `validateDistractors` as in 62c, with a rewritten sentence item allowed up to
   `SENTENCE_MAX_WORDS` (12) words instead of `SHORT_SENTENCE_MAX_WORDS` (8). Every other check is
   unchanged.
@@ -303,6 +308,15 @@ with `___` and its key, never the word, so the reader cannot be led to it.
   "Ci sono uccelli nel ___." fails steadily: the reader puts nido first, so my label (points) is
   likely wrong. Kept, not relabelled. Every row master passes still passes; campo, лук and
   pianta now point after their rescue.
+- **R11 (after merge, master's CI run 39224785496).** `test-eval` went red on the sentence group,
+  82 of 97: the group sat near the bar because one sentence per round rescued about half the hard
+  words ("Io sono sulla ___.", "Chiudo la ___ con la mano."). Each round now writes three
+  candidates, one per kind of clue, and keeps the best that points; asked in one call, each lists
+  its own alternatives. Two full suites after: sentence group 88 and 93 of 97, pointing 44 and 45
+  of 46, tier 1 clean. Ruled out first: telling the reader to merge synonyms into one guess (it
+  then wrote "starts" for "begins", whose Hebrew התחיל misses the gloss's להתחיל) and two felice
+  cases labelled "points" (their readers split between happy, lucky and proud, which by Victor's
+  brother-or-sister verdict is not clear).
 - **R10 (final review).** Phrase typed gaps ("ci sono", up to four words under one ___) were an
   unmeasured input. Four phrase cases were added to the pointing group and pass as words do
   ("Nel frigo ___ tre uova e il latte." → ci sono, 7–8 of 10); the prompt's "one word" wording
