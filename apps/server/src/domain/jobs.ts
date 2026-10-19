@@ -68,9 +68,8 @@ export const GAP_REWRITE_BUDGET_MS = 60_000;
  *  call added to the attempt adds its budget here. Phase 62c (spec D1): the gap
  *  check (beside the context call), the rewrite and the rewritten cards' context
  *  call (beside the checker), counted as if one after another. Phase 62d (spec D5):
- *  the point check, the typed gaps' rewrite, its re-check and second rewrite (beside
- *  the gap check and its rewrite), and the last re-check (beside the checker), on the
- *  same budgets. */
+ *  the point check, then two rounds of the typed gaps' rewrite and the point check of
+ *  its candidates (beside the gap check and its rewrite), on the same budgets. */
 export const PREPARE_SESSION_CALL_BUDGETS_MS: readonly number[] = [
   SESSION_GENERATION_BUDGET_MS,
   CONTEXT_CALL_BUDGET_MS,

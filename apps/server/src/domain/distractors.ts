@@ -203,7 +203,13 @@ export type DistractorItem = {
 
 /** Phase 62c (spec D3). Why a gap item is asked again: its last sentence, if it wrote one,
  *  and the wrong answers the checker found it fits, or why validation refused it. */
-export type GapRewrite = { sentence: string | null; fits: string[]; problem: string | null };
+export type GapRewrite = {
+  sentence: string | null;
+  fits: string[];
+  problem: string | null;
+  /** Phase 62d. A typed gap's candidate only: the kind of clue its new sentence is built on. */
+  angle?: string;
+};
 
 /** Phase 62c. A phrase of the rewrite's rule, which a prompt carries only when an item is a rewrite. */
 export const REWRITE_MARKER = 'its last sentence';
@@ -337,7 +343,7 @@ export function buildDistractorPrompt(input: {
     // call that asks one, so 62c's gap rewrite is exactly what it was.
     ...(input.items.some((item) => item.rewrite && item.task === 'sentence')
       ? [
-          `- An item with rewrite is a "sentence" item written before, and ${REWRITE_MARKER} (rewrite.old_sentence) could not be used: a reader who covers its word does not guess it. rewrite.fits are the words such a reader writes in its gap instead, and rewrite.problem says why. Write a completely new sentence for its word: not the last sentence with a word added or changed, and not its frame (its verb and the words around the gap). Build it on something only this word fits: for a thing or a person, what only it does, where only it is, or what is done only to it; for an adjective, something everyone knows to be so, or the reason to be so; for a verb, an object or a setting only it goes with; for a small word (a preposition, an adverb), the words it is always said with. Then cover the word and read the new sentence as a stranger would: if a word of another meaning, one of rewrite.fits or any other, would fit about as well, write another sentence; at least seven of ten native readers who see only the sentence must write this word or one of the same meaning. Pointing comes first: add words outside learner_words wherever pointing needs them (the learner can tap any word to see its translation), up to ${SENTENCE_MAX_WORDS} words. Then keep the learner's words: at least half of the sentence's other words of three letters or more come from learner_words wherever it still points with them. "Il ___ è qui." points to nothing, since any noun fits; "Ora leggo un ___ e poi dormo." points to libro, and half its other words are the learner's (ora, poi); "Lo zucchero è ___." points to dolce; "Ogni sera mi ___ i denti." points to lavo. Its alternatives follow the "sentence" rule, for the new sentence.`,
+          `- An item with rewrite is a "sentence" item written before, and ${REWRITE_MARKER} (rewrite.old_sentence) could not be used: a reader who covers its word does not guess it. rewrite.fits are the words such a reader writes in its gap instead, and rewrite.problem says why. Write a completely new sentence for its word: not the last sentence with a word added or changed, and not its frame (its verb and the words around the gap). Build it on something only this word fits: for a thing or a person, what only it does, where only it is, or what is done only to it; for an adjective, something everyone knows to be so, or the reason to be so; for a verb, an object or a setting only it goes with; for a small word (a preposition, an adverb), the words it is always said with. Then cover the word and read the new sentence as a stranger would: if a word of another meaning, one of rewrite.fits or any other, would fit about as well, write another sentence; at least seven of ten native readers who see only the sentence must write this word or one of the same meaning. Pointing comes first: add words outside learner_words wherever pointing needs them (the learner can tap any word to see its translation), up to ${SENTENCE_MAX_WORDS} words. Then keep the learner's words: at least half of the sentence's other words of three letters or more come from learner_words wherever it still points with them. "Il ___ è qui." points to nothing, since any noun fits; "Ora leggo un ___ e poi dormo." points to libro, and half its other words are the learner's (ora, poi); "Lo zucchero è ___." points to dolce; "Ogni sera mi ___ i denti." points to lavo. Its alternatives follow the "sentence" rule, for the new sentence. When rewrite.angle is given, the item is one of several candidates for the same card: build its sentence on that kind of clue, a different sentence from every other candidate's, and give each candidate its own alternatives, every other word that would fill its gap read alone, whatever the sentence then means (a sentence that points to its word still takes words of its kind: "Taglio il pane con il ___." points to coltello, and forbici and seghetto would still fill it).`,
         ]
       : []),
     'A wrong answer of a "meaning" or "word" item must be plausible: the same part of speech, the same register and a',
@@ -389,6 +395,7 @@ const rewriteJson = (rewrite: GapRewrite) => ({
   ...(rewrite.sentence ? { old_sentence: rewrite.sentence } : {}),
   ...(rewrite.fits.length > 0 ? { fits: rewrite.fits } : {}),
   ...(rewrite.problem ? { problem: rewrite.problem } : {}),
+  ...(rewrite.angle ? { angle: rewrite.angle } : {}),
 });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

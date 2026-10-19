@@ -16,6 +16,7 @@ import { testRng } from '../../tests/support/testRng';
 import { CHECK_MARKER } from '../domain/check';
 import { CONTEXT_MARKER, servedWords, type RecentContexts } from '../domain/context';
 import { nothingKnown, REWRITE_MARKER, type GenerationContext, type KnownRight, type RecentSentences } from '../domain/distractors';
+import { POINT_CANDIDATE_ANGLES } from '../domain/gapRewrite';
 import type { LlmJsonRequest } from './llm';
 import type { SessionState } from '../domain/session';
 import { GlossLanguageMismatch, InvalidDistractors } from '../errors';
@@ -2088,29 +2089,31 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     // Phase 62d (spec D1–D5). The typed gap q3 ("We combine the two plans today.") read
     // blind; one that points to nothing is asked again once, or becomes a typed translation.
     describe('phase 62d: a typed gap that points to nothing', () => {
-      const point = (findings: Record<string, { guesses: string[]; meaning: string; readers: number }>) =>
-        JSON.stringify({
-          items: Object.entries(findings).map(([key, { guesses, meaning, readers }]) => ({
-            key,
-            meaning,
-    guesses: guesses.map((word, at) => ({ word, readers: at === 0 ? readers : 0 })),
-          })),
+      type Finding = { guesses: string[]; meaning: string; readers: number };
+      const POINTS: Finding = { guesses: ['combine', 'merge', 'join'], meaning: 'לשלב', readers: 8 };
+      const UNCLEAR: Finding = { guesses: ['discuss', 'review', 'change'], meaning: 'לדון', readers: 3 };
+      const ORIGINAL = 'We ___ the two plans today.';
+      const blank = (sentence: string) => sentence.replace('combine', '___');
+      // The point check's answer by the sentence it is asked, since candidates are read side by
+      // side; a sentence not named is one the reader cannot place. 'down' fails the call.
+      const pointBy = (bySentence: Record<string, Finding | 'down'>) => async (request: LlmJsonRequest) => {
+        const asked = JSON.parse(request.user).items as { key: string; sentence: string }[];
+        if (asked.some((item) => bySentence[item.sentence] === 'down')) throw new Error('down');
+        return JSON.stringify({
+          items: asked.map(({ key, sentence }) => {
+            const { guesses, meaning, readers } = (bySentence[sentence] as Finding | undefined) ?? UNCLEAR;
+            return { key, meaning, guesses: guesses.map((word, at) => ({ word, readers: at === 0 ? readers : 0 })) };
+          }),
         });
-      const POINTS = point({ q3: { guesses: ['combine', 'merge', 'join'], meaning: 'לשלב', readers: 8 } });
-      const UNCLEAR = point({ q3: { guesses: ['discuss', 'review', 'change'], meaning: 'לדון', readers: 3 } });
-      const NEW = 'We combine flour and eggs into one dough.';
-      const typedRewrite = JSON.stringify({
-        items: [{ key: 'q3', distractors: [], sentence: NEW, gap: 'combine', translation: 'אנחנו משלבים קמח וביצים לבצק אחד.', alternatives: ['mix'] }],
-      });
-      const NEW_MAP = JSON.stringify({
-        items: [
-          { key: 'q3', sentence_word: 'משלבים', sentence_words: [
-            { shown: 'We', translation: 'אנחנו', word: '' },
-            { shown: 'combine', translation: 'משלבים', word: '' },
-            { shown: 'flour and eggs', translation: 'קמח וביצים', word: '' },
-            { shown: 'into one dough', translation: 'לבצק אחד', word: '' },
-          ] },
-        ],
+      };
+      const ROUND_1 = ['We combine flour and eggs into one dough.', 'Chefs combine sweet and salty flavours.', 'Teams combine their efforts to win.'];
+      const ROUND_2 = ['Painters combine blue and yellow to make green.', 'You can combine both coupons at checkout.', 'The recipe says to combine the dry ingredients.'];
+      const candidates = (sentences: string[]) =>
+        JSON.stringify({
+          items: sentences.map((sentence, at) => ({ key: `q3~${at + 1}`, distractors: [], sentence, gap: 'combine', translation: 'אנחנו משלבים דברים.', alternatives: ['mix'] })),
+        });
+      const MAP = JSON.stringify({
+        items: [{ key: 'q3', sentence_word: 'משלבים', sentence_words: [{ shown: 'combine', translation: 'משלבים', word: '' }] }],
       });
       const EMPTY = JSON.stringify({ items: [] });
       const SENTENCE_RULE = 'Ora leggo un ___ e poi dormo.';
@@ -2121,13 +2124,17 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
       const rewritten = () =>
         JSON.stringify({ items: [{ key: 'q2', distractors: ['eat', 'sleep', 'sing', 'dance', 'swim', 'fly'], sentence: 'I download songs to my phone.', gap: 'download', translation: 'אני מוריד שירים לטלפון שלי.' }] });
       type Mapped = { sentence: string | null; words: unknown[] | null };
+      const prepared = async (opts: Parameters<typeof world>[0]) => {
+        const made = world({ enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), ...opts });
+        await made.service.prepareSession(payloadOf(rows, cards));
+        return made;
+      };
 
       it('asks the point check of the typed gap, blind, and keeps a sentence that points', async () => {
-        const { service, calls, logger, pointCheckLlm, gapRewriteLlm } = world({ enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), pointReply: [POINTS] });
-        await service.prepareSession(payloadOf(rows, cards));
+        const { calls, logger, pointCheckLlm, gapRewriteLlm } = await prepared({ pointReply: [pointBy({ [ORIGINAL]: POINTS })] });
         expect(pointCheckLlm.calls).toHaveLength(1);
         expect(pointCheckLlm.calls[0].record.kind).toBe('gap_point');
-        expect(itemsOf(pointCheckLlm.calls[0])).toEqual([{ key: 'q3', sentence: 'We ___ the two plans today.' }]);
+        expect(itemsOf(pointCheckLlm.calls[0])).toEqual([{ key: 'q3', sentence: ORIGINAL }]);
         expect(pointCheckLlm.calls[0].user).not.toContain('combine');
         expect(gapRewriteLlm.calls).toHaveLength(0);
         expect(insertedOf(calls)[2]).toMatchObject({ type: 'cloze_typed', sentence: 'We combine the two plans today.' });
@@ -2139,161 +2146,138 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
         let pointAsked!: () => void;
         const contextStarted = new Promise<void>((resolve) => (contextAsked = resolve));
         const pointStarted = new Promise<void>((resolve) => (pointAsked = resolve));
-        const { service, calls } = world({
-          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural),
+        const { calls } = await prepared({
           contextReply: async () => {
             contextAsked();
             await pointStarted;
             return EMPTY;
           },
           pointReply: [
-            async () => {
+            async (request) => {
               pointAsked();
               await contextStarted;
-              return POINTS;
+              return pointBy({ [ORIGINAL]: POINTS })(request);
             },
           ],
         });
-        await service.prepareSession(payloadOf(rows, cards));
         expect(calls.transitions).toEqual(['preparing→ready']);
       }, 5_000);
 
-      it('rewrites a typed gap a reader cannot place, checks it again, and writes it with its new sentence and map', async () => {
-        const { service, calls, logger, contextLlm, checkerLlm, pointCheckLlm, gapRewriteLlm } = world({
-          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural),
-          pointReply: [UNCLEAR, POINTS], rewriteReply: [typedRewrite], contextReplies: [EMPTY, NEW_MAP],
+      it('asks one rewrite call for a candidate per angle, reads each blind, and keeps the one that points with the most readers', async () => {
+        const { calls, logger, contextLlm, checkerLlm, pointCheckLlm, gapRewriteLlm } = await prepared({
+          pointReply: [pointBy({ [blank(ROUND_1[1])]: { ...POINTS, readers: 7 }, [blank(ROUND_1[2])]: { ...POINTS, readers: 9 } })],
+          rewriteReply: [candidates(ROUND_1)],
+          contextReplies: [EMPTY, MAP],
         });
-        await service.prepareSession(payloadOf(rows, cards));
         expect(gapRewriteLlm.calls).toHaveLength(1);
         expect(gapRewriteLlm.calls[0].record.kind).toBe('gap_rewrite');
         expect(gapRewriteLlm.calls[0].system).toContain(SENTENCE_RULE);
         expect(gapRewriteLlm.calls[0].system).not.toContain(GAP_RULE);
-        const [asked] = itemsOf(gapRewriteLlm.calls[0]) as { key: string; task: string; avoid: string[]; rewrite: Record<string, unknown> }[];
-        expect(asked).toMatchObject({ key: 'q3', task: 'sentence', rewrite: { old_sentence: 'We combine the two plans today.', fits: ['discuss', 'review', 'change'] } });
-        expect(asked.rewrite.problem).toBe('a reader who covers the word guesses discuss first (discuss, review, change)');
-        expect(asked.avoid).toContain('We combine the two plans today.');
-        expect(pointCheckLlm.calls.map(itemsOf)).toEqual([[{ key: 'q3', sentence: 'We ___ the two plans today.' }], [{ key: 'q3', sentence: 'We ___ flour and eggs into one dough.' }]]);
+        const asked = itemsOf(gapRewriteLlm.calls[0]) as { key: string; task: string; avoid: string[]; rewrite: Record<string, unknown> }[];
+        expect(asked.map((item) => item.key)).toEqual(['q3~1', 'q3~2', 'q3~3']);
+        expect(asked.map((item) => item.rewrite.angle)).toEqual([...POINT_CANDIDATE_ANGLES]);
+        for (const item of asked) {
+          expect(item).toMatchObject({ task: 'sentence', rewrite: { old_sentence: 'We combine the two plans today.', fits: ['discuss', 'review', 'change'] } });
+          expect(item.avoid).toContain('We combine the two plans today.');
+        }
+        expect(pointCheckLlm.calls.map(itemsOf)).toEqual([
+          [{ key: 'q3', sentence: ORIGINAL }],
+          ...ROUND_1.map((sentence, at) => [{ key: `q3~${at + 1}`, sentence: blank(sentence) }]),
+        ]);
         expect(contextLlm.calls[1] && itemsOf(contextLlm.calls[1]).map((item) => item.key)).toEqual(['q3']);
-        expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q3')).toEqual({ key: 'q3', task: 'translate', sentence: 'אנחנו משלבים קמח וביצים לבצק אחד.' });
+        expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q3')).toEqual({ key: 'q3', task: 'translate', sentence: 'אנחנו משלבים דברים.' });
         const card = insertedOf(calls)[2] as Inserted & Mapped;
-        expect(card).toMatchObject({ type: 'cloze_typed', sentence: NEW, alternatives: ['mix'] });
+        expect(card).toMatchObject({ type: 'cloze_typed', sentence: ROUND_1[2], alternatives: ['mix'] });
         expect(card.words).not.toBeNull();
         expect(events(logger, 'gap_rewritten')).toEqual([
-          expect.objectContaining({ key: 'q3', position: 2, type: 'cloze_typed', stage: 'pointing', old_sentence: 'We combine the two plans today.', new_sentence: NEW }),
+          expect.objectContaining({ key: 'q3', position: 2, type: 'cloze_typed', stage: 'pointing', round: 1, pointed: true, candidates: 3, old_sentence: 'We combine the two plans today.', new_sentence: ROUND_1[2] }),
         ]);
         expect(events(logger, 'sentence_degraded')).toEqual([]);
         expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', point_count: 1, unpointed_count: 1, rewrite_count: 1 }));
       });
 
-      // Phase 62d (spec D3, POINT_REWRITE_ROUNDS). A rewrite that still points to nothing is written once more.
-      const AGAIN = 'In cucina we combine eggs, milk and flour.';
-      const secondRewrite = JSON.stringify({
-        items: [{ key: 'q3', distractors: [], sentence: AGAIN, gap: 'combine', translation: 'במטבח אנחנו משלבים ביצים, חלב וקמח.', alternatives: ['mix'] }],
-      });
-      const UNCLEAR_NEW = point({ q3: { guesses: ['mix', 'combine', 'knead'], meaning: 'לערבב', readers: 4 } });
-
-      it('writes a typed gap again when its rewrite still points to nothing, told what the readers of the rewrite wrote, and keeps the second', async () => {
-        const { service, calls, logger, pointCheckLlm, gapRewriteLlm } = world({
-          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural),
-          pointReply: [UNCLEAR, UNCLEAR_NEW, POINTS], rewriteReply: [typedRewrite, secondRewrite], contextReplies: [EMPTY, NEW_MAP],
+      it('asks the likeliest candidate again when none points, told what its readers wrote, and keeps a second-round candidate that points', async () => {
+        const { calls, logger, gapRewriteLlm } = await prepared({
+          pointReply: [pointBy({ [blank(ROUND_1[1])]: { guesses: ['mix', 'combine'], meaning: 'לערבב', readers: 5 }, [blank(ROUND_2[0])]: POINTS })],
+          rewriteReply: [candidates(ROUND_1), candidates(ROUND_2)],
+          contextReplies: [EMPTY, MAP],
         });
-        await service.prepareSession(payloadOf(rows, cards));
         expect(gapRewriteLlm.calls).toHaveLength(2);
-        const [asked] = itemsOf(gapRewriteLlm.calls[1]) as { avoid: string[]; rewrite: Record<string, unknown> }[];
-        expect(asked.rewrite).toEqual({ old_sentence: NEW, fits: ['mix', 'knead'], problem: 'a reader who covers the word guesses mix first (mix, combine, knead)' });
-        expect(asked.avoid).toEqual(expect.arrayContaining(['We combine the two plans today.', NEW]));
-        expect(pointCheckLlm.calls.map(itemsOf)).toEqual([
-          [{ key: 'q3', sentence: 'We ___ the two plans today.' }],
-          [{ key: 'q3', sentence: 'We ___ flour and eggs into one dough.' }],
-          [{ key: 'q3', sentence: 'In cucina we ___ eggs, milk and flour.' }],
-        ]);
-        expect(insertedOf(calls)[2]).toMatchObject({ type: 'cloze_typed', sentence: AGAIN });
+        const again = itemsOf(gapRewriteLlm.calls[1]) as { key: string; avoid: string[]; rewrite: Record<string, unknown> }[];
+        expect(again.map((item) => item.key)).toEqual(['q3~1', 'q3~2', 'q3~3']);
+        expect(again[0].rewrite).toMatchObject({ old_sentence: ROUND_1[1], fits: ['mix'], problem: 'a reader who covers the word guesses mix first (mix, combine)' });
+        expect(again[0].avoid).toEqual(expect.arrayContaining(['We combine the two plans today.', ROUND_1[1]]));
+        expect(insertedOf(calls)[2]).toMatchObject({ type: 'cloze_typed', sentence: ROUND_2[0] });
         expect(events(logger, 'gap_rewritten')).toEqual([
-          expect.objectContaining({ key: 'q3', stage: 'pointing', round: 1, old_sentence: 'We combine the two plans today.', new_sentence: NEW }),
-          expect.objectContaining({ key: 'q3', stage: 'pointing', round: 2, old_sentence: NEW, new_sentence: AGAIN }),
+          expect.objectContaining({ key: 'q3', round: 1, pointed: false, new_sentence: ROUND_1[1] }),
+          expect.objectContaining({ key: 'q3', round: 2, pointed: true, new_sentence: ROUND_2[0] }),
         ]);
       });
 
-      it('writes a typed translation when the second rewrite does not point either', async () => {
-        const { service, calls, gapRewriteLlm } = world({
-          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural),
-          pointReply: [UNCLEAR, UNCLEAR_NEW, UNCLEAR], rewriteReply: [typedRewrite, secondRewrite], contextReplies: [EMPTY, NEW_MAP],
+      it('writes a typed translation when no candidate of either round points', async () => {
+        const { calls, logger, gapRewriteLlm } = await prepared({
+          pointReply: [pointBy({})],
+          rewriteReply: [candidates(ROUND_1), candidates(ROUND_2)],
+          contextReplies: [EMPTY, MAP],
         });
-        await service.prepareSession(payloadOf(rows, cards));
         expect(gapRewriteLlm.calls).toHaveLength(2);
         expect(insertedOf(calls)[2]).toMatchObject({ type: 'typed_translation', sentence: null });
+        expect(events(logger, 'sentence_degraded')).toEqual([
+          expect.objectContaining({ position: 2, type: 'cloze_typed', reason: expect.stringContaining('the sentence does not point to its word') }),
+        ]);
+      });
+
+      it('writes a typed translation, never the old sentence, when the rewrite writes no usable candidate', async () => {
+        const { calls, logger } = await prepared({ pointReply: [pointBy({})], rewriteReply: [EMPTY] });
+        expect(insertedOf(calls)[2]).toMatchObject({ type: 'typed_translation', sentence: null });
+        expect(events(logger, 'gap_rewritten')).toEqual([expect.objectContaining({ key: 'q3', stage: 'pointing', round: 1, pointed: false, candidates: 0, failed: 'no answer for q3~1' })]);
+      });
+
+      it('writes a typed translation when the rewrite call fails', async () => {
+        const { calls, logger } = await prepared({ pointReply: [pointBy({})], rewriteReply: [new Error('down')] });
+        expect(insertedOf(calls)[2]).toMatchObject({ type: 'typed_translation' });
+        expect(events(logger, 'gap_rewritten')).toEqual([expect.objectContaining({ key: 'q3', failed: 'down' })]);
+      });
+
+      it('keeps a candidate the point check could not read, as it keeps a card it could not read', async () => {
+        const { calls, logger } = await prepared({
+          pointReply: [pointBy({ [blank(ROUND_1[0])]: 'down', [blank(ROUND_1[1])]: 'down', [blank(ROUND_1[2])]: 'down' })],
+          rewriteReply: [candidates(ROUND_1)],
+          contextReplies: [EMPTY, MAP],
+        });
+        expect(insertedOf(calls)[2]).toMatchObject({ type: 'cloze_typed', sentence: ROUND_1[0] });
+        expect(events(logger, 'point_check_failed')).toHaveLength(3);
+      });
+
+      it('keeps every typed gap as written when the point check fails, or leaves its key out', async () => {
+        const failed = await prepared({ pointReply: [new Error('down')] });
+        expect(insertedOf(failed.calls)[2]).toMatchObject({ type: 'cloze_typed', sentence: 'We combine the two plans today.' });
+        expect(events(failed.logger, 'point_check_failed')).toEqual([expect.objectContaining({ session_id: SESSION, key: 'q3', reason: 'down' })]);
+        expect(failed.gapRewriteLlm.calls).toHaveLength(0);
+
+        const silent = await prepared({ pointReply: [EMPTY] });
+        expect(insertedOf(silent.calls)[2]).toMatchObject({ type: 'cloze_typed', sentence: 'We combine the two plans today.' });
+        expect(events(silent.logger, 'point_check_failed')).toEqual([]);
+        expect(silent.gapRewriteLlm.calls).toHaveLength(0);
       });
 
       it('asks a gap fault and a typed fault in two rewrite calls, each with its own rule', async () => {
-        const { service, calls, gapRewriteLlm } = world({
-          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), gapCheckReply: ALL_FIT,
-          pointReply: [UNCLEAR, POINTS],
-          rewriteReply: [(request) => (itemsOf(request).some((item) => item.task === 'gap') ? rewritten() : typedRewrite)],
+        const { calls, gapRewriteLlm } = await prepared({
+          gapCheckReply: ALL_FIT,
+          pointReply: [pointBy({ [blank(ROUND_1[0])]: POINTS })],
+          rewriteReply: [(request) => (itemsOf(request).some((item) => item.task === 'gap') ? rewritten() : candidates(ROUND_1))],
         });
-        await service.prepareSession(payloadOf(rows, cards));
         expect(gapRewriteLlm.calls).toHaveLength(2);
         const gapCall = gapRewriteLlm.calls.find((call) => itemsOf(call).some((item) => item.task === 'gap'))!;
         const typedCall = gapRewriteLlm.calls.find((call) => itemsOf(call).some((item) => item.task === 'sentence'))!;
         expect(itemsOf(gapCall).map((item) => item.key)).toEqual(['q2']);
         expect(gapCall.system).toContain(GAP_RULE);
         expect(gapCall.system).not.toContain(SENTENCE_RULE);
-        expect(itemsOf(typedCall).map((item) => item.key)).toEqual(['q3']);
+        expect(itemsOf(typedCall).map((item) => item.key)).toEqual(['q3~1', 'q3~2', 'q3~3']);
         expect(typedCall.system).toContain(SENTENCE_RULE);
         expect(typedCall.system).not.toContain(GAP_RULE);
         expect(insertedOf(calls)[1]).toMatchObject({ type: 'cloze_choice', sentence: 'I download songs to my phone.' });
-        expect(insertedOf(calls)[2]).toMatchObject({ type: 'cloze_typed', sentence: NEW });
-      });
-
-      it('writes a typed translation when the rewrite is refused, never the old sentence', async () => {
-        const { service, calls, logger } = world({
-          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), pointReply: [UNCLEAR], rewriteReply: [EMPTY],
-        });
-        await service.prepareSession(payloadOf(rows, cards));
-        expect(insertedOf(calls)[2]).toMatchObject({ type: 'typed_translation', sentence: null });
-        expect(events(logger, 'sentence_degraded')).toEqual([expect.objectContaining({ position: 2, type: 'cloze_typed', reason: expect.stringContaining('guesses discuss first') })]);
-        expect(events(logger, 'gap_rewritten')).toEqual([expect.objectContaining({ key: 'q3', stage: 'pointing', failed: 'no answer for q3' })]);
-      });
-
-      it('writes a typed translation when the rewrite call fails', async () => {
-        const { service, calls } = world({
-          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), pointReply: [UNCLEAR], rewriteReply: [new Error('down')],
-        });
-        await service.prepareSession(payloadOf(rows, cards));
-        expect(insertedOf(calls)[2]).toMatchObject({ type: 'typed_translation' });
-      });
-
-      it('writes a typed translation when the re-check still cannot place the rewrite', async () => {
-        const { service, calls, logger } = world({
-          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural),
-          pointReply: [UNCLEAR, UNCLEAR], rewriteReply: [typedRewrite], contextReplies: [EMPTY, NEW_MAP],
-        });
-        await service.prepareSession(payloadOf(rows, cards));
-        expect(insertedOf(calls)[2]).toMatchObject({ type: 'typed_translation', sentence: null });
-        expect(events(logger, 'sentence_degraded')).toEqual([expect.objectContaining({ position: 2, type: 'cloze_typed' })]);
-      });
-
-      it('keeps the rewrite when the re-check call fails', async () => {
-        const { service, calls, logger } = world({
-          enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural),
-          pointReply: [UNCLEAR, new Error('down')], rewriteReply: [typedRewrite], contextReplies: [EMPTY, NEW_MAP],
-        });
-        await service.prepareSession(payloadOf(rows, cards));
-        expect(insertedOf(calls)[2]).toMatchObject({ type: 'cloze_typed', sentence: NEW });
-        expect(events(logger, 'point_check_failed')).toEqual([expect.objectContaining({ session_id: SESSION, reason: 'down' })]);
-      });
-
-      it('keeps every typed gap as written when the point check fails, or leaves its key out', async () => {
-        const failed = world({ enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), pointReply: [new Error('down')] });
-        await failed.service.prepareSession(payloadOf(rows, cards));
-        expect(insertedOf(failed.calls)[2]).toMatchObject({ type: 'cloze_typed', sentence: 'We combine the two plans today.' });
-        expect(events(failed.logger, 'point_check_failed')).toEqual([expect.objectContaining({ session_id: SESSION, reason: 'down' })]);
-        expect(failed.gapRewriteLlm.calls).toHaveLength(0);
-
-        const silent = world({ enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural), pointReply: [EMPTY] });
-        await silent.service.prepareSession(payloadOf(rows, cards));
-        expect(insertedOf(silent.calls)[2]).toMatchObject({ type: 'cloze_typed', sentence: 'We combine the two plans today.' });
-        expect(events(silent.logger, 'point_check_failed')).toEqual([]);
-        expect(silent.gapRewriteLlm.calls).toHaveLength(0);
+        expect(insertedOf(calls)[2]).toMatchObject({ type: 'cloze_typed', sentence: ROUND_1[0] });
       });
     });
   });
