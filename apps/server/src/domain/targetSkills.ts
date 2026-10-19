@@ -148,7 +148,10 @@ export type TimedTargetAnswer = TargetAnswer & { answeredAt: string };
  * Spec D4, D5. What one ended session writes for every target holding a word it asked: each
  * target's changed skills against its own cap on the session's day, one event per change, and
  * the words it started (any answer, an intro card's or a helped one too). An answer counts for
- * a target only when it was given at or after its word joined it.
+ * a target only when it was given at or after its word joined it. Phase 65b (spec D2): a session
+ * chosen past the day's budget (`planOnly`) moves its own target's skills only for the owed words
+ * its stock recorded; the rest of it is practice beyond the promise, which memory and readiness
+ * read and the plan does not. Every word it asked still starts.
  */
 export function targetSessionWrite(input: {
   sessionId: string;
@@ -156,6 +159,7 @@ export function targetSessionWrite(input: {
   targets: readonly HoldingTarget[];
   before: readonly TargetSkillRow[];
   answers: readonly TimedTargetAnswer[];
+  planOnly?: { targetId: string; glossIds: readonly string[] };
 }): { rows: TargetSkillRow[]; events: TargetSkillEvent[]; started: { targetId: string; glossIds: string[] }[] } {
   const rows: TargetSkillRow[] = [];
   const events: TargetSkillEvent[] = [];
@@ -167,6 +171,7 @@ export function targetSessionWrite(input: {
       return joined !== undefined && answer.answeredAt >= joined;
     });
     if (counted.length === 0) continue;
+    const only = input.planOnly?.targetId === target.id ? new Set(input.planOnly.glossIds) : null;
     const moved = applyTargetSession({
       targetId: target.id,
       sessionId: input.sessionId,
@@ -174,7 +179,7 @@ export function targetSessionWrite(input: {
       capHalves: capHalves(daysBetween(input.day, target.dueOn)),
       glossIds: new Set(addedAt.keys()),
       before: input.before,
-      answers: counted,
+      answers: only ? counted.filter((answer) => only.has(answer.glossId)) : counted,
     });
     rows.push(...moved.rows);
     events.push(...moved.events);

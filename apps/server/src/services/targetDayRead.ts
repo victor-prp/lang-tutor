@@ -170,7 +170,7 @@ export async function readTargetPickInput(
     inFlight: cards.filter((card) => !card.intro),
     newRoom: Math.max(0, DAY_NEW_CAP - introduced.length - meeting.size),
   };
-  return { read: { ...read, saved, memory, families }, input };
+  return { read: { ...read, saved, memory, families, inFlight: started != null }, input };
 }
 
 /**

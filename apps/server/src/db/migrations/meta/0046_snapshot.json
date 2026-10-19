@@ -1,83 +1,9 @@
 {
-  "id": "9368d359-704b-4c11-805b-512bbbc55e9e",
+  "id": "14a1963e-4345-49ad-8ef5-2d43a1e954bd",
   "prevId": "3da2b101-deb3-48cd-86e5-9b09a68ccb95",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.answer_explanations": {
-      "name": "answer_explanations",
-      "schema": "",
-      "columns": {
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "corrected": {
-          "name": "corrected",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mistakes": {
-          "name": "mistakes",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "answer_explanations_session_id_position_answers_session_id_position_fk": {
-          "name": "answer_explanations_session_id_position_answers_session_id_position_fk",
-          "tableFrom": "answer_explanations",
-          "tableTo": "answers",
-          "columnsFrom": [
-            "session_id",
-            "position"
-          ],
-          "columnsTo": [
-            "session_id",
-            "position"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "answer_explanations_session_id_position_pk": {
-          "name": "answer_explanations_session_id_position_pk",
-          "columns": [
-            "session_id",
-            "position"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.answer_taps": {
       "name": "answer_taps",
       "schema": "",
@@ -3623,6 +3549,13 @@
           "type": "text[]",
           "primaryKey": false,
           "notNull": false
+        },
+        "past_budget": {
+          "name": "past_budget",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},

@@ -18,7 +18,7 @@ import { applySession, type MemoryRow } from './memoryUpdate';
 import { RUNGS, planCards } from './plan';
 import { daysBetween, evaluateSession, type AnsweredQuestion, type ProgressRow } from './progress';
 import { readinessSessionWrite, type TargetReadinessEvent, type TargetReadinessRow } from './readinessWrite';
-import { MISS_RATE_DAYS, budgetSessions, missRateOf, playTodayForward } from './targetBudget';
+import { MISS_RATE_DAYS, budgetSessions, missRateOf, pastBudget, playTodayForward } from './targetBudget';
 import { targetDay, type TargetDay } from './targetDay';
 import {
   chooseTargetPicks,
@@ -1069,7 +1069,6 @@ function runPaths(
         kind: target.kind,
         dueOn: target.dueOn,
         today: date,
-        plan: dayOf(target).state,
         words: [...glossIds].map((glossId) => ({ glossId, live: LIVE })),
         rows: [...readinessRows.values()].filter((row) => row.targetId === target.id),
         memory: [...memory.values()].filter((row) => glossIds.has(row.glossId)),
@@ -1113,14 +1112,21 @@ function runPaths(
       };
     };
     /** services/sessions.ts readTarget: the target's choice beside its path's session in flight,
-     *  practice more when owed work returns no pick (T3-m); a family's new meaning started with its
+     *  past the day's budget the owed work and then practice more (phase 65b D2), practice more when
+     *  owed work returns no pick (T3-m); a family's new meaning started with its
      *  known meanings, no ladder (phase 60, spec D1). */
     const chooseFor = (target: SimTarget, inFlight: readonly { glossId: string; type: QuestionType; intro: boolean }[]): Choice => {
       const families = familiesNow();
       const pickInput = pickInputOf(target, inFlight, families);
       const { day } = pickInput;
       let mode = pickInput.mode;
-      let picks = chooseTargetPicks(pickInput);
+      // Phase 65b (spec D2): past the day's budget a session asks the owed work, then practice
+      // more. The path's sessions so far today include the one in flight when a stock is built
+      // beside it, so none is counted twice.
+      const set = budgets.get(`${target.id}|${date}`);
+      const played = sessions.filter((one) => one.path === target.id && one.date === date).length;
+      if (mode === 'owed' && pastBudget({ budget: set?.sessions ?? null, done: played, inFlight: false })) mode = 'past_budget';
+      let picks = chooseTargetPicks({ ...pickInput, mode });
       if (picks.length === 0 && mode === 'owed') {
         mode = 'more';
         picks = chooseTargetPicks({ ...pickInput, mode });
@@ -1170,6 +1176,7 @@ function runPaths(
       const rows = [...memory.values()];
       let picks: ChosenPick[];
       let mode: TargetMode | null = null;
+      let owedRecorded: readonly string[] = [];
       let input: ChoiceInput | null = null;
       let families: Families | null = null;
       let meanings: ReadonlyMap<string, readonly string[]> = new Map();
@@ -1183,7 +1190,9 @@ function runPaths(
           budgetsSet.push(set);
         }
         budget = budgets.get(key)!.sessions;
-        ({ picks, mode, meanings } = nextOf(target));
+        let recorded: StockChoice;
+        ({ picks, mode, meanings, recorded } = nextOf(target));
+        owedRecorded = recorded.owedGlossIds;
       } else {
         families = familiesNow();
         for (const glossId of families.newlyKnown) knownIn.set(glossId, at);
@@ -1270,7 +1279,10 @@ function runPaths(
       for (const row of evaluateSession(levels, given, date).changed) progress.set(keyOf(row.glossId, row.dimension), row);
       // Spec D4: the target skills of every active target holding a word the session asked, whatever
       // its path, each against its own cap, as recordProgress writes them.
-      const write = targetSessionWrite({ sessionId: `s${at}`, day: date, targets: holding, before: [...skills.values()], answers: timed });
+      // Phase 65b (spec D2): past the budget, the session moves its own target only for the owed
+      // words its stock recorded, as recordProgress reads session_targets.past_budget.
+      const planOnly = mode === 'past_budget' && path !== null ? { targetId: path, glossIds: owedRecorded } : undefined;
+      const write = targetSessionWrite({ sessionId: `s${at}`, day: date, targets: holding, before: [...skills.values()], answers: timed, planOnly });
       for (const row of write.rows) skills.set(`${row.targetId}|${row.glossId}|${row.dimension}`, row);
       events.push(...write.events);
       for (const { targetId, glossIds: asked } of write.started) {
@@ -1324,6 +1336,9 @@ function expectOnlyOwedWork(run: PathRun): number {
   let checked = 0;
   for (const session of run.sessions) {
     if (session.path === null) continue;
+    // Phase 65b (spec D2): past the day's budget a session fills with practice more after its
+    // owed work, the anti-goal's one exception; the picker's tests pin the owed work first.
+    if (session.mode === 'past_budget') continue;
     const day = session.home.get(session.path)!;
     if (day.state !== 'owed') continue;
     const words = new Map(day.words.map((word) => [word.glossId, word]));

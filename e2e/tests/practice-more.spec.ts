@@ -23,14 +23,12 @@ import {
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
-// Phase 65 (spec D7, D9). Practising past the day's budget. A homework of one word, on a device
-// with no voice and no microphone, so its readiness counts writing and spelling: its sessions are
-// played through the card's button until the budget is met, each entered at once, and past it
-// while a counted skill still has a bonus left today; then another session could add only a little
-// (every counted skill has had its first answer and both of the day's bonuses), and "לתרגל עוד"
-// asks first. "אחזור מחר" closes the sheet, "לתרגל בכל זאת" starts the session, the tick box stops
-// the asking, and the switch in הגדרות, which reads the choice each time it is shown, brings it
-// back.
+// Phase 65 (spec D7, D9), phase 65b (spec D1). Practising once today reads done. A homework of one
+// word, on a device with no voice and no microphone, so its readiness counts writing and spelling:
+// its first session, entered at once, does the day's work and ends the day early; from then on
+// "לתרגל עוד" asks first. "אחזור מחר" closes the sheet, "לתרגל בכל זאת" starts the session (the
+// budget's second), the tick box stops the asking (the next is a bonus session past the budget),
+// and the switch in הגדרות, which reads the choice each time it is shown, brings it back.
 test.setTimeout(300_000);
 test.beforeEach(async ({ request }) => {
   await clearGemini(request);
@@ -93,68 +91,31 @@ test('past the day’s budget, practice more asks first; the tick box stops the 
   // 1. Before the day's first session the card offers the budget. The offer is what the first
   // session's start sets: the word's ladder does the day's work in one session (its practice cards
   // take its skills to the far cap, ruling T9-a), and the default miss rate keeps one more for
-  // misses, ceil(1 / 0.8) = 2. So the loop below meets the budget after ending early once.
+  // misses, ceil(1 / 0.8) = 2.
   const offered = await readTarget(page.request, target.id);
   expect(offered.today, report()).toMatchObject({ state: 'owed', sessions_budget: null, sessions_done: 0 });
   const budget = offered.today.sessions_offer;
   expect(budget, report()).toBe(2);
   await expectSessions(card, target.id, offerOf(offered.today));
 
-  // 2. The budget's sessions, each straight in from the card: until the last, another session
-  // still adds more than a little, so nothing asks. The first does the day's work (the word's
-  // ladder, every answer right), so the day reads done from then on: in place of the budget
-  // until it is met, its unused dots faded (spec D5, D7.6).
-  for (let done = 1; done <= budget; done++) {
-    const before = await readTarget(page.request, target.id);
-    expect(before.practice_more_little, `before session ${done}: ${JSON.stringify(before.today)}`).toBe(false);
-    const creates = createsSent(diagnostics);
-    await tapCardUntil(page, target.id, 'progress-label');
-    expect(createsSent(diagnostics), report()).toBeGreaterThan(creates);
-    await expect(sheet).toHaveCount(0);
-    await playAndReturn(page, request, enrollmentId, target.id);
-    const after = await readTarget(page.request, target.id);
-    expect(after.today, report()).toMatchObject({ state: 'done', sessions_budget: budget, sessions_done: done, ended_early: done < budget });
-    await expectSessions(card, target.id, {
-      line: DONE_TODAY,
-      side: done < budget ? `${done} במקום ${budget}` : null,
-      dots: [...Array<string>(done).fill('done'), ...Array<string>(budget - done).fill('faded')],
-    });
-    await expectReadiness(card, after);
-    await expectLabel(practice, 'לתרגל עוד');
-  }
+  // 2. The first session, straight in from the card: while the day owes work nothing asks. It does
+  // the day's work (the word's ladder, every answer right), so the day reads done, ended early: in
+  // place of the budget, its unused dot faded (spec D5, D7.6).
+  const creates1 = createsSent(diagnostics);
+  await tapCardUntil(page, target.id, 'progress-label');
+  expect(createsSent(diagnostics), report()).toBeGreaterThan(creates1);
+  await expect(sheet).toHaveCount(0);
+  await playAndReturn(page, request, enrollmentId, target.id);
+  const early = await readTarget(page.request, target.id);
+  expect(early.today, report()).toMatchObject({ state: 'done', sessions_budget: budget, sessions_done: 1, ended_early: true });
+  // A homework asks before practice more on any day (phase 65b D1).
+  expect(early.practice_more_little, report()).toBe(true);
+  await expectSessions(card, target.id, { line: DONE_TODAY, side: `1 במקום ${budget}`, dots: ['done', 'faded'] });
+  await expectReadiness(card, early);
+  await expectLabel(practice, 'לתרגל עוד');
 
-  // 3. The budget met, a session still goes straight in while one more could add more than a
-  // little: a counted skill has a bonus left today, which practice_more_little counts (spec D9, the
-  // most every right answer still countable today could add). Each is a bonus dot past the budget.
-  // A skill has at most READINESS_BONUS_PER_DAY (2) bonuses a day, so at most two such sessions.
-  let extra = 0;
-  while (!(await readTarget(page.request, target.id)).practice_more_little) {
-    extra += 1;
-    expect(extra, `sessions past the budget before the sheet: ${report()}`).toBeLessThanOrEqual(2);
-    const creates = createsSent(diagnostics);
-    await tapCardUntil(page, target.id, 'progress-label');
-    expect(createsSent(diagnostics), report()).toBeGreaterThan(creates);
-    await expect(sheet).toHaveCount(0);
-    await playAndReturn(page, request, enrollmentId, target.id);
-    const after = await readTarget(page.request, target.id);
-    expect(after.today, report()).toMatchObject({ state: 'done', sessions_budget: budget, sessions_done: budget + extra, ended_early: false });
-    await expectSessions(card, target.id, {
-      line: DONE_TODAY,
-      side: `+${extra} בונוס`,
-      dots: [...Array<string>(budget).fill('done'), ...Array<string>(extra).fill('bonus')],
-    });
-  }
-  /** The side and dots once `more` sessions past the budget are done. */
-  const past = (more: number) => ({
-    line: DONE_TODAY,
-    side: `+${more} בונוס`,
-    dots: [...Array<string>(budget).fill('done'), ...Array<string>(more).fill('bonus')],
-  });
-
-  // 4. Now one more session could add only a little (spec D9). "לתרגל עוד" asks, with no number;
-  // "אחזור מחר" closes the sheet and starts nothing.
-  const met = await readTarget(page.request, target.id);
-  expect(met.practice_more_little, JSON.stringify(met.words)).toBe(true);
+  // 3. Today reads done, so "לתרגל עוד" asks (phase 65b D1), with no number; "אחזור מחר" closes the
+  // sheet and starts nothing.
   let creates = createsSent(diagnostics);
   await tapCardUntil(page, target.id, 'practice-more-sheet');
   await expect(sheet).toContainText('סיימת את התרגול של היום');
@@ -165,29 +126,34 @@ test('past the day’s budget, practice more asks first; the tick box stops the 
   await expect(sheet).toBeHidden();
   await expect(page.getByTestId('progress-label')).toBeHidden();
   expect(createsSent(diagnostics), report()).toBe(creates);
-  // הגדרות, shown now, reads the asking on. Its tab stays mounted from here, so step 7 shows that
+  // הגדרות, shown now, reads the asking on. Its tab stays mounted from here, so step 6 shows that
   // it reads the choice again each time it is shown (final review I3).
   await page.getByTestId('settings-tab').click();
   await expect(page.getByTestId('settings-practice-more-ask').getByRole('switch')).toBeChecked();
   await page.getByTestId('tab-home').click();
   await showCard(page, target.id);
 
-  // 5. Asked again, "לתרגל בכל זאת" starts the session. Past the budget it is a bonus dot, and
-  // readiness moves by less than the sheet's little.
+  // 4. Asked again, "לתרגל בכל זאת" starts the session: the budget's second, which meets it.
   creates = createsSent(diagnostics);
   await tapCardUntil(page, target.id, 'practice-more-sheet');
   await page.getByTestId('practice-more-anyway').click();
   await expect(page.getByTestId('progress-label'), report()).toBeVisible();
   expect(createsSent(diagnostics), report()).toBeGreaterThan(creates);
   await playAndReturn(page, request, enrollmentId, target.id);
-  const bonus = await readTarget(page.request, target.id);
-  expect(bonus.today, report()).toMatchObject({ state: 'done', sessions_budget: budget, sessions_done: budget + extra + 1, ended_early: false });
-  expect(bonus.readiness_pct - met.readiness_pct).toBeLessThan(2);
-  await expectSessions(card, target.id, past(extra + 1));
-  await expectReadiness(card, bonus);
+  const met = await readTarget(page.request, target.id);
+  expect(met.today, report()).toMatchObject({ state: 'done', sessions_budget: budget, sessions_done: budget, ended_early: false });
+  await expectSessions(card, target.id, { line: DONE_TODAY, side: null, dots: ['done', 'done'] });
+  await expectReadiness(card, met);
 
-  // 6. "אל תציג לי את זה שוב", then "אחזור מחר": nothing starts, and the next tap starts the
-  // session at once, with no sheet.
+  /** The side and dots once `more` sessions past the budget are done. */
+  const past = (more: number) => ({
+    line: DONE_TODAY,
+    side: `+${more} בונוס`,
+    dots: [...Array<string>(budget).fill('done'), ...Array<string>(more).fill('bonus')],
+  });
+
+  // 5. "אל תציג לי את זה שוב", then "אחזור מחר": nothing starts, and the next tap starts the
+  // session at once, with no sheet: past the budget, a bonus dot.
   await tapCardUntil(page, target.id, 'practice-more-sheet');
   await tick.click();
   await expect(tick).toHaveAttribute('aria-checked', 'true');
@@ -197,10 +163,10 @@ test('past the day’s budget, practice more asks first; the tick box stops the 
   await tapCardUntil(page, target.id, 'progress-label');
   await expect(sheet).toHaveCount(0);
   await playAndReturn(page, request, enrollmentId, target.id);
-  expect((await readTarget(page.request, target.id)).today).toMatchObject({ sessions_done: budget + extra + 2 });
-  await expectSessions(card, target.id, past(extra + 2));
+  expect((await readTarget(page.request, target.id)).today).toMatchObject({ sessions_done: budget + 1 });
+  await expectSessions(card, target.id, past(1));
 
-  // 7. הגדרות, shown again, reads the asking turned off; turned back on, "לתרגל עוד" asks again.
+  // 6. הגדרות, shown again, reads the asking turned off; turned back on, "לתרגל עוד" asks again.
   await page.getByTestId('settings-tab').click();
   const ask = page.getByTestId('settings-practice-more-ask').getByRole('switch');
   await expect(ask).not.toBeChecked();

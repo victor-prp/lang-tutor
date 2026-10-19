@@ -56,6 +56,8 @@ export type SessionTargetRow = {
   wordCount: number;
   fsrsReadyCount: number;
   owedGlossIds: string[];
+  /** Phase 65b (spec D2): chosen past the day's budget. */
+  pastBudget: boolean;
 };
 
 /** Phase 57 (spec D6). A target's word as its plan reads it: when it joined, and the
@@ -325,18 +327,32 @@ export function createTargetRepo(tx: Tx) {
     },
 
     /** Phase 57 (spec D2). What a target path's stock recorded of its target's day, for the
-     *  stale check; undefined when it recorded nothing (a malformed id, a phase 53 split row
-     *  with no cap). */
+     *  stale check and (phase 65b, spec D2) whether it was chosen past the budget; undefined when
+     *  it recorded nothing (a malformed id, a phase 53 split row with no cap). */
     findSessionTarget: async (
       sessionId: string,
       targetId: string,
-    ): Promise<{ capHalves: number; owedGlossIds: string[] } | undefined> => {
+    ): Promise<{ capHalves: number; owedGlossIds: string[]; pastBudget: boolean } | undefined> => {
       if (!UUID_RE.test(sessionId) || !UUID_RE.test(targetId)) return undefined;
       const [row] = await tx
-        .select({ capHalves: sessionTargets.capHalves, owedGlossIds: sessionTargets.owedGlossIds })
+        .select({ capHalves: sessionTargets.capHalves, owedGlossIds: sessionTargets.owedGlossIds, pastBudget: sessionTargets.pastBudget })
         .from(sessionTargets)
         .where(and(eq(sessionTargets.sessionId, sessionId), eq(sessionTargets.targetId, targetId)));
-      return row && row.capHalves !== null ? { capHalves: row.capHalves, owedGlossIds: row.owedGlossIds ?? [] } : undefined;
+      return row && row.capHalves !== null
+        ? { capHalves: row.capHalves, owedGlossIds: row.owedGlossIds ?? [], pastBudget: row.pastBudget }
+        : undefined;
+    },
+
+    /** Phase 65b (spec D2). Of these targets, the one whose stock this session was chosen as
+     *  past the day's budget, with the owed words it recorded: at session end only answers about
+     *  those move that target's skills. Undefined when the session was not chosen past a budget. */
+    findPastBudget: async (sessionId: string, targetIds: readonly string[]): Promise<{ targetId: string; owedGlossIds: string[] } | undefined> => {
+      if (!UUID_RE.test(sessionId) || targetIds.length === 0) return undefined;
+      const [row] = await tx
+        .select({ targetId: sessionTargets.targetId, owedGlossIds: sessionTargets.owedGlossIds })
+        .from(sessionTargets)
+        .where(and(eq(sessionTargets.sessionId, sessionId), inArray(sessionTargets.targetId, [...targetIds]), eq(sessionTargets.pastBudget, true)));
+      return row ? { targetId: row.targetId, owedGlossIds: row.owedGlossIds ?? [] } : undefined;
     },
   };
 }

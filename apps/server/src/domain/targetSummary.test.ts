@@ -1,11 +1,11 @@
 import { describe, expect, it } from '@jest/globals';
 import { FSRS6_DEFAULT, readinessFromMemory, type Dimension, type MemoryState, type ReadinessRow } from '@lang-tutor/core/domain';
 
-import { readinessSummary, todaySummary } from './targetSummary';
+import { asksBeforePracticeMore, readinessSummary, todaySummary } from './targetSummary';
 
 // Phase 65 (spec D1, D3.7, D4, D7, D9, D10). The numbers a target's summary carries: its
-// readiness, where today started, its ready words and whether more practice adds little; and
-// today as a budget of sessions. Pure: every row and count is passed in.
+// readiness, where today started and its ready words; whether "practice more" asks first (phase
+// 65b D1); and today as a budget of sessions. Pure: every row and count is passed in.
 
 const TODAY = '2026-10-15';
 const DUE = '2026-10-20';
@@ -24,7 +24,7 @@ const row = (memory: MemoryState, over: Partial<ReadinessRow> = {}): ReadinessRo
 const rowsOf = (glossId: string, dims: readonly Dimension[], r: ReadinessRow) => dims.map((dimension) => ({ glossId, dimension, row: r }));
 
 const read = (over: Partial<Parameters<typeof readinessSummary>[0]> = {}) =>
-  readinessSummary({ kind: 'homework', dueOn: DUE, today: TODAY, plan: 'done', words: [], rows: [], memory: [], firstToday: [], ...over });
+  readinessSummary({ kind: 'homework', dueOn: DUE, today: TODAY, words: [], rows: [], memory: [], firstToday: [], ...over });
 
 describe('readinessSummary (spec D1, D4)', () => {
   it("counts a homework word on write, spell and say, in the check's order, each from its row", () => {
@@ -152,37 +152,26 @@ describe('readinessSummary: the start of today (spec D5, D10)', () => {
   });
 });
 
-describe('readinessSummary: practice more adds little (spec D9)', () => {
-  it('is false on a day with first tries left', () => {
-    const summary = read({ words: [{ glossId: 'g1', live: SILENT }] });
-    expect(summary.practiceMoreLittle).toBe(false);
+describe('asksBeforePracticeMore (phase 65b D1)', () => {
+  const asks = (over: Partial<Parameters<typeof asksBeforePracticeMore>[0]> = {}) =>
+    asksBeforePracticeMore({ kind: 'homework', daysLeft: 3, readyCount: 2, wordCount: 15, ...over });
+
+  it('asks on any homework day, ready or not: the app asks only once today reads done', () => {
+    expect(asks()).toBe(true);
+    expect(asks({ daysLeft: 1 })).toBe(true);
+    expect(asks({ readyCount: 15 })).toBe(true);
   });
 
-  it('is true once every skill has had its first try today and both bonuses', () => {
-    const spent = row(AT_84, { day: TODAY, bonusUsed: 2 });
-    const summary = read({ words: [{ glossId: 'g1', live: SILENT }], rows: rowsOf('g1', SILENT, spent) });
-    expect(summary.practiceMoreLittle).toBe(true);
+  it('asks on an exam day that is not its eve', () => {
+    expect(asks({ kind: 'exam', daysLeft: 2 })).toBe(true);
   });
 
-  it('is false while the plan still owes work, every bonus spent: the next session asks it (spec D7.8)', () => {
-    const spent = row(AT_84, { day: TODAY, bonusUsed: 2 });
-    const words = [{ glossId: 'g1', live: SILENT }];
-    const rows = rowsOf('g1', SILENT, spent);
-    expect(read({ plan: 'owed', words, rows }).practiceMoreLittle).toBe(false);
-    // A day with nothing owed, done or resting, asks.
-    expect(read({ plan: 'done', words, rows }).practiceMoreLittle).toBe(true);
-    expect(read({ plan: 'rest', words, rows }).practiceMoreLittle).toBe(true);
+  it("does not ask on an exam's eve while a word is not ready: extra practice really helps then", () => {
+    expect(asks({ kind: 'exam', daysLeft: 1, readyCount: 14 })).toBe(false);
   });
 
-  it('is false while a bonus is left on a skill that is far from 100', () => {
-    const summary = read({
-      words: [{ glossId: 'g1', live: SILENT }],
-      rows: [
-        { glossId: 'g1', dimension: 'written_productive', row: row(state(1, TODAY), { day: TODAY, bonusUsed: 1 }) },
-        { glossId: 'g1', dimension: 'spelling', row: row(state(1e6, TODAY), { day: TODAY, bonusUsed: 2 }) },
-      ],
-    });
-    expect(summary.practiceMoreLittle).toBe(false);
+  it("asks on an exam's eve once every word is ready", () => {
+    expect(asks({ kind: 'exam', daysLeft: 1, readyCount: 15 })).toBe(true);
   });
 });
 

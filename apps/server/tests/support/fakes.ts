@@ -316,6 +316,7 @@ export function createFakeTargetRepo(overrides: Partial<TargetRepo> = {}): FakeT
       written.push({ method: 'insertSessionTarget', args });
     },
     findSessionTarget: async () => undefined,
+    findPastBudget: async () => undefined,
     listWords: missing.listWords,
     listHolding: async () => [],
     markStarted: async (...args) => {

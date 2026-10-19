@@ -681,7 +681,7 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
       findTarget: async () => exam,
       listWordIds: async () => [...exam.glossIds],
       listWords: async () => exam.glossIds.map((glossId) => ({ glossId, addedAt: exam.createdAt, startedOn })),
-      findSessionTarget: async (sessionId) => (sessionId === 's_stock' ? recorded : undefined),
+      findSessionTarget: async (sessionId) => (sessionId === 's_stock' && recorded ? { ...recorded, pastBudget: false } : undefined),
     });
     const made = world(
       {
@@ -693,6 +693,8 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
       {
         target: targets,
         targetSkills: stub<TargetSkillRepo>({ findRows: async () => [] }),
+        // Phase 65b (spec D2): no budget set today, so an owed day is not past it.
+        targetBudgets: stub<TargetBudgetRepo>({ find: async () => undefined }),
         vocabulary: stub<VocabularyRepo>({
           listSavedGlosses: async () => SAVED,
           countEntries: async () => SAVED.length,
@@ -851,6 +853,9 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
     skills?: Record<string, number>;
     cards: { glossId: string; type: QuestionType; intro: boolean }[];
     introduced?: string[];
+    /** Phase 65b (spec D2): today's budget, if set, and the path's sessions completed today. */
+    budget?: number;
+    done?: number;
   }) {
     const targets = createFakeTargetRepo({
       findTarget: async () => input.found,
@@ -862,9 +867,14 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
         findOpen: async () => ({ started: summary('s_started', 'ready') }),
         findSessionCards: async (sessionId) => (sessionId === 's_started' ? input.cards : []),
         findIntroducedOn: async () => input.introduced ?? [],
+        countCompletedOn: async () => input.done ?? 0,
       },
       {
         target: targets,
+        targetBudgets: stub<TargetBudgetRepo>({
+          find: async (targetId, day) =>
+            input.budget === undefined ? undefined : { targetId, day, sessions: input.budget, cards: 0, missRoom: 0, doneBefore: 0 },
+        }),
         targetSkills: stub<TargetSkillRepo>({
           findRows: async () =>
             Object.entries(input.skills ?? {}).flatMap(([glossId, halves]) =>
@@ -924,6 +934,34 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
       ['g_b', 'written_productive'],
     ]);
     expect(eventsOf(logger, 'session_stocked')).toHaveLength(1);
+  });
+
+  it('fills a session past the budget with practice more after the owed work (phase 65b D2)', async () => {
+    // Both words started yesterday at 4 of 7. The session in flight takes g_b to the cap and
+    // answers its checks; g_a is still owed. The budget is 2, one session is done, one in flight.
+    const world = (done: number) =>
+      pathWorld({
+        found: target('t_exam', '2026-10-17', ['g_a', 'g_b']),
+        words: { g_a: YESTERDAY, g_b: YESTERDAY },
+        skills: { g_a: 4, g_b: 4 },
+        cards: [{ glossId: 'g_b', type: 'typed_translation', intro: false }],
+        budget: 2,
+        done,
+      });
+    const before = world(0);
+    await build(before.service, 't_exam');
+    // Before the budget: owed work only.
+    expect(picksOf(before.jobs).map(([glossId]) => glossId)).toEqual(['g_a']);
+
+    const past = world(1);
+    await build(past.service, 't_exam');
+    // Past it: g_a's owed card first, then practice more's hardest card for g_b.
+    expect(picksOf(past.jobs)[0]).toEqual(picksOf(before.jobs)[0]);
+    expect(picksOf(past.jobs).slice(1)).toEqual([['g_b', 'written_productive']]);
+    // The stock records the day's owed words, as an owed stock does, for its stale check.
+    const owedOf = (made: ReturnType<typeof world>) => (writes(made.targets, 'insertSessionTarget')[0][1] as { owedGlossIds: string[] }).owedGlossIds;
+    expect(owedOf(past)).toEqual(owedOf(before));
+    expect(owedOf(past)).toEqual(['g_a', 'g_b']);
   });
 
   it("leaves practice more only the day's room for new words, less the in-flight session's first meetings (ruling T3-n)", async () => {

@@ -23,8 +23,9 @@ import { isRecallCard } from './targetSkills';
  */
 
 /** Spec D7, D10. `owed` asks only owed work; `more` is practice more on a done or rest day;
- *  `last_review` is the due date's. */
-export type TargetMode = 'owed' | 'more' | 'last_review';
+ *  `last_review` is the due date's. Phase 65b (spec D2): `past_budget`, once the day's budget is
+ *  met, asks the owed work first and then fills the session with practice more. */
+export type TargetMode = 'owed' | 'more' | 'last_review' | 'past_budget';
 
 export type TargetPickInput = {
   day: TargetDay;
@@ -295,15 +296,19 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
     }
   };
 
-  if (mode === 'more') {
-    // Spec D7 step 3: today's extra words up to the cap, then the next planned words started
-    // early as extra, then the hardest cards.
+  /** Spec D7 step 3: today's extra words up to the cap, then the next planned words started early
+   *  as extra, then the hardest cards. */
+  const practiceMore = () => {
     belowCapWork(words.filter((word) => word.state === 'extra'));
     start(
       words.filter((word) => word.state === 'later'),
       true,
     );
     hardest(words);
+  };
+
+  if (mode === 'more') {
+    practiceMore();
   } else {
     // Spec D7 steps 1–2 and D5's checks; on the due date (D10) the cap is 20, so this asks the
     // skills below 20, furthest first, and then the hardest cards fill what is left.
@@ -315,6 +320,8 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
     belowCapWork(owed);
     checkWork(owed);
     if (mode === 'last_review') hardest(words);
+    // Phase 65b (spec D2): past the budget, the rest of the session is practice more.
+    if (mode === 'past_budget') practiceMore();
   }
   return picks;
 }
