@@ -7,18 +7,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Group, groupStyles } from '@/components/Group';
 import { useAppRelease } from '@/hooks/useAppUpdates';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useReminders } from '@/hooks/useReminders';
 import { mobileAppLine } from '@/release';
-import { unregisterWithin } from '@/startState';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
 /**
  * Phase 64 (spec D7). The הגדרות tab, how the app behaves: the practice reminders, About with
- * the release this phone runs (phase 32 D10, phase 49 D4), and sign-out in a group of its own.
+ * the release this phone runs (phase 32 D10, phase 49 D4). Sign-out is the account's, so it is אני's.
+ * Phase 65 (spec D9): whether to ask before practising past the day's budget.
  */
 export default function SettingsTab() {
-  const { signOut, user, practiceMoreAsk } = useCurrentUser();
+  const { user, practiceMoreAsk } = useCurrentUser();
   // Phase 65 (spec D9). Read on mount; a failed read says "ask", which is the default.
   const [askBefore, setAskBefore] = useState(true);
   const username = user?.username;
@@ -36,14 +35,6 @@ export default function SettingsTab() {
     void (ask ? practiceMoreAsk.askAgain(username) : practiceMoreAsk.stopAsking(username));
   };
   const { release } = useAppRelease();
-  const reminders = useReminders();
-
-  async function onSignOut() {
-    // Phase 52 (spec D4). Before the session is cleared, so the call still carries it.
-    await unregisterWithin(reminders.unregister);
-    await signOut();
-    router.replace('/sign-in');
-  }
 
   return (
     <SafeAreaView style={styles.screen} edges={[]}>
@@ -91,12 +82,6 @@ export default function SettingsTab() {
               trackColor={{ true: colors.primary, false: colors.border }}
             />
           </View>
-        </Group>
-
-        <Group>
-          <Pressable accessibilityRole="button" testID="sign-out-button" onPress={onSignOut} style={groupStyles.row}>
-            <Text style={groupStyles.danger}>{strings.signOut}</Text>
-          </Pressable>
         </Group>
       </ScrollView>
     </SafeAreaView>

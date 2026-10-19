@@ -260,6 +260,8 @@ export const strings = {
   offlineTitle: 'אין חיבור לשרת',
   offlineRetry: 'לנסות שוב',
   signOut: 'יציאה',
+  signOutTitle: 'לצאת מהחשבון?',
+  signOutMessage: 'כדי לחזור צריך להיכנס שוב עם קוד שיישלח למייל.',
   profileUsernameLabel: 'שם משתמש',
   usernameHint: 'אותיות אנגליות קטנות, ספרות וקו תחתון — בין 3 ל‑30 תווים',
   onboardingTitle: 'יצירת משתמש',

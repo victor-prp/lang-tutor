@@ -46,7 +46,12 @@ test('a new learner signs up with a code, onboards, signs out and back in, and k
   await tapAndWaitForWrite(page, page.getByTestId('translate-save').first());
 
   await openApp(page);
-  await page.getByTestId('settings-tab').click();
+  await page.getByTestId('profile-button').click();
+  // Sign-out asks first; saying no keeps the learner signed in.
+  page.once('dialog', (dialog) => void dialog.dismiss());
+  await page.getByTestId('sign-out-button').click();
+  await expect(page.getByTestId('profile-username')).toBeVisible();
+  page.once('dialog', (dialog) => void dialog.accept());
   await page.getByTestId('sign-out-button').click();
   await expect(page.getByTestId('sign-in-email')).toBeVisible({ timeout: 30_000 });
   // Signed out means the API refuses this browser now.

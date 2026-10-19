@@ -9,16 +9,20 @@ import { confirm } from '@/confirm';
 import { availableTargets } from '@/enrollments';
 import { myStudents, myTutors } from '@/grants';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useReminders } from '@/hooks/useReminders';
+import { unregisterWithin } from '@/startState';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
 /**
  * Phase 64 (spec D7). The אני tab, who you are and who you learn with: the profile's fields,
  * the languages (and adding one), the tutors (and ending one), and teaching: the students
- * (home's list, moved here) and inviting one. How the app behaves is הגדרות'.
+ * (home's list, moved here) and inviting one, and signing out, after a confirm. How the app
+ * behaves is הגדרות'.
  */
 export default function MeTab() {
-  const { user, enrollments, grants, endGrant } = useCurrentUser();
+  const { user, enrollments, grants, endGrant, signOut } = useCurrentUser();
+  const reminders = useReminders();
   if (!user) return <Redirect href="/" />;
 
   const tutors = myTutors(grants);
@@ -39,6 +43,20 @@ export default function MeTab() {
     } catch {
       // The row stays; the next load of the grants re-reads it.
     }
+  }
+
+  async function onSignOut() {
+    const yes = await confirm({
+      title: strings.signOutTitle,
+      message: strings.signOutMessage,
+      confirm: strings.signOut,
+      cancel: strings.cancel,
+    });
+    if (!yes) return;
+    // Phase 52 (spec D4). Before the session is cleared, so the call still carries it.
+    await unregisterWithin(reminders.unregister);
+    await signOut();
+    router.replace('/sign-in');
   }
 
   return (
@@ -119,6 +137,12 @@ export default function MeTab() {
               <Text style={groupStyles.link}>{`+ ${strings.inviteStudent}`}</Text>
             </Pressable>
           )}
+        </Group>
+
+        <Group>
+          <Pressable accessibilityRole="button" testID="sign-out-button" onPress={onSignOut} style={groupStyles.row}>
+            <Text style={groupStyles.danger}>{strings.signOut}</Text>
+          </Pressable>
         </Group>
       </ScrollView>
     </SafeAreaView>
