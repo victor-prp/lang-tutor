@@ -151,7 +151,7 @@ date. `R(state, due)` is core's `retrievability`.
    call, chosen with him in the replays)**. Each sets the stability that makes
    `R(state, due) = r + ¼ (1 − r)`, with `r` its value before; the last-review day and difficulty do
    not change. Hard and Good count alike. Constants `READINESS_BONUS_SHARE = 0.25`,
-   `READINESS_BONUS_PER_DAY = 2` in `chooseConstants.ts`.
+   `READINESS_BONUS_PER_DAY = 2` beside the rule in core (R3).
 4. **Exam only: a cold miss holds the skill at half** **(Victor: "one that drops when you forget a
    word cold and stays closer to your real grade" for tests)**. When the first answer of a day is a
    miss, the skill's chance counts × ½ until the first answer of a later day is right. Same-day bonuses
@@ -173,9 +173,9 @@ The evidence shows what each rule does on Victor's answers (`bonus.mts`):
 |---|---|---|---|
 | Today's app (target skills) | ~25% | ~40% | 49.7% |
 | Homework: rules 1–3, 5–6 | 45 | 70 | 83 |
-| The same answers as a בוחן: rules 1–6, write and spell | 54 | 56 | 77 |
+| The same answers as a בוחן: rules 1–6, write and spell | 53 | 55 | 77 |
 
-As a בוחן, 18 Oct's cold misses drop it 60 → 47 in one session. Victor chose that drop for tests.
+As a בוחן, 18 Oct's cold misses drop it 60 → 46 in one session. Victor chose that drop for tests.
 
 ### D4. A word is ready at 90 (my call)
 
@@ -313,7 +313,7 @@ measures:
   first), reported, not gated.
 
 - The 17–19 Oct replay as a fixture (the answers' types, verdicts, help and days, glosses as lemmas):
-  readiness 45, 70, 83 as homework at the end of each day; as a בוחן, 54, 56, 77.
+  readiness 45, 70, 83 as homework at the end of each day; as a בוחן, 53, 55, 77 (R4: in core).
 - Over every scenario: readiness never moves between days without an answer, never drops after a
   right answer, and the day's session count never grows.
 - The anti-goal scenario: a בוחן whose same skills are missed cold on each of its last two days reads
@@ -355,4 +355,20 @@ measures:
 
 ## Rulings
 
-*(None yet. Rulings made while building go here, written "Ruling:".)*
+Made while planning, 2026-10-19 (my calls, under "go till PR"):
+
+- **R1.** Ruling: the readiness rows start from the main memory, not from a replay of the word's
+  history (amends D2). A (target, word, skill) with no row reads the word's `gloss_memory` row as its
+  readiness state; the first session end that touches it after it joined copies that row, as it stood
+  before the session's own memory write, and applies the session's answers under D3. The effect is the
+  one D2 wanted (what was learnt before joining counts) without a history replay at creation, and the
+  recompute stays call-for-call with the live path. Cost: a word's earlier same-day misses are read as
+  FSRS counted them, not once a day.
+- **R2.** Ruling: the exam replay's numbers are 53, 55, 77 (and the drop 60 → 46), not 54, 56, 77:
+  readiness rounds down (D1), and the chat's replay had rounded to nearest.
+- **R3.** Ruling: the readiness constants (`READINESS_BONUS_SHARE`, `READINESS_BONUS_PER_DAY`,
+  `READINESS_EXAM_HOLD`, `READINESS_WORD_READY`, `READINESS_LITTLE`) live in core beside the rule, not
+  in the server's `chooseConstants.ts`: core cannot import the server, and the rule is core's.
+- **R4.** Ruling: the 17–19 Oct replay is a core test over a fixture of the answers
+  (`drafts/2026-10-19-readiness-grade-evidence/answers.json`, 368 answers in 44 sessions, lemma-keyed),
+  not a day-simulation scenario: it needs only core's rule.
