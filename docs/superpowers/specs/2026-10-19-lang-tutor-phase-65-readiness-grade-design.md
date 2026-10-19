@@ -1,7 +1,8 @@
 # Phase 65 — Readiness as a grade, and today as a budget
 
-- **Status:** Designed with Victor on 2026-10-19, in chat and in mockups. Awaiting his approval of this
-  document.
+- **Status:** Designed with Victor on 2026-10-19, in chat and in mockups. A builder check asked four
+  questions, all settled without him and marked "builder check" (D7.1, D7.4, D8, D11). Awaiting his
+  approval of this document.
 - **Date:** 2026-10-19
 - **Source:**
   - The one-pager: `drafts/2026-10-19-readiness-grade-one-pager.md` (main checkout, gitignored).
@@ -27,8 +28,8 @@
 - **Touches:**
   - core: a pure readiness rule beside `memory.ts`; the target schemas; `API_LEVEL`
   - the server: a readiness memory per target, word and skill, with an event log, written at session
-    end and rebuilt by the recompute; `targetDay`'s "done for today"; the session budget; the target
-    view; the day simulation
+    end and rebuilt by the recompute; `targetDay`'s "done for today"; the session budget, counted by
+    playing the unchanged target picker forward; the target view; the day simulation
   - the app: `TargetCard`, the target screen, `targets.ts`, the "practice more" sheet, a setting in
     הגדרות, strings; e2e
 
@@ -200,8 +201,8 @@ them. Below the header:
   lower (a בוחן's cold miss) shows no bright part, and the label reads "−4% היום" in grey, never red
   (my call).
 - **Today, in sessions** (D6, D7): "היום: 3 מתוך 5 תרגולים" and "עוד 2", one dot per session, green
-  when done. Before the first session: "היום: 5 תרגולים" and "כ-25 דקות" (my call: five minutes a
-  session). When the budget is met: "סיימת להיום ✓"; when it ended early, "4 במקום 5" and the unused
+  when done. Before the first session: "היום: 5 תרגולים" and "כ-25 דקות" (my call: from the predicted
+  cards, D7.1). When the budget is met: "סיימת להיום ✓"; when it ended early, "4 במקום 5" and the unused
   dot faded. A session past the budget is a blue dot, "+1 בונוס".
 - The rest-day and due-date notes stay as phase 57 and 64 wrote them; on the date the big number is
   the final readiness (D3.7).
@@ -225,32 +226,41 @@ held exam skill. The cap line and the 0–10 values leave the screen.
 Today's line counts sessions, and the count is a promise: it never grows during the day.
 
 1. **Set once, at the start of the path's first session of the learner day.** The count is the
-   sessions today's owed work needs: the larger of (a) the owed cards ÷ `SESSION_LENGTH`, rounded up,
-   and (b) the most sessions any owed skill needs, since a skill changes at most once a session (phase
-   57 D4) — plus room for misses at the learner's own recent first-try miss rate (Victor's Monday: 4
-   in 45). Before the first session the card shows the same count, computed the same way, as an offer.
+   sessions the target picker itself would make for today's owed work if every answer were right:
+   the server plays `chooseTargetPicks` forward over the day's plan, with its limits (two ladders a
+   session, two picks a word, one change per skill per session, three speaking cards). To that it
+   adds room for misses at the learner's own recent first-try miss rate (Victor's Monday: 4 in 45),
+   as whole sessions (my call, builder check: a formula would under-count, and an under-count cannot
+   be fixed later because the count never grows). It lives in the server's `domain/`, beside the
+   picker it runs. Before the first session the card shows the same count, computed the same way, as
+   an offer; the minutes beside it come from the predicted cards (about 30 seconds a card, my call).
 2. **Recorded** (derive, then record): the target, the day, the count, and what it was made from, in
    the transaction that starts the session.
 3. **Sessions done** are the path's completed sessions on that learner day (`sessions.target_id`,
    `practice_day`, `status = 'completed'`, as `countCompletedOnDay` counts reminders).
-4. **Full sessions.** Every budgeted session but the last asks `SESSION_LENGTH` cards while owed work
-   allows it. On 19 Oct Victor's sessions ran 10, 10, 10, 9, 5, 4, 2 and 10 cards: a "session" has to be
-   a steady unit for "עוד 2" to mean something. Anti-goal 1 of phase 57 still binds: no card that
-   serves no owed work while work is owed.
-5. **Misses fit inside.** A miss makes work owed again (phase 57 D4); the remaining budgeted sessions
-   ask it first. What does not fit carries to tomorrow, as phase 57 D6's unfinished work already does.
+4. **Sessions are what the picker makes** (my call, builder check). The picker does not change: a
+   session holds the owed work the picker finds, so the day's last sessions can be short, as on
+   19 Oct (10, 10, 10, 9, 5, 4, 2, 10 cards). The count is of sessions, whatever their length, and the
+   play-forward in rule 1 predicts the short ones too. Filling every session to `SESSION_LENGTH` would
+   need new picker rules and would change the cards the day simulation plays; it is not worth that
+   here.
+5. **Misses fit inside.** A miss makes work owed again (phase 57 D4), and the remaining budgeted
+   sessions ask it as the picker does today. What does not fit carries to tomorrow, as phase 57 D6's
+   unfinished work already does.
 6. **Done for today** is: the budget is met, or no word owes work (whichever comes first). The second
    is "finished early" (D5). This replaces `targetDay`'s "no word owed and answered today" for the
    card's state; the plan's owed words are unchanged and still lead the next session's picks.
 7. **Practice past the budget** is phase 57 D7's "practice more" session, asking any work still owed
    first. It is shown as a bonus dot and raises readiness through D3's same-day bonus.
+8. **The eve gets no exception** (Victor agreed: "It's ok"). The budget can end a בוחן's eve with
+   work still owed. Readiness and phase 64's "not ready" line then say so ("עוד תרגול אחד יעזור"), and
+   the D9 sheet does not appear, because the next session asks owed work and can add more.
 
-### D8. Stock (my call)
+### D8. Stock (my call, builder check)
 
-Sessions are made ahead (phase 43, ADR 0014). A stocked target session made before the budget's count
-or its remaining owed work is known is checked when it starts, as `replaceIfStale` already re-checks a
-practice-more stock: a stock that would leave a budgeted session short, or that serves no owed work,
-is rebuilt. The count itself never changes once set.
+Unchanged. Sessions are made ahead as phase 43 and ADR 0014 make them, and `replaceIfStale` re-checks
+target stock as it does today. With rule 4 the budget asks nothing new of the stock, so no session
+waits on "preparing" (phase 43 Done 1).
 
 ### D9. The "practice more" sheet **(Victor)**
 
@@ -291,10 +301,16 @@ On `TargetSummarySchema` and `TargetWordSchema` (`packages/core/src/api/schemas.
 ### D11. The day simulation
 
 `day.test.ts` keeps every phase 57 measure that reads the plan and target skills (owed work, done
-for today, the eve's cap), renamed where they say "readiness" so they read as the plan's. The FSRS
-marks (`READY_ON_DUE_PASS`) stay as gates and are never lowered; the budget changes which cards a
-session holds, so they are compared on all five phases' aggregates against master's, never on one
-(phase 54's lesson). New measures:
+for today, the eve's cap), renamed where they say "readiness" so they read as the plan's. The
+simulated learner plays the day's budget, then "practice more" sessions until no word owes work, as
+a diligent learner does (my call, builder check): the picker is unchanged (D7.4), so phase 57's gates
+(the plan at 100% on the eve, the 2026-10-16 replay, the 3-day exam) keep testing the plan, and the
+FSRS marks (`READY_ON_DUE_PASS`) stay as gates, never lowered. Should any of them move, they are
+compared on all five phases' aggregates against master's, never on one (phase 54's lesson). New
+measures:
+
+- How often the budget alone covered the day's owed work, and on which days it did not (the eve
+  first), reported, not gated.
 
 - The 17–19 Oct replay as a fixture (the answers' types, verdicts, help and days, glosses as lemmas):
   readiness 45, 70, 83 as homework at the end of each day; as a בוחן, 54, 56, 77.
@@ -309,7 +325,9 @@ session holds, so they are compared on all five phases' aggregates against maste
 ## 5. Testing
 
 - **Core, pure:** D3's rules one by one (first try, one miss a day, the bonus and its limit, the hold
-  and its lifting, the frozen due date), D1's word and target arithmetic, D4's ready count, D7's count.
+  and its lifting, the frozen due date), D1's word and target arithmetic, D4's ready count.
+- **Server domain, pure:** D7's count, by playing the picker forward (new words over several sessions,
+  a skill that needs two sessions to reach its cap, the miss room).
 - **Server unit:** the session-end write of readiness rows and events beside target skills; the
   budget set at the first session and never raised; "done for today" by budget and by no work;
   `practice_more_little`.
@@ -330,8 +348,8 @@ session holds, so they are compared on all five phases' aggregates against maste
 ## Left to the builder
 
 - Table, column and event names; the wire's exact shape within D10.
-- How the budget's miss room is computed from the recent miss rate, within D7.1.
-- How the stock re-check of D8 is folded into `replaceIfStale`.
+- How the budget's miss room is computed from the recent miss rate, within D7.1 (whole sessions,
+  never fewer than the play-forward).
 
 ---
 
