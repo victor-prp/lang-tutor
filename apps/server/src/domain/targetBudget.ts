@@ -1,6 +1,7 @@
 import { dimensionsTested, gradesFor, type GradableAnswer, type QuestionType } from '@lang-tutor/core/domain';
 
 import { LADDER_SLOTS } from './chooseConstants';
+import { LADDER_PRACTICE } from './plan';
 import { targetDay, type TargetWordInput } from './targetDay';
 import { cardOf, chooseTargetPicks, type TargetPickInput } from './targetPicker';
 import { applyTargetSession, type TargetAnswer, type TargetSkillRow } from './targetSkills';
@@ -28,9 +29,11 @@ export const MISS_RATE_DAYS = 3;
  *  doubled, so a promise stays one the learner can keep. */
 export const MISS_RATE_CAP = 0.25;
 
-/** The most sessions a play makes: a bound that cuts a very large day short. Every session of the
- *  play answers owed work right, so it moves toward done and the play ends by itself. */
-const PLAY_SESSIONS_MAX = 30;
+/** The most sessions a play makes. Every session of the play answers owed work right, so the play
+ *  always ends by itself; this bounds a very large day, which it cuts short at this count (37 or
+ *  more fresh words due tomorrow, two ladders a session and each climbing to the eve's cap, reach
+ *  it). Past it, the count no longer means a day anyone plays. */
+export const PLAY_SESSIONS_MAX = 30;
 
 /** The target id the play's skill rows carry: one target, so any id. */
 const PLAYED = 'play';
@@ -50,10 +53,11 @@ const keyOf = (row: Pick<TargetSkillRow, 'glossId' | 'dimension'>) => `${row.glo
 /**
  * Spec D7.1. Today's sessions and cards (slots: LADDER_SLOTS a ladder, one any other pick) from
  * the day as it stands, with no session in flight: while the day owes work, the picker's next
- * session of it, every pick answered right. A ladder starts its word and grades nothing (its intro
- * stage); any other pick is one right answer of its card (cardOf), which starts its word if it
- * was not, moves its skills through applyTargetSession against today's cap, one change per skill
- * a session, and is right today in the skills it tests. The input is targetDay's, with the
+ * session of it, every pick answered right. Any pick starts its word if it was not. A ladder is
+ * its practice cards (LADDER_PRACTICE, ruling T9-a), each answered right; its intro stage grades
+ * nothing (phase 55). Any other pick is one right answer of its card (cardOf). The session's
+ * answers move the skills through applyTargetSession against today's cap, one change per skill a
+ * session, and are right today in the skills they test. The input is targetDay's, with the
  * picker's own (`pick`).
  */
 export function playTodayForward(input: {
@@ -85,7 +89,9 @@ export function playTodayForward(input: {
 
     const asked = new Set(picks.map((pick) => pick.glossId));
     words = words.map((word) => (word.startedOn === null && asked.has(word.glossId) ? { ...word, startedOn: today } : word));
-    const answers = picks.filter((pick) => !pick.ladder).map((pick) => rightAnswer(pick.glossId, cardOf(pick.dimension, pick.rung)));
+    const answers = picks.flatMap((pick) =>
+      pick.ladder ? LADDER_PRACTICE.map((type) => rightAnswer(pick.glossId, type)) : [rightAnswer(pick.glossId, cardOf(pick.dimension, pick.rung))],
+    );
     const moved = applyTargetSession({
       targetId: PLAYED,
       sessionId: `${PLAYED} ${sessions}`,

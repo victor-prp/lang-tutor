@@ -862,11 +862,11 @@ describe("today's budget (phase 65, spec D7)", () => {
 
     await service.startSession('u_1', first.sessionId, NO_DEVICES);
 
-    // The picker played forward: the word's ladder (4 cards), then its written skills to the cap
-    // of 7 half-points in three more sessions of 2, 1 and 1 cards; with no answer to read a miss
-    // rate from, the default's one session of room.
+    // The picker played forward: the word's ladder (4 cards), whose practice cards take its written
+    // skills to 4 half-points (ruling T9-a), then one card to the cap of 7 in a second session;
+    // with no answer to read a miss rate from, the default's one session of room (ceil(2 / 0.8)).
     const set = await readTargetBudgets(t.db, exam);
-    expect(set).toEqual([{ day: DAY, sessions: 5, cards: 8, missRoom: 1, doneBefore: 0, createdAt: expect.any(Date) }]);
+    expect(set).toEqual([{ day: DAY, sessions: 3, cards: 5, missRoom: 1, doneBefore: 0, createdAt: expect.any(Date) }]);
 
     // Its card answered right, the session ends and the word is started: played forward now, the
     // day would be 3 sessions and 4 cards. A second session the same day leaves the budget be.
@@ -892,7 +892,7 @@ describe("today's budget (phase 65, spec D7)", () => {
 
     // The same budget the start call sets in the test above: the day before this answer.
     const set = await readTargetBudgets(t.db, exam);
-    expect(set).toEqual([{ day: DAY, sessions: 5, cards: 8, missRoom: 1, doneBefore: 0, createdAt: expect.any(Date) }]);
+    expect(set).toEqual([{ day: DAY, sessions: 3, cards: 5, missRoom: 1, doneBefore: 0, createdAt: expect.any(Date) }]);
     // The start call that lands after it leaves it be, as does the session's next answer.
     await service.startSession('u_1', first.sessionId, NO_DEVICES);
     const card = asChoice(first.questions[1]);

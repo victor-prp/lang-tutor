@@ -169,6 +169,7 @@
   // repo/targetBudgets.ts: { find(targetId, day), insert(row) /* on conflict do nothing */ }
   ```
 - `playTodayForward`: loop (at most 30): `day = targetDay(…)`; stop when `day.state !== 'owed'`; `picks = chooseTargetPicks({ …pick, day, mode: 'owed', inFlight: [] })`; stop when empty; count a session and its slots (`LADDER_SLOTS` for a `ladder` pick, else 1); then answer every pick right: a ladder sets the word's `startedOn = today` and grades nothing; a `TARGET` pick is one right answer of `cardOf(dimension, rung)` through `applyTargetSession` (cap of `today`) and adds its `dimensionsTested` to `rightToday`.
+  - *Amended in the final fix wave (ruling T9-a):* a ladder pick is not ungraded. It starts its word, and its graded practice cards (`LADDER_PRACTICE` in `plan.ts`: `multiple_choice`, `reverse_choice`, `typed_translation`, the list `ladderCards` also uses) are each one right answer through the same `applyTargetSession` call, adding their `dimensionsTested` to `rightToday`. Only the phase 55 intro stage (meet, read aloud, write-it) grades nothing, as in a real session. `LADDER_SLOTS` stays the slot cost. A fresh word's ladder session thus does its share of the written work, so a fresh two-ladder day due in a few weeks plays in one session.
 
 - [ ] **Step 1: Write the failing domain tests:**
   - Nothing owed → `{ sessions: 0, cards: 0 }`.

@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { Dimension, GradableAnswer } from '@lang-tutor/core/domain';
 
 import { LADDER_SLOTS } from './chooseConstants';
-import { DEFAULT_MISS_RATE, MISS_RATE_CAP, budgetSessions, missRateOf, playTodayForward } from './targetBudget';
+import { DEFAULT_MISS_RATE, MISS_RATE_CAP, PLAY_SESSIONS_MAX, budgetSessions, missRateOf, playTodayForward } from './targetBudget';
 import type { TargetWordInput } from './targetDay';
 import type { TargetPickInput } from './targetPicker';
 import type { TargetSkillRow } from './targetSkills';
@@ -87,9 +87,29 @@ describe('playTodayForward (spec D7.1)', () => {
     // With no live skill a started word owes nothing more: the play is its starts alone, two
     // ladders a session (NEW_PER_SESSION), so every word is started by its end.
     expect(play({ ...due, words: fresh.map((id) => word(id, null, [])) })).toEqual({ sessions: 3, cards: 5 * LADDER_SLOTS });
-    // With their written skills, each started word then climbs to the eve's cap: two ladders and
-    // two skills of earlier words in the second session, then six more of typed and choice cards.
-    expect(play({ ...due, words: fresh.map((id) => word(id, null)) })).toEqual({ sessions: 9, cards: 55 });
+    // With their written skills, each started word then climbs to the eve's cap of 20: its
+    // ladder's practice cards (ruling T9-a) take each skill to 4, then four sessions of typed
+    // translations (+4 each) the rest of the way. The last word starts in the third session, so its
+    // climb ends in the seventh. (A ladder that graded nothing made this 9 sessions, 55 cards.)
+    expect(play({ ...due, words: fresh.map((id) => word(id, null)) })).toEqual({ sessions: 7, cards: 40 });
+  });
+
+  it("answers a ladder's practice cards right: a fresh word's ladder session alone does its written work (ruling T9-a)", () => {
+    // Due in 20 days, made nine days ago: three intro days reached, so every word is planned today,
+    // and the cap is 4 half-points. The ladder's typed translation is a recall of all three written
+    // skills (+4 each, to the cap); its intro stage grades nothing.
+    const far = { createdOn: '2026-10-10', dueOn: '2026-11-08' };
+    expect(play({ ...far, words: [word('g1', null)] })).toEqual({ sessions: 1, cards: LADDER_SLOTS });
+    // Two fresh words: two ladders, one session.
+    expect(play({ ...far, words: [word('g1', null), word('g2', null)] })).toEqual({ sessions: 1, cards: 2 * LADDER_SLOTS });
+  });
+
+  it(`cuts a very large day short at ${PLAY_SESSIONS_MAX} sessions`, () => {
+    const due = { createdOn: TODAY, dueOn: TOMORROW };
+    const fresh = (n: number) => Array.from({ length: n }, (_, i) => word(`g${String(i).padStart(2, '0')}`, null));
+    // 36 fresh words due tomorrow play in 29 sessions; 40 would take more, and stop at the bound.
+    expect(play({ ...due, words: fresh(36) }).sessions).toBe(29);
+    expect(play({ ...due, words: fresh(40) }).sessions).toBe(PLAY_SESSIONS_MAX);
   });
 });
 

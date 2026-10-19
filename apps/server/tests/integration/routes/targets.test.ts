@@ -318,8 +318,9 @@ describe('GET /api/enrollments/{id}/targets', () => {
 describe('GET /api/targets/{id}', () => {
   // Phase 65 (spec D1, D7, D10). A new exam: no word answered, so readiness 0 from the start of
   // today, every first try left; each word counted on write and spell; and today's offer, the
-  // picker played forward (one word planned of two: its ladder of 4 cards, then its written
-  // skills to the cap in sessions of 2, 1 and 1) with one session of room at the default miss rate.
+  // picker played forward (one word planned of two: its ladder of 4 cards, whose practice cards
+  // take its written skills to 4 half-points (ruling T9-a), then one card to the cap of 7 in a
+  // second session) with one session of room at the default miss rate: ceil(2 / 0.8) = 3.
   it('answers readiness, where today started, and today as an offer of sessions before the first', async () => {
     const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
     const exam = await made('exam', DUE, apple, bread);
@@ -334,10 +335,10 @@ describe('GET /api/targets/{id}', () => {
       extra: 0,
       next_practice_in: 1,
       sessions_budget: null,
-      sessions_offer: 5,
+      sessions_offer: 3,
       sessions_done: 0,
       ended_early: false,
-      minutes: 4,
+      minutes: 3,
     });
     for (const shown of body.words) {
       expect(shown.skills).toEqual([
