@@ -55,6 +55,8 @@ export async function clearGemini(request: APIRequestContext): Promise<void> {
 const ACCEPT_MARKER = 'every right translation';
 const CONTEXT_MARKER = 'pins the sense';
 const CHECK_MARKER = 'a second opinion';
+// Phase 66 (spec D2). The server's EXPLAIN_MARKER (apps/server/src/domain/explain.ts).
+const EXPLAIN_MARKER = "list the mistakes in the learner's sentence";
 
 /** Above the broad generation stub (no priority), below a spec's own answer to
  *  the same call (expectContext's and expectCheck's default). */
@@ -90,12 +92,17 @@ async function expectMarked(
  * - **checker** (spec D5): it must name every option, or the attempt fails.
  *   expectCheck's answer keeps every card as the batch stubs made it.
  *
+ * - **explain** (phase 66, spec D2): not a preparation call, but every translation card
+ *   answered with a sentence of its own asks it as soon as it is judged. No mistakes,
+ *   so a spec that never looks at the הסבר panel sends no call into the generation stub.
+ *
  * Registered by clearGemini, so every spec has them however it clears.
  */
 async function expectPreparationDefaults(request: APIRequestContext): Promise<void> {
   await expectMarked(request, ACCEPT_MARKER, { answers: [], answer_form: null }, DEFAULT_PRIORITY);
   await expectContext(request, [], DEFAULT_PRIORITY);
   await expectCheck(request, {}, DEFAULT_PRIORITY);
+  await expectMarked(request, EXPLAIN_MARKER, { corrected: '', mistakes: [] }, DEFAULT_PRIORITY);
 }
 
 /** Phase 34 (spec D6, D8). The context call's answer: per key, the sentence a
@@ -355,8 +362,8 @@ export async function expectExplain(
 ): Promise<void> {
   const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
     data: {
-      priority: 10,
-      httpRequest: { method: 'POST', path, body: { type: 'REGEX', regex: "[\\s\\S]*list the mistakes in the learner's sentence[\\s\\S]*" } },
+      priority: OVERRIDE_PRIORITY,
+      httpRequest: { method: 'POST', path, body: { type: 'REGEX', regex: `[\\s\\S]*${EXPLAIN_MARKER}[\\s\\S]*` } },
       httpResponse: { statusCode: 200, headers: { 'content-type': ['application/json'] }, body: envelope(answer) },
       times: { remainingTimes: 1, unlimited: false },
     },

@@ -63,7 +63,7 @@ translation card's reference block that fetches on mount and shows on tap.
 
 ### Task 3: The table, the service method and the endpoint
 
-**Files:** Modify `apps/server/src/db/schema.ts` (+ migration `0046_answer_explanations.sql` via drizzle-kit generate), `apps/server/src/repo/sessions.ts` (`findExplainContext`, `insertExplanation`, `findExplanation`), `apps/server/src/services/sessions.ts` (`explainAnswer`), `apps/server/src/composition.ts` (`explainer` client), `apps/server/src/routes/sessions.ts` (`explainRoute`), test support `tests/support/mockServer.ts` (`expectExplain(ns, body | { status })`); Create `apps/server/tests/integration/routes/sessions.explain.test.ts`.
+**Files:** Modify `apps/server/src/db/schema.ts` (+ migration `0047_answer_explanations.sql` (0046 was taken by phase 65b) via drizzle-kit generate), `apps/server/src/repo/sessions.ts` (`findExplainContext`, `insertExplanation`, `findExplanation`), `apps/server/src/services/sessions.ts` (`explainAnswer`), `apps/server/src/composition.ts` (`explainer` client), `apps/server/src/routes/sessions.ts` (`explainRoute`), test support `tests/support/mockServer.ts` (`expectExplain(ns, body | { status })`); Create `apps/server/tests/integration/routes/sessions.explain.test.ts`.
 
 **Interfaces — Produces:** `sessions.explainAnswer(actorUserId, sessionId, { questionId }): Promise<Explanation>`; errors: `SessionNotFound` 404, `AnswerKindMismatch` 400 (not a translation, or not answered), `RetryPending` (new, 409), `LlmUnavailable` 502; route `POST /sessions/{id}/explain` → 200 `ExplainResponse`.
 

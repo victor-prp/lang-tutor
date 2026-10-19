@@ -113,7 +113,7 @@ record, never sent again: the explanation is of what was graded.
 by measuring in the eval (builder's call, start from the translation judge's 512). Recorded in
 `model_calls` with kind `sentence_explain`.
 
-**Table** `answer_explanations` (migration 0046) **(my call: recorded, per Victor's
+**Table** `answer_explanations` (migration 0047, R5) **(my call: recorded, per Victor's
 derive-then-record preference)**: `session_id`, `position` (the PK, and a cascading FK to
 `answers`), `text` (the text explained), `corrected`, `mistakes` jsonb, `created_at`. Never read by
 grading, memory, readiness or the recompute.
@@ -163,3 +163,25 @@ just never asks.
 
 The explain prompt's wording and thinking budget (measured), names inside the app component, and
 the panel's styling within the phase 64 look (white card, one blue).
+
+## Rulings made while building
+
+Ruling: R1. The judge's wrong verdict names "the practised word alone, with no sentence around it" as
+not a sentence. Without the detail rule a bare `красивый` was judged right in both eval runs. A first
+wording, "a word or two", could grade a correct two-word sentence wrong (review); the case `Egli
+corre.` now guards it. The app's `wordOnly` rule refuses the word alone before any call anyway.
+
+Ruling: R2. `EXPLAIN_THINKING` is 1024. At 512 the explainer called the Russian short form `красив` a
+mistake in both runs; at 1024 the `explain ` group passed 21/21 twice, about 3.5 s a call, which
+nothing waits on.
+
+Ruling: R3. The explain prompt compares the answer with the Hebrew sentence, not the reference, and
+names what is not a mistake (another correct wording, form or order, a word that only makes the
+sentence's meaning explicit): without it, `per due persone` and `for two people` were flagged.
+
+Ruling: R4. The הסבר button sits under the reference row, not beside the round speak button, so a
+long Italian line keeps its width on a phone. A mistake's Hebrew reason opens with U+200F, because
+Android takes a line's direction from its first strong letter and `writingDirection` is iOS-only.
+
+Ruling: R5. Phase 65b took migration 0046 on master while this was built; this table is 0047.
+
