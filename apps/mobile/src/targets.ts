@@ -265,8 +265,8 @@ export function stackBars(order: readonly HomeCard[], targets: readonly TargetSu
  *  Readiness shows in every state; the card draws it with its bar. */
 export type TargetCardState = {
   title: Countdown;
-  /** The praise once today's work is done, the rest day's line, or good luck on the date. */
-  note: { kind: 'praise' | 'rest' | 'due-today'; text: string } | null;
+  /** The rest day's line, or good luck on the date. */
+  note: { kind: 'rest' | 'due-today'; text: string } | null;
   /** Today's words: none on a rest day or on the date. `check` once all planned are done. */
   today: { text: string; check: boolean; extra: string | null } | null;
   readiness: string;
@@ -294,7 +294,7 @@ function cardOfDay(target: TargetSummary): TargetCardState & { button: string } 
     case 'done':
       return {
         title,
-        note: { kind: 'praise', text: strings.targetDonePraise },
+        note: null,
         today: todayLine,
         readiness,
         button: strings.practiceMore,
@@ -436,22 +436,32 @@ export function sessionDots(target: TargetSummary): ('done' | 'todo' | 'faded' |
 /** Phase 65 (spec D7). The words beside the dots: the count and what is left, the offer before
  *  the first session, that it is met, or what ended it early. Empty text where the card says
  *  nothing of sessions (a rest day, the date). */
-export function sessionsLine(target: TargetSummary): { text: string; side: string | null } {
+export type SessionsLine = {
+  kind: 'offer' | 'progress' | 'met' | 'early' | 'rest' | 'none';
+  text: string;
+  side: string | null;
+};
+
+export function sessionsLine(target: TargetSummary): SessionsLine {
   const { today } = target;
   const bonus = Math.max(0, today.sessions_done - sessionBudget(target));
   const bonusSide = bonus > 0 ? strings.targetSessionsBonus(bonus) : null;
-  if (today.state === 'due_today') return { text: '', side: null };
-  if (today.state === 'rest') return { text: '', side: bonusSide };
+  if (today.state === 'due_today') return { kind: 'none', text: '', side: null };
+  if (today.state === 'rest') return { kind: 'rest', text: '', side: bonusSide };
   const budget = sessionBudget(target);
-  if (today.sessions_budget === null) {
-    if (budget === 0) return { text: '', side: null };
-    return { text: strings.targetSessionsOffer(budget), side: strings.targetSessionsMinutes(today.minutes) };
-  }
+  // A day that is done reads as met whether or not the budget was ever set.
   if (today.state === 'done') {
-    const side = today.ended_early ? strings.targetSessionsEarly(today.sessions_done, budget) : bonusSide;
-    return { text: strings.targetSessionsMet, side };
+    if (today.ended_early && today.sessions_budget !== null) {
+      return { kind: 'early', text: strings.targetSessionsMet, side: strings.targetSessionsEarly(today.sessions_done, budget) };
+    }
+    return { kind: 'met', text: strings.targetSessionsMet, side: bonusSide };
+  }
+  if (today.sessions_budget === null) {
+    if (budget === 0) return { kind: 'none', text: '', side: null };
+    return { kind: 'offer', text: strings.targetSessionsOffer(budget), side: strings.targetSessionsMinutes(today.minutes) };
   }
   return {
+    kind: 'progress',
     text: strings.targetSessionsProgress(Math.min(today.sessions_done, budget), budget),
     side: strings.targetSessionsLeft(Math.max(0, budget - today.sessions_done)),
   };

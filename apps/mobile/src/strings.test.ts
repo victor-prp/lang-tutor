@@ -302,7 +302,6 @@ describe("home's cards (phase 57 D10, D11)", () => {
   it('words the buttons, the praise and the rest day', () => {
     expect(strings.practiceNow).toBe('לתרגל עכשיו');
     expect(strings.practiceMore).toBe('לתרגל עוד');
-    expect(strings.targetDonePraise).toBe('כל הכבוד! סיימת להיום. נתראה מחר');
     expect(strings.targetRest('exam', 3)).toBe('היום אין תרגול לבוחן. התרגול הבא בעוד ' + ltr('3') + ' ימים');
     expect(strings.targetRest('homework', 2)).toBe('היום אין תרגול לשיעורי הבית. התרגול הבא בעוד ' + ltr('2') + ' ימים');
     expect(strings.targetRest('exam', 1)).toBe('היום אין תרגול לבוחן. התרגול הבא מחר');

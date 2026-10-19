@@ -599,7 +599,6 @@ export const strings = {
   myWordsSeed: (language: string) => `מילים ב${language}`,
   myWordsSaved: (language: string) => `משמעויות שמורות ב${language}`,
   practiceMore: 'לתרגל עוד',
-  targetDonePraise: 'כל הכבוד! סיימת להיום. נתראה מחר',
   /** A rest day. `nextIn` is the days to the next practice day, null when none is known. */
   targetRest: (kind: TargetKind, nextIn: number | null): string => {
     const today = `היום אין תרגול ${TARGET_FOR[kind]}.`;

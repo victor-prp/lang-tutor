@@ -399,7 +399,7 @@ describe('targetCardState', () => {
       summary('t', 'done', '2026-10-21', { days_left: 20, today: { done: 10, planned: 10, extra: 2 } }),
     );
     expect(card.title).toEqual({ before: 'בוחן בעוד ', number: ltr('20'), after: ' ימים' });
-    expect(card.note).toEqual({ kind: 'praise', text: 'כל הכבוד! סיימת להיום. נתראה מחר' });
+    expect(card.note).toBeNull();
     expect(card.today).toEqual({
       text: `היום: ${ltr('10')} מתוך ${ltr('10')} מילים`,
       check: true,
@@ -742,45 +742,50 @@ describe('sessionDots and sessionsLine (phase 65)', () => {
   it('offers the count before the first session, with the minutes', () => {
     const t = today('owed', { sessions_budget: null, sessions_offer: 5, minutes: 25 });
     expect(sessionDots(t)).toEqual(['todo', 'todo', 'todo', 'todo', 'todo']);
-    expect(sessionsLine(t)).toEqual({ text: `היום: ${ltr('5')} תרגולים`, side: `כ-${ltr('25')} דקות` });
+    expect(sessionsLine(t)).toEqual({ kind: 'offer', text: `היום: ${ltr('5')} תרגולים`, side: `כ-${ltr('25')} דקות` });
   });
 
   it('counts the sessions done out of the budget, and what is left', () => {
     const t = today('owed', { sessions_budget: 5, sessions_done: 3 });
     expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'todo', 'todo']);
-    expect(sessionsLine(t)).toEqual({ text: `היום: ${ltr('3')} מתוך ${ltr('5')} תרגולים`, side: `עוד ${ltr('2')}` });
+    expect(sessionsLine(t)).toEqual({ kind: 'progress', text: `היום: ${ltr('3')} מתוך ${ltr('5')} תרגולים`, side: `עוד ${ltr('2')}` });
   });
 
   it('fades the unused dots when the work ran out, and says so', () => {
     const t = today('done', { sessions_budget: 5, sessions_done: 4, ended_early: true });
     expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'done', 'faded']);
-    expect(sessionsLine(t)).toEqual({ text: 'סיימת להיום ✓', side: `${ltr('4')} במקום ${ltr('5')}` });
+    expect(sessionsLine(t)).toEqual({ kind: 'early', text: 'סיימת להיום ✓', side: `${ltr('4')} במקום ${ltr('5')}` });
   });
 
   it('is met: all dots done, nothing more to say', () => {
     const t = today('done', { sessions_budget: 5, sessions_done: 5 });
     expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'done', 'done']);
-    expect(sessionsLine(t)).toEqual({ text: 'סיימת להיום ✓', side: null });
+    expect(sessionsLine(t)).toEqual({ kind: 'met', text: 'סיימת להיום ✓', side: null });
+  });
+
+  it('reads a done day as met even when the budget was never set', () => {
+    const t = today('done', { sessions_budget: null, sessions_offer: 5, ended_early: false });
+    expect(sessionsLine(t)).toEqual({ kind: 'met', text: 'סיימת להיום ✓', side: null });
   });
 
   it('draws the sessions past the budget as bonus dots', () => {
     const t = today('done', { sessions_budget: 5, sessions_done: 6 });
     expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'done', 'done', 'bonus']);
-    expect(sessionsLine(t)).toEqual({ text: 'סיימת להיום ✓', side: `${ltr('+1')} בונוס` });
+    expect(sessionsLine(t)).toEqual({ kind: 'met', text: 'סיימת להיום ✓', side: `${ltr('+1')} בונוס` });
   });
 
   it('shows a rest day only bonus dots, if any practice happened', () => {
     expect(sessionDots(today('rest', { sessions_budget: null, sessions_offer: 0 }))).toEqual([]);
-    expect(sessionsLine(today('rest', {}))).toEqual({ text: '', side: null });
+    expect(sessionsLine(today('rest', {}))).toEqual({ kind: 'rest', text: '', side: null });
     const practised = today('rest', { sessions_done: 2 });
     expect(sessionDots(practised)).toEqual(['bonus', 'bonus']);
-    expect(sessionsLine(practised)).toEqual({ text: '', side: `${ltr('+2')} בונוס` });
+    expect(sessionsLine(practised)).toEqual({ kind: 'rest', text: '', side: `${ltr('+2')} בונוס` });
   });
 
   it('says nothing of sessions on the date', () => {
     const t = today('due_today', { sessions_budget: null, sessions_offer: 3 });
     expect(sessionDots(t)).toEqual([]);
-    expect(sessionsLine(t)).toEqual({ text: '', side: null });
+    expect(sessionsLine(t)).toEqual({ kind: 'none', text: '', side: null });
   });
 });
 

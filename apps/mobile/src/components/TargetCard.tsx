@@ -77,9 +77,9 @@ export function TargetCard({
               {urgency.text}
             </Text>
           ) : null}
-          {card.note && card.note.kind !== 'praise' ? <Note id={id} note={card.note} /> : null}
+          {card.note ? <Note id={id} note={card.note} /> : null}
           <Readiness target={target} readiness={card.readiness} />
-          <Sessions target={target} praiseTestID={card.note?.kind === 'praise' ? `target-praise-${id}` : undefined} />
+          <Sessions target={target} />
         </>
       }
       footer={
@@ -100,7 +100,6 @@ export function TargetCard({
 }
 
 const NOTE_STYLES = {
-  praise: { box: { backgroundColor: colors.correctSurface }, text: { color: colors.correct } },
   rest: { box: { backgroundColor: colors.primarySurface }, text: { color: colors.text } },
   'due-today': { box: { backgroundColor: colors.warmSurface }, text: { color: colors.warmText } },
 } as const;
@@ -156,17 +155,17 @@ const paleOf = (hsl: string) => hsl.replace('hsl(', 'hsla(').replace(/\)$/, ', 0
 
 /** Phase 65 (spec D7). Today as a budget: its words and what is left or why it ended, then a
  *  dot per session (green done, grey to do, dashed when faded, blue bonus). */
-function Sessions({ target, praiseTestID }: { target: TargetSummary; praiseTestID?: string }) {
+function Sessions({ target }: { target: TargetSummary }) {
   const { id } = target;
   const line = sessionsLine(target);
   const dots = sessionDots(target);
   if (!line.text && !line.side && dots.length === 0) return null;
-  const met = target.today.state === 'done';
+  const met = line.kind === 'met' || line.kind === 'early';
   return (
     <View testID={`target-sessions-${id}`} style={styles.sessions}>
       <View style={styles.sessionsLine}>
         <Text
-          testID={praiseTestID ?? `target-today-${id}`}
+          testID={met ? `target-praise-${id}` : `target-today-${id}`}
           style={[styles.line, styles.sessionsText, met ? styles.met : null]}
         >
           {line.text}
