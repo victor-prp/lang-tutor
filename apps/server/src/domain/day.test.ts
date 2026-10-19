@@ -1069,7 +1069,6 @@ function runPaths(
         kind: target.kind,
         dueOn: target.dueOn,
         today: date,
-        plan: dayOf(target).state,
         words: [...glossIds].map((glossId) => ({ glossId, live: LIVE })),
         rows: [...readinessRows.values()].filter((row) => row.targetId === target.id),
         memory: [...memory.values()].filter((row) => glossIds.has(row.glossId)),

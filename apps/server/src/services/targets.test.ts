@@ -467,8 +467,8 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
       ready_count: 0,
       readiness_pct: 0,
       readiness_start_pct: 0,
-      // Phase 65 (spec D9): no word answered yet, every first try is left.
-      practice_more_little: false,
+      // Phase 65b D1: an exam five days out asks before practice more (the app asks once today is done).
+      practice_more_little: true,
       today: {
         state: 'owed',
         done: 0,
@@ -1164,30 +1164,24 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
     expect(read.readiness_start_pct).toBe(25);
   });
 
-  it('says more practice adds little only once every skill has had its first try today and both bonuses, and the plan owes nothing (spec D9, D7.8)', async () => {
-    const little = async (row: Partial<ReadinessRow>, plan: 'owed' | 'done' = 'done') =>
+  it("asks before practice more on any day but an exam's eve while a word is not ready (phase 65b D1)", async () => {
+    /** The day after TODAY. */
+    const EVE = '2026-10-16';
+    const asks = async (kind: 'exam' | 'homework', dueOn: string, state: MemoryState) =>
       (
         await world({
           saved: ['g_sole'],
-          targets: [target({ words: ['g_sole'] })],
-          readiness: readinessRows('g_sole', WRITE_SPELL, fading, row),
-          // Started two days ago, every skill at its full points: the plan owes nothing today.
-          // Else the word is still to start, which the plan owes.
-          ...(plan === 'done'
-            ? {
-                startedOn: { g_sole: '2026-10-13' },
-                skills: ALL_SKILLS.map((dimension) => ({ targetId: 't1', glossId: 'g_sole', dimension, halves: 20, sessionId: null, day: null })),
-              }
-            : {}),
+          targets: [target({ kind, dueOn, words: ['g_sole'] })],
+          readiness: readinessRows('g_sole', WRITE_SPELL, state),
         }).service.getTarget(OWNER, 't1')
       ).practice_more_little;
 
-    // Last answered on another day: today's first tries are left.
-    expect(await little({})).toBe(false);
-    expect(await little({ day: TODAY, bonusUsed: 1 })).toBe(false);
-    expect(await little({ day: TODAY, bonusUsed: 2 })).toBe(true);
-    // Every bonus spent, but the plan still owes work: the next session asks it, and can add more.
-    expect(await little({ day: TODAY, bonusUsed: 2 }, 'owed')).toBe(false);
+    // An exam's eve with its word below 90: extra practice helps, so the button starts at once.
+    expect(await asks('exam', EVE, fading)).toBe(false);
+    // The same eve with the word ready, another exam day, and a homework eve all ask.
+    expect(await asks('exam', EVE, solid)).toBe(true);
+    expect(await asks('exam', DUE, fading)).toBe(true);
+    expect(await asks('homework', EVE, fading)).toBe(true);
   });
 
   it('is owed before the budget is met and done once it is, a word still owed; the budget is the offer', async () => {
