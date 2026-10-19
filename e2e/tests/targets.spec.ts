@@ -563,8 +563,10 @@ test('practice more starts the next words early, and the target screen groups th
   expect(before.today).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 0, sessions_done: 1, ended_early: true });
   const budget = before.today.sessions_budget;
   if (budget === null) throw new Error(`the first answer set no budget: ${JSON.stringify(before.today)}`);
-  // The practice-more session below still ends inside it (spec D7.6).
-  expect(budget).toBeGreaterThan(2);
+  // The day's owed work, two ladders, is one session of the play (their practice cards take the
+  // words to the cap, ruling T9-a), and the default miss rate keeps one more for misses:
+  // ceil(1 / 0.8) = 2. The practice-more session below is that second one, and meets it (D7.6).
+  expect(budget).toBe(2);
   // Later words are still to start, which one more session would raise a lot: no sheet (spec D9).
   expect(before.practice_more_little).toBe(false);
   const more = await readyPathSession(page.request, enrollmentId, target.id);
@@ -585,16 +587,16 @@ test('practice more starts the next words early, and the target screen groups th
   const homeworkForms = HOMEWORK_WORDS.map((word) => word.form);
   for (const form of asked) expect(homeworkForms, asked.join(', ')).toContain(form);
 
-  // 2. The words it started are today's extra. Phase 65 (spec D5, D7): the day is still done, two
-  // sessions of the budget done and the rest faded; readiness rose with the words started.
+  // 2. The words it started are today's extra. Phase 65 (spec D5, D7): the day is still done, and
+  // with its two sessions the budget is met, not ended early; readiness rose with the words started.
   await backHome(page);
   const after = await readTarget(page.request, target.id);
-  expect(after.today, report()).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 2, sessions_budget: budget, sessions_done: 2, ended_early: true });
+  expect(after.today, report()).toMatchObject({ state: 'done', done: 2, planned: 2, extra: 2, sessions_budget: budget, sessions_done: 2, ended_early: false });
   expect(after.readiness_pct).toBeGreaterThan(before.readiness_pct);
   const extra = formsOf(after, 'extra');
   for (const form of extra) expect(asked).toContain(form);
   await showCard(page, target.id);
-  const sessions = { line: DONE_TODAY, side: `2 במקום ${budget}`, dots: ['done', 'done', ...Array<string>(budget - 2).fill('faded')] };
+  const sessions = { line: DONE_TODAY, side: null, dots: ['done', 'done'] };
   await expectSessions(page.getByTestId(`target-card-${target.id}`), target.id, sessions);
   await expectReadiness(page.getByTestId(`target-card-${target.id}`), after);
 
