@@ -164,8 +164,9 @@ describe('targets (phase 53 D10, D11)', () => {
     expect(strings.targetKindName('homework')).toBe('שיעורי בית');
     expect(strings.targetKindName('exam')).toBe('בוחן');
     expect(strings.targetReadinessName(40)).toBe(ltr('40%'));
-    // Spec D9, D12: a word at 100% is ready.
-    expect(strings.targetReadinessName(100)).toBe('מוכנה');
+    // Phase 65: a word from 90% is ready.
+    expect(strings.targetReadinessName(89)).toBe(ltr('89%'));
+    expect(strings.targetReadinessName(90)).toBe('מוכנה');
   });
 
   // Final review M2. My words with nothing of its own while targets hold every saved word.

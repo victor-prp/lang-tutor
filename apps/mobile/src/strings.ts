@@ -1,5 +1,5 @@
 import type { PartOfSpeech, TargetKind, UnavailableReason } from '@lang-tutor/core/api';
-import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
+import { READINESS_WORD_READY, type Dimension, type QuestionType } from '@lang-tutor/core/domain';
 
 // U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
 //
@@ -470,7 +470,7 @@ export const strings = {
   // Phase 53 (spec D10, D11). Preparing for homework or a test.
   targetKindName: (kind: TargetKind): string => TARGET_KIND_NAMES[kind],
   // Phase 57 (spec D9, D12). A word's readiness is a percent, and "ready" at 100%.
-  targetReadinessName: (readinessPct: number): string => (readinessPct >= 100 ? 'מוכנה' : isolateLtr(`${readinessPct}%`)),
+  targetReadinessName: (readinessPct: number): string => (readinessPct >= READINESS_WORD_READY ? 'מוכנה' : isolateLtr(`${readinessPct}%`)),
   targetTomorrow: 'מחר',
   targetInDays: (days: number) => `בעוד ${isolateLtr(String(days))} ימים`,
   // A target read after its date has come is no longer counted down to.
@@ -559,6 +559,20 @@ export const strings = {
   targetWordExtra: 'בונוס ✓',
   targetWordStartsIn: (days: number) =>
     days === 1 ? 'נתחיל מחר' : `נתחיל בעוד ${isolateLtr(String(days))} ימים`,
+  // Phase 65 (spec D4, D5). The card's big readiness: its label beside the number, the gain
+  // under the bar, and today as a budget of sessions.
+  targetReadinessLabel: 'מוכנות',
+  targetReadinessFor: (kind: TargetKind): string => TARGET_FOR[kind],
+  targetGainUp: (pct: number) => `${isolateLtr(`+${pct}%`)} היום`,
+  targetGainDown: (pct: number) => `${isolateLtr(`−${pct}%`)} היום`,
+  targetSessionsOffer: (offer: number) => `היום: ${isolateLtr(String(offer))} תרגולים`,
+  targetSessionsMinutes: (minutes: number) => `כ-${isolateLtr(String(minutes))} דקות`,
+  targetSessionsProgress: (done: number, budget: number) =>
+    `היום: ${isolateLtr(String(done))} מתוך ${isolateLtr(String(budget))} תרגולים`,
+  targetSessionsLeft: (left: number) => `עוד ${isolateLtr(String(left))}`,
+  targetSessionsMet: 'סיימת להיום ✓',
+  targetSessionsEarly: (done: number, budget: number) => `${isolateLtr(String(done))} במקום ${isolateLtr(String(budget))}`,
+  targetSessionsBonus: (extra: number) => `${isolateLtr(`+${extra}`)} בונוס`,
   targetReadinessPct: (kind: TargetKind, pct: number) => `מוכנות ${TARGET_FOR[kind]}: ${isolateLtr(`${pct}%`)}`,
   practiceNow: 'לתרגל עכשיו',
   // Phase 64 (spec D4, D5). The card's blue header: the countdown's big line, the fuse's label

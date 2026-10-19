@@ -8,7 +8,10 @@ import {
   countdownBig,
   dueDayLabel,
   fuseOf,
+  readinessBar,
   readinessColor,
+  sessionDots,
+  sessionsLine,
   targetButtonSolid,
   targetCardState,
   targetTitle,
@@ -74,21 +77,9 @@ export function TargetCard({
               {urgency.text}
             </Text>
           ) : null}
-          {card.note ? <Note id={id} note={card.note} /> : null}
-          {card.today ? (
-            <>
-              <Text testID={`target-today-${id}`} style={styles.line}>
-                {card.today.text}
-                {card.today.check ? ` ${strings.targetTodayCheck}` : ''}
-                {card.today.extra ? <Text style={styles.extra}>{` ${card.today.extra}`}</Text> : null}
-              </Text>
-              <TodayBar today={target.today} />
-            </>
-          ) : null}
-          <Text testID={`target-readiness-${id}`} style={styles.line}>
-            {card.readiness}
-          </Text>
-          <Bar parts={[{ share: target.readiness_pct / 100, color: readinessColor(target.readiness_pct) }]} />
+          {card.note && card.note.kind !== 'praise' ? <Note id={id} note={card.note} /> : null}
+          <Readiness target={target} readiness={card.readiness} />
+          <Sessions target={target} praiseTestID={card.note?.kind === 'praise' ? `target-praise-${id}` : undefined} />
         </>
       }
       footer={
@@ -122,6 +113,81 @@ function Note({ id, note }: { id: string; note: NonNullable<TargetCardState['not
     </View>
   );
 }
+
+/** Phase 65 (spec D4, D5). The big readiness in its colour with its label beside it, then its
+ *  bar: the start of the day pale, the day's gain bright at its end, with the gain's label. */
+function Readiness({ target, readiness }: { target: TargetSummary; readiness: string }) {
+  const { id } = target;
+  const bar = readinessBar(target);
+  const color = readinessColor(target.readiness_pct);
+  // A lower day leaves the bar at where it is now; the drop is only in the label.
+  const pale = Math.min(bar.start, target.readiness_pct);
+  const gain = Math.max(0, bar.gain);
+  return (
+    <>
+      <View testID={`target-readiness-${id}`} accessible accessibilityLabel={readiness} style={styles.hero}>
+        <Text testID="target-readiness-big" style={[styles.heroNumber, { color }]}>
+          {target.readiness_pct}
+          <Text style={styles.heroPercent}>%</Text>
+        </Text>
+        <View>
+          <Text style={styles.heroLabel}>{strings.targetReadinessLabel}</Text>
+          <Text style={styles.heroLabel}>{strings.targetReadinessFor(target.kind)}</Text>
+        </View>
+      </View>
+      <Bar
+        parts={[
+          { share: pale / 100, color: paleOf(color) },
+          { share: gain / 100, color },
+        ]}
+      />
+      <Text
+        testID="target-readiness-gain"
+        style={[styles.gain, bar.gain < 0 ? styles.gainDown : null]}
+      >
+        {bar.label ?? ' '}
+      </Text>
+    </>
+  );
+}
+
+/** The start of the day's colour, softened. */
+const paleOf = (hsl: string) => hsl.replace('hsl(', 'hsla(').replace(/\)$/, ', 0.45)');
+
+/** Phase 65 (spec D7). Today as a budget: its words and what is left or why it ended, then a
+ *  dot per session (green done, grey to do, dashed when faded, blue bonus). */
+function Sessions({ target, praiseTestID }: { target: TargetSummary; praiseTestID?: string }) {
+  const { id } = target;
+  const line = sessionsLine(target);
+  const dots = sessionDots(target);
+  if (!line.text && !line.side && dots.length === 0) return null;
+  const met = target.today.state === 'done';
+  return (
+    <View testID={`target-sessions-${id}`} style={styles.sessions}>
+      <View style={styles.sessionsLine}>
+        <Text
+          testID={praiseTestID ?? `target-today-${id}`}
+          style={[styles.line, styles.sessionsText, met ? styles.met : null]}
+        >
+          {line.text}
+        </Text>
+        {line.side ? <Text testID={`target-sessions-${id}-side`} style={met ? styles.sideMet : styles.side}>{line.side}</Text> : null}
+      </View>
+      <View testID="target-sessions" style={styles.dots}>
+        {dots.map((dot, at) => (
+          <View key={at} testID="target-session-dot" accessibilityLabel={dot} style={[styles.dot, DOT_STYLES[dot]]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const DOT_STYLES = {
+  done: { backgroundColor: colors.progress },
+  todo: { backgroundColor: '#EAECF0' },
+  faded: { height: 4, borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#D0D5DD' },
+  bonus: { backgroundColor: colors.primary },
+} as const;
 
 /** Today's bar: the planned words done (green once all are), then the extra words in a
  *  lighter green past the plan. */
@@ -201,7 +267,20 @@ function PracticeButton({
 
 const styles = StyleSheet.create({
   line: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.text, writingDirection: 'rtl' },
-  extra: { color: colors.correct, fontWeight: '800' },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
+  heroNumber: { fontSize: 54, lineHeight: 58, fontWeight: '900' },
+  heroPercent: { fontSize: 26, fontWeight: '800' },
+  heroLabel: { fontSize: fontSizes.md, lineHeight: 19, color: '#475467', fontWeight: '600', writingDirection: 'rtl' },
+  gain: { minHeight: 14, fontSize: 11.5, lineHeight: 14, fontWeight: '700', color: colors.correct, textAlign: 'right', writingDirection: 'rtl' },
+  gainDown: { color: colors.muted },
+  sessions: { gap: spacing.sm },
+  sessionsLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
+  sessionsText: { fontSize: fontSizes.sm },
+  met: { color: colors.correct, fontWeight: '700' },
+  side: { fontSize: fontSizes.sm, color: '#344054', fontWeight: '600', writingDirection: 'rtl' },
+  sideMet: { fontSize: fontSizes.sm, color: colors.muted, writingDirection: 'rtl' },
+  dots: { flexDirection: 'row', gap: 5, alignItems: 'center' },
+  dot: { width: 22, height: 7, borderRadius: radii.pill },
   ready: { fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '600', color: colors.correct, writingDirection: 'rtl' },
   urgency: {
     flexDirection: 'row',

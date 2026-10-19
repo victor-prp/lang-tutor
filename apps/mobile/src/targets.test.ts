@@ -19,6 +19,9 @@ import {
   homeOrder,
   readinessColor,
   readinessName,
+  readinessBar,
+  sessionDots,
+  sessionsLine,
   readyLabel,
   shouldPollTargets,
   stepTitle,
@@ -144,11 +147,13 @@ describe('readinessName', () => {
   it('writes the percent, its digits isolated', () => {
     expect(readinessName(0)).toBe('\u20660%\u2069');
     expect(readinessName(85)).toBe('\u206685%\u2069');
-    expect(readinessName(99)).toBe('\u206699%\u2069');
+    expect(readinessName(88)).toBe('\u206688%\u2069');
   });
 
-  // Spec D9, D12: "מוכנה" stays for 100%.
-  it('says ready at 100%', () => {
+  // Phase 65: a word is ready from READINESS_WORD_READY (90).
+  it('says ready from 90%', () => {
+    expect(readinessName(89)).toBe('\u206689%\u2069');
+    expect(readinessName(90)).toBe('מוכנה');
     expect(readinessName(100)).toBe('מוכנה');
   });
 });
@@ -270,7 +275,7 @@ describe('withoutWord', () => {
     ready_count: 1,
     ...DAY,
     words: [
-      { ...WORD, gloss_id: 'g1', form: 'cane', meaning: 'כלב', readiness_pct: 100 },
+      { ...WORD, gloss_id: 'g1', form: 'cane', meaning: 'כלב', readiness_pct: 90 },
       { ...WORD, gloss_id: 'g2', form: 'casa', meaning: 'בית', readiness_pct: 80 },
       { ...WORD, gloss_id: 'g3', form: 'gatto', meaning: 'חתול', readiness_pct: 0 },
     ],
@@ -366,7 +371,7 @@ describe('homeOrder', () => {
 
   // Its last review is outlined at 100%: the next card down has the filled button.
   it('fills the next card when the target on its date is already ready', () => {
-    const ready = summary('today', 'due_today', '2026-10-16', { days_left: 0, readiness_pct: 100 });
+    const ready = summary('today', 'due_today', '2026-10-16', { days_left: 0, ready_count: 8, word_count: 8, readiness_pct: 95 });
     expect(homeOrder([ready])).toEqual({ first: 'main', order: ['today', 'main'] });
     expect(homeOrder([ready, summary('owed', 'owed', '2026-10-20')])).toEqual({
       first: 'owed',
@@ -642,12 +647,12 @@ describe('urgencyOf (phase 64, spec D5)', () => {
 });
 
 describe('targetButtonSolid (phase 64, spec D4)', () => {
-  it('is solid while work is owed, and on the date below 100%', () => {
+  it('is solid while work is owed, and on the date until every word is ready', () => {
     expect(targetButtonSolid(summary('t', 'owed', '2026-10-20'))).toBe(true);
     expect(targetButtonSolid(summary('t', 'done', '2026-10-20'))).toBe(false);
     expect(targetButtonSolid(summary('t', 'rest', '2026-10-20'))).toBe(false);
-    expect(targetButtonSolid(summary('t', 'due_today', '2026-10-15', { readiness_pct: 99 }))).toBe(true);
-    expect(targetButtonSolid(summary('t', 'due_today', '2026-10-15', { readiness_pct: 100 }))).toBe(false);
+    expect(targetButtonSolid(summary('t', 'due_today', '2026-10-15', { ready_count: 7, word_count: 8, readiness_pct: 99 }))).toBe(true);
+    expect(targetButtonSolid(summary('t', 'due_today', '2026-10-15', { ready_count: 8, word_count: 8, readiness_pct: 92 }))).toBe(false);
   });
 });
 
@@ -711,5 +716,77 @@ describe('dotLook (phase 64, spec D5)', () => {
     expect(dotLook({ onTop: true, urgent: true })).toBe('on');
     expect(dotLook({ onTop: false, urgent: true })).toBe('urgent');
     expect(dotLook({ onTop: false, urgent: false })).toBe('off');
+  });
+});
+
+// Phase 65 (spec D4, D5). The card: readiness first, today's gain on its bar, today as a budget.
+describe('readinessBar (phase 65)', () => {
+  const at = (start: number, now: number) => readinessBar(summary('t', 'owed', '2026-10-21', { readiness_start_pct: start, readiness_pct: now }));
+
+  it('shows the gain bright at the end of the start, with its label', () => {
+    expect(at(70, 83)).toEqual({ start: 70, gain: 13, label: `${ltr('+13%')} היום` });
+  });
+
+  it('has no label before any answer today', () => {
+    expect(at(70, 70)).toEqual({ start: 70, gain: 0, label: null });
+  });
+
+  it('shows a lower day as a negative gain', () => {
+    expect(at(74, 70)).toEqual({ start: 74, gain: -4, label: `${ltr('−4%')} היום` });
+  });
+});
+
+describe('sessionDots and sessionsLine (phase 65)', () => {
+  const today = (state: TodayState, over: Partial<TargetSummary['today']>) => summary('t', state, '2026-10-21', { today: over });
+
+  it('offers the count before the first session, with the minutes', () => {
+    const t = today('owed', { sessions_budget: null, sessions_offer: 5, minutes: 25 });
+    expect(sessionDots(t)).toEqual(['todo', 'todo', 'todo', 'todo', 'todo']);
+    expect(sessionsLine(t)).toEqual({ text: `היום: ${ltr('5')} תרגולים`, side: `כ-${ltr('25')} דקות` });
+  });
+
+  it('counts the sessions done out of the budget, and what is left', () => {
+    const t = today('owed', { sessions_budget: 5, sessions_done: 3 });
+    expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'todo', 'todo']);
+    expect(sessionsLine(t)).toEqual({ text: `היום: ${ltr('3')} מתוך ${ltr('5')} תרגולים`, side: `עוד ${ltr('2')}` });
+  });
+
+  it('fades the unused dots when the work ran out, and says so', () => {
+    const t = today('done', { sessions_budget: 5, sessions_done: 4, ended_early: true });
+    expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'done', 'faded']);
+    expect(sessionsLine(t)).toEqual({ text: 'סיימת להיום ✓', side: `${ltr('4')} במקום ${ltr('5')}` });
+  });
+
+  it('is met: all dots done, nothing more to say', () => {
+    const t = today('done', { sessions_budget: 5, sessions_done: 5 });
+    expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'done', 'done']);
+    expect(sessionsLine(t)).toEqual({ text: 'סיימת להיום ✓', side: null });
+  });
+
+  it('draws the sessions past the budget as bonus dots', () => {
+    const t = today('done', { sessions_budget: 5, sessions_done: 6 });
+    expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'done', 'done', 'bonus']);
+    expect(sessionsLine(t)).toEqual({ text: 'סיימת להיום ✓', side: `${ltr('+1')} בונוס` });
+  });
+
+  it('shows a rest day only bonus dots, if any practice happened', () => {
+    expect(sessionDots(today('rest', { sessions_budget: null, sessions_offer: 0 }))).toEqual([]);
+    expect(sessionsLine(today('rest', {}))).toEqual({ text: '', side: null });
+    const practised = today('rest', { sessions_done: 2 });
+    expect(sessionDots(practised)).toEqual(['bonus', 'bonus']);
+    expect(sessionsLine(practised)).toEqual({ text: '', side: `${ltr('+2')} בונוס` });
+  });
+
+  it('says nothing of sessions on the date', () => {
+    const t = today('due_today', { sessions_budget: null, sessions_offer: 3 });
+    expect(sessionDots(t)).toEqual([]);
+    expect(sessionsLine(t)).toEqual({ text: '', side: null });
+  });
+});
+
+describe('ready means every word at 90 (phase 65)', () => {
+  it('outlines the last review only once every word is ready', () => {
+    const almost = summary('a', 'due_today', '2026-10-16', { days_left: 0, ready_count: 7, word_count: 8, readiness_pct: 99 });
+    expect(homeOrder([almost]).first).toBe('a');
   });
 });

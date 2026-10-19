@@ -1,4 +1,5 @@
 import type { Target, TargetKind, TargetList, TargetSummary, TargetWord } from '@lang-tutor/core/api';
+import { READINESS_WORD_READY } from '@lang-tutor/core/domain';
 
 import { ApiError } from '@/api/client';
 import { strings, type Countdown } from '@/strings';
@@ -128,13 +129,17 @@ export function withoutWord(target: Target, glossId: string): Target {
   return {
     ...target,
     word_count: target.word_count - 1,
-    ready_count: target.ready_count - (word.readiness_pct === 100 ? 1 : 0),
+    ready_count: target.ready_count - (word.readiness_pct >= READINESS_WORD_READY ? 1 : 0),
     words: target.words.filter((candidate) => candidate !== word),
   };
 }
 
 /** Phase 57 (spec D11). A card on home: the main path ("My words") or a target, by its id. */
 export type HomeCard = 'main' | string;
+
+/** Phase 65. A target is ready when every word is at READINESS_WORD_READY or more. */
+const allReady = (target: Pick<TargetSummary, 'word_count' | 'ready_count'>): boolean =>
+  target.ready_count === target.word_count;
 
 const byDate = (a: TargetSummary, b: TargetSummary) =>
   a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
@@ -154,7 +159,7 @@ export function homeOrder(targets: readonly TargetSummary[]): { first: HomeCard;
   const order = [...ids(['due_today']), ...ids(['owed']), 'main', ...ids(['done', 'rest'])];
   const outlined = new Set(
     sorted
-      .filter((target) => (target.today.state === 'due_today' && target.readiness_pct >= 100) || target.word_count === 0)
+      .filter((target) => (target.today.state === 'due_today' && allReady(target)) || target.word_count === 0)
       .map((target) => target.id),
   );
   const first = order.find((card) => !outlined.has(card)) ?? 'main';
@@ -202,10 +207,11 @@ export function urgencyOf(target: Pick<TargetSummary, 'kind' | 'days_left' | 'wo
 }
 
 /** Phase 64 (spec D4). A target's button is solid when pressing it is the thing to do now:
- *  work owed today, or the last review on the date below 100% (phase 57 D10). */
+ *  work owed today, or the last review on the date until every word is ready (phase 57 D10,
+ *  phase 65: ready is a word at READINESS_WORD_READY). */
 export function targetButtonSolid(target: TargetSummary): boolean {
   if (target.today.state === 'owed') return true;
-  return target.today.state === 'due_today' && target.readiness_pct < 100;
+  return target.today.state === 'due_today' && !allReady(target);
 }
 
 /** Phase 64 (spec D3, D5). How a dot of the stack is drawn: the top card's long and blue, a
@@ -389,4 +395,64 @@ export function wordTodayLine(word: TargetWord): string | null {
     case 'later':
       return word.starts_in === null ? null : strings.targetWordStartsIn(word.starts_in);
   }
+}
+
+/** Phase 65 (spec D4, D5). The readiness bar: the start of the day pale, the day's gain bright
+ *  at its end (negative on a lower day), and the gain's label, none before any answer today. */
+export function readinessBar(target: Pick<TargetSummary, 'readiness_pct' | 'readiness_start_pct'>): {
+  start: number;
+  gain: number;
+  label: string | null;
+} {
+  const start = target.readiness_start_pct;
+  const gain = target.readiness_pct - start;
+  if (gain === 0) return { start, gain, label: null };
+  return { start, gain, label: gain > 0 ? strings.targetGainUp(gain) : strings.targetGainDown(-gain) };
+}
+
+/** The sessions budget as the card counts it: what it is once set, else the offer. A rest day
+ *  and the date itself have none. */
+function sessionBudget(target: TargetSummary): number {
+  const { today } = target;
+  if (today.state === 'rest' || today.state === 'due_today') return 0;
+  return today.sessions_budget ?? today.sessions_offer;
+}
+
+/** Phase 65 (spec D7). Today's sessions as dots: done, still to do, faded when the work ran out
+ *  before the budget, and bonus for the sessions past it. */
+export function sessionDots(target: TargetSummary): ('done' | 'todo' | 'faded' | 'bonus')[] {
+  const { today } = target;
+  if (today.state === 'due_today') return [];
+  const budget = sessionBudget(target);
+  const done = Math.min(today.sessions_done, budget);
+  const rest = budget - done;
+  return [
+    ...Array<'done'>(done).fill('done'),
+    ...Array<'todo' | 'faded'>(rest).fill(today.ended_early ? 'faded' : 'todo'),
+    ...Array<'bonus'>(today.sessions_done - done).fill('bonus'),
+  ];
+}
+
+/** Phase 65 (spec D7). The words beside the dots: the count and what is left, the offer before
+ *  the first session, that it is met, or what ended it early. Empty text where the card says
+ *  nothing of sessions (a rest day, the date). */
+export function sessionsLine(target: TargetSummary): { text: string; side: string | null } {
+  const { today } = target;
+  const bonus = Math.max(0, today.sessions_done - sessionBudget(target));
+  const bonusSide = bonus > 0 ? strings.targetSessionsBonus(bonus) : null;
+  if (today.state === 'due_today') return { text: '', side: null };
+  if (today.state === 'rest') return { text: '', side: bonusSide };
+  const budget = sessionBudget(target);
+  if (today.sessions_budget === null) {
+    if (budget === 0) return { text: '', side: null };
+    return { text: strings.targetSessionsOffer(budget), side: strings.targetSessionsMinutes(today.minutes) };
+  }
+  if (today.state === 'done') {
+    const side = today.ended_early ? strings.targetSessionsEarly(today.sessions_done, budget) : bonusSide;
+    return { text: strings.targetSessionsMet, side };
+  }
+  return {
+    text: strings.targetSessionsProgress(Math.min(today.sessions_done, budget), budget),
+    side: strings.targetSessionsLeft(Math.max(0, budget - today.sessions_done)),
+  };
 }
