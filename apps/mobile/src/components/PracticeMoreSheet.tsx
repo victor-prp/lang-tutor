@@ -6,8 +6,9 @@ import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 /**
  * Phase 65 (spec D9). The bottom sheet that asks before practising past the day's budget.
- * Only "לתרגל בכל זאת" starts a session; "אחזור מחר" and a tap outside close it. The tick box
- * applies to whichever button is pressed, and is passed up with the choice.
+ * Only "לתרגל בכל זאת" starts a session; "אחזור מחר", a tap outside and Android's back close it.
+ * The tick box applies to whichever button is pressed, and is passed up with the choice; a tap
+ * outside or back is a cancel, which saves nothing, so it passes false whatever the box says.
  */
 export function PracticeMoreSheet({
   visible,
@@ -27,10 +28,14 @@ export function PracticeMoreSheet({
     onAnyway(stop);
     setStop(false);
   };
+  const cancel = () => {
+    onLater(false);
+    setStop(false);
+  };
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={later}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={cancel}>
       <View style={styles.dim} testID="practice-more-sheet">
-        <Pressable style={styles.outside} onPress={later} accessibilityLabel={strings.practiceMoreLater} />
+        <Pressable style={styles.outside} onPress={cancel} accessibilityLabel={strings.practiceMoreLater} />
         <View style={styles.sheet}>
           <View style={styles.grab} />
           <Text style={styles.title}>{strings.practiceMoreSheetTitle}</Text>

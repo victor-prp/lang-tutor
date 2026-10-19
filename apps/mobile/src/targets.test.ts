@@ -24,13 +24,13 @@ import {
   skillRows,
   sessionDots,
   sessionsLine,
+  sessionsSpoken,
   readyLabel,
   shouldPollTargets,
   stepTitle,
   targetCardState,
   targetTitle,
   targetsFor,
-  todayBar,
   withoutWord,
   wizardTitle,
   screenGroups,
@@ -385,53 +385,40 @@ describe('homeOrder', () => {
 describe('targetCardState', () => {
   const ltr = (text: string) => `⁦${text}⁩`;
 
-  it('owes work: the countdown, today\'s line and "practise now"', () => {
+  it('owes work: the countdown and "practise now"', () => {
     const card = targetCardState(summary('t', 'owed', '2026-10-21', { today: { done: 5, planned: 8 } }));
     expect(card).toEqual({
       title: { before: 'בוחן בעוד ', number: ltr('5'), after: ' ימים' },
       note: null,
-      today: { text: `היום: ${ltr('5')} מתוך ${ltr('8')} מילים`, check: false, extra: null },
       readiness: `מוכנות לבוחן: ${ltr('18%')}`,
       button: 'לתרגל עכשיו',
     });
   });
 
-  it('is done: the praise, today\'s line with its check and the extra words, and "practise more"', () => {
+  it('is done: no note, and "practise more"', () => {
     const card = targetCardState(
       summary('t', 'done', '2026-10-21', { days_left: 20, today: { done: 10, planned: 10, extra: 2 } }),
     );
     expect(card.title).toEqual({ before: 'בוחן בעוד ', number: ltr('20'), after: ' ימים' });
     expect(card.note).toBeNull();
-    expect(card.today).toEqual({
-      text: `היום: ${ltr('10')} מתוך ${ltr('10')} מילים`,
-      check: true,
-      extra: `${ltr('+2')} נוספות`,
-    });
     expect(card.button).toBe('לתרגל עוד');
   });
 
-  it('shows no extra words when there are none', () => {
-    const card = targetCardState(summary('t', 'done', '2026-10-21', { today: { done: 8, planned: 8, extra: 0 } }));
-    expect(card.today?.extra).toBeNull();
-  });
-
-  it('rests: the rest line with the next practice day, no today line, and "practise more"', () => {
+  it('rests: the rest line with the next practice day, and "practise more"', () => {
     const card = targetCardState(
       summary('t', 'rest', '2026-11-02', { days_left: 17, today: { planned: 0, next_practice_in: 3 } }),
     );
     expect(card.note).toEqual({ kind: 'rest', text: `היום אין תרגול לבוחן. התרגול הבא בעוד ${ltr('3')} ימים` });
-    expect(card.today).toBeNull();
     expect(card.button).toBe('לתרגל עוד');
   });
 
-  it('is on its date: its own title, good luck, no today line and the last review (spec D10)', () => {
+  it('is on its date: its own title, good luck and the last review (spec D10)', () => {
     const card = targetCardState(
       summary('t', 'due_today', '2026-10-16', { kind: 'homework', days_left: 0, readiness_pct: 100 }),
     );
     expect(card).toEqual({
       title: { before: 'שיעורי הבית היום', number: null, after: '' },
       note: { kind: 'due-today', text: 'בהצלחה!' },
-      today: null,
       readiness: `מוכנות לשיעורי הבית: ${ltr('100%')}`,
       button: 'חזרה אחרונה',
     });
@@ -450,24 +437,6 @@ describe('targetCardState', () => {
       number: null,
       after: '',
     });
-  });
-});
-
-describe('todayBar', () => {
-  it("fills the share of today's planned words done", () => {
-    expect(todayBar({ done: 5, planned: 8, extra: 0 })).toEqual({ done: 5 / 8, extra: 0 });
-    expect(todayBar({ done: 0, planned: 8, extra: 0 })).toEqual({ done: 0, extra: 0 });
-    expect(todayBar({ done: 8, planned: 8, extra: 0 })).toEqual({ done: 1, extra: 0 });
-  });
-
-  // extra-words.html: 10 of 10 and 2 more is 10/12 of the bar, then 2/12 in a lighter green.
-  it('runs past the plan with the extra words, out of the plan and the extra together', () => {
-    expect(todayBar({ done: 10, planned: 10, extra: 2 })).toEqual({ done: 10 / 12, extra: 2 / 12 });
-    expect(todayBar({ done: 3, planned: 8, extra: 2 })).toEqual({ done: 3 / 10, extra: 2 / 10 });
-  });
-
-  it('is empty with nothing planned or done', () => {
-    expect(todayBar({ done: 0, planned: 0, extra: 0 })).toEqual({ done: 0, extra: 0 });
   });
 });
 
@@ -788,6 +757,22 @@ describe('sessionDots and sessionsLine (phase 65)', () => {
     const t = today('due_today', { sessions_budget: null, sessions_offer: 3 });
     expect(sessionDots(t)).toEqual([]);
     expect(sessionsLine(t)).toEqual({ kind: 'none', text: '', side: null });
+  });
+
+  // The dots are hidden from a screen reader: the row says in Hebrew what they draw.
+  it("says the row for a screen reader: the offer as written, else the count the dots draw, after the day's end", () => {
+    expect(sessionsSpoken(today('owed', { sessions_budget: null, sessions_offer: 5, minutes: 25 }))).toBe(
+      `היום: ${ltr('5')} תרגולים, כ-${ltr('25')} דקות`,
+    );
+    expect(sessionsSpoken(today('owed', { sessions_budget: 5, sessions_done: 3 }))).toBe(`${ltr('3')} מתוך ${ltr('5')} תרגולים היום`);
+    expect(sessionsSpoken(today('done', { sessions_budget: 5, sessions_done: 4, ended_early: true }))).toBe(
+      `סיימת להיום, ${ltr('4')} מתוך ${ltr('5')} תרגולים היום`,
+    );
+    expect(sessionsSpoken(today('done', { sessions_budget: 5, sessions_done: 6 }))).toBe(
+      `סיימת להיום, ${ltr('5')} מתוך ${ltr('5')} תרגולים היום ועוד ${ltr('1')} בונוס`,
+    );
+    expect(sessionsSpoken(today('rest', { sessions_done: 2 }))).toBe(`${ltr('+2')} בונוס`);
+    expect(sessionsSpoken(today('rest', {}))).toBe('');
   });
 });
 

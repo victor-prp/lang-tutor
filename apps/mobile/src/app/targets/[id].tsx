@@ -296,7 +296,7 @@ function Skills({ word }: { word: TargetWord }) {
         <View key={row.dimension} testID={`target-word-skill-${row.dimension}`} style={styles.skill}>
           <View style={styles.skillHead}>
             <Text style={styles.skillName}>{row.name}</Text>
-            <Text style={styles.skillName}>{`\u2066${row.chance}%\u2069`}</Text>
+            <Text style={styles.skillName}>{strings.targetSkillChance(row.chance)}</Text>
           </View>
           <View style={styles.skillTrack}>
             <View
@@ -344,7 +344,6 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   due: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, fontWeight: '700', color: colors.text, writingDirection: 'rtl' },
-  when: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, writingDirection: 'rtl' },
   ready: { fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '700', color: colors.primary, writingDirection: 'rtl' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   action: {

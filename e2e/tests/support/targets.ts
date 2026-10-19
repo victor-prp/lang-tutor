@@ -209,9 +209,14 @@ export const offerOf = (today: Target['today']): SessionsView => ({
  *  for each session left unused). */
 export const DONE_TODAY = 'סיימת להיום ✓';
 
+/** The dots' testID prefix: each dot's kind follows it (`target-session-dot-done`). The dots are
+ *  hidden from a screen reader, which reads the row's own label instead. */
+const DOT = 'target-session-dot-';
+
 /**
  * Phase 65 (spec D5, D7). Today's sessions where `scope` draws them: the line (the praise once the
- * day is done, which is where target-praise-<id> sits), what is beside it, and the dots.
+ * day is done, which is where target-praise-<id> sits), what is beside it, the dots, and that the
+ * dots are hidden from a screen reader while the row has a label of its own.
  */
 export async function expectSessions(scope: Locator, targetId: string, view: SessionsView): Promise<void> {
   const line = scope.getByTestId(view.line === DONE_TODAY ? `target-praise-${targetId}` : `target-today-${targetId}`);
@@ -219,9 +224,16 @@ export async function expectSessions(scope: Locator, targetId: string, view: Ses
   const side = scope.getByTestId(`target-sessions-${targetId}-side`);
   if (view.side === null) await expect(side).toHaveCount(0);
   else await expectLabel(side, view.side);
+  const row = scope.getByTestId(`target-sessions-${targetId}`);
   await expect
-    .poll(() => scope.getByTestId('target-session-dot').evaluateAll((dots) => dots.map((dot) => dot.getAttribute('aria-label'))))
+    .poll(() =>
+      row
+        .locator(`[data-testid^="${DOT}"]`)
+        .evaluateAll((dots, prefix) => dots.map((dot) => dot.getAttribute('data-testid')!.slice(prefix.length)), DOT),
+    )
     .toEqual(view.dots);
+  await expect(row.getByTestId('target-sessions')).toHaveAttribute('aria-hidden', 'true');
+  await expect(row).toHaveAttribute('aria-label', /תרגולים|בונוס/);
 }
 
 /** The target screen's header (phase 65, spec D6): the countdown and what sits beside it. Home stays

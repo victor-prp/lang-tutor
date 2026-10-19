@@ -548,17 +548,13 @@ export const strings = {
   targetDueToday: (kind: TargetKind): string => TARGET_DUE_TODAY[kind],
   targetGoodLuck: 'בהצלחה!',
   lastReview: 'חזרה אחרונה',
-  targetToday: (done: number, planned: number) =>
-    `היום: ${isolateLtr(String(done))} מתוך ${isolateLtr(String(planned))} מילים`,
-  // After today's line once every planned word is done.
-  targetTodayCheck: '✓',
-  // The words started early today, after the check (extra-words.html).
-  targetExtra: (count: number) => `${isolateLtr(`+${count}`)} נוספות`,
   // The target screen's word groups and each word's line for today (spec D12).
   targetGroupTitle: { owed: 'נשאר להיום', done: 'סיימת להיום', extra: 'נוספו היום', later: 'בהמשך' } as const,
   targetWordOwed: (names: string[]) => `היום נשאר: ${names.join(', ')}`,
   targetWordDone: 'היום ✓',
   targetSkillHeld: 'חצי עד שתענה נכון מחר',
+  // Phase 65 (spec D6). A counted skill's chance beside its name.
+  targetSkillChance: (chance: number) => isolateLtr(`${chance}%`),
   targetWordExtra: 'בונוס ✓',
   targetWordStartsIn: (days: number) =>
     days === 1 ? 'נתחיל מחר' : `נתחיל בעוד ${isolateLtr(String(days))} ימים`,
@@ -576,6 +572,11 @@ export const strings = {
   targetSessionsMet: 'סיימת להיום ✓',
   targetSessionsEarly: (done: number, budget: number) => `${isolateLtr(String(done))} במקום ${isolateLtr(String(budget))}`,
   targetSessionsBonus: (extra: number) => `${isolateLtr(`+${extra}`)} בונוס`,
+  // What a screen reader says of the sessions row, its dots hidden: the count they draw.
+  targetSessionsSpoken: (done: number, budget: number, bonus: number) =>
+    `${isolateLtr(String(done))} מתוך ${isolateLtr(String(budget))} תרגולים היום` +
+    (bonus > 0 ? ` ועוד ${isolateLtr(String(bonus))} בונוס` : ''),
+  targetSessionsMetSpoken: 'סיימת להיום',
   targetReadinessPct: (kind: TargetKind, pct: number) => `מוכנות ${TARGET_FOR[kind]}: ${isolateLtr(`${pct}%`)}`,
   practiceNow: 'לתרגל עכשיו',
   // Phase 64 (spec D4, D5). The card's blue header: the countdown's big line, the fuse's label

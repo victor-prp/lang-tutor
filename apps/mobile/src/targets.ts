@@ -261,14 +261,12 @@ export function stackBars(order: readonly HomeCard[], targets: readonly TargetSu
 }
 
 /** Phase 57 (spec D10, D11). What a target's card shows: its title (the countdown, or the
- *  date itself), the line under it, today's line, its readiness and its button's label.
- *  Readiness shows in every state; the card draws it with its bar. */
+ *  date itself), the line under it, its readiness and its button's label. Readiness shows in
+ *  every state; the card draws it with its bar. Phase 65: today is its sessions (sessionsLine). */
 export type TargetCardState = {
   title: Countdown;
   /** The rest day's line, or good luck on the date. */
   note: { kind: 'rest' | 'due-today'; text: string } | null;
-  /** Today's words: none on a rest day or on the date. `check` once all planned are done. */
-  today: { text: string; check: boolean; extra: string | null } | null;
   readiness: string;
   /** Null for a target with no word (final review M3): its path has nothing to ask. */
   button: string | null;
@@ -283,27 +281,15 @@ function cardOfDay(target: TargetSummary): TargetCardState & { button: string } 
   const { kind, today } = target;
   const title = strings.targetCountdown(kind, target.days_left);
   const readiness = strings.targetReadinessPct(kind, target.readiness_pct);
-  const todayLine = {
-    text: strings.targetToday(today.done, today.planned),
-    check: today.state === 'done',
-    extra: today.extra > 0 ? strings.targetExtra(today.extra) : null,
-  };
   switch (today.state) {
     case 'owed':
-      return { title, note: null, today: todayLine, readiness, button: strings.practiceNow };
+      return { title, note: null, readiness, button: strings.practiceNow };
     case 'done':
-      return {
-        title,
-        note: null,
-        today: todayLine,
-        readiness,
-        button: strings.practiceMore,
-      };
+      return { title, note: null, readiness, button: strings.practiceMore };
     case 'rest':
       return {
         title,
         note: { kind: 'rest', text: strings.targetRest(kind, today.next_practice_in) },
-        today: null,
         readiness,
         button: strings.practiceMore,
       };
@@ -311,22 +297,10 @@ function cardOfDay(target: TargetSummary): TargetCardState & { button: string } 
       return {
         title: strings.targetCountdown(kind, 0),
         note: { kind: 'due-today', text: strings.targetGoodLuck },
-        today: null,
         readiness,
         button: strings.lastReview,
       };
   }
-}
-
-/** Phase 57 (spec D11, extra-words.html). The today bar's two parts, as shares of the
- *  whole: the planned words done, then the day's extra words running past the plan. */
-export function todayBar(today: Pick<TargetSummary['today'], 'done' | 'planned' | 'extra'>): {
-  done: number;
-  extra: number;
-} {
-  const whole = Math.max(today.planned, today.done) + today.extra;
-  if (whole === 0) return { done: 0, extra: 0 };
-  return { done: today.done / whole, extra: today.extra / whole };
 }
 
 /** Phase 57 (spec D9). Readiness's colour: red at 0%, through orange and yellow, to green
@@ -465,6 +439,32 @@ export function sessionsLine(target: TargetSummary): SessionsLine {
     text: strings.targetSessionsProgress(Math.min(today.sessions_done, budget), budget),
     side: strings.targetSessionsLeft(Math.max(0, budget - today.sessions_done)),
   };
+}
+
+/** Phase 65 (spec D5, final review). What a screen reader says of today's sessions row, whose
+ *  dots it does not read: the offer as the card writes it; else the count the dots draw ("3 מתוך 5
+ *  תרגולים היום", with the bonus past the budget), after "סיימת להיום" once the day is done; on a
+ *  rest day only its bonus, if any. */
+export function sessionsSpoken(target: TargetSummary): string {
+  const line = sessionsLine(target);
+  const dots = sessionDots(target);
+  const count = strings.targetSessionsSpoken(
+    dots.filter((dot) => dot === 'done').length,
+    sessionBudget(target),
+    dots.filter((dot) => dot === 'bonus').length,
+  );
+  switch (line.kind) {
+    case 'offer':
+      return `${line.text}, ${line.side}`;
+    case 'progress':
+      return count;
+    case 'met':
+    case 'early':
+      return `${strings.targetSessionsMetSpoken}, ${count}`;
+    case 'rest':
+    case 'none':
+      return line.side ?? '';
+  }
 }
 
 /** Phase 65 (spec D6). A tapped word's counted skills, in the order the server counts them: the

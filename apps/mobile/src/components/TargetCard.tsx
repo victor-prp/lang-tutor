@@ -12,10 +12,10 @@ import {
   readinessColor,
   sessionDots,
   sessionsLine,
+  sessionsSpoken,
   targetButtonSolid,
   targetCardState,
   targetTitle,
-  todayBar,
   urgencyOf,
   type TargetCardState,
 } from '@/targets';
@@ -154,7 +154,9 @@ export function Readiness({ target, readiness }: { target: TargetSummary; readin
 const paleOf = (hsl: string) => hsl.replace('hsl(', 'hsla(').replace(/\)$/, ', 0.45)');
 
 /** Phase 65 (spec D7). Today as a budget: its words and what is left or why it ended, then a
- *  dot per session (green done, grey to do, dashed when faded, blue bonus). */
+ *  dot per session (green done, grey to do, dashed when faded, blue bonus). A screen reader reads
+ *  the row as one Hebrew sentence (sessionsSpoken) and not the dots, which are drawing only; each
+ *  dot's kind is in its testID (`target-session-dot-<kind>`). */
 export function Sessions({ target }: { target: TargetSummary }) {
   const { id } = target;
   const line = sessionsLine(target);
@@ -162,7 +164,7 @@ export function Sessions({ target }: { target: TargetSummary }) {
   if (!line.text && !line.side && dots.length === 0) return null;
   const met = line.kind === 'met' || line.kind === 'early';
   return (
-    <View testID={`target-sessions-${id}`} style={styles.sessions}>
+    <View testID={`target-sessions-${id}`} accessible accessibilityLabel={sessionsSpoken(target)} style={styles.sessions}>
       <View style={styles.sessionsLine}>
         <Text
           testID={met ? `target-praise-${id}` : `target-today-${id}`}
@@ -172,9 +174,15 @@ export function Sessions({ target }: { target: TargetSummary }) {
         </Text>
         {line.side ? <Text testID={`target-sessions-${id}-side`} style={met ? styles.sideMet : styles.side}>{line.side}</Text> : null}
       </View>
-      <View testID="target-sessions" style={styles.dots}>
+      <View
+        testID="target-sessions"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        aria-hidden
+        style={styles.dots}
+      >
         {dots.map((dot, at) => (
-          <View key={at} testID="target-session-dot" accessibilityLabel={dot} style={[styles.dot, DOT_STYLES[dot]]} />
+          <View key={at} testID={`target-session-dot-${dot}`} style={[styles.dot, DOT_STYLES[dot]]} />
         ))}
       </View>
     </View>
@@ -187,20 +195,6 @@ const DOT_STYLES = {
   faded: { height: 4, borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#D0D5DD' },
   bonus: { backgroundColor: colors.primary },
 } as const;
-
-/** Today's bar: the planned words done (green once all are), then the extra words in a
- *  lighter green past the plan. */
-export function TodayBar({ today }: { today: TargetSummary['today'] }) {
-  const shares = todayBar(today);
-  return (
-    <Bar
-      parts={[
-        { share: shares.done, color: today.state === 'done' ? colors.correct : colors.primary },
-        { share: shares.extra, color: colors.correctLight },
-      ]}
-    />
-  );
-}
 
 /** A bar of coloured parts from the start of the line (the right, in RTL), each a share
  *  of the whole; the rest of the track is left empty. */
