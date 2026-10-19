@@ -1720,9 +1720,10 @@ export const targetReadinessEvents = pgTable(
   ],
 );
 
-// Phase 65 (spec D4). A target's budget for one learner day: sessions, cards and miss room,
-// stored so the day reads alike however often it is read. Nothing writes it in this task; the
-// target day read does (Task 3). Not rebuilt by the recompute.
+// Phase 65 (spec D4, D7). A target's budget for one learner day: sessions, cards and miss room,
+// stored so the day reads alike however often it is read. Written once, by the start of its
+// path's first session of the day (services/sessions.ts startSession), and never rewritten. Not
+// rebuilt by the recompute.
 export const targetBudgets = pgTable(
   'target_budgets',
   {

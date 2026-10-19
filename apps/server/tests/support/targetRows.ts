@@ -1,7 +1,7 @@
 import { asc, eq, sql } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
-import { sessions, sessionTargets, targetEvents } from '../../src/db/schema';
+import { sessions, sessionTargets, targetBudgets, targetEvents } from '../../src/db/schema';
 import type { TargetKind } from '../../src/domain/targets';
 import { createTargetReadinessRepo } from '../../src/repo/targetReadiness';
 import { createTargetRepo } from '../../src/repo/targets';
@@ -181,4 +181,19 @@ export async function setTargetWord(
       insert into target_skills (target_id, gloss_id, dimension, halves) values (${input.targetId}, ${input.glossId}, ${dimension}, ${halves!})
       on conflict (target_id, gloss_id, dimension) do update set halves = excluded.halves`);
   }
+}
+
+/** Phase 65 (spec D7.2). A target's budgets, one a learner day, with when each was written. */
+export function readTargetBudgets(db: Db, targetId: string) {
+  return db
+    .select({
+      day: targetBudgets.day,
+      sessions: targetBudgets.sessions,
+      cards: targetBudgets.cards,
+      missRoom: targetBudgets.missRoom,
+      createdAt: targetBudgets.createdAt,
+    })
+    .from(targetBudgets)
+    .where(eq(targetBudgets.targetId, targetId))
+    .orderBy(asc(targetBudgets.day));
 }

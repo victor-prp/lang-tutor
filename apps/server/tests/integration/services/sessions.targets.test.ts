@@ -14,7 +14,7 @@ import { insertGlossMemory, moveAnswersBack, readLearnerDay, readMemory, setLeve
 import { asChoice, insertListSession, type AskedGloss } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, makeBot, seedUser, setTimeZone } from '../../support/seedUser';
-import { endTargetNow, readSessionTargets, readStockRow, readTargetEvents, readFirstReadinessEvents, readTargetReadiness, readTargetReadinessEvents, readTargetSkills, seedTarget, setTargetWord } from '../../support/targetRows';
+import { endTargetNow, readSessionTargets, readStockRow, readTargetBudgets, readTargetEvents, readFirstReadinessEvents, readTargetReadiness, readTargetReadinessEvents, readTargetSkills, seedTarget, setTargetWord } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -821,3 +821,44 @@ describe("a session's end records the target's readiness (phase 65)", () => {
     expect(await firstOf()).toEqual(first);
   });
 });
+
+// Phase 65 (spec D7.1, D7.2). Today's budget: set in the transaction that starts the target path's
+// first session of the learner day, from the picker played forward over the day as it stands, and
+// never rewritten that day.
+describe("today's budget (phase 65, spec D7)", () => {
+  it("is set when the path's first session of the day starts, and a later one the same day leaves it", async () => {
+    const words = await savedWords();
+    const exam = await addTarget('exam', '2030-01-13', ids(words.slice(0, 3)));
+    // Five days left of five: the plan meets one word of three today (spec D6).
+    const planned = words.find((word) => word.glossId === sorted(ids(words.slice(0, 3)))[0])!;
+    const first = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [planned], types: ['multiple_choice'], targetId: exam });
+    expect(await readTargetBudgets(t.db, exam)).toEqual([]);
+
+    await service.startSession('u_1', first.sessionId, NO_DEVICES);
+
+    // The picker played forward: the word's ladder (4 cards), then its written skills to the cap
+    // of 7 half-points in three more sessions of 2, 1 and 1 cards; with no answer to read a miss
+    // rate from, the default's one session of room.
+    const set = await readTargetBudgets(t.db, exam);
+    expect(set).toEqual([{ day: DAY, sessions: 5, cards: 8, missRoom: 1, createdAt: expect.any(Date) }]);
+
+    // Its card answered right, the session ends and the word is started: played forward now, the
+    // day would be 3 sessions and 4 cards. A second session the same day leaves the budget be.
+    const card = asChoice(first.questions[0]);
+    await service.submitAnswer('u_1', first.sessionId, card.id, { option_index: card.correct_option });
+    expect(await readStockRow(t.db, first.sessionId)).toMatchObject({ status: 'completed', practiceDay: DAY });
+    const second = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [planned], types: ['typed_translation'], targetId: exam });
+    await service.startSession('u_1', second.sessionId, NO_DEVICES);
+
+    expect(await readTargetBudgets(t.db, exam)).toEqual(set);
+  });
+
+  it("sets none for a main-path session", async () => {
+    const words = await savedWords();
+    const exam = await addTarget('exam', '2030-01-13', ids(words.slice(0, 3)));
+    const main = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [words[3]], types: ['multiple_choice'] });
+    await service.startSession('u_1', main.sessionId, NO_DEVICES);
+    expect(await readTargetBudgets(t.db, exam)).toEqual([]);
+  });
+});
+

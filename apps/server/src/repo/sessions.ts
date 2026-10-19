@@ -33,6 +33,37 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const onPath = (path: Path): SQL => (path === null ? sql`s.target_id IS NULL` : sql`s.target_id = ${path}::uuid`);
 
 export function createSessionRepo(tx: Tx) {
+  /** Phase 37 (spec D7), phase 59 (spec D4). Every answer about a saved gloss, given while it was
+   *  saved, in this enrollment's sessions `where` keeps (`s`), with a tapped list word's miss
+   *  right after its card's answer; each with its session and that session's path, decoded as a
+   *  session's evidence is, in answer order (findAnswersOn). */
+  async function findAnswersWhere(enrollmentId: string, where: SQL): Promise<(DayAnswer & { targetId: Path })[]> {
+    // Phase 59 (spec D4): a tapped list word's miss, right after its card's answer.
+    const rows = await tx.execute<AnswerRow & { session_id: string; target_id: string | null }>(sql`
+      SELECT e.session_id, s.target_id::text AS target_id, e.gloss_id, e.type, e.options, e.selected_option_position, e.verdict, e.retry_verdict, e.intro, e.helped
+      FROM (
+        SELECT a.session_id, q.gloss_id, q.type::text AS type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro,
+               a.answered_at, a.position, -1 AS word_index, coalesce(a.helped, false) AS helped
+        FROM answers a
+        JOIN questions q ON q.id = a.question_id
+        UNION ALL
+        SELECT tp.session_id, tp.gloss_id, ${tapMissType}, NULL::jsonb, NULL::integer, 'wrong', NULL::text, false,
+               a.answered_at, tp.position, tp.word_index, false
+        FROM answer_taps tp
+        JOIN answers a ON a.session_id = tp.session_id AND a.position = tp.position
+        -- Phase 62 (spec D4): the card the tap was on decides what it missed.
+        JOIN questions q ON q.id = a.question_id
+        WHERE tp.kind = 'list'
+      ) e
+      JOIN sessions s            ON s.id = e.session_id
+      JOIN vocabulary_entries ve ON ve.enrollment_id = s.enrollment_id AND ve.gloss_id = e.gloss_id
+      WHERE s.enrollment_id = ${enrollmentId}
+        AND e.answered_at >= ve.created_at
+        AND ${where}
+      ORDER BY s.created_at, s.id, e.position, e.word_index`);
+    return rows.rows.map((row) => ({ ...decodeAnswer(row), sessionId: row.session_id, targetId: row.target_id }));
+  }
+
   // The two open-session indexes (phase 43: one in stock, one started; phase 57: per
   // path) are the only unique constraints on this table, so a unique violation here
   // means exactly "this path already has an open session of that kind".
@@ -280,32 +311,25 @@ export function createSessionRepo(tx: Tx) {
      *  its positions' order. Phase 57 (spec D1): each with the path of its session.
      *  Sessions of two paths can be answered at once, so "answer order" is now creation
      *  order across paths, which dayState's returns read, as before. */
-    findAnswersOn: async (enrollmentId: string, day: string): Promise<(DayAnswer & { targetId: Path })[]> => {
-      // Phase 59 (spec D4): a tapped list word's miss, right after its card's answer.
-      const rows = await tx.execute<AnswerRow & { session_id: string; target_id: string | null }>(sql`
-        SELECT e.session_id, s.target_id::text AS target_id, e.gloss_id, e.type, e.options, e.selected_option_position, e.verdict, e.retry_verdict, e.intro, e.helped
-        FROM (
-          SELECT a.session_id, q.gloss_id, q.type::text AS type, q.options, a.selected_option_position, a.verdict, a.retry_verdict, q.intro,
-                 a.answered_at, a.position, -1 AS word_index, coalesce(a.helped, false) AS helped
-          FROM answers a
-          JOIN questions q ON q.id = a.question_id
-          UNION ALL
-          SELECT tp.session_id, tp.gloss_id, ${tapMissType}, NULL::jsonb, NULL::integer, 'wrong', NULL::text, false,
-                 a.answered_at, tp.position, tp.word_index, false
-          FROM answer_taps tp
-          JOIN answers a ON a.session_id = tp.session_id AND a.position = tp.position
-          -- Phase 62 (spec D4): the card the tap was on decides what it missed.
-          JOIN questions q ON q.id = a.question_id
-          WHERE tp.kind = 'list'
-        ) e
-        JOIN sessions s            ON s.id = e.session_id
-        JOIN vocabulary_entries ve ON ve.enrollment_id = s.enrollment_id AND ve.gloss_id = e.gloss_id
-        WHERE s.enrollment_id = ${enrollmentId}
-          AND e.answered_at >= ve.created_at
-          AND (s.practice_day = ${day}::date OR s.status IN ('preparing', 'ready'))
-        ORDER BY s.created_at, s.id, e.position, e.word_index`);
-      return rows.rows.map((row) => ({ ...decodeAnswer(row), sessionId: row.session_id, targetId: row.target_id }));
-    },
+    findAnswersOn: (enrollmentId: string, day: string): Promise<(DayAnswer & { targetId: Path })[]> =>
+      findAnswersWhere(enrollmentId, sql`(s.practice_day = ${day}::date OR s.status IN ('preparing', 'ready'))`),
+
+    /** Phase 65 (spec D7.1). Every answer as findAnswersOn reads one, in this enrollment's
+     *  sessions that counted for one of its last `days` practice days up to `day`: the days its
+     *  ended sessions hold an answer on, an open session counting for none. The budget's miss
+     *  rate reads them. */
+    findRecentAnswers: (enrollmentId: string, day: string, days: number): Promise<(DayAnswer & { targetId: Path })[]> =>
+      findAnswersWhere(
+        enrollmentId,
+        sql`s.practice_day IN (
+          SELECT DISTINCT d.practice_day
+          FROM sessions d
+          WHERE d.enrollment_id = ${enrollmentId}
+            AND d.practice_day <= ${day}::date
+            AND EXISTS (SELECT 1 FROM answers da WHERE da.session_id = d.id)
+          ORDER BY d.practice_day DESC
+          LIMIT ${days})`,
+      ),
 
     /** Phase 35 (spec D5, D10), phase 37 (D7). The glosses `day` introduced: saved
      *  glosses whose first answer given while saved is in a session counting for
