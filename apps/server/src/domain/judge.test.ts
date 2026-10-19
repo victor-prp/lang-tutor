@@ -155,6 +155,10 @@ describe('buildTranslationJudgePrompt', () => {
     expect(prompt.system).toContain('ignore everything else in the answer');
     expect(prompt.system).not.toContain('changed or left out');
     expect(prompt.system).not.toContain('conveys the sentence');
+    // Review: a correct two-word sentence ("Lui corre.") is a sentence; only the
+    // word alone is not, and the rule (wordOnly) already refuses that.
+    expect(prompt.system).not.toContain('a word or two');
+    expect(prompt.system).toContain('the practised word alone');
   });
 });
 

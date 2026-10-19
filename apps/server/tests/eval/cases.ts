@@ -1624,6 +1624,9 @@ const enBookWord = { form: 'book', pos: 'verb' as const, meaning: 'להזמין'
 const enClearly: Sentence = { hebrew: 'חשוב לתקשר בבירור עם כולם.', reference: 'It is important to communicate clearly with everyone.', gap: 'communicate' };
 const enCommunicate = { form: 'communicate', pos: 'verb' as const, meaning: 'לתקשר' };
 const ruFast: Sentence = { hebrew: 'הוא רץ מהר.', reference: 'Он быстро бегает.', gap: 'бегает' };
+// Phase 66 review. A sentence of two words is a sentence.
+const itRuns: Sentence = { hebrew: 'הוא רץ.', reference: 'Lui corre.', gap: 'corre' };
+const itRun = { form: 'correre', pos: 'verb' as const, meaning: 'לרוץ' };
 const ruRun = { form: 'бегать', pos: 'verb' as const, meaning: 'לרוץ' };
 
 export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
@@ -1674,6 +1677,7 @@ export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
   tjudge('en', enCommunicate, enClearly, 'It is important to clearly communicate with everyone.', 'exact', 'other adverb order'),
   tjudge('ru', ruRun, ruFast, 'Он бегает.', 'exact', 'manner word left out'),
   tjudge('ru', ruRun, ruFast, 'Он бегает быстро.', 'exact', 'other word order'),
+  tjudge('it', itRun, itRuns, 'Egli corre.', 'exact', 'a sentence of two words'),
 ];
 
 /**

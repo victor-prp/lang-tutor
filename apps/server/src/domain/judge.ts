@@ -117,7 +117,7 @@ export function buildTranslationJudgePrompt(question: SentenceTranslationQuestio
     '- "right": the answer uses the practised word, in this sense, in a form the sentence needs.',
     '- "misspelled": as "right", but the practised word itself has a one-letter or accent slip. A slip in any other word is still "right".',
     `- "other_word": the practised word is not used, but another word stands in the practised word's place and means the same there. Another word that does not mean the same is "wrong".`,
-    '- "wrong": the practised word is missing, used in another sense or used wrongly, including the wrong form; or the answer is not a sentence (the word alone, or a word or two) or not an attempt at this sentence.',
+    '- "wrong": the practised word is missing, used in another sense or used wrongly, including the wrong form; or the answer is the practised word alone, with no sentence around it, or not an attempt at this sentence.',
   ].join('\n');
   const user = JSON.stringify({
     hebrew_sentence: question.question,
