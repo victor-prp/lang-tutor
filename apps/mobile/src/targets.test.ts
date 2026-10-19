@@ -20,6 +20,7 @@ import {
   readinessColor,
   readinessName,
   readinessBar,
+  skillRows,
   sessionDots,
   sessionsLine,
   readyLabel,
@@ -793,5 +794,43 @@ describe('ready means every word at 90 (phase 65)', () => {
   it('outlines the last review only once every word is ready', () => {
     const almost = summary('a', 'due_today', '2026-10-16', { days_left: 0, ready_count: 7, word_count: 8, readiness_pct: 99 });
     expect(homeOrder([almost]).first).toBe('a');
+  });
+});
+
+// Phase 65 (spec D6). A tapped word's counted skills: in order, each with its chance out of 100.
+describe('skillRows (phase 65)', () => {
+  const word = (skills: TargetWord['skills']): TargetWord => ({ ...WORD, skills });
+
+  it('lists the counted skills in order with their names and chances', () => {
+    const rows = skillRows(word([
+      { dimension: 'written_productive', chance: 82, held: false },
+      { dimension: 'spelling', chance: 40, held: false },
+      { dimension: 'spoken_productive', chance: 90, held: false },
+    ]));
+    expect(rows.map((row) => [row.dimension, row.name, row.chance])).toEqual([
+      ['written_productive', 'כתיבה', 82],
+      ['spelling', 'איות', 40],
+      ['spoken_productive', 'דיבור', 90],
+    ]);
+  });
+
+  it('marks a skill ready from 90, and not at 89', () => {
+    const rows = skillRows(word([
+      { dimension: 'spelling', chance: 89, held: false },
+      { dimension: 'written_productive', chance: 90, held: false },
+    ]));
+    expect(rows.map((row) => row.ready)).toEqual([false, true]);
+  });
+
+  it('says a held skill counts half until tomorrow, and says nothing for the others', () => {
+    const rows = skillRows(word([
+      { dimension: 'spelling', chance: 30, held: true },
+      { dimension: 'written_productive', chance: 60, held: false },
+    ]));
+    expect(rows.map((row) => row.note)).toEqual(['חצי עד שתענה נכון מחר', null]);
+  });
+
+  it('has no rows for a word with no counted skills', () => {
+    expect(skillRows(word([]))).toEqual([]);
   });
 });

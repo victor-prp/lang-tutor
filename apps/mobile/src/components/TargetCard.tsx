@@ -115,7 +115,7 @@ function Note({ id, note }: { id: string; note: NonNullable<TargetCardState['not
 
 /** Phase 65 (spec D4, D5). The big readiness in its colour with its label beside it, then its
  *  bar: the start of the day pale, the day's gain bright at its end, with the gain's label. */
-function Readiness({ target, readiness }: { target: TargetSummary; readiness: string }) {
+export function Readiness({ target, readiness }: { target: TargetSummary; readiness: string }) {
   const { id } = target;
   const bar = readinessBar(target);
   const color = readinessColor(target.readiness_pct);
@@ -155,7 +155,7 @@ const paleOf = (hsl: string) => hsl.replace('hsl(', 'hsla(').replace(/\)$/, ', 0
 
 /** Phase 65 (spec D7). Today as a budget: its words and what is left or why it ended, then a
  *  dot per session (green done, grey to do, dashed when faded, blue bonus). */
-function Sessions({ target }: { target: TargetSummary }) {
+export function Sessions({ target }: { target: TargetSummary }) {
   const { id } = target;
   const line = sessionsLine(target);
   const dots = sessionDots(target);

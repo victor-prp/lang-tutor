@@ -556,6 +556,7 @@ export const strings = {
   targetGroupTitle: { owed: 'נשאר להיום', done: 'סיימת להיום', extra: 'נוספו היום', later: 'בהמשך' } as const,
   targetWordOwed: (names: string[]) => `היום נשאר: ${names.join(', ')}`,
   targetWordDone: 'היום ✓',
+  targetSkillHeld: 'חצי עד שתענה נכון מחר',
   targetWordExtra: 'בונוס ✓',
   targetWordStartsIn: (days: number) =>
     days === 1 ? 'נתחיל מחר' : `נתחיל בעוד ${isolateLtr(String(days))} ימים`,

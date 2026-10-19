@@ -466,3 +466,21 @@ export function sessionsLine(target: TargetSummary): SessionsLine {
     side: strings.targetSessionsLeft(Math.max(0, budget - today.sessions_done)),
   };
 }
+
+/** Phase 65 (spec D6). A tapped word's counted skills, in the order the server counts them: the
+ *  name, the chance out of 100, whether it is ready, and the note under a held skill. */
+export function skillRows(word: TargetWord): {
+  dimension: TargetWord['skills'][number]['dimension'];
+  name: string;
+  chance: number;
+  ready: boolean;
+  note: string | null;
+}[] {
+  return word.skills.map((skill) => ({
+    dimension: skill.dimension,
+    name: strings.dimensionName(skill.dimension),
+    chance: skill.chance,
+    ready: skill.chance >= READINESS_WORD_READY,
+    note: skill.held ? strings.targetSkillHeld : null,
+  }));
+}
