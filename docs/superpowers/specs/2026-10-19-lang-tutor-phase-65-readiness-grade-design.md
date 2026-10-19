@@ -1,8 +1,8 @@
 # Phase 65 — Readiness as a grade, and today as a budget
 
 - **Status:** Designed with Victor on 2026-10-19, in chat and in mockups. A builder check asked four
-  questions, all settled without him and marked "builder check" (D7.1, D7.4, D8, D11). Awaiting his
-  approval of this document.
+  questions, all settled without him and marked "builder check" (D7.1, D7.4, D8, D11). Victor
+  approved the document with "go till PR. subagents" (CLAUDE.md, *Continue till PR*).
 - **Date:** 2026-10-19
 - **Source:**
   - The one-pager: `drafts/2026-10-19-readiness-grade-one-pager.md` (main checkout, gitignored).
