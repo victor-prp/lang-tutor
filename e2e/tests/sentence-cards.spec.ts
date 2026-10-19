@@ -20,7 +20,7 @@ import {
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { tapUntil } from './support/interactions';
 import { seedMemory, type MemorySeed } from './support/memory';
-import { clearGemini, expectContext, expectGeminiMatching, expectJudge, userText } from './support/mockServer';
+import { clearGemini, expectContext, expectExplain, expectGeminiMatching, expectJudge, userText } from './support/mockServer';
 import { continueMeet } from './support/sessions';
 import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
@@ -218,12 +218,29 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       await expect(page.getByTestId('typed-input')).toHaveValue(STUB_GAP);
       await expect(page.getByTestId('feedback-wrong')).not.toBeVisible();
       await expectJudge(request, 'right');
+      // Phase 66 (spec D2, D3): asked as soon as the answer is judged, shown on a tap.
+      await expectExplain(request, {
+        corrected: 'Она прочитала эту книгу вчера.',
+        mistakes: [{ wrong: '', right: '.', why: 'חסרה נקודה בסוף המשפט' }],
+      });
+      const explained = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/explain'));
       await answerTyped(page, 'Она прочитала эту книгу вчера');
       await expect(page.getByTestId('word-only')).not.toBeVisible();
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
       await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
       await expect(page.getByText('תרגום לדוגמה:')).toBeVisible();
       expect(stripIsolates(await page.getByTestId('translation-reference').textContent())).toBe(STUB_SENTENCE);
+      // The request goes out before any tap; the panel opens only on one.
+      expect((await explained).postDataJSON()).toMatchObject({ question_id: expect.any(String) });
+      await expect(page.getByTestId('explain-panel')).toHaveCount(0);
+      await page.getByTestId('explain-button').click();
+      await expect(page.getByTestId('explain-corrected')).toHaveText('Она прочитала эту книгу вчера.');
+      await expect(page.getByTestId('explain-mistake')).toHaveCount(1);
+      await expect(page.getByTestId('explain-mistake')).toContainText('חסרה נקודה בסוף המשפט');
+      // A second tap closes it; nothing about the grade changed.
+      await page.getByTestId('explain-button').click();
+      await expect(page.getByTestId('explain-panel')).toHaveCount(0);
+      await expect(page.getByTestId('feedback-correct')).toBeVisible();
       await page.getByTestId('continue-button').click();
     } else {
       await pass(page, card);

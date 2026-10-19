@@ -347,6 +347,23 @@ export async function codeFor(request: APIRequestContext, email: string): Promis
   return digits;
 }
 
+/** Phase 66 (spec D2). The explain call's answer, matched on the server's EXPLAIN_MARKER
+ *  (apps/server/src/domain/explain.ts) and ranked above the generation stub. Consumed once. */
+export async function expectExplain(
+  request: APIRequestContext,
+  answer: { corrected: string; mistakes: { wrong: string; right: string; why: string }[] },
+): Promise<void> {
+  const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
+    data: {
+      priority: 10,
+      httpRequest: { method: 'POST', path, body: { type: 'REGEX', regex: "[\\s\\S]*list the mistakes in the learner's sentence[\\s\\S]*" } },
+      httpResponse: { statusCode: 200, headers: { 'content-type': ['application/json'] }, body: envelope(answer) },
+      times: { remainingTimes: 1, unlimited: false },
+    },
+  });
+  if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
+}
+
 /** Phase 27. The meaning judge's answer (or, with `misspelled` or `other_word`, the translation judge's; with `fits`, phase 41's fit check), matched on the server's JUDGE_MARKER
  *  (apps/server/src/domain/judge.ts) and ranked above the generation stub.
  *  Consumed once, in registration order. `status` makes it a failed call
