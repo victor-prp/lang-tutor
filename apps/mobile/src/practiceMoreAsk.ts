@@ -34,3 +34,34 @@ export function createPracticeMoreAskStore(storage: PracticeMoreAskStorage, pref
 }
 
 export type PracticeMoreAskStore = ReturnType<typeof createPracticeMoreAskStore>;
+
+/**
+ * Phase 65 (spec D9), final review I3. The הגדרות switch: `read` shows the stored choice (each time
+ * the screen is shown: the sheet's tick box can change it while the tab stays mounted), and
+ * returns a stop for a read the screen no longer waits for; `flip` shows the learner's choice at
+ * once and stores it. A read that resolves after a flip is ignored: the flip is newer.
+ */
+export function createAskSwitch(
+  store: Pick<PracticeMoreAskStore, 'shouldAsk' | 'stopAsking' | 'askAgain'>,
+  username: string,
+  show: (ask: boolean) => void,
+) {
+  let flips = 0;
+  return {
+    read: (): (() => void) => {
+      const seen = flips;
+      let live = true;
+      void store.shouldAsk(username).then((ask) => {
+        if (live && flips === seen) show(ask);
+      });
+      return () => {
+        live = false;
+      };
+    },
+    flip: (ask: boolean): void => {
+      flips += 1;
+      show(ask);
+      void (ask ? store.askAgain(username) : store.stopAsking(username));
+    },
+  };
+}

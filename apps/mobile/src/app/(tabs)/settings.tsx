@@ -1,12 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Group, groupStyles } from '@/components/Group';
 import { useAppRelease } from '@/hooks/useAppUpdates';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { createAskSwitch } from '@/practiceMoreAsk';
 import { mobileAppLine } from '@/release';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
@@ -18,22 +19,17 @@ import { colors, fontSizes, lineHeights, spacing } from '@/theme';
  */
 export default function SettingsTab() {
   const { user, practiceMoreAsk } = useCurrentUser();
-  // Phase 65 (spec D9). Read on mount; a failed read says "ask", which is the default.
+  // Phase 65 (spec D9). Read each time the tab is shown: the tab stays mounted, and the sheet's
+  // tick box on home can change the choice meanwhile (final review I3). A failed read says "ask",
+  // which is the default; a read that lands after the learner flipped the switch is ignored.
   const [askBefore, setAskBefore] = useState(true);
   const username = user?.username;
-  useEffect(() => {
-    if (!username) return;
-    let live = true;
-    void practiceMoreAsk.shouldAsk(username).then((ask) => live && setAskBefore(ask));
-    return () => {
-      live = false;
-    };
-  }, [username, practiceMoreAsk]);
-  const changeAsk = (ask: boolean) => {
-    setAskBefore(ask);
-    if (!username) return;
-    void (ask ? practiceMoreAsk.askAgain(username) : practiceMoreAsk.stopAsking(username));
-  };
+  const askSwitch = useMemo(
+    () => (username ? createAskSwitch(practiceMoreAsk, username, setAskBefore) : null),
+    [username, practiceMoreAsk],
+  );
+  useFocusEffect(useCallback(() => askSwitch?.read(), [askSwitch]));
+  const changeAsk = (ask: boolean) => (askSwitch ? askSwitch.flip(ask) : setAskBefore(ask));
   const { release } = useAppRelease();
 
   return (
