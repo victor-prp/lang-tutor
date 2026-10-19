@@ -11,6 +11,7 @@ import type {
   TypedVerdict,
   LlmDistractors,
   LlmEntry,
+  LlmPoint,
   LlmReconciliation,
   PartOfSpeech,
   SentenceTranslationQuestion,
@@ -39,6 +40,7 @@ import {
   type JudgeContext,
   type MeaningJudgeContext,
 } from '../../src/domain/judge';
+import { buildPointPrompt, parsePoint, type PointItem } from '../../src/domain/pointing';
 import { parseTranscript, transcriptionSystem } from '../../src/domain/speech';
 import type { SpeechTranscriber } from '../../src/services/speech';
 import {
@@ -272,6 +274,14 @@ export async function askContext(
 /** Phase 34 (spec D5). The real checker prompt and parser, as prepareSession
  *  sends them after the context call, minus the database. Throws on an empty or
  *  unreadable answer: the session would fail the attempt on it too. */
+/** Phase 62d (spec D2). The real point check, prompt and parser, as prepareSession calls it. */
+export async function askPoint(llm: LlmClient, input: { from: LanguageCode; to: LanguageCode; items: PointItem[] }): Promise<LlmPoint> {
+  const raw = await llm({ ...buildPointPrompt(input.items, input.from, input.to), record: { kind: 'gap_point' } });
+  const answer = raw === '' ? null : parsePoint(raw);
+  if (!answer) throw new Error(`unreadable point check answer: ${raw.slice(0, 200)}`);
+  return answer;
+}
+
 export async function askCheck(
   llm: LlmClient,
   input: { from: LanguageCode; to: LanguageCode; items: CheckItem[] },

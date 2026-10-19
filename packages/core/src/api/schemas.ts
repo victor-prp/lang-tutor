@@ -1536,6 +1536,25 @@ export const LlmCheckSchema = z.object({
   ),
 });
 
+// Phase 62d (spec D2). The blind reader of a typed gap: for each sentence with ___, the
+// three likeliest words for its gap, each with how many of ten readers would write it or
+// a word of its meaning, and the first one's meaning in the learner's language. Asking for
+// the ten readers split between the guesses, not one count for the first, keeps a lone
+// sentence's first guess from taking them all (2026-10-18). A meaning for every guess, so
+// that a synonym's readers could join the word's, was measured and dropped: the pointing
+// group fell from 39–40 of 41 to 34, big and large passing "The city is ___.". Every field required: an optional
+// string can hang a non-streaming call. Timings are measured with
+// tests/eval/measureSchema.ts before a field is added.
+export const LlmPointSchema = z.object({
+  items: z.array(
+    z.object({
+      key: z.string(),
+      guesses: z.array(z.object({ word: z.string(), readers: z.number() })),
+      meaning: z.string(),
+    }),
+  ),
+});
+
 // Phase 26. Words from a photo: an import is one photo of a word list, read in
 // the background into rows, each a word or phrase with one chosen gloss. The
 // image is base64 JPEG, because the app re-encodes every photo. 2 800 000

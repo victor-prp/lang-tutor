@@ -7,9 +7,10 @@ import type { SentenceContent } from './sentences';
 /**
  * Phase 62c (spec D2). A gap to choose that is asked again, once: validation
  * refused it, or the gap check left it fewer than three wrong options. `rewrite`
- * is what the model is told of its last sentence.
+ * is what the model is told of its last sentence. Phase 62d (spec D3): or a typed
+ * gap whose sentence the point check found pointing to nothing.
  */
-export type GapFault = { key: string; stage: 'validation' | 'checker'; rewrite: GapRewrite };
+export type GapFault = { key: string; stage: 'validation' | 'checker' | 'pointing'; rewrite: GapRewrite };
 
 /** Phase 62c (spec D1). What the gap check found, for the items it judged: each
  *  option asked, and whether the checker calls it right. */
@@ -50,6 +51,25 @@ export function gapFaults(input: {
     return [{ key: item.key, stage: 'checker', rewrite: { sentence: written.sentence, fits, problem: null } }];
   });
   return [...refused, ...short];
+}
+
+/**
+ * Phase 62d (spec D3). The typed gaps to ask again, in item order: each sentence
+ * item the point check failed, told its old sentence, what a reader guessed
+ * instead, and why. One with no sentence written was degraded by validation and
+ * is not rescued here.
+ */
+export function pointFaults(input: {
+  items: readonly DistractorItem[];
+  verdict: DistractorVerdict;
+  failed: ReadonlyMap<string, { fits: string[]; problem: string }>;
+}): GapFault[] {
+  return input.items.flatMap((item): GapFault[] => {
+    const found = input.failed.get(item.key);
+    const written = input.verdict.byKey.get(item.key)?.sentence;
+    if (item.task !== 'sentence' || !found || !written) return [];
+    return [{ key: item.key, stage: 'pointing', rewrite: { sentence: written.sentence, fits: found.fits, problem: found.problem } }];
+  });
 }
 
 /** Phase 62c (spec D3). Each fault's item, asked again: its rewrite, and its last sentence added to what it avoids. */

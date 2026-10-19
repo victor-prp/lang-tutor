@@ -10,6 +10,7 @@ import {
   MAX_AVOID,
   MAX_GAP_ALTERNATIVES,
   SENTENCE_MIN_WORDS,
+  SENTENCE_MAX_WORDS,
   SHORT_SENTENCE_MAX_WORDS,
   SHORT_SENTENCE_MIN_ASKED,
   TRANSLATE_MAX_WORDS,
@@ -327,9 +328,16 @@ export function buildDistractorPrompt(input: {
     `- "translate": write a short, natural, everyday ${answers.name} sentence of ${SENTENCE_MIN_WORDS} to ${TRANSLATE_MAX_WORDS} words that uses the meaning in correct, in the sense the example shows. It must differ from every sentence in avoid. Put it in sentence; a natural ${learned.name} translation of it that uses the word, in whatever form the translation needs, in translation; and that word exactly as written in the translation in gap. Leave distractors empty. Count the words of a translate item's sentence: never more than ${TRANSLATE_MAX_WORDS} (this limit is the translate task's alone). When learner_words is given, the learner knows only those ${learned.name} words and the word itself: write the ${learned.name} translation first, from the word and learner_words alone, in whatever form each needs, adding another word only where the sentence cannot stand without it, and then a simple one (a pronoun, an article, a preposition, or the verb to be or to have); then write sentence as its ${answers.name} translation.`,
     // Phase 62c (spec D3): only a call that asks a gap item again carries its rule, so the
     // session's own batch prompt is exactly what it was.
-    ...(input.items.some((item) => item.rewrite)
+    ...(input.items.some((item) => item.rewrite && item.task === 'gap')
       ? [
           `- An item with rewrite is a "gap" item written before, and ${REWRITE_MARKER} (rewrite.old_sentence) could not be used: the words in rewrite.fits made it correct as wrong answers, or rewrite.problem says why it was refused. Write a new sentence for its word around another verb or phrase, never the last sentence with a word changed or added: the words next to the gap must be ones that only the word's kind goes with, so that its wrong answers cannot. For a person, a verb only people do (speaks, works, studies), and things as the wrong answers (a table, a book, a wall), never animals or people; for a thing, what only that kind of thing does or has done to it; for an adjective, a noun its wrong answers cannot describe at all, not even figuratively (a carbonated or a paved man); for a verb, an object only it takes. Then keep the learner's words: count them, and at least half of the sentence's other words of three letters or more come from learner_words wherever it still points with them; a word outside learner_words, of any kind, is added only where pointing needs it. "Io ho una madre qui ora." points to nothing, since any noun fits; "Ora mia madre parla con me." points, and most of its words are the learner's. Its six wrong answers follow the gap rule and must each be wrong in the new sentence.`,
+        ]
+      : []),
+    // Phase 62d (spec D3): a typed gap asked again, told what a reader guessed; only in a
+    // call that asks one, so 62c's gap rewrite is exactly what it was.
+    ...(input.items.some((item) => item.rewrite && item.task === 'sentence')
+      ? [
+          `- An item with rewrite is a "sentence" item written before, and ${REWRITE_MARKER} (rewrite.old_sentence) could not be used: a reader who covers its word does not guess it. rewrite.fits are the words such a reader writes in its gap instead, and rewrite.problem says why. Write a completely new sentence for its word: not the last sentence with a word added or changed, and not its frame (its verb and the words around the gap). Build it on something only this word fits: for a thing or a person, what only it does, where only it is, or what is done only to it; for an adjective, something everyone knows to be so, or the reason to be so; for a verb, an object or a setting only it goes with; for a small word (a preposition, an adverb), the words it is always said with. Then cover the word and read the new sentence as a stranger would: if a word of another meaning, one of rewrite.fits or any other, would fit about as well, write another sentence; at least seven of ten native readers who see only the sentence must write this word or one of the same meaning. Pointing comes first: add words outside learner_words wherever pointing needs them (the learner can tap any word to see its translation), up to ${SENTENCE_MAX_WORDS} words. Then keep the learner's words: at least half of the sentence's other words of three letters or more come from learner_words wherever it still points with them. "Il ___ è qui." points to nothing, since any noun fits; "Ora leggo un ___ e poi dormo." points to libro, and half its other words are the learner's (ora, poi); "Lo zucchero è ___." points to dolce; "Ogni sera mi ___ i denti." points to lavo. Its alternatives follow the "sentence" rule, for the new sentence.`,
         ]
       : []),
     'A wrong answer of a "meaning" or "word" item must be plausible: the same part of speech, the same register and a',
@@ -563,7 +571,9 @@ export function validateDistractors(
   for (const item of items) {
     const found = answered.get(item.key);
     if (item.task === 'sentence' || item.task === 'translate') {
-      const input = { form: item.form, target, explanation: explanation as LanguageCode, avoid: item.avoid };
+      // Phase 62d (spec D3): a typed gap asked again may run to the long limit, where pointing needs it.
+      const maxWords = item.task === 'sentence' && item.rewrite ? SENTENCE_MAX_WORDS : undefined;
+      const input = { form: item.form, target, explanation: explanation as LanguageCode, avoid: item.avoid, maxWords };
       const checked = !found
         ? ({ ok: false, reason: `no answer for ${item.key}` } as const)
         : item.task === 'sentence'

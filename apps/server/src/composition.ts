@@ -43,7 +43,7 @@ import { createTargetService, type TargetService } from './services/targets';
 import type { SpeechTranscriber } from './services/speech';
 import type { Repos } from './services/transaction';
 import { TRANSLATION_JUDGE_THINKING } from './domain/judge';
-import { SESSION_GENERATION_THINKING } from './domain/jobs';
+import { POINT_CHECK_THINKING, SESSION_GENERATION_THINKING } from './domain/jobs';
 import { createTranslationService, type TranslationService } from './services/translations';
 import { createUserService, type UserService } from './services/users';
 import { createGrantService, type GrantService } from './services/grants';
@@ -276,6 +276,17 @@ export function createServerDeps(io: {
     now: io.now,
     timeoutMs: io.gapCheckTimeoutMs,
   });
+  // Phase 62d (spec D2). The point check: the gap check's provider and budget, its thinking capped.
+  const pointCheckLlm: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    onCall,
+    now: io.now,
+    timeoutMs: io.gapCheckTimeoutMs,
+    thinkingBudget: POINT_CHECK_THINKING,
+  });
   const gapRewriteLlm: LlmClient = createGeminiClient({
     fetch: io.fetch,
     baseUrl: io.gemini.baseUrl,
@@ -383,6 +394,7 @@ export function createServerDeps(io: {
       checkerLlm,
       gapCheckLlm,
       gapRewriteLlm,
+      pointCheckLlm,
       transcriber,
       judge,
       translationJudge,

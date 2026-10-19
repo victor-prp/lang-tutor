@@ -1426,9 +1426,116 @@ const sentenceCases = (task: 'sentence' | 'translate'): SentenceCase[] =>
 
 
 
+// Phase 62d (spec D6). Victor's 2026-10-18 21:37 session: the twenty practised words its
+// batch was sent, less the one it also asked (pesce), and eight words whose typed gaps
+// pointed to nothing that day ("Il ___ è qui."), each with its saved example. The forms
+// are the saved ones, capitals and all.
+const VICTOR_IT_LIST_1018 = [
+  ['ora', 'עכשיו'], ['io', 'אני'], ['qui', 'כאן'], ['ho', 'לבעול'], ['con', 'עם'], ['Tempo', 'זמן'], ['Freddo', 'קור'],
+  ['città', 'עיר'], ['Lavoro', 'עבודה'], ['fratello', 'אח'], ['Tavolo', 'שולחן'], ['poi', 'אחר כך'], ['ora', 'שעה'], ['poi', 'אז'],
+  ['avere', 'להרגיש'], ['ci sono', 'להיות'], ['poi', 'לאחר מכן'], ['ora', 'תכף'], ['ora', 'שעות'],
+].map(([word, meaning]) => ({ word, meaning }));
+// Without the avoid lists that session sent: with them, master's batch writes an avoided
+// sentence back for sedia and felice, which validation degrades to a typed translation
+// (tier 1), a path this phase leaves as it is (spec non-goals; left for Victor).
+const VICTOR_UNPOINTED_1018 = [
+  word('Cielo', 'cielo', 'noun', 'שמיים', 'Spero che la sua anima riposi in cielo.', 'אני מקווה שנשמתו תנוח בשמיים.'),
+  word('Treno', 'treno', 'noun', 'רכבת', 'Ho preso il treno per Roma questa mattina.', 'לקחתי את הרכבת לרומא הבוקר.'),
+  word('Porta', 'porta', 'noun', 'דלת', 'Per favore, chiudi la porta quando esci.', 'בבקשה, סגור את הדלת כשאתה יוצא.'),
+  word('Sedia', 'sedia', 'noun', 'כיסא', 'Mi sono seduto su una sedia comoda per leggere il libro.', 'ישבתי על כיסא נוח כדי לקרוא את הספר.'),
+  word('finestra', 'finestra', 'noun', 'חלון', 'La nuova finestra del browser si è aperta automaticamente.', 'חלון הדפדפן החדש נפתח אוטומטית.'),
+  word('Pesce', 'pesce', 'noun', 'דג', 'Ho visto un pesce nuotare nel lago.', 'ראיתי דג שוחה באגם.'),
+  word('Felice', 'felice', 'adjective', 'שמח', 'Era felice di rivederti dopo tanto tempo.', 'הוא שמח לראות אותך שוב אחרי כל כך הרבה זמן.'),
+  word('Grande', 'grande', 'adjective', 'גדול', 'Ho comprato una casa grande con un giardino.', 'קניתי בית גדול עם גינה.'),
+];
+
 export const SENTENCE_CASES: SentenceCase[] = [
   ...sentenceCases('sentence'),
   { label: "sentence it, a learner's list: con, poi, fratello", task: 'sentence', from: 'it', learner: VICTOR_IT_LIST, items: VICTOR_GAP_WORDS },
+  {
+    label: "sentence it, Victor's 2026-10-18 list: cielo, treno, porta, sedia, finestra, pesce, felice, grande",
+    task: 'sentence',
+    from: 'it',
+    learner: VICTOR_IT_LIST_1018,
+    items: VICTOR_UNPOINTED_1018,
+  },
+];
+
+/**
+ * Phase 62d (spec D6). The point check's own cases: a sentence with its word left
+ * out, and whether a reader who sees only it can tell the word, by Victor's bar
+ * (ruling R1): the first guess, clearly. The English verdicts are Victor's, as he
+ * validated them on 2026-10-18; the Italian are sentences from his lane 0 cards that
+ * day, labelled under the same bar (the spec lists them and why).
+ */
+export type PointCase = {
+  label: string;
+  from: LanguageCode;
+  /** The sentence, its word written ___. */
+  sentence: string;
+  word: { answer: string; lemma: string };
+  /** The word's meanings in Hebrew, as its gloss would know them. */
+  meanings: string[];
+  points: boolean;
+};
+
+const pointCase = (from: LanguageCode, sentence: string, answer: string, meaning: string, points: boolean, lemma = answer): PointCase => ({
+  label: `point ${from}: ${sentence} (${answer})`,
+  from,
+  sentence,
+  word: { answer, lemma },
+  meanings: [meaning],
+  points,
+});
+
+export const POINT_CASES: PointCase[] = [
+  pointCase('en', 'The ___ is here.', 'sky', 'שמיים', false),
+  pointCase('en', 'The ___ is blue today.', 'sky', 'שמיים', true),
+  pointCase('en', 'The ___ is arriving now.', 'train', 'רכבת', false),
+  pointCase('en', 'The ___ leaves from platform 3.', 'train', 'רכבת', true),
+  pointCase('en', 'My ___ is happy.', 'brother', 'אח', false),
+  pointCase('en', 'My ___ and I have the same parents.', 'brother', 'אח', false),
+  pointCase('en', 'My parents have two sons: me and my ___.', 'brother', 'אח', true),
+  pointCase('en', 'I have a ___ here.', 'chair', 'כיסא', false),
+  pointCase('en', 'Sit on the ___ next to the table.', 'chair', 'כיסא', true),
+  pointCase('en', "Open the ___, it's hot in here.", 'window', 'חלון', true),
+  pointCase('en', 'The city is ___.', 'big', 'גדול', false),
+  pointCase('en', 'An elephant is a very ___ animal.', 'big', 'גדול', true),
+  pointCase('en', 'I am ___ now.', 'happy', 'שמח', false),
+  pointCase('en', "I'm ___ because today is my birthday.", 'happy', 'שמח', true),
+  pointCase('en', 'I have ___ now.', 'time', 'זמן', false),
+  pointCase('en', "Sorry, I have no ___, I'm late.", 'time', 'זמן', true),
+  pointCase('en', 'First we eat, ___ we go to the cinema.', 'then', 'אחר כך', true),
+  pointCase('en', 'I drink coffee ___ milk.', 'with', 'עם', true),
+  pointCase('en', 'I have a ___.', 'fish', 'דג', false),
+  pointCase('en', 'The ___ swims in the water.', 'fish', 'דג', true),
+  pointCase('it', 'Io ho ___ ora.', 'Tempo', 'זמן', false, 'tempo'),
+  pointCase('it', 'La ___ è qui.', 'porta', 'דלת', false),
+  pointCase('it', 'Io ho una ___ qui.', 'finestra', 'חלון', false),
+  pointCase('it', 'Io ho un ___.', 'Treno', 'רכבת', false, 'treno'),
+  pointCase('it', 'Il ___ è freddo.', 'cielo', 'שמיים', false),
+  pointCase('it', 'La ___ è vicino alla finestra.', 'sedia', 'כיסא', false),
+  pointCase('it', 'La città è ___.', 'grande', 'גדול', false),
+  pointCase('it', 'Io ho un ___.', 'pesce', 'דג', false),
+  pointCase('it', 'Il ___ è qui.', 'treno', 'רכבת', false),
+  pointCase('it', 'Ho una ___ qui.', 'sedia', 'כיסא', false),
+  pointCase('it', 'Il ___ è qui.', 'cielo', 'שמיים', false),
+  pointCase('it', 'Io sono ___ ora.', 'felice', 'שמח', false),
+  pointCase('it', 'Mio ___ è felice.', 'fratello', 'אח', false),
+  pointCase('it', 'Il ___ arriva ora.', 'treno', 'רכבת', false),
+  pointCase('it', 'Ho poco ___ per il lavoro.', 'tempo', 'זמן', true),
+  pointCase('it', 'Ho un ___ con sedie.', 'tavolo', 'שולחן', true),
+  pointCase('it', 'Il ___ è blu ora.', 'cielo', 'שמיים', true),
+  pointCase('it', 'Il ___ arriva in inverno.', 'freddo', 'קור', true),
+  pointCase('it', 'Un ___ vola nel cielo.', 'uccello', 'ציפור', true),
+  pointCase('it', 'Ci sono uccelli nel ___.', 'cielo', 'שמיים', true),
+  pointCase('it', "Il ___ è nell'acqua.", 'pesce', 'דג', true),
+  // Final review (Important 1): a typed gap can practise a phrase of up to four words, and
+  // its gap is one ___ for all of them. Labelled under the same bar.
+  pointCase('it', 'Nel frigo ___ tre uova e il latte.', 'ci sono', 'יש', true, 'esserci'),
+  pointCase('it', 'In questa città ___ molti musei famosi.', 'ci sono', 'יש', true, 'esserci'),
+  pointCase('it', 'Oggi ___ qui.', 'ci sono', 'יש', false, 'esserci'),
+  pointCase('en', 'Can you ___ the kids from school at four?', 'pick up', 'לאסוף', true),
 ];
 export const TRANSLATE_CASES: SentenceCase[] = [
   ...sentenceCases('translate'),

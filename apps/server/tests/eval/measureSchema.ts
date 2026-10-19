@@ -34,6 +34,11 @@
  *                      Run it several times, for the same reason as --context.
  *   --required         with --check: every field of an item required, the variant
  *                      ruling R8 names if the optional fields make the call hang.
+ *   --point            measure the point check instead (LlmPointSchema, phase 62d spec D2):
+ *                      ten typed gaps, a session's most, each in a call of its own side by
+ *                      side as prepareSession asks them, through buildPointPrompt on the
+ *                      point check's client and budget, with the waits and the thinking spent.
+ *                      Run it several times: the wait is the measurement.
  *
  * The prompt is the production one, which asks a choice item for six wrong
  * answers (spec D4), so the answer is as long as a real one.
@@ -44,11 +49,11 @@
 import { z, type ZodType } from 'zod';
 
 import type { QuestionType } from '@lang-tutor/core/domain';
-import { LlmCheckSchema, LlmContextSchema, LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
+import { LlmCheckSchema, LlmContextSchema, LlmDistractorsSchema, LlmPointSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
 import { buildCheckPrompt, parseCheck, readCheck, type CheckItem } from '../../src/domain/check';
-import { CHECKER_CALL_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
+import { CHECKER_CALL_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, GAP_CHECK_BUDGET_MS, POINT_CHECK_THINKING, SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
 import {
   buildContextPrompt,
   contextItemFor,
@@ -69,6 +74,7 @@ import {
   type Task,
 } from '../../src/domain/distractors';
 import { findMarks } from '../../src/domain/marks';
+import { buildPointPrompt, parsePoint, readPoint, type PointItem } from '../../src/domain/pointing';
 import { createGeminiClient, toGeminiSchema } from '../../src/providers/gemini';
 
 /** The session batch's production budget (composition.ts: sessionGenerationTimeoutMs). */
@@ -136,7 +142,7 @@ const CONTEXT_TYPES: Record<Task, QuestionType> = {
   translate: 'sentence_translation',
 };
 
-type Args = { oversized: boolean; distractors: number | null; extra: number; context: boolean; check: boolean; required: boolean };
+type Args = { oversized: boolean; distractors: number | null; extra: number; context: boolean; check: boolean; required: boolean; point: boolean };
 
 function parseArgs(argv: string[]): Args {
   const number = (flag: string): number | null => {
@@ -153,6 +159,7 @@ function parseArgs(argv: string[]): Args {
     context: argv.includes('--context'),
     check: argv.includes('--check'),
     required: argv.includes('--required'),
+    point: argv.includes('--point'),
   };
 }
 
@@ -188,6 +195,7 @@ async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   if (args.context) return measureContext(gemini);
   if (args.check) return measureCheck(gemini, args.required);
+  if (args.point) return measurePoint(gemini);
   const { schema, label } = schemaFor(args);
 
   const recent: RecentSentences = new Map();
@@ -451,6 +459,58 @@ async function measureCheck(gemini: ReturnType<typeof loadGeminiConfig>, require
     console.log(`${item.key.padEnd(4)} ${item.task.padEnd(9)} ${said}   [expected: ${expect}]`);
   }
   return 0;
+}
+
+/** Phase 62d (spec D2). Ten typed gaps from Victor's lane 0 cards of 2026-10-18, half that point. */
+const POINTS: PointItem[] = [
+  'Il ___ è qui.', 'Io ho un ___.', 'La ___ è qui.', 'Io sono ___ ora.', 'Mio ___ è felice.',
+  'Ho poco ___ per il lavoro.', 'Il ___ è blu ora.', 'Un ___ vola nel cielo.', "Il ___ è nell'acqua.", 'Il ___ arriva in inverno.',
+].map((sentence, index) => ({ key: `q${index + 1}`, sentence }));
+
+async function measurePoint(gemini: ReturnType<typeof loadGeminiConfig>): Promise<number> {
+  console.log(`model     ${gemini.model}`);
+  console.log(`schema    LlmPointSchema (${JSON.stringify(toGeminiSchema(LlmPointSchema)).length} characters of responseSchema)`);
+  console.log(`request   ${POINTS.length} typed gaps, one call each, side by side`);
+  const started = Date.now();
+  const results = await Promise.all(
+    POINTS.map(async (item) => {
+      let thinking: number | null = null;
+      const llm = createGeminiClient({
+        fetch: globalThis.fetch,
+        baseUrl: gemini.baseUrl,
+        apiKey: gemini.apiKey,
+        model: gemini.model,
+        timeoutMs: GAP_CHECK_BUDGET_MS,
+        thinkingBudget: POINT_CHECK_THINKING,
+        onCall: async (call) => {
+          thinking = call.thinkingTokens;
+        },
+        now: Date.now,
+      });
+      const at = Date.now();
+      try {
+        const raw = await llm({ ...buildPointPrompt([item], 'it', 'he'), record: { kind: 'gap_point' } });
+        const answer = parsePoint(raw);
+        return { item, ms: Date.now() - at, thinking, finding: answer ? readPoint([item], answer).get(item.key) : undefined, raw, error: null as string | null };
+      } catch (error) {
+        return { item, ms: Date.now() - at, thinking, finding: undefined, raw: '', error: error instanceof Error ? error.message : String(error) };
+      }
+    }),
+  );
+  console.log(`after     ${Date.now() - started} ms (slowest call ${Math.max(...results.map((result) => result.ms))} ms)`);
+  let code = 0;
+  for (const { item, ms, thinking, finding, raw, error } of results) {
+    if (error) {
+      console.log(`${item.key.padEnd(4)} ${/responded 400$/.test(error) ? 'refused' : 'failed'} ${error}`);
+      code = Math.max(code, /responded 400$/.test(error) ? 1 : 2);
+    } else if (!finding) {
+      console.log(`${item.key.padEnd(4)} parse FAILED: ${raw.slice(0, 200)}`);
+      code = Math.max(code, 3);
+    } else {
+      console.log(`${item.key.padEnd(4)} ${String(ms).padStart(5)} ms ${String(thinking ?? '?').padStart(4)} t  ${item.sentence.padEnd(28)} ${finding.guesses.join(' / ')} (${finding.meaning}, ${finding.readers}/10)`);
+    }
+  }
+  return code;
 }
 
 main().then(

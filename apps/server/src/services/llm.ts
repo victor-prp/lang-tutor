@@ -52,6 +52,8 @@ export type ModelCallKind =
   // Phase 62c (spec D3). The gap check on its own client, and the rewrite on its own.
   | 'gap_check'
   | 'gap_rewrite'
+  // Phase 62d (spec D2). The point check of a typed gap, and its re-check, on the gap check's client.
+  | 'gap_point'
   | 'gloss_merge'
   // Phase 50 (spec D2). On the judge's client.
   | 'sound_alike';

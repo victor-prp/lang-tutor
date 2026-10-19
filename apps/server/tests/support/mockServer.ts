@@ -8,6 +8,7 @@ import { CONTEXT_MARKER } from '../../src/domain/context';
 import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
 import { JUDGE_MARKER } from '../../src/domain/judge';
 import { PHOTO_READING_MARKER } from '../../src/domain/photoReading';
+import { POINT_MARKER } from '../../src/domain/pointing';
 import { SENSE_MATCH_MARKER } from '../../src/domain/senseMatching';
 import { SOUND_ALIKE_MARKER } from '../../src/domain/soundAlike';
 import { TRANSCRIBE_MARKER } from '../../src/domain/speech';
@@ -425,6 +426,28 @@ export async function expectCheck(
       httpResponse: failed
         ? { statusCode: opts.status, body: '{"error":{"message":"upstream"}}' }
         : { statusCode: 200, headers: { 'content-type': ['application/json'] }, body: JSON.stringify(geminiResponse({ items })) },
+    },
+  });
+}
+
+/**
+ * Phase 62d (spec D2). The point check's answer, matched on POINT_MARKER and ranked
+ * above a broader stub: each key's guesses, the first one's meaning, and how many of
+ * ten readers would write it. Without this stub the call finds no expectation and fails, and every typed gap
+ * is kept as written (spec D3).
+ */
+export async function expectPoint(ns: string, findings: Record<string, { guesses: string[]; meaning: string; readers: number }>): Promise<void> {
+  // The first guess carries `readers`; the others take none.
+  const items = Object.entries(findings).map(([key, { guesses, meaning, readers }]) => ({
+    key,
+    meaning,
+    guesses: guesses.map((word, at) => ({ word, readers: at === 0 ? readers : 0 })),
+  }));
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${POINT_MARKER}[\\s\\S]*` } },
+    action: {
+      priority: 10,
+      httpResponse: { statusCode: 200, headers: { 'content-type': ['application/json'] }, body: JSON.stringify(geminiResponse({ items })) },
     },
   });
 }
