@@ -26,9 +26,10 @@ import { normalizeForm } from '../../src/domain/dictionary';
 import { readCheck, type CheckItem } from '../../src/domain/check';
 import { findGap } from '../../src/domain/cloze';
 import { ASKED_DISTRACTORS, comparable, distractorItems, KEPT_DISTRACTORS, nothingKnown, validateDistractors, type DistractorItem, type Generated, type LearnerWord, type RecentSentences, type Task } from '../../src/domain/distractors';
-import { gapCheckItem, gapFaults, pointFaults, rewriteItems, rewriteOthers, type GapJudged } from '../../src/domain/gapRewrite';
+import { candidateItems, gapCheckItem, gapFaults, pointFaults, rewriteItems, rewriteOthers, type GapJudged } from '../../src/domain/gapRewrite';
 import { POINT_REWRITE_ROUNDS, judgePoint, pointItem, readPoint, type PointFinding, type PointItem } from '../../src/domain/pointing';
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
+import type { SentenceContent } from '../../src/domain/sentences';
 import { TRANSLATION_JUDGE_THINKING } from '../../src/domain/judge';
 import { DEFAULT_SOUND_ALIKE_THRESHOLD } from '../../src/domain/soundAlike';
 import { POINT_CHECK_THINKING, SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
@@ -1333,43 +1334,64 @@ async function main(): Promise<void> {
     });
     const failed = judge(asked, await read(asked, 'point check'), 'point check');
     let shown = answer;
-    // Up to POINT_REWRITE_ROUNDS rewrites per typed gap, one call each, side by side, as
-    // prepareSession asks them; each but the last read again before the next.
+    // Up to POINT_REWRITE_ROUNDS rounds per typed gap, as prepareSession runs them: one call
+    // writes its candidates (POINT_CANDIDATE_ANGLES), the point check reads each, side by
+    // side, and the best that points is shown; when none does, the likeliest feeds the next.
+    const targetFor = (key: string, sentence: SentenceContent) => {
+      const { form, lemma, translation } = kase.items[items.findIndex((item) => item.key === key)];
+      return { word: { answer: sentence.sentence.slice(sentence.gap.start, sentence.gap.end), lemma, alternatives: [form] }, meanings: [translation] };
+    };
     let asking = pointFaults({ items, verdict, failed }).map((fault) => ({ fault, base: items }));
     for (let round = 1; round <= POINT_REWRITE_ROUNDS && asking.length > 0; round += 1) {
-      const again: { item: PointItem; base: DistractorItem[] }[] = [];
+      const next: typeof asking = [];
       await Promise.all(
         asking.map(async ({ fault, base }) => {
-          const rewritten = rewriteItems(base, [fault]);
+          const [ask] = rewriteItems(base, [fault]);
+          const candidates = candidateItems(ask);
           const clear = rewriteOthers(items, [fault], []);
           const started = Date.now();
+          let reply: LlmDistractors;
           try {
-            const reply = await askDistractors(sessionLlm, { from, to, items: rewritten, learnerWords, others: clear });
-            const rescued = validateDistractors(rewritten, reply, to, clear, from, nothingKnown());
-            const got = reply.items.find((item) => item.key === fault.key);
-            const card = rescued.byKey.get(fault.key);
-            if (card?.sentence && got) {
-              made.set(fault.key, card);
-              shown = { items: shown.items.map((item) => (item.key === fault.key ? got : item)) };
-              again.push({ item: pointItem(fault.key, card.sentence), base: rewritten });
-              written.push(`rewrite ${fault.key} (round ${round}, ${Date.now() - started} ms): ${fault.rewrite.sentence ?? '(none)'} → ${got.sentence ?? '(none)'}`);
-            } else {
-              const why = card?.degraded ?? 'no answer';
-              status.set(fault.key, `the rewrite was refused: ${why}`);
-              written.push(`rewrite ${fault.key} (round ${round}) refused: ${why}`);
-            }
+            reply = await askDistractors(sessionLlm, { from, to, items: candidates, learnerWords, others: clear });
           } catch (error) {
             tier1.push({ name: `${fault.key}: the sentence rewrite call succeeded`, ok: false, detail: (error as Error).message });
+            return;
           }
+          const rescued = validateDistractors(candidates, reply, to, clear, from, nothingKnown());
+          const written_ = candidates.flatMap((candidate) => {
+            const card = rescued.byKey.get(candidate.key);
+            const got = reply.items.find((item) => item.key === candidate.key);
+            return card?.sentence && got ? [{ key: candidate.key, card, got, item: pointItem(candidate.key, card.sentence) }] : [];
+          });
+          written.push(`rewrite ${fault.key} (round ${round}, ${Date.now() - started} ms): ${fault.rewrite.sentence ?? '(none)'} → ${written_.map((one) => one.got.sentence).join(' | ') || '(none usable)'}`);
+          if (written_.length === 0) {
+            status.set(fault.key, 'the rewrite wrote no usable candidate');
+            return;
+          }
+          const reading = await read(written_.map((one) => one.item), `point check of ${fault.key}'s candidates`);
+          const judged = written_.flatMap((one) => {
+            const finding = reading.get(one.key);
+            if (!finding) return [];
+            written.push(`  ${one.key}: ${one.item.sentence} → ${finding.guesses.join(' / ')} (${finding.meaning}, ${finding.readers}/10)`);
+            return [{ ...one, finding, verdict: judgePoint(finding, targetFor(fault.key, one.card.sentence!)) }];
+          });
+          const best = [...judged].sort((a, b) => Number(b.verdict.points) - Number(a.verdict.points) || b.finding.readers - a.finding.readers)[0];
+          if (!best) {
+            status.set(fault.key, "the point check did not judge the candidates");
+            return;
+          }
+          made.set(fault.key, best.card);
+          shown = { items: shown.items.map((item) => (item.key === fault.key ? { ...best.got, key: fault.key } : item)) };
+          if (best.verdict.points) {
+            status.set(fault.key, null);
+            return;
+          }
+          status.set(fault.key, best.verdict.problem);
+          const rewrite = { sentence: best.card.sentence!.sentence, fits: best.verdict.fits, problem: best.verdict.problem };
+          next.push({ fault: { key: fault.key, stage: 'pointing', rewrite }, base: [ask] });
         }),
       );
-      const items2 = again.map(({ item }) => item);
-      const still = judge(items2, await read(items2, `point re-check ${round}`), `point re-check ${round}`);
-      asking = again.flatMap(({ item, base }) => {
-        const found = still.get(item.key);
-        if (!found || round === POINT_REWRITE_ROUNDS) return [];
-        return [{ fault: { key: item.key, stage: 'pointing' as const, rewrite: { sentence: made.get(item.key)!.sentence!.sentence, ...found } }, base }];
-      });
+      asking = next;
     }
     const tier2 = items.map((item, index): Check => {
       const why = status.has(item.key) ? status.get(item.key)! : 'no sentence';
