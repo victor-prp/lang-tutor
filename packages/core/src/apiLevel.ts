@@ -26,8 +26,13 @@
  * (it counted those ready by FSRS), and a target's word loses its `readiness` enum for
  * `readiness_pct`, `today`, `owed`, `starts_in` and `skills`: an older app would read
  * `undefined` where it drew a name.
+ *
+ * 6: phase 65: readiness is the expected grade; ready_count counts words at 90; word skills are
+ * chances. A target's `readiness_pct` and `ready_count` keep their names and change meaning, and a
+ * word's skills carry `chance` and `held` in place of `value` and `cap`: an older app would draw
+ * the grade as points and read `undefined` where it drew a skill's bar (spec D10).
  */
-export const API_LEVEL = 5;
+export const API_LEVEL = 6;
 
 /** Written here and nowhere else (ADR 0012 R3). */
 export const API_LEVEL_HEADER = 'X-Api-Level';

@@ -156,7 +156,9 @@ describe('readinessName', () => {
 const WORD = { gloss_id: 'g0', form: '', meaning: '', readiness_pct: 0, today: 'owed' as const, owed: [], starts_in: null, skills: [] };
 const DAY = {
   readiness_pct: 0,
-  today: { state: 'owed' as const, done: 0, planned: 0, extra: 0, next_practice_in: null },
+  readiness_start_pct: 0,
+  practice_more_little: false,
+  today: { state: 'owed' as const, done: 0, planned: 0, extra: 0, next_practice_in: null, sessions_budget: null, sessions_offer: 0, sessions_done: 0, ended_early: false, minutes: 0 },
   session: null,
 };
 
@@ -308,9 +310,11 @@ const summary = (
   word_count: 8,
   ready_count: 0,
   readiness_pct: 18,
+  readiness_start_pct: 18,
+  practice_more_little: false,
   session: null,
   ...over,
-  today: { state, done: 0, planned: 8, extra: 0, next_practice_in: null, ...over.today },
+  today: { state, done: 0, planned: 8, extra: 0, next_practice_in: null, sessions_budget: null, sessions_offer: 0, sessions_done: 0, ended_early: false, minutes: 0, ...over.today },
 });
 
 describe('homeOrder', () => {

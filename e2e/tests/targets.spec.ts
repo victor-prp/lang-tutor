@@ -578,7 +578,7 @@ test('practice more starts the next words early, and the target screen groups th
   for (const name of ['זיהוי בכתב', 'כתיבה', 'איות']) await expect(skills).toContainText(name);
   for (const name of ['הבנת הנשמע', 'דיבור']) await expect(skills).not.toContainText(name);
   expect(word.skills.map((skill) => skill.dimension).sort()).toEqual(['spelling', 'written_productive', 'written_receptive']);
-  for (const skill of word.skills) expect(skill.value, skill.dimension).toBe(skill.cap);
+  for (const skill of word.skills) expect(skill.chance, skill.dimension).toBeGreaterThan(0);
   await page.getByTestId(`target-word-toggle-${word.gloss_id}`).click();
   await expect(skills).toHaveCount(0);
   expect(diagnostics.pageErrors, report()).toEqual([]);

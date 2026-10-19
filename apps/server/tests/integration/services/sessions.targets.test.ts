@@ -791,6 +791,31 @@ describe("a session's end records the target's readiness (phase 65)", () => {
     expect(rows.find((row) => row.dimension === 'written_productive')).toMatchObject({ day: DAY, missedToday: true, bonusUsed: 1, held: false, sessionId: own.sessionId });
   });
 
+  it("puts readiness on the target's summary, from the start of today, on the skills the check asks", async () => {
+    const words = await savedWords();
+    const homework = await addTarget('homework', '2030-01-13', [words[0].glossId]);
+    const own = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: [words[0], words[0]],
+      types: ['typed_translation', 'typed_translation'],
+      targetId: homework,
+    });
+    await service.startSession('u_1', own.sessionId, NO_DEVICES);
+    for (const question of own.questions) await service.submitAnswer('u_1', own.sessionId, question.id, { text: words[0].form });
+
+    const read = await targets.getTarget('u_1', homework);
+
+    // A device that does not record: homework counts write and spell only. A first right and a
+    // bonus each, from nothing at the start of today.
+    expect(read.words[0].skills.map((skill) => skill.dimension)).toEqual(['written_productive', 'spelling']);
+    expect(read.words[0].skills.every((skill) => skill.chance > 0 && !skill.held)).toBe(true);
+    expect(read.readiness_pct).toBe(read.words[0].readiness_pct);
+    expect(read.readiness_pct).toBeGreaterThan(0);
+    expect(read.readiness_start_pct).toBe(0);
+    expect(read.today).toMatchObject({ sessions_done: 1, sessions_budget: expect.any(Number) });
+  });
+
   it("reads the day's first line as the first answer's, whatever else the day held", async () => {
     const words = await savedWords();
     const homework = await addTarget('homework', '2030-01-13', [words[0].glossId]);
@@ -881,6 +906,37 @@ describe("today's budget (phase 65, spec D7)", () => {
       ...eveBudget,
       { day: DAY, sessions: 3 + 1 + 1, cards: 4, missRoom: 1, doneBefore: 1, createdAt: expect.any(Date) },
     ]);
+  });
+
+  // Review Focus 4, ruling P1. The summary counts a session by its practice_day: started on the
+  // eve and ended today, it is today's session done, and not the eve's.
+  it("counts a session started the day before and completed today in today's sessions done on the summary", async () => {
+    const words = await savedWords();
+    const exam = await addTarget('exam', '2030-01-13', ids(words.slice(0, 3)));
+    const planned = words.find((word) => word.glossId === sorted(ids(words.slice(0, 3)))[0])!;
+    await makeBot(t.db, 'u_1', PREVIOUS_DAY);
+    const eve = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [planned], types: ['multiple_choice'], targetId: exam });
+    await service.startSession('u_1', eve.sessionId, NO_DEVICES);
+    // Started on the eve, which set the eve's budget: none done yet.
+    const [eveBudget] = await readTargetBudgets(t.db, exam);
+    expect((await targets.getTarget('u_1', exam)).today).toMatchObject({ sessions_budget: eveBudget.sessions, sessions_done: 0, state: 'owed' });
+
+    await makeBot(t.db, 'u_1', DAY);
+    const card = asChoice(eve.questions[0]);
+    await service.submitAnswer('u_1', eve.sessionId, card.id, { option_index: card.correct_option });
+
+    // Today: no session started yet, so no budget; the offer is today's play (3 sessions of 4
+    // cards), one session of room, and the one done, as the day's first start would set it.
+    expect((await targets.getTarget('u_1', exam)).today).toMatchObject({
+      state: 'owed',
+      sessions_budget: null,
+      sessions_offer: 3 + 1 + 1,
+      sessions_done: 1,
+      minutes: 2,
+    });
+    // Read back on the eve, it is not the eve's.
+    await makeBot(t.db, 'u_1', PREVIOUS_DAY);
+    expect((await targets.getTarget('u_1', exam)).today).toMatchObject({ sessions_budget: eveBudget.sessions, sessions_done: 0 });
   });
 
   it("sets none for a main-path session", async () => {

@@ -298,8 +298,8 @@ function Summary({ target }: { target: Target }) {
   );
 }
 
-/** A tapped word's live skills (option B): a bar out of 10 filled to the value, a thin
- *  line at the cap, green once the value reaches it, and the skill's name. */
+/** A tapped word's counted skills: a bar out of 100 filled to its chance, green from 90, and
+ *  the skill's name. Phase 65 (spec D6): the panel's look is redrawn in Task 7. */
 function Skills({ word }: { word: TargetWord }) {
   return (
     <View testID={`target-word-skills-${word.gloss_id}`} style={styles.skills}>
@@ -309,11 +309,10 @@ function Skills({ word }: { word: TargetWord }) {
           <View style={styles.skillTrack}>
             <View
               style={{
-                width: `${(skill.value / 10) * 100}%`,
-                backgroundColor: skill.value >= skill.cap ? colors.correct : colors.primary,
+                width: `${skill.chance}%`,
+                backgroundColor: skill.chance >= 90 ? colors.correct : colors.primary,
               }}
             />
-            <View style={[styles.capLine, { start: `${(skill.cap / 10) * 100}%` }]} />
           </View>
         </View>
       ))}
@@ -339,7 +338,6 @@ const styles = StyleSheet.create({
   skill: { gap: spacing.xs },
   skillName: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.text, writingDirection: 'rtl' },
   skillTrack: { flexDirection: 'row', height: 8, borderRadius: radii.pill, backgroundColor: colors.border, overflow: 'hidden' },
-  capLine: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: colors.text },
   screen: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: spacing.sm },
   link: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
   failed: { gap: spacing.sm, alignItems: 'center', paddingTop: spacing.xl },

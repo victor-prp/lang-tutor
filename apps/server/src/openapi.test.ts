@@ -601,9 +601,33 @@ describe('the target endpoints in the published document (phase 53)', () => {
     const doc = await openApiDocument();
     const list = doc.paths[TARGETS].get.responses['200'].content['application/json'].schema;
     expect(list.required.sort()).toEqual(['targets', 'today']);
-    const SUMMARY = ['created_on', 'days_left', 'due_on', 'id', 'kind', 'readiness_pct', 'ready_count', 'session', 'today', 'word_count'];
+    const SUMMARY = [
+      'created_on',
+      'days_left',
+      'due_on',
+      'id',
+      'kind',
+      'practice_more_little',
+      'readiness_pct',
+      'readiness_start_pct',
+      'ready_count',
+      'session',
+      'today',
+      'word_count',
+    ];
     expect(list.properties.targets.items.required.sort()).toEqual(SUMMARY);
-    expect(list.properties.targets.items.properties.today.properties.state.enum).toEqual(['owed', 'done', 'rest', 'due_today']);
+    const today = list.properties.targets.items.properties.today;
+    expect(today.properties.state.enum).toEqual(['owed', 'done', 'rest', 'due_today']);
+    // Phase 65 (spec D7, D10). Today as a budget of sessions: null until the day's first session
+    // sets it, with the offer shown before.
+    expect(today.required.sort()).toEqual(
+      ['done', 'ended_early', 'extra', 'minutes', 'next_practice_in', 'planned', 'sessions_budget', 'sessions_done', 'sessions_offer', 'state'],
+    );
+    expect(today.properties.sessions_budget.type).toEqual(['integer', 'null']);
+    expect(today.properties.sessions_offer.type).toBe('integer');
+    expect(today.properties.ended_early.type).toBe('boolean');
+    expect(list.properties.targets.items.properties.practice_more_little.type).toBe('boolean');
+    expect(list.properties.targets.items.properties.readiness_start_pct).toMatchObject({ type: 'integer', minimum: 0, maximum: 100 });
     for (const [path, method, status] of [
       [TARGETS, 'post', '201'],
       [TARGET, 'get', '200'],
@@ -617,6 +641,11 @@ describe('the target endpoints in the published document (phase 53)', () => {
       );
       expect(target.properties.words.items.properties.today.enum).toEqual(['owed', 'done', 'extra', 'later']);
       expect(target.properties.words.items.properties.readiness).toBeUndefined();
+      // Phase 65 (spec D10). A word's counted skills, each a chance in percent and held or not.
+      const skill = target.properties.words.items.properties.skills.items;
+      expect(skill.required.sort()).toEqual(['chance', 'dimension', 'held']);
+      expect(skill.properties.chance).toMatchObject({ type: 'integer', minimum: 0, maximum: 100 });
+      expect(skill.properties.held.type).toBe('boolean');
     }
   });
 

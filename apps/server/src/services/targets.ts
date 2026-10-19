@@ -10,12 +10,13 @@ import type {
 import { daysBetween } from '../domain/progress';
 import { targetDay } from '../domain/targetDay';
 import { openOn } from '../domain/targets';
+import { readinessSummary, todaySummary } from '../domain/targetSummary';
 import { InvalidTarget, TargetClosed, TargetNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { TargetRow } from '../repo/targets';
 import { authorizeEnrollment } from './access';
 import { learnerDay, learnerDays } from './learnerDay';
-import { readTargetDay } from './targetDayRead';
+import { readTargetDay, readTodayBudget } from './targetDayRead';
 import { logImportSaved, saveImportsInTx, type ImportSaved } from './photoImports';
 import { lockPaths, logTargetRetired, requestStocks, restockAfterTargetChange, retireStocks } from './stock';
 import type { Repos, Transaction } from './transaction';
@@ -117,11 +118,21 @@ export function createTargetService({
   /**
    * Phase 57 (spec D9, D10, D13, rulings T6-a, T6-b). Targets as the learner reads them on
    * `today`: each word with the form it was saved from, as written (final review M3), its key,
-   * and its day (the day's state of it, its readiness in percent, its skills in points); and the
-   * target's own day (today's work, readiness, the words at 100) and its path's session as the
-   * home read gives it (started, else stock, else a failed newest). The day is readTargetDay's,
-   * the one the target's path plans by. A target's words are saved ones (unsaving takes a word
-   * out of every target), so a word the list does not hold is not shown.
+   * and its day (the day's state of it, what it owes); and the target's own day (today's work)
+   * and its path's session as the home read gives it (started, else stock, else a failed newest).
+   * The day is readTargetDay's, the one the target's path plans by. A target's words are saved
+   * ones (unsaving takes a word out of every target), so a word the list does not hold is not
+   * shown.
+   *
+   * Phase 65 (spec D1, D4, D7, D9, D10). Readiness is the expected grade on the date
+   * (readinessSummary): each word's counted skills among its live ones (readTargetDay's, so
+   * speaking is dropped for a word that cannot be said or a device that does not record), each
+   * from the target's readiness row, else the word's main memory (R1); at the start of today,
+   * each skill's first line today; the words at 90 or more; and whether more practice adds
+   * little. Today is a budget (todaySummary): the one stored for today, else none yet with the
+   * offer as readTodayBudget would set it now; the path's sessions completed today, by their
+   * practice_day (ADR 0013); its state from the plan's and the budget. The plan's own state is
+   * unchanged: the picker reads it.
    */
   async function view(repos: Repos, enrolled: Enrollment, today: string, targets: readonly TargetWithWords[]): Promise<Target[]> {
     if (targets.length === 0) return [];
@@ -129,6 +140,9 @@ export function createTargetService({
     const saved = await repos.vocabulary.findSavedWords({ enrollmentId: enrolled.id, glossIds });
     const savedOf = new Map(saved.map((word) => [word.glossId, word]));
     const devices = (await repos.session.findNewestDevices(enrolled.id)) ?? { listening: false, speaking: false };
+    // Phase 65 (spec D1, R1). Readiness reads the targets' own rows, else the words' main memory.
+    const readinessRows = await repos.targetReadiness.findRows(targets.map((target) => target.id), glossIds);
+    const memory = await repos.memory.findRows({ enrollmentId: enrolled.id, glossIds });
 
     const out: Target[] = [];
     for (const target of targets) {
@@ -140,22 +154,38 @@ export function createTargetService({
         read?.day ??
         targetDay({ today, createdOn: today, dueOn: target.dueOn, words: [], skills: [], rightToday: new Set(), answeredToday: false });
       const dayOf = new Map(day.words.map((word) => [word.glossId, word]));
-      const words = target.glossIds.flatMap((glossId) => {
-        const gloss = savedOf.get(glossId);
-        const word = dayOf.get(glossId);
-        if (!gloss || !word) return [];
-        return [
-          {
-            gloss_id: glossId,
-            form: gloss.form,
-            meaning: gloss.key,
-            readiness_pct: word.readinessPct,
-            today: word.state,
-            owed: word.owed,
-            starts_in: word.startsIn,
-            skills: word.skills.map((skill) => ({ dimension: skill.dimension, value: skill.halves / 2, cap: day.capHalves / 2 })),
-          },
-        ];
+      const liveOf = new Map((read?.dayInput.words ?? []).map((word) => [word.glossId, word.live]));
+      const shown = target.glossIds.filter((glossId) => savedOf.has(glossId) && dayOf.has(glossId));
+      const readiness = readinessSummary({
+        kind: target.kind,
+        dueOn: target.dueOn,
+        today,
+        words: shown.map((glossId) => ({ glossId, live: liveOf.get(glossId) ?? [] })),
+        rows: readinessRows.filter((row) => row.targetId === target.id),
+        memory,
+        firstToday: await repos.targetReadiness.findFirstEventsOn(target.id, today),
+      });
+      const words = shown.map((glossId, i) => {
+        const gloss = savedOf.get(glossId)!;
+        const word = dayOf.get(glossId)!;
+        return {
+          gloss_id: glossId,
+          form: gloss.form,
+          meaning: gloss.key,
+          readiness_pct: readiness.words[i].readinessPct,
+          today: word.state,
+          owed: word.owed,
+          starts_in: word.startsIn,
+          skills: readiness.words[i].skills,
+        };
+      });
+      const budget = (await repos.targetBudgets.find(target.id, today)) ?? null;
+      const todays = todaySummary({
+        plan: day.state,
+        daysLeft: day.daysLeft,
+        budget,
+        offer: budget ? null : await readTodayBudget(repos, enrolled, target, devices, today),
+        sessionsDone: await repos.session.countCompletedOn(enrolled.id, target.id, today),
       });
       const { started, stock } = await repos.session.findOpen(enrolled.id, target.id);
       const latest = started || stock ? undefined : await repos.session.findLatest(enrolled.id, target.id);
@@ -167,9 +197,22 @@ export function createTargetService({
         created_on: createdOn,
         days_left: daysBetween(today, target.dueOn),
         word_count: words.length,
-        ready_count: day.readyCount,
-        readiness_pct: day.readinessPct,
-        today: { state: day.state, done: day.done, planned: day.planned, extra: day.extra, next_practice_in: day.nextPracticeIn },
+        ready_count: readiness.readyCount,
+        readiness_pct: readiness.readinessPct,
+        readiness_start_pct: readiness.readinessStartPct,
+        practice_more_little: readiness.practiceMoreLittle,
+        today: {
+          state: todays.state,
+          done: day.done,
+          planned: day.planned,
+          extra: day.extra,
+          next_practice_in: day.nextPracticeIn,
+          sessions_budget: todays.sessionsBudget,
+          sessions_offer: todays.sessionsOffer,
+          sessions_done: todays.sessionsDone,
+          ended_early: todays.endedEarly,
+          minutes: todays.minutes,
+        },
         session: current
           ? {
               session_id: current.id,

@@ -187,7 +187,9 @@ const targetWith = (session: CurrentSessionResponse['current']): TargetSummary =
   word_count: 8,
   ready_count: 0,
   readiness_pct: 18,
-  today: { state: 'owed', done: 0, planned: 8, extra: 0, next_practice_in: null },
+  readiness_start_pct: 18,
+  practice_more_little: false,
+  today: { state: 'owed', done: 0, planned: 8, extra: 0, next_practice_in: null, sessions_budget: null, sessions_offer: 0, sessions_done: 0, ended_early: false, minutes: 0 },
   session,
 });
 const session = (status: 'preparing' | 'ready' | 'failed' | 'completed', answered = 0, started = answered > 0) => ({
@@ -256,7 +258,7 @@ describe('homeReminderStartOf', () => {
   const stale = { failed: false, read: false };
   const owed = (current: CurrentSessionResponse['current']) => [targetWith(current)];
   const done = (current: CurrentSessionResponse['current']): TargetSummary[] => [
-    { ...targetWith(current), today: { state: 'done', done: 8, planned: 8, extra: 0, next_practice_in: null } },
+    { ...targetWith(current), today: { ...targetWith(current).today, state: 'done', done: 8 } },
   ];
   const mainReady = { kind: 'start', sessionId: 'm1' } as const;
   const answered = (status: 'ready' | 'preparing', sessionId = 'ts2') => ({ kind: 'answered', sessionId, status }) as const;
