@@ -54,6 +54,9 @@ export function PracticeMoreSheet({
           <Pressable
             accessibilityRole="checkbox"
             accessibilityState={{ checked: stop }}
+            // react-native-web does not render accessibilityState: on the web this puts the tick
+            // in the DOM (as PhotoImportRow's does).
+            aria-checked={stop}
             testID="practice-more-stop-asking"
             onPress={() => setStop(!stop)}
             style={styles.check}
