@@ -134,10 +134,10 @@ export function createTargetRepo(tx: Tx) {
      */
     listActiveHolding: async (enrollmentId: string, glossIds: readonly string[], day: string, asOf: string): Promise<HoldingTarget[]> => {
       if (glossIds.length === 0) return [];
-      const rows = await tx.execute<{ id: string; due_on: string; gloss_id: string; added_at: string }>(sql`
-        SELECT t.id, t.due_on::text AS due_on, w.gloss_id, ${instantText(sql`w.added_at`)} AS added_at
+      const rows = await tx.execute<{ id: string; due_on: string; kind: 'homework' | 'exam'; gloss_id: string; added_at: string }>(sql`
+        SELECT t.id, t.due_on::text AS due_on, t.kind, w.gloss_id, ${instantText(sql`w.added_at`)} AS added_at
         FROM (
-          SELECT t.id,
+          SELECT t.id, t.kind,
                  coalesce(
                    (SELECT (e.before->>'due_on')::date
                     FROM target_events e
@@ -157,7 +157,7 @@ export function createTargetRepo(tx: Tx) {
       for (const row of rows.rows) {
         let target = held.get(row.id);
         if (!target) {
-          target = { id: row.id, dueOn: row.due_on, words: [] };
+          target = { id: row.id, dueOn: row.due_on, kind: row.kind, words: [] };
           held.set(row.id, target);
         }
         target.words.push({ glossId: row.gloss_id, addedAt: row.added_at });

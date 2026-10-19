@@ -14,7 +14,7 @@ import { insertGlossMemory, moveAnswersBack, readLearnerDay, readMemory, setLeve
 import { asChoice, insertListSession, type AskedGloss } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, makeBot, seedUser, setTimeZone } from '../../support/seedUser';
-import { endTargetNow, readSessionTargets, readStockRow, readTargetEvents, readTargetSkills, seedTarget, setTargetWord } from '../../support/targetRows';
+import { endTargetNow, readSessionTargets, readStockRow, readTargetEvents, readTargetReadiness, readTargetReadinessEvents, readTargetSkills, seedTarget, setTargetWord } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -758,5 +758,35 @@ describe('the home read of a path (spec D11)', () => {
 
     await endTargetNow(t.db, exam);
     expect((await service.currentSession('u_1', E)).savedCount).toBe(6);
+  });
+});
+
+// Phase 65 (spec D2, D3). A session's end writes a target's readiness and its log, from the
+// answers in order: the first try of the day decides, a miss counts once, a right after counts
+// as a bonus.
+describe("a session's end records the target's readiness (phase 65)", () => {
+  it('writes one row per counted skill and an event per applied answer: right, wrong, right', async () => {
+    const words = await savedWords();
+    const homework = await addTarget('homework', '2030-01-13', [words[0].glossId]);
+    const own = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: [words[0], words[0], words[0]],
+      types: ['typed_translation', 'typed_translation', 'typed_translation'],
+      targetId: homework,
+    });
+    await service.startSession('u_1', own.sessionId, NO_DEVICES);
+    for (const [i, right] of [true, false, true].entries()) {
+      await service.submitAnswer('u_1', own.sessionId, own.questions[i].id, { text: right ? words[0].form : 'zzzz' });
+    }
+
+    const events = await readTargetReadinessEvents(t.db, homework);
+    const productive = events.filter((event) => event.dimension === 'written_productive');
+    expect(productive.map((event) => event.why).sort()).toEqual(['bonus', 'first_right', 'miss']);
+    expect(productive.every((event) => event.day === DAY && event.sessionId === own.sessionId)).toBe(true);
+    const rows = await readTargetReadiness(t.db, homework);
+    expect(rows.filter((row) => row.dimension === 'written_productive')).toHaveLength(1);
+    expect(rows.every((row) => ['written_productive', 'spelling', 'spoken_productive'].includes(row.dimension))).toBe(true);
+    expect(rows.find((row) => row.dimension === 'written_productive')).toMatchObject({ day: DAY, missedToday: true, bonusUsed: 1, held: false, sessionId: own.sessionId });
   });
 });

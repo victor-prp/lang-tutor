@@ -1147,6 +1147,7 @@ function runPaths(
         targets: active.map((one) => ({
           id: one.id,
           dueOn: one.dueOn,
+          kind: one.kind,
           words: wordsOf(one).map(({ glossId, addedOn }) => ({ glossId, addedAt: `${addedOn}T00:00:00.000000Z` })),
         })),
         before: [...skills.values()],

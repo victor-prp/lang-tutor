@@ -1652,3 +1652,87 @@ export const targetSkillEvents = pgTable(
     index('target_skill_events_target_created_idx').on(t.targetId, t.createdAt),
   ],
 );
+
+// Phase 65 (spec D2, D3). Derive, then record: a target skill's readiness, the FSRS state of a
+// copy of the memory model that only a target's answers move, with the day-rule bookkeeping
+// (domain/readinessWrite.ts; the rule is packages/core readiness.ts). Written when a session
+// ends and rebuilt by the recompute. Only the counted skills of the target's kind get a row.
+// `day` is the last learner day an answer moved the row; `session_id` the session that did.
+// Keyed through the target word, as target_skills is: removing a word takes its readiness.
+export const targetReadiness = pgTable(
+  'target_readiness',
+  {
+    targetId: uuid('target_id').notNull(),
+    glossId: text('gloss_id').notNull(),
+    dimension: text('dimension').notNull(),
+    stability: real('stability').notNull(),
+    difficulty: real('difficulty').notNull(),
+    lastDay: date('last_day', { mode: 'string' }).notNull(),
+    reps: integer('reps').notNull(),
+    lapses: integer('lapses').notNull(),
+    params: text('params').notNull(),
+    day: date('day', { mode: 'string' }).notNull(),
+    missedToday: boolean('missed_today').notNull(),
+    bonusUsed: smallint('bonus_used').notNull(),
+    held: boolean('held').notNull(),
+    sessionId: uuid('session_id'),
+  },
+  (t) => [
+    primaryKey({ name: 'target_readiness_pkey', columns: [t.targetId, t.glossId, t.dimension] }),
+    foreignKey({
+      name: 'target_readiness_word_fk',
+      columns: [t.targetId, t.glossId],
+      foreignColumns: [targetWords.targetId, targetWords.glossId],
+    })
+      .onDelete('cascade')
+      .onUpdate('cascade'),
+    check('target_readiness_dimension_known', sql`${t.dimension} in ('written_productive', 'spelling', 'spoken_productive')`),
+    check('target_readiness_bonus_range', sql`${t.bonusUsed} between 0 and 2`),
+    check('target_readiness_stability_positive', sql`${t.stability} > 0`),
+  ],
+);
+
+// Phase 65 (spec D3). Append-only: every answer that moved a readiness row, the session, the
+// learner day, the skill's chance before and after as read (0..1, so an exam hold shows), and
+// why. gloss_id and session_id carry no foreign key, so a line outlives its word and its
+// session, as target_skill_events' do. The recompute deletes and rebuilds it with the rows.
+export const targetReadinessEvents = pgTable(
+  'target_readiness_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    targetId: uuid('target_id').notNull(),
+    glossId: text('gloss_id').notNull(),
+    dimension: text('dimension').notNull(),
+    sessionId: uuid('session_id').notNull(),
+    day: date('day', { mode: 'string' }).notNull(),
+    before: real('before').notNull(),
+    after: real('after').notNull(),
+    why: text('why').notNull(),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'target_readiness_events_target_fk', columns: [t.targetId], foreignColumns: [targets.id] }).onDelete('cascade'),
+    check('target_readiness_events_dimension_known', sql`${t.dimension} in ('written_productive', 'spelling', 'spoken_productive')`),
+    check('target_readiness_events_why_known', sql`${t.why} in ('first_right', 'first_miss', 'miss', 'bonus')`),
+    index('target_readiness_events_target_day_idx').on(t.targetId, t.day),
+  ],
+);
+
+// Phase 65 (spec D4). A target's budget for one learner day: sessions, cards and miss room,
+// stored so the day reads alike however often it is read. Nothing writes it in this task; the
+// target day read does (Task 3). Not rebuilt by the recompute.
+export const targetBudgets = pgTable(
+  'target_budgets',
+  {
+    targetId: uuid('target_id').notNull(),
+    day: date('day', { mode: 'string' }).notNull(),
+    sessions: smallint('sessions').notNull(),
+    cards: smallint('cards').notNull(),
+    missRoom: smallint('miss_room').notNull(),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'target_budgets_pkey', columns: [t.targetId, t.day] }),
+    foreignKey({ name: 'target_budgets_target_fk', columns: [t.targetId], foreignColumns: [targets.id] }).onDelete('cascade'),
+  ],
+);

@@ -21,6 +21,8 @@ import { enrollmentOf, makeBot, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import {
   readStartedOn,
+  readTargetReadiness,
+  readTargetReadinessEvents,
   readTargetSkillEventTimes,
   readTargetSkillEvents,
   readTargetSkills,
@@ -419,6 +421,8 @@ describe('recomputeProgress', () => {
     await play([[quill, 'multiple_choice', false]]);
 
     const written = async () => ({
+      readiness: [await readTargetReadiness(t.db, exam), await readTargetReadiness(t.db, homework)],
+      readinessEvents: [await readTargetReadinessEvents(t.db, exam), await readTargetReadinessEvents(t.db, homework)],
       skills: [await readTargetSkills(t.db, exam), await readTargetSkills(t.db, homework)],
       events: [await readTargetSkillEvents(t.db, exam), await readTargetSkillEvents(t.db, homework)],
       started: [await readStartedOn(t.db, exam), await readStartedOn(t.db, homework)],
@@ -438,6 +442,12 @@ describe('recomputeProgress', () => {
     });
     expect(halves(before.skills[1])).toEqual({ 'tome:written_receptive': 4, 'tome:written_productive': 4, 'tome:spelling': 4 });
     expect(before.events[0].map((event) => event.why)).toContain('miss');
+    // Phase 65. Readiness is rebuilt too: the live rows and log are not empty, the exam holds a
+    // skill it missed on the second day, and the ended homework keeps what it was given before.
+    expect(before.readiness[0].length).toBeGreaterThan(0);
+    expect(before.readiness[1].length).toBeGreaterThan(0);
+    expect(before.readinessEvents[0].map((event) => event.why)).toEqual(expect.arrayContaining(['first_right', 'first_miss']));
+    expect(before.readiness[0].some((row) => row.held)).toBe(true);
     expect(before.started).toEqual([
       { [tome.glossId]: '2030-01-08', [quill.glossId]: '2030-01-08' },
       { [tome.glossId]: '2030-01-08' },

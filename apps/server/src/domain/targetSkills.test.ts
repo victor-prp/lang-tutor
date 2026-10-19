@@ -100,7 +100,7 @@ describe('targetSessionWrite', () => {
     type: 'typed_meaning', verdict: 'exact', glossId, helped: false, answeredAt: at(minute), ...o,
   });
   const target = (id: string, dueOn: string, words: [glossId: string, addedMinute: number][]): HoldingTarget => ({
-    id, dueOn, words: words.map(([glossId, minute]) => ({ glossId, addedAt: at(minute) })),
+    id, dueOn, kind: 'homework', words: words.map(([glossId, minute]) => ({ glossId, addedAt: at(minute) })),
   });
   const write = (targets: HoldingTarget[], answers: TimedTargetAnswer[], before: TargetSkillRow[] = []) =>
     targetSessionWrite({ sessionId: 's1', day: DAY, targets, before, answers });
@@ -128,7 +128,7 @@ describe('targetSessionWrite', () => {
   });
 
   it('compares instants to the microsecond', () => {
-    const exam = { id: 't1', dueOn: '2026-10-17', words: [{ glossId: 'g1', addedAt: '2026-10-16T09:00:00.000501Z' }] };
+    const exam = { id: 't1', dueOn: '2026-10-17', kind: 'exam' as const, words: [{ glossId: 'g1', addedAt: '2026-10-16T09:00:00.000501Z' }] };
     const early = typed('g1', 0, { answeredAt: '2026-10-16T09:00:00.000500Z' });
     expect(write([exam], [early])).toEqual({ rows: [], events: [], started: [] });
   });

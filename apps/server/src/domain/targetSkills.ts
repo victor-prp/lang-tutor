@@ -133,7 +133,13 @@ export function applyTargetSession(input: {
  * asked joined it. Instants are fixed-width UTC text to the microsecond (repo/instants.ts),
  * so two compare as strings exactly as the instants do.
  */
-export type HoldingTarget = { id: string; dueOn: string; words: readonly { glossId: string; addedAt: string }[] };
+export type HoldingTarget = {
+  id: string;
+  dueOn: string;
+  /** Phase 65 (spec D1): decides which skills count toward its readiness. */
+  kind: 'homework' | 'exam';
+  words: readonly { glossId: string; addedAt: string }[];
+};
 
 /** A session's answer and when it was given, in the same text as HoldingTarget's instants. */
 export type TimedTargetAnswer = TargetAnswer & { answeredAt: string };
