@@ -107,6 +107,10 @@ import type {
   JudgedAnswerResponseSchema,
   LlmMeaningJudgeSchema,
   LlmTranslationJudgeSchema,
+  LlmSentenceExplainSchema,
+  SentenceMistakeSchema,
+  ExplainRequestSchema,
+  ExplainResponseSchema,
   GapSchema,
   MarkSchema,
   ContextSchema,
@@ -253,6 +257,10 @@ export type JudgedAnswerRequest = z.infer<typeof JudgedAnswerRequestSchema>;
 export type JudgedAnswerResponse = z.infer<typeof JudgedAnswerResponseSchema>;
 export type LlmMeaningJudge = z.infer<typeof LlmMeaningJudgeSchema>;
 export type LlmTranslationJudge = z.infer<typeof LlmTranslationJudgeSchema>;
+export type LlmSentenceExplain = z.infer<typeof LlmSentenceExplainSchema>;
+export type SentenceMistake = z.infer<typeof SentenceMistakeSchema>;
+export type ExplainRequest = z.infer<typeof ExplainRequestSchema>;
+export type ExplainResponse = z.infer<typeof ExplainResponseSchema>;
 export type Gap = z.infer<typeof GapSchema>;
 export type Mark = z.infer<typeof MarkSchema>;
 export type Context = z.infer<typeof ContextSchema>;

@@ -1677,6 +1677,43 @@ export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
 ];
 
 /**
+ * Phase 66 (spec D2). The explain call over a translation card's answer: a
+ * sentence with known mistakes must name each fix (in some mistake's `right` or
+ * in `corrected`, ignoring case), and a correct sentence in other words must
+ * have none. Every reason must be in Hebrew, the learner's language.
+ */
+export type ExplainCase = {
+  label: string;
+  question: SentenceTranslationQuestion;
+  context: JudgeContext;
+  answer: string;
+  /** Empty: the answer is correct and must have no mistakes. */
+  fixes: string[];
+};
+
+const explain = (
+  language: 'it' | 'ru' | 'en',
+  practised: { form: string; lemma?: string; pos: PartOfSpeech; meaning: string },
+  sentence: Sentence,
+  answer: string,
+  fixes: string[],
+  what: string,
+): ExplainCase => {
+  const { question, context } = tjudge(language, practised, sentence, answer, 'exact', what);
+  return { label: `explain ${language} ${what}: ${answer}`, question, context, answer, fixes };
+};
+
+export const EXPLAIN_CASES: ExplainCase[] = [
+  explain('it', itBook, itTable, 'Io volere prenotare il tavola per due.', ['voglio'], 'grammar mistakes'),
+  explain('it', itBook, itTable, 'Voglio prenotare una camera per tre.', ['tavolo', 'due'], 'meaning changed'),
+  explain('it', itBook, itTable, 'Voglio prenotare un tavolo per due persone.', [], 'correct in other words'),
+  explain('ru', ruBeautiful, ruCity, 'Эта город очен красивый.', ['этот', 'очень'], 'grammar mistakes'),
+  explain('ru', ruBeautiful, ruCity, 'Этот город очень красив.', [], 'correct in other words'),
+  explain('en', enBookWord, enTable, 'I wants to book table for two peoples.', ['want', 'a table'], 'grammar mistakes'),
+  explain('en', enBookWord, enTable, 'I want to book a table for two people.', [], 'correct in other words'),
+];
+
+/**
  * Phase 34 (spec D1, D2). The accept call: every right answer to a typed or
  * spoken card whose prompt is one rendering, and the form of the headword that
  * agrees with it. Each case is a card from the audit

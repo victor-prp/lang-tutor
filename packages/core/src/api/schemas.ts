@@ -609,6 +609,28 @@ export const JudgedAnswerResponseSchema = z.object({
   next: NextStepResponseSchema,
 });
 
+// Phase 66 (spec D2). One mistake in a translated sentence: the words as the
+// learner wrote them (empty when something is missing), what they should be,
+// and why, in the learner's language. Shown, never graded.
+export const SentenceMistakeSchema = z.object({
+  wrong: z.string(),
+  right: z.string(),
+  why: z.string(),
+});
+
+// Phase 66 (spec D2). Asks for the mistakes in a translation card's answer. The
+// text is read from the record: what is explained is what was graded.
+export const ExplainRequestSchema = z.object({
+  question_id: z.string().min(1),
+});
+
+// `corrected` is the learner's own sentence, minimally fixed; no mistakes means
+// the sentence is right.
+export const ExplainResponseSchema = z.object({
+  corrected: z.string(),
+  mistakes: z.array(SentenceMistakeSchema),
+});
+
 // Phase 19. The home screen's one read. `current` is the enrollment's newest
 // session when it is preparing, ready or failed (never completed or skipped).
 // `total` is how many questions it holds, so 0 while preparing.
@@ -1397,6 +1419,11 @@ export const LlmFitJudgeSchema = z.object({
 export const LlmTranslationJudgeSchema = z.object({
   verdict: z.enum(['right', 'misspelled', 'other_word', 'wrong']),
 });
+
+// Phase 66 (spec D2). The model's explanation of a translated sentence. Every
+// field is required: optional strings in a Gemini schema can hang the call. The
+// count is the domain's to cap (parseExplain), so a surplus never fails it.
+export const LlmSentenceExplainSchema = ExplainResponseSchema;
 
 // Phase 19. The model's answer when asked for a session's wrong options. `key`
 // is echoed from the request (q1, q2, …) rather than a sense id: a short key is
