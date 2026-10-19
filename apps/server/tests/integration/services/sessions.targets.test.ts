@@ -879,6 +879,27 @@ describe("today's budget (phase 65, spec D7)", () => {
     expect(await readTargetBudgets(t.db, exam)).toEqual(set);
   });
 
+  // Task 9 (e2e). A session no start call started is started by its first answer: the app's own
+  // start waits up to three seconds on the device's voices, and a quick first tap lands before it.
+  // That start sets the day's budget too, as the start call would, from the day before the answer.
+  it('is set when the first answer starts the session, as the start call sets it', async () => {
+    const words = await savedWords();
+    const exam = await addTarget('exam', '2030-01-13', ids(words.slice(0, 3)));
+    const planned = words.find((word) => word.glossId === sorted(ids(words.slice(0, 3)))[0])!;
+    const first = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [planned, planned], types: ['typed_translation', 'multiple_choice'], targetId: exam });
+
+    await service.submitAnswer('u_1', first.sessionId, first.questions[0].id, { text: planned.form });
+
+    // The same budget the start call sets in the test above: the day before this answer.
+    const set = await readTargetBudgets(t.db, exam);
+    expect(set).toEqual([{ day: DAY, sessions: 5, cards: 8, missRoom: 1, doneBefore: 0, createdAt: expect.any(Date) }]);
+    // The start call that lands after it leaves it be, as does the session's next answer.
+    await service.startSession('u_1', first.sessionId, NO_DEVICES);
+    const card = asChoice(first.questions[1]);
+    await service.submitAnswer('u_1', first.sessionId, card.id, { option_index: card.correct_option });
+    expect(await readTargetBudgets(t.db, exam)).toEqual(set);
+  });
+
   // Review Focus 4, coordinator's ruling. A session started on the eve and ended the next day is
   // that day's (its practice_day): the day's first start counts it among the sessions promised.
   it("counts a session started the day before and completed today among today's sessions", async () => {

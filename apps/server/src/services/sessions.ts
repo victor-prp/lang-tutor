@@ -972,6 +972,22 @@ export function createSessionService({
           return { result: { ...outcome.record, progress }, justCompleted: false, tapsLogged: null };
         }
 
+        // Phase 43 (spec D2). A first answer starts a session no start call
+        // started (an older app, a bot, or the app's own start still waiting on
+        // the device's voices), and asks for the next one in stock (below).
+        // Another started session of its path refuses it here, before anything
+        // commits. Phase 57 (spec D2): the stock asked for is its path's.
+        // Phase 65 (spec D7.1): it sets a target's budget for the day as the start
+        // call does, before this answer is stored, so the day is read as it stood
+        // when the session began; for the devices the session was built for.
+        const pathOf = async () => (await repos.session.findState(sessionId))?.targetId ?? null;
+        const startedByAnswer = outcome.recorded === 'answer' && loaded.answers.length === 0 && (await repos.session.markStarted(sessionId));
+        const path = startedByAnswer ? await pathOf() : null;
+        if (path !== null) {
+          const builtFor = await repos.session.findStockChoice(sessionId);
+          await setTodayBudget(repos, enrolled, path, { listening: builtFor?.listening ?? false, speaking: builtFor?.speaking ?? false });
+        }
+
         // Phase 34 (spec D9). A retry resolves the pending answer in its place; a
         // first answer is a new row, held for its second try when it opens one.
         // Either may complete the session: the last card's answer only when it
@@ -1008,13 +1024,8 @@ export function createSessionService({
         // second try re-sending them adds only the new ones.
         const added = taps.length > 0 ? await repos.session.insertTaps(sessionId, tappedAt, taps) : [];
 
-        // Phase 43 (spec D2). A first answer starts a session no start call
-        // started (an older app, a bot), and asks for the next one in stock.
-        // Another started session of its path refuses it here, before anything
-        // commits. Phase 57 (spec D2): the stock asked for is its path's.
-        const pathOf = async () => (await repos.session.findState(sessionId))?.targetId ?? null;
-        if (outcome.recorded === 'answer' && loaded.answers.length === 0 && (await repos.session.markStarted(sessionId))) {
-          await requestStock(repos, { enrollment_id: enrolled.id, reason: 'answer', ...pathPayload(await pathOf()) });
+        if (startedByAnswer) {
+          await requestStock(repos, { enrollment_id: enrolled.id, reason: 'answer', ...pathPayload(path) });
         }
 
         if (outcome.justCompleted) {
