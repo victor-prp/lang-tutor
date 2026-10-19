@@ -93,7 +93,10 @@ async function recordTargetSkills(repos: Repos, sessionId: string, evidence: Ses
   const targets = await repos.target.listActiveHolding(evidence.enrollmentId, glossIds, evidence.day, evidence.lastAnsweredAt);
   if (targets.length === 0) return;
   const before = await repos.targetSkills.findRows(targets.map((target) => target.id), glossIds);
-  const write = targetSessionWrite({ sessionId, day: evidence.day, targets, before, answers: evidence.answers });
+  // Phase 65b (spec D2): a session chosen past its budget moves its own target only for its owed words.
+  const past = await repos.target.findPastBudget(sessionId, targets.map((target) => target.id));
+  const planOnly = past && { targetId: past.targetId, glossIds: past.owedGlossIds };
+  const write = targetSessionWrite({ sessionId, day: evidence.day, targets, before, answers: evidence.answers, planOnly });
   await repos.targetSkills.upsertRows(write.rows);
   await repos.targetSkills.insertEvents(write.events, evidence.lastAnsweredAt);
   for (const started of write.started) await repos.target.markStarted(started.targetId, started.glossIds, evidence.day);

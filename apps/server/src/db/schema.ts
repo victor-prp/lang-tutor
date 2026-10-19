@@ -1581,6 +1581,9 @@ export const sessionTargets = pgTable(
     // (none when it was chosen as practice more), sorted: with cap_halves, what the stale
     // check compares with today's. Null on a phase 53 split row.
     owedGlossIds: text('owed_gloss_ids').array(),
+    // Phase 65b (spec D2). The stock was chosen past the day's budget: its owed words first, then
+    // practice more. At session end only answers about owed_gloss_ids move this target's skills.
+    pastBudget: boolean('past_budget').notNull().default(false),
   },
   (t) => [
     primaryKey({ name: 'session_targets_pkey', columns: [t.sessionId, t.targetId] }),

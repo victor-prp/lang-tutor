@@ -1,0 +1,1 @@
+ALTER TABLE "session_targets" ADD COLUMN "past_budget" boolean DEFAULT false NOT NULL;

@@ -133,6 +133,35 @@ describe('targetSessionWrite', () => {
     expect(write([exam], [early])).toEqual({ rows: [], events: [], started: [] });
   });
 
+  // Phase 65b (spec D2). A session chosen past the budget moves its own target's skills only for
+  // the owed words its stock recorded: the fill is practice beyond the promise.
+  it("moves a past-budget session's own target only for its owed words, and starts every word asked", () => {
+    const exam = target('t1', '2026-10-17', [['g_owed', 0], ['g_fill', 0]]);
+    const other = target('t2', '2026-10-17', [['g_fill', 0]]);
+    const miss = (glossId: string, minute: number) => typed(glossId, minute, { type: 'typed_translation', verdict: 'wrong' });
+    const before: TargetSkillRow[] = [
+      { targetId: 't1', glossId: 'g_fill', dimension: 'written_productive', halves: 20, sessionId: null, day: null },
+      { targetId: 't2', glossId: 'g_fill', dimension: 'written_productive', halves: 20, sessionId: null, day: null },
+    ];
+    const { rows, started } = targetSessionWrite({
+      sessionId: 's1',
+      day: DAY,
+      targets: [exam, other],
+      before,
+      answers: [typed('g_owed', 1), miss('g_fill', 2)],
+      planOnly: { targetId: 't1', glossIds: ['g_owed'] },
+    });
+    // t1: the owed word moves, the fill word's miss does not; t2 holds the fill word on its own path: it moves.
+    expect(rows.map((row) => [row.targetId, row.glossId, row.dimension, row.halves])).toEqual([
+      ['t1', 'g_owed', 'written_receptive', 4],
+      ['t2', 'g_fill', 'written_productive', 16],
+    ]);
+    expect(started).toEqual([
+      { targetId: 't1', glossIds: ['g_owed', 'g_fill'] },
+      { targetId: 't2', glossIds: ['g_fill'] },
+    ]);
+  });
+
   it('starts a word an intro card or a helped answer asked, and moves none of its skills', () => {
     const exam = target('t1', '2026-10-17', [['g1', 0], ['g2', 0]]);
     const { rows, started } = write([exam], [typed('g1', 1, { intro: true }), typed('g2', 2, { helped: true, verdict: 'wrong' })]);

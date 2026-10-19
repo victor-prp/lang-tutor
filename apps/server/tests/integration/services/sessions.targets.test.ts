@@ -14,7 +14,7 @@ import { insertGlossMemory, moveAnswersBack, readLearnerDay, readMemory, setLeve
 import { asChoice, insertListSession, type AskedGloss } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, makeBot, seedUser, setTimeZone } from '../../support/seedUser';
-import { endTargetNow, readSessionTargets, readStockRow, readTargetBudgets, readTargetEvents, readFirstReadinessEvents, readTargetReadiness, readTargetReadinessEvents, readTargetSkills, seedTarget, setTargetWord } from '../../support/targetRows';
+import { endTargetNow, markPastBudget, readSessionTargets, readStartedOn, readStockRow, readTargetBudgets, readTargetEvents, readFirstReadinessEvents, readTargetReadiness, readTargetReadinessEvents, readTargetSkills, seedTarget, setTargetWord } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -759,6 +759,47 @@ describe('the home read of a path (spec D11)', () => {
 
     await endTargetNow(t.db, exam);
     expect((await service.currentSession('u_1', E)).savedCount).toBe(6);
+  });
+});
+
+// Phase 65b (spec D2). Past the budget, a session asks its owed work and then practice more; the
+// practice more moves memory and readiness, but the plan's skills move only for the owed words.
+describe("a session past the budget moves its target's plan only for its owed words (phase 65b)", () => {
+  const play = async (pastBudget: boolean) => {
+    const words = await savedWords();
+    const homework = await addTarget('homework', '2030-01-13', [words[0].glossId, words[1].glossId]);
+    // The practice more word started yesterday, at 8 halves in writing: a miss would cost it 4.
+    await setTargetWord(t.db, { targetId: homework, glossId: words[1].glossId, startedOn: '2030-01-07', halves: { written_productive: 8 } });
+    const own = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: [words[0], words[1]],
+      types: ['typed_translation', 'typed_translation'],
+      targetId: homework,
+    });
+    if (pastBudget) await markPastBudget(t.db, { sessionId: own.sessionId, targetId: homework, owedGlossIds: [words[0].glossId] });
+    await service.startSession('u_1', own.sessionId, NO_DEVICES);
+    await service.submitAnswer('u_1', own.sessionId, own.questions[0].id, { text: words[0].form });
+    await service.submitAnswer('u_1', own.sessionId, own.questions[1].id, { text: 'zzzz' });
+    const skills = await readTargetSkills(t.db, homework);
+    const writing = (glossId: string) => skills.find((row) => row.glossId === glossId && row.dimension === 'written_productive')?.halves;
+    return { words, homework, writing };
+  };
+
+  it("leaves a practice more word's skills as they were on a miss, and moves the owed word's", async () => {
+    const { words, homework, writing } = await play(true);
+    expect(writing(words[1].glossId)).toBe(8);
+    expect(writing(words[0].glossId)).toBeGreaterThan(0);
+    // Both words were asked: both are started.
+    expect(await readStartedOn(t.db, homework)).toEqual({ [words[0].glossId]: DAY, [words[1].glossId]: '2030-01-07' });
+    // Readiness still reads the miss: the practice more word's writing missed today.
+    const readiness = await readTargetReadiness(t.db, homework);
+    expect(readiness.find((row) => row.glossId === words[1].glossId && row.dimension === 'written_productive')).toMatchObject({ missedToday: true });
+  });
+
+  it('costs the miss, as before, when the session was not chosen past the budget', async () => {
+    const { words, writing } = await play(false);
+    expect(writing(words[1].glossId)).toBe(4);
   });
 });
 

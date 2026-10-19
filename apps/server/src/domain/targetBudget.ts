@@ -131,3 +131,12 @@ export function missRateOf(answers: readonly GradableAnswer[]): number {
   if (graded.length < MISS_RATE_MIN_ANSWERS) return DEFAULT_MISS_RATE;
   return graded.filter((pieces) => pieces.some((piece) => piece.grade === 1)).length / graded.length;
 }
+
+/**
+ * Phase 65b (spec D2). Whether a target path's day is past its budget: the budget is set and its
+ * completed sessions, with the session in flight, meet it. The stock chosen beside the session
+ * that meets the budget is then a full session (the picker's past_budget mode).
+ */
+export function pastBudget(input: { budget: number | null; done: number; inFlight: boolean }): boolean {
+  return input.budget !== null && input.done + (input.inFlight ? 1 : 0) >= input.budget;
+}
