@@ -17,6 +17,7 @@ import {
   daysLeftLabel,
   doneFailureMessage,
   homeOrder,
+  askBeforePracticeMore,
   readinessColor,
   readinessName,
   readinessBar,
@@ -832,5 +833,20 @@ describe('skillRows (phase 65)', () => {
 
   it('has no rows for a word with no counted skills', () => {
     expect(skillRows(word([]))).toEqual([]);
+  });
+});
+
+describe('askBeforePracticeMore', () => {
+  const target = (state: 'owed' | 'done' | 'rest' | 'due_today', little: boolean): TargetSummary =>
+    ({ id: 't1', kind: 'exam', due_on: '2026-10-20', created_on: '2026-10-10', days_left: 5, word_count: 4, ready_count: 1,
+      ...DAY, practice_more_little: little, today: { ...DAY.today, state } }) as TargetSummary;
+
+  it('asks only when today is done, another session adds little, and the learner has not opted out', () => {
+    expect(askBeforePracticeMore(target('done', true), false)).toBe(true);
+    expect(askBeforePracticeMore(target('done', true), true)).toBe(false);
+    expect(askBeforePracticeMore(target('done', false), false)).toBe(false);
+    expect(askBeforePracticeMore(target('owed', true), false)).toBe(false);
+    expect(askBeforePracticeMore(target('due_today', true), false)).toBe(false);
+    expect(askBeforePracticeMore(target('rest', true), false)).toBe(false);
   });
 });

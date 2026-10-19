@@ -600,6 +600,13 @@ export const strings = {
   myWordsSeed: (language: string) => `מילים ב${language}`,
   myWordsSaved: (language: string) => `משמעויות שמורות ב${language}`,
   practiceMore: 'לתרגל עוד',
+  // Phase 65 (spec D9). The sheet that asks before practising past the day's budget; no number.
+  practiceMoreSheetTitle: 'סיימת את התרגול של היום',
+  practiceMoreSheetBody: 'עוד תרגול היום יעלה את המוכנות רק מעט. מחר, אחרי לילה, התרגול יעזור הרבה יותר.',
+  practiceMoreLater: 'אחזור מחר',
+  practiceMoreAnyway: 'לתרגל בכל זאת',
+  practiceMoreStopAsking: 'אל תציג לי את זה שוב',
+  settingsPracticeMoreAsk: 'לשאול לפני תרגול נוסף',
   /** A rest day. `nextIn` is the days to the next practice day, null when none is known. */
   targetRest: (kind: TargetKind, nextIn: number | null): string => {
     const today = `היום אין תרגול ${TARGET_FOR[kind]}.`;

@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Group, groupStyles } from '@/components/Group';
@@ -17,7 +18,23 @@ import { colors, fontSizes, lineHeights, spacing } from '@/theme';
  * the release this phone runs (phase 32 D10, phase 49 D4), and sign-out in a group of its own.
  */
 export default function SettingsTab() {
-  const { signOut } = useCurrentUser();
+  const { signOut, user, practiceMoreAsk } = useCurrentUser();
+  // Phase 65 (spec D9). Read on mount; a failed read says "ask", which is the default.
+  const [askBefore, setAskBefore] = useState(true);
+  const username = user?.username;
+  useEffect(() => {
+    if (!username) return;
+    let live = true;
+    void practiceMoreAsk.shouldAsk(username).then((ask) => live && setAskBefore(ask));
+    return () => {
+      live = false;
+    };
+  }, [username, practiceMoreAsk]);
+  const changeAsk = (ask: boolean) => {
+    setAskBefore(ask);
+    if (!username) return;
+    void (ask ? practiceMoreAsk.askAgain(username) : practiceMoreAsk.stopAsking(username));
+  };
   const { release } = useAppRelease();
   const reminders = useReminders();
 
@@ -61,6 +78,19 @@ export default function SettingsTab() {
               {mobileAppLine(release)}
             </Text>
           </Pressable>
+        </Group>
+
+        <Group>
+          <View style={groupStyles.row}>
+            <Text style={groupStyles.label}>{strings.settingsPracticeMoreAsk}</Text>
+            <Switch
+              testID="settings-practice-more-ask"
+              accessibilityLabel={strings.settingsPracticeMoreAsk}
+              value={askBefore}
+              onValueChange={changeAsk}
+              trackColor={{ true: colors.primary, false: colors.border }}
+            />
+          </View>
         </Group>
 
         <Group>

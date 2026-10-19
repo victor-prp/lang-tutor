@@ -27,6 +27,7 @@ import { createAppAuthClient } from '@/auth/client';
 import { createAuthEvents } from '@/authEvents';
 import { requireEnvValue } from '@/config/requireEnvValue';
 import { createRememberedEnrollmentStore } from '@/currentUser';
+import { createPracticeMoreAskStore } from '@/practiceMoreAsk';
 import { ApiProvider } from '@/hooks/useApi';
 import { AppUpdatesProvider } from '@/hooks/useAppUpdates';
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
@@ -105,6 +106,8 @@ const appRelease: AppRelease = {
 // Phase 49. The only file that names expo-clipboard (ADR 0002 R1).
 const copyToClipboard = (text: string) => Clipboard.setStringAsync(text);
 const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage });
+// Phase 65. Whether to ask before "practise more" past the day's budget, per username.
+const practiceMoreAsk = createPracticeMoreAskStore(AsyncStorage, 'lang-tutor:practice-more-ask:');
 
 const firstAsset = (result: ImagePicker.ImagePickerResult): PhotoAsset | null =>
   result.canceled || result.assets.length === 0
@@ -329,7 +332,7 @@ export default function RootLayout() {
         <RemindersProvider reminders={reminders}>
           <SpeechProvider speaker={speaker}>
             <RecordingProvider recorder={recorder}>
-              <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} enrollmentStore={enrollmentStore}
+              <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} enrollmentStore={enrollmentStore} practiceMoreAsk={practiceMoreAsk}
               >
                 <NextSessionProvider api={api}>
                   <SessionProvider api={api}>

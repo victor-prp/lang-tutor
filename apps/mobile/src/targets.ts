@@ -484,3 +484,9 @@ export function skillRows(word: TargetWord): {
     note: skill.held ? strings.targetSkillHeld : null,
   }));
 }
+
+/** Phase 65 (spec D9). "לתרגל עוד" asks first when today's sessions are done, another session
+ *  would add little to readiness (server-computed), and the learner has not turned the ask off. */
+export function askBeforePracticeMore(target: TargetSummary, optedOut: boolean): boolean {
+  return target.today.state === 'done' && target.practice_more_little && !optedOut;
+}
