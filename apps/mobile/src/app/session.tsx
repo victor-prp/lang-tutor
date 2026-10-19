@@ -12,12 +12,14 @@ import { MeetCardView } from '@/components/MeetCardView';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
 import { NewMeaningPrompt } from '@/components/NewMeaningPrompt';
 import { ProgressBar } from '@/components/ProgressBar';
+import { SentenceExplain } from '@/components/SentenceExplain';
 import { SentenceGap } from '@/components/SentenceGap';
 import { SpeakButton } from '@/components/SpeakButton';
 import { TappableSentence } from '@/components/TappableSentence';
 import { SpeakingCardView } from '@/components/SpeakingCardView';
 import { TypedAnswerView } from '@/components/TypedAnswerView';
 import { confirm } from '@/confirm';
+import { explainText } from '@/explain';
 import { feedbackFor } from '@/feedback';
 import { useCardVoice } from '@/hooks/useCardVoice';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -87,6 +89,9 @@ function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, taps: Sen
 function translatePrompt(question: SentenceTranslationQuestion, session: SessionValue, language: string) {
   const answered = session.answered;
   const { before, word, after } = splitAtGap(question.sentence, question.gap);
+  // Phase 66 (spec D3): the learner's own sentence explained on request, when it is
+  // not the reference. Keyed by the card, so the next card asks afresh.
+  const explains = answered && session.sessionId !== null && explainText(question, session.answer) !== null;
   return (
     <View style={styles.gapCard}>
       {/* Phase 59 (spec D3): each word a tap shows the Italian of; the practised word's is help.
@@ -121,6 +126,9 @@ function translatePrompt(question: SentenceTranslationQuestion, session: Session
             </Text>
             <SpeakButton text={question.sentence} language={language} testID="speak-reference" />
           </View>
+          {explains && session.sessionId !== null ? (
+            <SentenceExplain key={question.id} sessionId={session.sessionId} questionId={question.id} />
+          ) : null}
         </View>
       ) : null}
     </View>

@@ -177,6 +177,13 @@ export const strings = {
   // One word on a translation card is asked again, not sent.
   wordOnlyNotice: 'כתבו את כל המשפט, לא רק את המילה',
   translationReference: 'תרגום לדוגמה:',
+  // Phase 66 (spec D3). The button beside the reference that explains the learner's
+  // own sentence, and what a tap on it shows. Information only: nothing is graded.
+  explainButton: 'הסבר',
+  explainCorrected: 'המשפט שלך, מתוקן:',
+  explainNone: 'המשפט שלך נכון',
+  explainLoading: 'מכין הסבר…',
+  explainFailed: 'ההסבר לא זמין כרגע',
   // Phase 59c (design A). Under a translation card's sentence, while a tap can show a word.
   tapWordHint: (language: string) => `הקישו על מילה כדי לראות אותה ב${languageName(language)}`,
   // Phase 62 (spec D5, D7). Above a word card's context line, so it reads as an
