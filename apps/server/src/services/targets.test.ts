@@ -221,8 +221,9 @@ function world(
     findSavedWords: async ({ glossIds }) =>
       saved.filter((glossId) => glossIds.includes(glossId)).map((glossId) => ({ glossId, key: WORDS[glossId].key, form: WORDS[glossId].form })),
     // Phase 65 (spec D7.1). The saved list as a target's picker reads it, for today's budget.
-    listSavedGlosses: async () =>
-      saved.map((glossId, i) => ({
+    listSavedGlosses: async () => {
+      reads.push('listSavedGlosses');
+      return saved.map((glossId, i) => ({
         glossId,
         key: WORDS[glossId].key,
         variantId: WORDS[glossId].variantId,
@@ -232,7 +233,8 @@ function world(
         form: WORDS[glossId].form.toLowerCase(),
         order: [i, 0] as [number, number],
         knownAt: null,
-      })),
+      }));
+    },
   });
 
   const imports = new Map((setup.imports ?? []).map(({ row, items }) => [row.id, { row: { ...row }, items }]));
@@ -357,10 +359,16 @@ function world(
       return setup.retires ?? true;
     },
     findNewestDevices: async () => setup.devices,
-    findAnswersOn: async () => setup.answersOn ?? [],
+    findAnswersOn: async () => {
+      reads.push('findAnswersOn');
+      return setup.answersOn ?? [];
+    },
     findLatest: async (_enrollmentId, path) => (path === null ? undefined : setup.latestOn?.[path]),
     // Phase 65 (spec D7). What today's budget and its sessions done read.
-    countCompletedOn: async (_enrollmentId, path, day) => setup.completed?.[`${path}|${day}`] ?? 0,
+    countCompletedOn: async (_enrollmentId, path, day) => {
+      reads.push(`countCompletedOn ${path}`);
+      return setup.completed?.[`${path}|${day}`] ?? 0;
+    },
     findRecentAnswers: async () => {
       reads.push('findRecentAnswers');
       return [];
@@ -1251,6 +1259,46 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
       minutes: 3,
     });
     expect(reads).toContain('findRecentAnswers');
+  });
+
+  // Final review I4. The home list's cost: the offer plays the picker forward only while the plan
+  // owes work, and the reads that are the enrollment's are made once for the whole list.
+  it('plays nothing forward on a day the plan owes nothing: the offer is the sessions done', async () => {
+    const { service, reads } = world({
+      saved: ['g_casa'],
+      targets: [target({ words: ['g_casa'] })],
+      // Started two days ago, every skill at its full points, and the path practised today.
+      startedOn: { g_casa: '2026-10-13' },
+      skills: ALL_SKILLS.map((dimension) => ({ targetId: 't1', glossId: 'g_casa', dimension, halves: 20, sessionId: null, day: null })),
+      answersOn: [{ glossId: 'g_casa', sessionId: 's1', targetId: 't1', type: 'multiple_choice', correct: true }],
+      completed: { [`t1|${TODAY}`]: 1 },
+    });
+
+    const read = await service.getTarget(OWNER, 't1');
+
+    // As the play would make it: no session to play, so the offer is the one done, no minutes.
+    expect(read.today).toMatchObject({ state: 'done', sessions_budget: null, sessions_offer: 1, sessions_done: 1, ended_early: true, minutes: 0 });
+    expect(reads).not.toContain('findRecentAnswers');
+    expect(reads.filter((name) => name === 'countCompletedOn t1')).toHaveLength(1);
+  });
+
+  it("reads the enrollment's inputs to the offers once for the whole list, and each path's sessions done once", async () => {
+    const { service, reads } = world({
+      saved: ['g_casa', 'g_gatto'],
+      targets: [target({ words: ['g_casa'] }), target({ id: 't2', dueOn: '2026-10-21', words: ['g_gatto'] })],
+    });
+
+    const listed = await service.list(OWNER, 'e1');
+
+    // Both owe work and have no budget yet: each is offered its play.
+    expect(listed.targets.map((one) => [one.id, one.today.state, one.today.sessions_budget])).toEqual([
+      ['t1', 'owed', null],
+      ['t2', 'owed', null],
+    ]);
+    expect(listed.targets.every((one) => one.today.sessions_offer > 0)).toBe(true);
+    for (const once of ['findRecentAnswers', 'listSavedGlosses', 'findAnswersOn', 'countCompletedOn t1', 'countCompletedOn t2']) {
+      expect(reads.filter((name) => name === once)).toHaveLength(1);
+    }
   });
 
   it("counts today's completed sessions of the target's path only (Review Focus 4: by practice_day)", async () => {

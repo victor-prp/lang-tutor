@@ -9,14 +9,14 @@ import type {
 
 import { daysBetween } from '../domain/progress';
 import { targetDay } from '../domain/targetDay';
-import { openOn } from '../domain/targets';
+import { activeOn, openOn } from '../domain/targets';
 import { readinessSummary, todaySummary } from '../domain/targetSummary';
 import { InvalidTarget, TargetClosed, TargetNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { TargetRow } from '../repo/targets';
 import { authorizeEnrollment } from './access';
 import { learnerDay, learnerDays } from './learnerDay';
-import { readTargetDay, readTodayBudget } from './targetDayRead';
+import { enrollmentReads, readTargetDay, readTodayBudget } from './targetDayRead';
 import { logImportSaved, saveImportsInTx, type ImportSaved } from './photoImports';
 import { lockPaths, logTargetRetired, requestStocks, restockAfterTargetChange, retireStocks } from './stock';
 import type { Repos, Transaction } from './transaction';
@@ -133,6 +133,11 @@ export function createTargetService({
    * offer as readTodayBudget would set it now; the path's sessions completed today, by their
    * practice_day (ADR 0013); its state from the plan's and the budget. The plan's own state is
    * unchanged: the picker reads it.
+   *
+   * Final review I4, the list's cost. The offer plays the picker forward only while the plan owes
+   * work: on any other day the play is empty, so the offer is the sessions already done, which is
+   * what readTodayBudget would answer. Its count of them is the day's sessions done, not read
+   * again. The reads that are the enrollment's (enrollmentReads) are made once for all targets.
    */
   async function view(repos: Repos, enrolled: Enrollment, today: string, targets: readonly TargetWithWords[]): Promise<Target[]> {
     if (targets.length === 0) return [];
@@ -140,13 +145,14 @@ export function createTargetService({
     const saved = await repos.vocabulary.findSavedWords({ enrollmentId: enrolled.id, glossIds });
     const savedOf = new Map(saved.map((word) => [word.glossId, word]));
     const devices = (await repos.session.findNewestDevices(enrolled.id)) ?? { listening: false, speaking: false };
+    const shared = enrollmentReads(repos, enrolled, devices, today);
     // Phase 65 (spec D1, R1). Readiness reads the targets' own rows, else the words' main memory.
     const readinessRows = await repos.targetReadiness.findRows(targets.map((target) => target.id), glossIds);
     const memory = await repos.memory.findRows({ enrollmentId: enrolled.id, glossIds });
 
     const out: Target[] = [];
     for (const target of targets) {
-      const read = await readTargetDay(repos, enrolled, target, devices, today, saved);
+      const read = await readTargetDay(repos, enrolled, target, devices, today, saved, shared.answersOn);
       // Phase 64 (spec D5). The day it was made, for home's fuse; read on its own when no
       // saved word is left and so no target day was read.
       const createdOn = read?.createdOn ?? (await learnerDays(repos, enrolled.user_id, [target.createdAt.getTime()]))[0];
@@ -181,12 +187,16 @@ export function createTargetService({
         };
       });
       const budget = (await repos.targetBudgets.find(target.id, today)) ?? null;
+      // readTodayBudget answers null for a target not active today or with no saved word.
+      const offered = budget === null && read !== null && activeOn(target, today);
+      const played = offered && day.state === 'owed' ? await readTodayBudget(repos, enrolled, target, devices, today, shared) : null;
+      const sessionsDone = played?.doneBefore ?? (await repos.session.countCompletedOn(enrolled.id, target.id, today));
       const todays = todaySummary({
         plan: day.state,
         daysLeft: day.daysLeft,
         budget,
-        offer: budget ? null : await readTodayBudget(repos, enrolled, target, devices, today),
-        sessionsDone: await repos.session.countCompletedOn(enrolled.id, target.id, today),
+        offer: offered ? (played ?? { sessions: sessionsDone, cards: 0 }) : null,
+        sessionsDone,
       });
       const { started, stock } = await repos.session.findOpen(enrolled.id, target.id);
       const latest = started || stock ? undefined : await repos.session.findLatest(enrolled.id, target.id);
