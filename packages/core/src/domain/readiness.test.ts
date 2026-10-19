@@ -105,6 +105,21 @@ describe("applyReadiness", () => {
     );
   });
 
+  it("an exam hold survives a same-day bonus, which still raises the memory under it (D3.4)", () => {
+    const held = first(1, D1, "exam").row;
+    const bonus = applyReadiness(held, 3, D1, DUE, "exam")!;
+    expect(bonus.why).toBe("bonus");
+    expect(bonus.row.held).toBe(true);
+    expect(retrievability(bonus.row.state, DUE)).toBeGreaterThan(
+      retrievability(held.state, DUE),
+    );
+    // Counted at half, both before and after the bonus.
+    expect(skillChance(bonus.row, DUE)).toBeCloseTo(
+      0.5 * retrievability(bonus.row.state, DUE),
+      9,
+    );
+  });
+
   it("an exam hold lifts on the first right of a later day", () => {
     const held = first(1, D1, "exam").row;
     expect(applyReadiness(held, 3, D2, DUE, "exam")!.row.held).toBe(false);

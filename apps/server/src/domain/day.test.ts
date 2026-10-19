@@ -88,18 +88,20 @@ import { dayState, type DayAnswer } from './today';
  * Phase 57 (spec §7). Phase 53's split session is gone: each target is a path of its own (D1), and
  * the learner plays, session by session, the first card home shows (D11). The target scenarios at
  * the end run on runPaths; phase 53's marks on the share of a list ready by FSRS on its due date
- * stay their gates, and target readiness (D9) has its own.
+ * stay their gates, and the plan's target skills (D9) have their own.
  *
  * Phase 65 (spec D11). Readiness is the grade the list's words would get on the date (core's rule,
  * kept per target, word and counted skill), and today is a budget of sessions. Phase 57's
  * readiness was the plan's target skills, and its measures stay, named as the plan's; the learner
  * still plays until no target owes work, past the budget. The runner writes readiness at every
  * session end from the main memory as it stood before that session's own write (ruling R1), and
- * sets each target day's budget before its path's first session. Every target scenario adds three
- * outcomes: readiness never moves overnight, never drops across a session whose answers about the
- * target were all right, and the day's budget is set once; and reports, ungated, readiness on the
- * date beside the share ready by FSRS, and how often the day's sessions fit the budget. One more
- * scenario is the spec's anti-goal: an exam whose same skills are missed cold on its last days.
+ * sets each target day's budget before its path's first session. Every target scenario adds two
+ * outcomes: readiness never moves overnight, and never drops across a session whose answers about
+ * the target were all right; checks its own runner sets the day's budget once (the simulation's
+ * fidelity: the product's rule is gated in tests/integration/services/sessions.targets.test.ts);
+ * and reports, ungated, readiness on the date beside the share ready by FSRS, and how often the
+ * day's sessions fit the budget. One more scenario is the spec's anti-goal: an exam whose same
+ * skills are missed cold on its last days.
  */
 
 const DIMENSIONS: Dimension[] = ['written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling'];
@@ -1393,9 +1395,13 @@ function expectNoDropWhenRight(run: PathRun): number {
   return checked;
 }
 
-/** Phase 65 (spec D7.1, D11; anti-goal "the count of today's sessions grows"). Each target day its
- *  path played has one budget, set before the path's first session that day, and every session of
- *  the path that day read it as set. Returns the target days checked. */
+/** Phase 65 (spec D7.1, D11), ruling T5-c: the simulation's own fidelity, not the product's rule.
+ *  Each target day its path played has one budget in this runner, set before the path's first
+ *  session that day, and every session of the path that day read it as set, so the coverage the
+ *  reports give is measured against the budget the service would have kept. The product's rule (a
+ *  later start leaves the day's budget as it is; anti-goal "the count of today's sessions grows")
+ *  is gated in tests/integration/services/sessions.targets.test.ts. Returns the target days
+ *  checked. */
 function expectBudgetSetOnce(run: PathRun): number {
   const days = new Map<string, PathSession[]>();
   for (const session of run.sessions.filter((one) => one.path !== null)) {
@@ -1461,8 +1467,9 @@ function mainRun(run: PathRun): Run {
  * (anti-goal 2). `targets` are the run's targets as they stand on its last day.
  *
  * Phase 65 (spec D11): readiness never moves overnight and never drops across a session whose
- * answers about the target were all right, and the day's budget is set once, in `every` run of the
- * scenario (each phase of the rhythm, where it has them).
+ * answers about the target were all right, in `every` run of the scenario (each phase of the
+ * rhythm, where it has them); and, the simulation's own fidelity check (ruling T5-c), its runner
+ * sets the day's budget once.
  */
 function itKeepsTheTargetPaths(run: PathRun, targets: readonly SimTarget[], every: readonly PathRun[] = [run]) {
   it(`never moves readiness overnight: a day starts where the day before ended, word by word, while the date stays, in ${every.length} run(s) (phase 65, spec D3.6, D11)`, () => {
@@ -1475,7 +1482,7 @@ function itKeepsTheTargetPaths(run: PathRun, targets: readonly SimTarget[], ever
     expect(every.reduce((checked, one) => checked + expectNoDropWhenRight(one), 0)).toBeGreaterThan(0);
   });
 
-  it(`sets the day's budget once, before its path's first session, and every session that day reads it, in ${every.length} run(s) (phase 65, spec D7.1, D11)`, () => {
+  it(`simulation fidelity (ruling T5-c): the runner sets each target day's budget once, before its path's first session, and every session that day reads it, in ${every.length} run(s); the product's rule is gated in the integration tests (phase 65, spec D7.1, D11)`, () => {
     for (const one of every) expect(expectBudgetSetOnce(one)).toBeGreaterThan(0);
   });
 

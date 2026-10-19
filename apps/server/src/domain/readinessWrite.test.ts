@@ -45,7 +45,10 @@ describe('readinessSessionWrite', () => {
 
   it('writes nothing for uncounted skills', () => {
     const say = typed('g1', 5, { type: 'say_translation', verdict: 'understood' });
-    const exam = write([target('t1', 'exam', [['g1', 0]])], [say]);
+    // With a typed translation beside it, the exam's write is not empty: it writes its counted
+    // skills, and speaking is not one of them.
+    const exam = write([target('t1', 'exam', [['g1', 0]])], [say, typed('g1', 6)]);
+    expect(exam.rows.length).toBeGreaterThan(0);
     expect(exam.rows.map((row) => row.dimension)).not.toContain('spoken_productive');
     const hw = write([target('t1', 'homework', [['g1', 0]])], [typed('g1', 5)]);
     expect(hw.rows.map((row) => row.dimension)).not.toContain('written_receptive');
