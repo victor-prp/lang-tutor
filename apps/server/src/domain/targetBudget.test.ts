@@ -3,13 +3,13 @@ import { describe, expect, it } from '@jest/globals';
 import type { Dimension, GradableAnswer } from '@lang-tutor/core/domain';
 
 import { LADDER_SLOTS } from './chooseConstants';
-import { DEFAULT_MISS_RATE, budgetSessions, missRateOf, playTodayForward } from './targetBudget';
+import { DEFAULT_MISS_RATE, PLAY_SESSIONS_MAX, missEveryOf, missRateOf, playBudget, playTodayForward, type PlayInput } from './targetBudget';
 import type { TargetWordInput } from './targetDay';
 import type { TargetPickInput } from './targetPicker';
 import type { TargetSkillRow } from './targetSkills';
 
-// Phase 65 (spec D7.1). Today's sessions, as the target picker itself would make them for the
-// day's owed work with every answer right, and the room for misses on top.
+// Phase 65 (spec D7.1, ruling T5-a). Today's sessions, as the target picker itself would make them
+// for the day's owed work, every answer right or missing on the learner's rhythm.
 
 const WR: Dimension = 'written_receptive';
 const WP: Dimension = 'written_productive';
@@ -44,18 +44,22 @@ const skill = (glossId: string, dimension: Dimension, halves: number): TargetSki
   day: '2026-10-16',
 });
 
-const play = (over: Partial<Parameters<typeof playTodayForward>[0]>) =>
-  playTodayForward({
-    pick,
-    today: TODAY,
-    createdOn: '2026-10-10',
-    dueOn: IN_THREE,
-    words: [],
-    skills: [],
-    rightToday: new Set(),
-    answeredToday: false,
-    ...over,
-  });
+const day = (over: Partial<PlayInput>): PlayInput => ({
+  pick,
+  today: TODAY,
+  createdOn: '2026-10-10',
+  dueOn: IN_THREE,
+  words: [],
+  skills: [],
+  rightToday: new Set(),
+  answeredToday: false,
+  ...over,
+});
+const play = (over: Partial<PlayInput>, missRate = 0) => playTodayForward({ ...day(over), missRate });
+
+/** Five new words made today and due tomorrow, their written skills live: every word is planned
+ *  today, and the eve's cap is a skill's full 20 half-points. */
+const FIVE = day({ createdOn: TODAY, dueOn: TOMORROW, words: ['g1', 'g2', 'g3', 'g4', 'g5'].map((id) => word(id, null)) });
 
 describe('playTodayForward (spec D7.1)', () => {
   it('plays nothing when nothing is owed', () => {
@@ -81,33 +85,57 @@ describe('playTodayForward (spec D7.1)', () => {
   });
 
   it('starts new words two ladders a session, over several sessions', () => {
-    const fresh = ['g1', 'g2', 'g3', 'g4', 'g5'];
-    // Made today, due tomorrow: every word is planned today.
-    const due = { createdOn: TODAY, dueOn: TOMORROW };
     // With no live skill a started word owes nothing more: the play is its starts alone, two
     // ladders a session (NEW_PER_SESSION), so every word is started by its end.
-    expect(play({ ...due, words: fresh.map((id) => word(id, null, [])) })).toEqual({ sessions: 3, cards: 5 * LADDER_SLOTS });
-    // With their written skills, each started word then climbs to the cap: more sessions, and
-    // the play still ends (under its 30) with every word started and at the cap.
-    const written = play({ ...due, words: fresh.map((id) => word(id, null)) });
-    expect(written.sessions).toBeGreaterThanOrEqual(3);
-    expect(written.sessions).toBeLessThan(30);
-    expect(written.cards).toBeGreaterThan(5 * LADDER_SLOTS);
+    const starts = FIVE.words.map((one) => ({ ...one, live: [] }));
+    expect(play({ ...FIVE, words: starts })).toEqual({ sessions: 3, cards: 5 * LADDER_SLOTS });
+    // With their written skills, each started word then climbs to the eve's cap: two ladders and
+    // two skills of earlier words in the second session, then six more of typed and choice cards.
+    expect(play(FIVE)).toEqual({ sessions: 9, cards: 55 });
   });
 });
 
-describe('budgetSessions (spec D7.1)', () => {
-  it('adds whole sessions of room for misses to the play', () => {
-    // 38 cards at 9% is 3.4 misses: one more session.
-    expect(budgetSessions({ sessions: 4, cards: 38 }, 0.09)).toBe(5);
-    expect(budgetSessions({ sessions: 4, cards: 38 }, 0)).toBe(4);
-    expect(budgetSessions({ sessions: 0, cards: 0 }, DEFAULT_MISS_RATE)).toBe(0);
+// Ruling T5-a. The play misses on a fixed rhythm at the learner's rate: every missEveryOf-th graded
+// pick across the play is an Again, which costs its skill 4 half-points, so the picker asks it
+// again in a later session of the play.
+describe('playTodayForward at a miss rate (ruling T5-a)', () => {
+  it('misses every round(1 / rate)-th graded pick, every second at most, and never at 0', () => {
+    expect([0.1, 0.2, 0.25, 1 / 3, 0.5, 1].map(missEveryOf)).toEqual([10, 5, 4, 3, 2, 2]);
+    expect(missEveryOf(0)).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it('reads a whole number of sessions of misses as that number, not one more', () => {
-    // 87 cards at 10 misses in 29 answers is 30 misses, 3 sessions exactly, which floating
-    // point reads as 3.0000000000000004.
-    expect(budgetSessions({ sessions: 9, cards: 87 }, 10 / 29)).toBe(12);
+  it('plays more sessions at 0.2 than at 0 for the same day: the misses are asked again', () => {
+    expect(play(FIVE, 0.2).sessions).toBeGreaterThan(play(FIVE).sessions);
+    expect(play(FIVE, 0.2)).toEqual({ sessions: 16, cards: 73 });
+    expect(play(FIVE, 0.1)).toEqual({ sessions: 12, cards: 63 });
+  });
+
+  it('never misses a ladder: a day of starts alone plays the same at any rate', () => {
+    const starts = FIVE.words.map((one) => ({ ...one, live: [] }));
+    expect(play({ ...FIVE, words: starts }, 1)).toEqual(play({ ...FIVE, words: starts }));
+  });
+
+  it('misses nothing on a day of fewer graded picks than its rhythm', () => {
+    // Two typed translations, one a session: at 0.1 the tenth pick would be the first missed.
+    const one = { words: [word('g1', '2026-10-15', [WP])], skills: [skill('g1', WP, 2)] };
+    expect(play(one, DEFAULT_MISS_RATE)).toEqual({ sessions: 2, cards: 2 });
+  });
+
+  it(`stops at ${PLAY_SESSIONS_MAX} sessions when the misses keep undoing a skill's gains`, () => {
+    // One skill asked once a session, every second pick missed: 2 → 6 → 2 → 6, never the cap.
+    const one = { words: [word('g1', '2026-10-15', [WP])], skills: [skill('g1', WP, 2)] };
+    expect(play(one, 0.5)).toEqual({ sessions: PLAY_SESSIONS_MAX, cards: PLAY_SESSIONS_MAX });
+  });
+});
+
+describe('playBudget (spec D7.1, ruling T5-a)', () => {
+  it("is the play at the learner's rate, its room the sessions its misses add, its cards the missing play's", () => {
+    expect(playBudget(FIVE, 0.2)).toEqual({ sessions: 16, cards: 73, missRoom: 16 - 9 });
+  });
+
+  it('is the play all right at 0, with no room', () => {
+    expect(playBudget(FIVE, 0)).toEqual({ sessions: 9, cards: 55, missRoom: 0 });
+    expect(playBudget(day({}), DEFAULT_MISS_RATE)).toEqual({ sessions: 0, cards: 0, missRoom: 0 });
   });
 });
 

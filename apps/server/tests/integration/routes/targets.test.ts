@@ -319,7 +319,8 @@ describe('GET /api/targets/{id}', () => {
   // Phase 65 (spec D1, D7, D10). A new exam: no word answered, so readiness 0 from the start of
   // today, every first try left; each word counted on write and spell; and today's offer, the
   // picker played forward (one word planned of two: its ladder of 4 cards, then its written
-  // skills to the cap in sessions of 2, 1 and 1) with one session of room at the default miss rate.
+  // skills to the cap in sessions of 2, 1 and 1), and no room at the default miss rate: its four
+  // graded picks are fewer than the ten it misses one of (ruling T5-a).
   it('answers readiness, where today started, and today as an offer of sessions before the first', async () => {
     const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
     const exam = await made('exam', DUE, apple, bread);
@@ -334,7 +335,7 @@ describe('GET /api/targets/{id}', () => {
       extra: 0,
       next_practice_in: 1,
       sessions_budget: null,
-      sessions_offer: 5,
+      sessions_offer: 4,
       sessions_done: 0,
       ended_early: false,
       minutes: 4,

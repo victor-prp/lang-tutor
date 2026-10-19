@@ -571,16 +571,23 @@ describe("a target's path (spec D1, D2, D10)", () => {
       return { ...made, inserted, asked, counted, enqueuedAtInsert: () => enqueuedAtInsert };
     }
 
+    /** A miss the learner gave on an earlier day. */
+    const wrong = { ...right, verdict: 'wrong' as const };
+
+    // Ruling T5-a: the play misses on the learner's rhythm, every round(1 / rate)-th graded pick.
     it.each([
-      ['no recent answer: the default miss rate, one session of room', [], 0, 3, 1],
-      ['twenty right answers: no miss, no room', Array.from({ length: 20 }, () => right), 0, 2, 0],
+      ['no recent answer: the default miss rate, whose first miss would be the tenth pick of two: no room', [], 0, 2, 2, 0],
+      ['twenty right answers: no miss, no room', Array.from({ length: 20 }, () => right), 0, 2, 2, 0],
+      // Every second pick missed: the one skill climbs and drops in turn (2, 6, 2, …) and the play
+      // stops at its bound, PLAY_SESSIONS_MAX sessions of one card.
+      ['twenty answers, half missed: every second pick missed, to the play bound', [...Array.from({ length: 10 }, () => right), ...Array.from({ length: 10 }, () => wrong)], 0, 30, 30, 28],
       // Coordinator's ruling on Review Focus 4: a session started yesterday and ended today is one
       // of today's sessions done, so the promise counts it too.
-      ['a session of the path already completed today, started yesterday', [], 1, 4, 1],
-    ])('is set at the first session, from the picker played forward: %s', async (_, recent, doneBefore, sessions, missRoom) => {
+      ['a session of the path already completed today, started yesterday', [], 1, 3, 2, 0],
+    ])('is set at the first session, from the picker played forward: %s', async (_, recent, doneBefore, sessions, cards, missRoom) => {
       const { service, inserted, asked, counted, enqueuedAtInsert, jobs } = budgetWorld(undefined, recent, doneBefore);
       await service.startSession('u1', 's1', NO_DEVICES);
-      expect(inserted).toEqual([{ targetId: 't_exam', day: TODAY, sessions, cards: 2, missRoom, doneBefore }]);
+      expect(inserted).toEqual([{ targetId: 't_exam', day: TODAY, sessions, cards, missRoom, doneBefore }]);
       // The miss rate reads the enrollment's last three practice days, up to today; the sessions
       // done, the path's completed today.
       expect(asked).toEqual([[E, TODAY, 3]]);
