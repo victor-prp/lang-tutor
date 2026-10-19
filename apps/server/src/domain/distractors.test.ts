@@ -1209,6 +1209,13 @@ describe('buildDistractorPrompt (phase 62d)', () => {
     expect(item.rewrite).toEqual({ old_sentence: OLD, fits: ['tavolo', 'libro', 'gatto'], problem: pointing.problem });
   });
 
+  it('a candidate carries its angle, and the rule says candidates of one word are different sentences', () => {
+    const prompt = buildDistractorPrompt({ items: [{ ...sentence, key: 'q2~1', rewrite: { ...pointing, angle: 'where only it is' } }], from: 'it', to: 'he', others: [], learnerWords });
+    const [item] = (JSON.parse(prompt.user) as { items: Record<string, unknown>[] }).items;
+    expect(item.rewrite).toMatchObject({ angle: 'where only it is' });
+    expect(prompt.system).toContain('rewrite.angle');
+  });
+
   it('a rewritten gap item carries the gap rule and not the sentence rule', () => {
     const rewrite = { sentence: 'Io ho un fratello qui ora.', fits: ['tavolo'], problem: null };
     const prompt = buildDistractorPrompt({ items: [{ ...gap, rewrite }], from: 'it', to: 'he', others: [], learnerWords });

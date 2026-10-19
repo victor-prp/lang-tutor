@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { LlmDistractors } from '@lang-tutor/core/api';
 
 import { distractorItems, NOTHING_GENERATED, type DistractorVerdict, type Generated, type GenerationContext } from './distractors';
-import { gapCheckItem, gapFaults, pointFaults, rewriteItems, rewriteOthers, type GapFault } from './gapRewrite';
+import { POINT_CANDIDATE_ANGLES, candidateItems, cardKeyOf, gapCheckItem, gapFaults, pointFaults, rewriteItems, rewriteOthers, type GapFault } from './gapRewrite';
 
 const row = (form: string, translation: string, example: string | null = null): GenerationContext => ({
   glossId: `g-${form}`,
@@ -146,5 +146,24 @@ describe('pointFaults', () => {
     expect(pointFaults({ items: TYPED, verdict, failed: failed('q2') })).toEqual([]);
     expect(pointFaults({ items: TYPED, verdict, failed: new Map() })).toEqual([]);
     expect(pointFaults({ items: TYPED, verdict, failed: failed('q3') })).toEqual([]);
+  });
+});
+
+// Fix (master run 39224785496). One rewrite call writes a typed gap three candidates, each
+// built on a different kind of clue, so a round has three chances to point, not one.
+describe('candidateItems', () => {
+  const [typed] = distractorItems([row('sedia', 'כיסא', 'Mi siedo sulla sedia.')], ['sentence'], new Map());
+  const asked = { ...typed, rewrite: { sentence: 'La sedia è qui.', fits: ['macchina'], problem: 'a reader who covers the word guesses macchina first' } };
+
+  it('makes one candidate per angle, keyed after the card, each told its angle', () => {
+    const candidates = candidateItems(asked);
+    expect(candidates.map((item) => item.key)).toEqual(POINT_CANDIDATE_ANGLES.map((_, at) => `${typed.key}~${at + 1}`));
+    expect(candidates.map((item) => item.rewrite?.angle)).toEqual([...POINT_CANDIDATE_ANGLES]);
+    for (const item of candidates) expect(item).toMatchObject({ form: 'sedia', task: 'sentence', avoid: asked.avoid, rewrite: { sentence: 'La sedia è qui.', fits: ['macchina'] } });
+  });
+
+  it('reads a candidate key back to its card', () => {
+    expect(candidateItems(asked).map((item) => cardKeyOf(item.key))).toEqual(POINT_CANDIDATE_ANGLES.map(() => typed.key));
+    expect(cardKeyOf('q3')).toBe('q3');
   });
 });

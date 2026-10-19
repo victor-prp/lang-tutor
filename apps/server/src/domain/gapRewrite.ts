@@ -72,6 +72,25 @@ export function pointFaults(input: {
   });
 }
 
+/** Fix (master run 39224785496). The kinds of clue a typed gap's candidates are built on,
+ *  one candidate each: one rewrite call writes them all, and the point check keeps the best
+ *  that points. One sentence per round rescued about half of the eval's hard words. */
+export const POINT_CANDIDATE_ANGLES: readonly string[] = [
+  'what only it does, or what is done only with it',
+  'where or when only it is, or what it always goes with',
+  'something everyone knows of it, or the reason for it',
+];
+
+const CANDIDATE_MARK = '~';
+
+/** A typed gap asked again, as one candidate per angle: keyed after its card, each told its angle. */
+export function candidateItems(asked: DistractorItem): DistractorItem[] {
+  return POINT_CANDIDATE_ANGLES.map((angle, at) => ({ ...asked, key: `${asked.key}${CANDIDATE_MARK}${at + 1}`, rewrite: { ...asked.rewrite!, angle } }));
+}
+
+/** The card a candidate's key belongs to; a card's own key is its own. */
+export const cardKeyOf = (key: string): string => key.split(CANDIDATE_MARK)[0];
+
 /** Phase 62c (spec D3). Each fault's item, asked again: its rewrite, and its last sentence added to what it avoids. */
 export function rewriteItems(items: readonly DistractorItem[], faults: readonly GapFault[]): DistractorItem[] {
   return faults.flatMap((fault) => {

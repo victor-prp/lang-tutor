@@ -75,7 +75,7 @@ import {
   type GenerationContext,
   type Generated,
 } from '../domain/distractors';
-import { gapCheckItem, gapFaults, pointFaults, rewriteItems, rewriteOthers, type GapFault, type GapJudged } from '../domain/gapRewrite';
+import { candidateItems, gapCheckItem, gapFaults, pointFaults, rewriteItems, rewriteOthers, type GapFault, type GapJudged } from '../domain/gapRewrite';
 import { glossFamilies } from '../domain/glossFamilies';
 import { familyChanges, isEmptyFamilyWrite } from '../domain/glossFamilyRecord';
 import { buildFitJudgePrompt, judgePrompt, parseFitJudge, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
@@ -1755,12 +1755,20 @@ export function createSessionService({
       // Phase 62c (spec D3). One rewrite call for the given faults, each item told what was
       // wrong, validated as the main call is. Phase 62d (spec D1): a gap's and a typed gap's
       // are separate calls, so each sends only its own rule. Its failure never fails the attempt.
-      // Phase 62d (spec D3): `base` is the item as last asked, so a second rewrite avoids both old sentences.
-      type Rewrite = { index: number; fault: GapFault; reason: string; made: Generated | null; failed: string | null; round?: number };
-      const askRewrite = async (faults: readonly GapFault[], reasonOf: (fault: GapFault) => string, base: readonly DistractorItem[] = items) => {
-        const asked = rewriteItems(base, faults);
+      // Phase 62d: `round`, `pointed` and `candidates` are a typed gap's, for the log.
+      type Rewrite = {
+        index: number;
+        fault: GapFault;
+        reason: string;
+        made: Generated | null;
+        failed: string | null;
+        round?: number;
+        pointed?: boolean;
+        candidates?: number;
+      };
+      // The call and its validation, for any items asked again: what validated, or why the call failed.
+      const callRewrite = async (asked: DistractorItem[], faults: readonly GapFault[]) => {
         const clear = rewriteOthers(items, faults, others);
-        const rewriteStarted = now();
         let again: DistractorVerdict | null = null;
         let failure: string | null = null;
         try {
@@ -1774,15 +1782,17 @@ export function createSessionService({
         } catch (error) {
           failure = error instanceof Error ? error.message : String(error);
         }
+        return { again, failure };
+      };
+      const askRewrite = async (faults: readonly GapFault[], reasonOf: (fault: GapFault) => string) => {
+        const rewriteStarted = now();
+        const { again, failure } = await callRewrite(rewriteItems(items, faults), faults);
         const rewrites = faults.map((fault): Rewrite => {
-          const got = again?.byKey.get(fault.key) ?? null;
-          // A sentence item validation could not use comes back degraded, not refused.
-          const made = got && (fault.stage !== 'pointing' || got.sentence) ? got : null;
+          const made = again?.byKey.get(fault.key) ?? null;
           const index = cards.find((candidate) => keyOf(candidate.index) === fault.key)!.index;
-          const failed = made ? null : (failure ?? again?.refused.get(fault.key) ?? got?.degraded ?? `no answer for ${fault.key}`);
-          return { index, fault, reason: reasonOf(fault), made, failed };
+          return { index, fault, reason: reasonOf(fault), made, failed: made ? null : (failure ?? again?.refused.get(fault.key) ?? `no answer for ${fault.key}`) };
         });
-        return { rewrites, asked, ms: now() - rewriteStarted };
+        return { rewrites, ms: now() - rewriteStarted };
       };
       // Phase 62c (spec D1–D4). The gap check, then one rewrite for every gap to choose
       // validation refused or the gap check left short, each told what was wrong: the
@@ -1855,45 +1865,80 @@ export function createSessionService({
       const pointItems: PointItem[] = cards.flatMap((card) =>
         !refusals.has(card.index) && generatedAs(card.type) === 'cloze_typed' && card.answered.sentence ? [pointItem(keyOf(card.index), card.answered.sentence)] : [],
       );
-      // Phase 62d (spec D1, D3). The point check, then a rewrite of every typed gap it could
-      // not place, beside the gap check and the context call: one call per typed gap, side by
-      // side, as the point check asks them (eight asked at once came back pointing half as
-      // often as one alone, the eval, 2026-10-18). A rewrite before the last round is read
-      // again here, and one that still does not point is written once more, told what its
-      // readers would write; the last round's is read again beside the checker. `verified`
-      // holds the cards a rewrite rescued and a re-check here already passed.
+      // Phase 62d (spec D1, D3). The point check, then up to POINT_REWRITE_ROUNDS rounds for
+      // every typed gap it could not place, beside the gap check and the context call. A round
+      // is one call per typed gap, side by side, that writes its candidates, one per angle
+      // (POINT_CANDIDATE_ANGLES), then every candidate read blind, side by side; the best that
+      // points is kept (fix, master run 39224785496: one sentence a round rescued about half
+      // the eval's hard words). When none points, the likeliest is told what its readers wrote
+      // in the next round, and after the last the card is written as a typed translation. A
+      // candidate the point check could not judge is kept, as a card it could not judge is (D3).
       const rescuePoints = async () => {
         const pointCheck = pointItems.length > 0 ? await askPoints(pointItems) : { reading: null, ms: 0 };
         let pointMs = pointCheck.ms;
         const failed = unplaced(pointItems, pointCheck.reading);
         const rewrites: Rewrite[] = [];
-        const verified = new Set<number>();
+        // What each typed gap asked again ends as: content that points, or why none does.
+        const outcomes = new Map<number, { made: Generated } | { unpointed: string }>();
         let rewriteMs = 0;
         let asking = pointFaults({ items, verdict, failed }).map((fault) => ({ fault, base: items as readonly DistractorItem[] }));
         for (let round = 1; round <= POINT_REWRITE_ROUNDS && asking.length > 0; round += 1) {
           const started = now();
-          const each = await Promise.all(asking.map(({ fault, base }) => askRewrite([fault], (asked) => asked.rewrite.problem ?? '', base)));
-          rewriteMs += now() - started;
-          const made = each.flatMap((one) => one.rewrites.map((rewrite) => ({ ...rewrite, round, asked: one.asked })));
-          rewrites.push(...made.map(({ asked: _asked, ...rewrite }) => rewrite));
-          if (round === POINT_REWRITE_ROUNDS) break;
-          const rescued = made.filter((rewrite) => rewrite.made?.sentence);
-          const sentences = new Map(rescued.map((rewrite) => [rewrite.fault.key, rewrite.made!.sentence!] as const));
-          const again = rescued.map((rewrite) => pointItem(rewrite.fault.key, rewrite.made!.sentence!));
-          const recheck = again.length > 0 ? await askPoints(again) : { reading: null, ms: 0 };
-          pointMs += recheck.ms;
-          const still = unplaced(again, recheck.reading, sentences);
-          for (const rewrite of rescued) if (!still.has(rewrite.fault.key)) verified.add(rewrite.index);
-          asking = rescued.flatMap((rewrite) => {
-            const found = still.get(rewrite.fault.key);
-            if (!found) return [];
-            const fault: GapFault = { key: rewrite.fault.key, stage: 'pointing', rewrite: { sentence: rewrite.made!.sentence!.sentence, ...found } };
-            return [{ fault, base: rewrite.asked }];
+          const asked = asking.map(({ fault, base }) => {
+            const [ask] = rewriteItems(base, [fault]);
+            return { fault, ask, candidates: candidateItems(ask) };
           });
+          const called = await Promise.all(asked.map(({ fault, candidates }) => callRewrite(candidates, [fault])));
+          rewriteMs += now() - started;
+          const written = asked.map(({ fault, ask, candidates }, at) => ({
+            fault,
+            ask,
+            failure: called[at].failure ?? candidates.map((candidate) => called[at].again?.byKey.get(candidate.key)?.degraded).find(Boolean) ?? null,
+            made: candidates.flatMap((candidate) => {
+              const got = called[at].again?.byKey.get(candidate.key);
+              return got?.sentence ? [{ key: candidate.key, got }] : [];
+            }),
+          }));
+          const checking = written.flatMap(({ made }) => made.map(({ key, got }) => pointItem(key, got.sentence!)));
+          const check = checking.length > 0 ? await askPoints(checking) : { reading: null, ms: 0 };
+          pointMs += check.ms;
+          asking = [];
+          for (const { fault, ask, failure, made } of written) {
+            const index = indexOfKey(fault.key);
+            const judged = made.map((one) => {
+              const finding = check.reading?.get(one.key);
+              return { ...one, readers: finding?.readers ?? -1, verdict: finding ? judgePoint(finding, pointTargetOf(index, one.got.sentence!)) : null };
+            });
+            // The candidate that points with the most readers; else one the check could not
+            // judge (kept, D3); else the likeliest, for the next round's feedback.
+            const byReaders = [...judged].sort((a, b) => b.readers - a.readers);
+            const best = byReaders.find((one) => one.verdict?.points) ?? judged.find((one) => one.verdict === null) ?? byReaders[0];
+            const pointed = best !== undefined && (best.verdict === null || best.verdict.points);
+            rewrites.push({
+              index,
+              fault,
+              reason: fault.rewrite.problem ?? '',
+              made: best?.got ?? null,
+              failed: best ? null : (failure ?? `no usable candidate for ${fault.key}`),
+              round,
+              pointed,
+              candidates: made.length,
+            });
+            if (pointed) {
+              outcomes.set(index, { made: best.got });
+              continue;
+            }
+            const miss = best?.verdict && !best.verdict.points ? best.verdict : null;
+            if (!best || !miss || round === POINT_REWRITE_ROUNDS) {
+              outcomes.set(index, { unpointed: miss?.problem ?? failure ?? `no usable candidate for ${fault.key}` });
+              continue;
+            }
+            asking.push({ fault: { key: fault.key, stage: 'pointing', rewrite: { sentence: best.got.sentence!.sentence, fits: miss.fits, problem: miss.problem } }, base: [ask] });
+          }
         }
-        return { pointMs, unpointedCount: failed.size, pointRewrites: rewrites, pointRewriteMs: rewriteMs, verified };
+        return { pointMs, unpointedCount: failed.size, pointRewrites: rewrites, pointRewriteMs: rewriteMs, outcomes };
       };
-      const [first, { gapCheck, judged, rewrites: gapRewrites, rewriteMs: gapRewriteMs }, { pointMs: firstPointMs, unpointedCount, pointRewrites, pointRewriteMs, verified }] = await Promise.all([
+      const [first, { gapCheck, judged, rewrites: gapRewrites, rewriteMs: gapRewriteMs }, { pointMs, unpointedCount, pointRewrites, pointRewriteMs, outcomes }] = await Promise.all([
         contextItems.size > 0 ? askContext([...contextItems.values()]) : Promise.resolve({ answer: null, ms: 0 }),
         rescueGaps(),
         rescuePoints(),
@@ -1901,13 +1946,12 @@ export function createSessionService({
       const rewrites = [...gapRewrites, ...pointRewrites];
       // The two rewrites ran side by side: the longer is what the session waited.
       const rewriteMs = Math.max(gapRewriteMs, pointRewriteMs);
-      let pointMs = firstPointMs;
       const contextMs = first.ms;
       // Phase 62d (spec D4). A typed gap that cannot be made to point, with why: written as a typed translation.
       const unpointed = new Map<number, string>();
       // A rescued card takes its new content and loses its refusal; any other keeps its
       // own, and one the gap check left short is refused as the checker would refuse it.
-      for (const { index, fault, reason, made } of rewrites) {
+      for (const { index, fault, reason, made } of gapRewrites) {
         if (made) {
           verdict.byKey.set(fault.key, made);
           verdict.refused.delete(fault.key);
@@ -1915,11 +1959,22 @@ export function createSessionService({
           cards[index].answered = made;
         } else if (fault.stage === 'checker') {
           refusals.set(index, { stage: 'checker', reason });
-        } else if (fault.stage === 'pointing') {
-          unpointed.set(index, reason);
         }
       }
-      const rescued = new Set(rewrites.filter((rewrite) => rewrite.made).map((rewrite) => rewrite.index));
+      // Phase 62d (spec D4). A typed gap a round rescued takes the candidate that points; one
+      // no round could is written as a typed translation.
+      for (const [index, outcome] of outcomes) {
+        if ('made' in outcome) {
+          verdict.byKey.set(keyOf(index), outcome.made);
+          cards[index].answered = outcome.made;
+        } else {
+          unpointed.set(index, outcome.unpointed);
+        }
+      }
+      const rescued = new Set([
+        ...gapRewrites.filter((rewrite) => rewrite.made).map((rewrite) => rewrite.index),
+        ...[...outcomes].flatMap(([index, outcome]) => ('made' in outcome ? [index] : [])),
+      ]);
       const languages = { target, explanation: read.enrolled.source_language as LanguageCode };
 
       // Logged once the session is written, not on an attempt a failed insert or a
@@ -1987,12 +2042,6 @@ export function createSessionService({
         }),
       );
       const second = secondItems.size > 0 ? askContext([...secondItems.values()]) : null;
-      // Phase 62d (spec D1, D4). The last round's rewritten typed gaps read blind again, beside the checker.
-      const recheckItems = [...rescued].flatMap((index) => {
-        const made = cards[index].answered.sentence;
-        return generatedAs(cards[index].type) === 'cloze_typed' && made && !verified.has(index) ? [pointItem(keyOf(index), made)] : [];
-      });
-      const recheck = recheckItems.length > 0 ? askPoints(recheckItems) : null;
 
       // Phase 34 (spec D5). The checker: a second model reads the cards as a
       // learner would, with no transaction open (ADR 0001 R8). Every usable
@@ -2124,13 +2173,6 @@ export function createSessionService({
       if (second) {
         const { answer } = await second;
         for (const [index, item] of secondItems) shown[index] = show(cards[index], item, answer);
-      }
-      // Phase 62d (spec D4). A rewrite the reader still cannot place is not shown as a gap;
-      // one the re-check could not read stays, since it was asked to point and the old did not.
-      if (recheck) {
-        const { reading, ms } = await recheck;
-        pointMs += ms;
-        for (const [key, { problem }] of unplaced(recheckItems, reading)) unpointed.set(indexOfKey(key), problem);
       }
 
       // Phase 48 (spec D3). Which cards the session keeps: every unit nobody
@@ -2344,7 +2386,7 @@ export function createSessionService({
         logNotGenerated();
       }
       // Phase 62c (spec D5). Every card asked again, written or not, and what came of it.
-      for (const { index, fault, reason, made, failed, round } of rewrites) {
+      for (const { index, fault, reason, made, failed, round, pointed, candidates } of rewrites) {
         const position = written ? kept.findIndex((card) => card.index === index) : -1;
         logger.info({
           event: 'gap_rewritten',
@@ -2354,7 +2396,7 @@ export function createSessionService({
           // Phase 62d (spec D5): a gap to choose's or a typed gap's, and which of its rewrites.
           type: plan.types[index],
           stage: fault.stage,
-          ...(round !== undefined ? { round } : {}),
+          ...(round !== undefined ? { round, pointed, candidates } : {}),
           reason,
           old_sentence: fault.rewrite.sentence,
           ...(made ? { new_sentence: made.sentence?.sentence ?? null } : { failed }),

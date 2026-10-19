@@ -1536,6 +1536,8 @@ export const POINT_CASES: PointCase[] = [
   pointCase('it', 'In questa città ___ molti musei famosi.', 'ci sono', 'יש', true, 'esserci'),
   pointCase('it', 'Oggi ___ qui.', 'ci sono', 'יש', false, 'esserci'),
   pointCase('en', 'Can you ___ the kids from school at four?', 'pick up', 'לאסוף', true),
+  // A word with a common synonym (begins, starts): the readers' split must still find it.
+  pointCase('en', 'The new school year ___ in September.', 'begins', 'להתחיל', true, 'begin'),
 ];
 export const TRANSLATE_CASES: SentenceCase[] = [
   ...sentenceCases('translate'),
