@@ -1,4 +1,4 @@
-import type { CreateTargetRequest, Target, TargetList, VocabularyEntryInput } from '@lang-tutor/core/api';
+import type { CreateTargetRequest, Target, TargetKind, TargetList, VocabularyEntryInput } from '@lang-tutor/core/api';
 import { sql } from 'drizzle-orm';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
@@ -117,9 +117,10 @@ export async function moveDueDateToToday(targetId: string, today: string): Promi
 
 /**
  * Phase 57 (spec D6). Moves a target back `days` days, as if it had been made then and its
- * played sessions played then: its creation, its words' joining and starting, and its
- * finished sessions' practice day. A target whose day was done is then resting today, until
- * the plan's next practice day: nothing is owed and nothing was practised today.
+ * played sessions played then: its creation, its words' joining and starting, its finished
+ * sessions' practice day, and (phase 65) its days' budgets and readiness. A target whose day
+ * was done is then resting today, until the plan's next practice day: nothing is owed and
+ * nothing was practised today.
  */
 export async function moveTargetBack(targetId: string, days: number): Promise<void> {
   const handle = createDb(E2E_DATABASE_URL, { max: 1, onError: () => {} });
@@ -134,6 +135,12 @@ export async function moveTargetBack(targetId: string, days: number): Promise<vo
       await tx.execute(sql`
         update sessions set practice_day = practice_day - ${days}::int
         where target_id = ${targetId} and practice_day is not null`);
+      // Phase 65 (spec D2, D7.2): the day's budget and readiness, recorded by the day too.
+      await tx.execute(sql`update target_budgets set day = day - ${days}::int where target_id = ${targetId}`);
+      await tx.execute(sql`
+        update target_readiness set day = day - ${days}::int, last_day = last_day - ${days}::int
+        where target_id = ${targetId}`);
+      await tx.execute(sql`update target_readiness_events set day = day - ${days}::int where target_id = ${targetId}`);
     });
   } finally {
     await handle.close();
@@ -166,6 +173,60 @@ export async function showCard(page: Page, card: string): Promise<void> {
 export async function expectLabel(locator: Locator, text: string): Promise<void> {
   await expect.poll(async () => stripIsolates(await locator.textContent()), { timeout: 15_000 }).toBe(text);
 }
+
+const READINESS_FOR: Record<TargetKind, string> = { homework: 'לשיעורי הבית', exam: 'לבוחן' };
+
+/**
+ * Phase 65 (spec D4, D5). A target's readiness where `scope` draws it, a home card or the target
+ * screen's header: the big number, what a screen reader says of it, and the gain on its bar since
+ * the start of today ("+13% היום"), none before an answer today.
+ */
+export async function expectReadiness(
+  scope: Locator,
+  target: Pick<Target, 'id' | 'kind' | 'readiness_pct' | 'readiness_start_pct'>,
+): Promise<void> {
+  await expectLabel(scope.getByTestId('target-readiness-big'), `${target.readiness_pct}%`);
+  await expect
+    .poll(async () => stripIsolates(await scope.getByTestId(`target-readiness-${target.id}`).getAttribute('aria-label')))
+    .toBe(`מוכנות ${READINESS_FOR[target.kind]}: ${target.readiness_pct}%`);
+  const gain = target.readiness_pct - target.readiness_start_pct;
+  await expectLabel(scope.getByTestId('target-readiness-gain'), gain === 0 ? '' : `${gain > 0 ? '+' : '−'}${Math.abs(gain)}% היום`);
+}
+
+/** Today's sessions as `expectSessions` reads them: the line, the words beside it (none: null), and
+ *  each dot's kind (done, todo, faded, bonus). */
+export type SessionsView = { line: string; side: string | null; dots: string[] };
+
+/** Phase 65 (spec D5, D7). The budget before the day's first session: the offer, about how long it
+ *  takes, and a dot to do per session. */
+export const offerOf = (today: Target['today']): SessionsView => ({
+  line: `היום: ${today.sessions_offer} תרגולים`,
+  side: `כ-${today.minutes} דקות`,
+  dots: Array<string>(today.sessions_offer).fill('todo'),
+});
+
+/** The day done (spec D7.6): the budget met, or the work done before it ("4 במקום 5", a faded dot
+ *  for each session left unused). */
+export const DONE_TODAY = 'סיימת להיום ✓';
+
+/**
+ * Phase 65 (spec D5, D7). Today's sessions where `scope` draws them: the line (the praise once the
+ * day is done, which is where target-praise-<id> sits), what is beside it, and the dots.
+ */
+export async function expectSessions(scope: Locator, targetId: string, view: SessionsView): Promise<void> {
+  const line = scope.getByTestId(view.line === DONE_TODAY ? `target-praise-${targetId}` : `target-today-${targetId}`);
+  await expectLabel(line, view.line);
+  const side = scope.getByTestId(`target-sessions-${targetId}-side`);
+  if (view.side === null) await expect(side).toHaveCount(0);
+  else await expectLabel(side, view.side);
+  await expect
+    .poll(() => scope.getByTestId('target-session-dot').evaluateAll((dots) => dots.map((dot) => dot.getAttribute('aria-label'))))
+    .toEqual(view.dots);
+}
+
+/** The target screen's header (phase 65, spec D6): the countdown and what sits beside it. Home stays
+ *  mounted under the screen with the same card ids, so the screen's lines are read inside it. */
+export const screenHeader = (page: Page): Locator => page.getByTestId('target-countdown').locator('..');
 
 /** Two words of the learner's own list and six of a homework's: single-sense Russian nouns
  *  shared with other specs (lexemes.ts), so a lookup another spec stored is the same. */
