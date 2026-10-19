@@ -60,3 +60,24 @@ work still owed first").
 - **Day simulation:** phase 57's gates and `READY_ON_DUE_PASS` hold; if one moves, compared on five-phase
   aggregates against master's (phase 54's lesson), never lowered.
 - **e2e:** the sheet appears on the first "לתרגל עוד" after the budget is met.
+
+## Rulings
+
+Made while building, 2026-10-19 (my calls, under "go now"):
+
+- **R1.** Ruling: past the budget, the fill moves memory and readiness but not the plan. A session
+  chosen past the budget (`session_targets.past_budget`, migration 0046) moves its own target's skills
+  only for the owed words its stock recorded; every word it asks still starts. Why: with the fill
+  counting, the day simulation's learner (who misses one card in five) kept reopening work on words at
+  the cap, and the 3-day exam's eve stopped at the 25-session cap at 96–97% instead of reaching 100% in
+  10 (phase 57's gate, never lowered). With this rule the eve reaches 100% in 10–11 sessions. Cost: a
+  miss on a fill word does not make it owed again today; readiness and tomorrow's first try still see it.
+- **R2.** Ruling: a past-budget stock records the day's owed words, as an owed one does, so its stale
+  check is unchanged.
+- **R3.** Ruling: the day simulation's anti-goal 1 check skips past-budget sessions, the anti-goal's one
+  exception (D2); the picker's and the service's tests pin "owed work first".
+- **R4 (flagged).** The 14-day homework scenario's FSRS ready-on-due mean moved from 0.92 to 0.91 over
+  the five phases (0.85 0.90 0.90 0.95 0.95 against master's 0.90 0.90 0.90 0.95 0.95). The gate,
+  ≥ 0.85, holds; the mean is one word in a hundred below master's. Likely cause: past the budget a
+  session now holds more cards, and the simulated learner misses every fifth card whatever it is, so
+  more cards means more FSRS lapses. The 3-day exam's share rose (0.30 → 0.34 over the five phases).
