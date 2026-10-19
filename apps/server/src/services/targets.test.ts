@@ -1229,13 +1229,12 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
     const read = await service.getTarget(OWNER, 't1');
 
     // The picker played forward over the day: casa's ladder (4 cards), then its written skills to
-    // the cap of 7 half-points in three more sessions of 2, 1 and 1 cards; at the default miss rate
-    // the tenth graded pick would be the first missed, and the play has four: no room (ruling
-    // T5-a); and the one session done today.
+    // the cap of 7 half-points in three more sessions of 2, 1 and 1 cards; one session of room at
+    // the default miss rate; and the one session done today.
     expect(read.today).toMatchObject({
       state: 'owed',
       sessions_budget: null,
-      sessions_offer: 4 + 1,
+      sessions_offer: 4 + 1 + 1,
       sessions_done: 1,
       ended_early: false,
       minutes: 4,

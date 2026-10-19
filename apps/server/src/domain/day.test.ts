@@ -18,7 +18,7 @@ import { applySession, type MemoryRow } from './memoryUpdate';
 import { RUNGS, planCards } from './plan';
 import { daysBetween, evaluateSession, type AnsweredQuestion, type ProgressRow } from './progress';
 import { readinessSessionWrite, type TargetReadinessEvent, type TargetReadinessRow } from './readinessWrite';
-import { MISS_RATE_DAYS, missRateOf, playBudget } from './targetBudget';
+import { MISS_RATE_DAYS, budgetSessions, missRateOf, playTodayForward } from './targetBudget';
 import { targetDay, type TargetDay } from './targetDay';
 import {
   chooseTargetPicks,
@@ -970,9 +970,9 @@ function pathAnswer(glossId: string, type: QuestionType, verdict: Verdict): Answ
  * session's own write, and each target's readiness is read before and after every session, at the
  * start of every day and at its end, as the target summary reads it. A target's budget for the day
  * is set before its path's first session that day (readTodayBudget's: the picker played forward
- * from the day as it stands, missing on the learner's rhythm at the miss rate of the last
- * MISS_RATE_DAYS days with answers, ruling T5-a; none of the path's sessions done yet), and its
- * later sessions read it. The learner plays as before: the budget changes no session.
+ * from the day as it stands, stretched for the miss rate of the last MISS_RATE_DAYS days with
+ * answers, ruling T5-b; none of the path's sessions done yet), and its later sessions read it. The
+ * learner plays as before: the budget changes no session.
  */
 function runPaths(
   list: DayList,
@@ -1139,14 +1139,14 @@ function runPaths(
       const fresh = chooseFor(target, []);
       return stockServes(stock.recorded, fresh.recorded) || fresh.picks.length === 0 ? stock : fresh;
     };
-    /** Phase 65 (spec D7.1, rulings T3-a, T5-a): services/targetDayRead.ts readTodayBudget before
+    /** Phase 65 (spec D7.1, rulings T3-a, T5-b): services/targetDayRead.ts readTodayBudget before
      *  the path's first session of the day, so none of its sessions is done yet (doneBefore 0): the
-     *  picker played forward missing at the learner's rate, read from the answers of the last
-     *  MISS_RATE_DAYS days with some, today's so far among them. */
+     *  picker played forward all right, stretched for the learner's miss rate, read from the answers
+     *  of the last MISS_RATE_DAYS days with some, today's so far among them. */
     const budgetFor = (target: SimTarget, at: number): SimBudget => {
+      const play = playTodayForward({ pick: pickInputOf(target, []), ...dayInputOf(target) });
       const recent = [...answered, ...(today.length > 0 ? [today] : [])].slice(-MISS_RATE_DAYS).flat();
-      const { sessions } = playBudget({ pick: pickInputOf(target, []), ...dayInputOf(target) }, missRateOf(recent));
-      return { targetId: target.id, date, at, daysLeft: daysBetween(date, target.dueOn), sessions };
+      return { targetId: target.id, date, at, daysLeft: daysBetween(date, target.dueOn), sessions: budgetSessions(play, missRateOf(recent)) };
     };
     const start = homeNow();
     const readinessStart = readinessNow();

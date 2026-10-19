@@ -864,10 +864,9 @@ describe("today's budget (phase 65, spec D7)", () => {
 
     // The picker played forward: the word's ladder (4 cards), then its written skills to the cap
     // of 7 half-points in three more sessions of 2, 1 and 1 cards; with no answer to read a miss
-    // rate from, the default's, whose first miss would be the tenth graded pick of four: no room
-    // (ruling T5-a).
+    // rate from, the default's one session of room.
     const set = await readTargetBudgets(t.db, exam);
-    expect(set).toEqual([{ day: DAY, sessions: 4, cards: 8, missRoom: 0, doneBefore: 0, createdAt: expect.any(Date) }]);
+    expect(set).toEqual([{ day: DAY, sessions: 5, cards: 8, missRoom: 1, doneBefore: 0, createdAt: expect.any(Date) }]);
 
     // Its card answered right, the session ends and the word is started: played forward now, the
     // day would be 3 sessions and 4 cards. A second session the same day leaves the budget be.
@@ -902,11 +901,10 @@ describe("today's budget (phase 65, spec D7)", () => {
     await service.startSession('u_1', next.sessionId, NO_DEVICES);
 
     // The word started and its receptive skill at 2 of the cap's 7: the picker played forward is 3
-    // sessions of 2, 1 and 1 cards; no room at the default miss rate, four graded picks being fewer
-    // than its ten (ruling T5-a); and the one done.
+    // sessions of 2, 1 and 1 cards; one session of room at the default miss rate; and the one done.
     expect(await readTargetBudgets(t.db, exam)).toEqual([
       ...eveBudget,
-      { day: DAY, sessions: 3 + 1, cards: 4, missRoom: 0, doneBefore: 1, createdAt: expect.any(Date) },
+      { day: DAY, sessions: 3 + 1 + 1, cards: 4, missRoom: 1, doneBefore: 1, createdAt: expect.any(Date) },
     ]);
   });
 
@@ -928,12 +926,11 @@ describe("today's budget (phase 65, spec D7)", () => {
     await service.submitAnswer('u_1', eve.sessionId, card.id, { option_index: card.correct_option });
 
     // Today: no session started yet, so no budget; the offer is today's play (3 sessions of 4
-    // cards), no room at the default miss rate (four graded picks of its ten, ruling T5-a), and the
-    // one done, as the day's first start would set it.
+    // cards), one session of room, and the one done, as the day's first start would set it.
     expect((await targets.getTarget('u_1', exam)).today).toMatchObject({
       state: 'owed',
       sessions_budget: null,
-      sessions_offer: 3 + 1,
+      sessions_offer: 3 + 1 + 1,
       sessions_done: 1,
       minutes: 2,
     });
