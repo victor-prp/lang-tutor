@@ -14,7 +14,7 @@ import { insertGlossMemory, moveAnswersBack, readLearnerDay, readMemory, setLeve
 import { asChoice, insertListSession, type AskedGloss } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, makeBot, seedUser, setTimeZone } from '../../support/seedUser';
-import { endTargetNow, readSessionTargets, readStockRow, readTargetEvents, readTargetReadiness, readTargetReadinessEvents, readTargetSkills, seedTarget, setTargetWord } from '../../support/targetRows';
+import { endTargetNow, readSessionTargets, readStockRow, readTargetEvents, readFirstReadinessEvents, readTargetReadiness, readTargetReadinessEvents, readTargetSkills, seedTarget, setTargetWord } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -788,5 +788,36 @@ describe("a session's end records the target's readiness (phase 65)", () => {
     expect(rows.filter((row) => row.dimension === 'written_productive')).toHaveLength(1);
     expect(rows.every((row) => ['written_productive', 'spelling', 'spoken_productive'].includes(row.dimension))).toBe(true);
     expect(rows.find((row) => row.dimension === 'written_productive')).toMatchObject({ day: DAY, missedToday: true, bonusUsed: 1, held: false, sessionId: own.sessionId });
+  });
+
+  it("reads the day's first line as the first answer's, whatever else the day held", async () => {
+    const words = await savedWords();
+    const homework = await addTarget('homework', '2030-01-13', [words[0].glossId]);
+    const play = async (rights: boolean[]) => {
+      const own = await insertListSession(t.db, {
+        userId: 'u_1',
+        enrollmentId: E,
+        asked: rights.map(() => words[0]),
+        types: rights.map(() => 'typed_translation' as const),
+        targetId: homework,
+      });
+      await service.startSession('u_1', own.sessionId, NO_DEVICES);
+      for (const [i, right] of rights.entries()) {
+        await service.submitAnswer('u_1', own.sessionId, own.questions[i].id, { text: right ? words[0].form : 'zzzz' });
+      }
+    };
+    const firstOf = async () =>
+      (await readFirstReadinessEvents(t.db, homework, DAY)).find((event) => event.dimension === 'written_productive');
+
+    await play([true, false, true]);
+    const first = await firstOf();
+    // Right, wrong, right: the first line is the first right, read from the start state (nothing).
+    const events = await readTargetReadinessEvents(t.db, homework);
+    expect(events.filter((event) => event.dimension === 'written_productive' && event.why === 'first_right')).toHaveLength(1);
+    expect(first).toEqual({ glossId: words[0].glossId, dimension: 'written_productive', before: 0 });
+
+    // A second session later the same day leaves it where it was.
+    await play([false]);
+    expect(await firstOf()).toEqual(first);
   });
 });

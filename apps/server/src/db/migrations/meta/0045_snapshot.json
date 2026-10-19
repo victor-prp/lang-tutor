@@ -1,5 +1,5 @@
 {
-  "id": "ebcc8b7e-4d55-4f0b-b1b2-e1447bd20cc7",
+  "id": "e38176ad-9055-43fe-b4c3-434dfe4f1123",
   "prevId": "a8e59de9-d8e9-48ea-94a0-f337034dbf7f",
   "version": "7",
   "dialect": "postgresql",
@@ -4199,6 +4199,12 @@
         "why": {
           "name": "why",
           "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },

@@ -3,6 +3,7 @@ import { asc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../../src/db/client';
 import { sessions, sessionTargets, targetEvents } from '../../src/db/schema';
 import type { TargetKind } from '../../src/domain/targets';
+import { createTargetReadinessRepo } from '../../src/repo/targetReadiness';
 import { createTargetRepo } from '../../src/repo/targets';
 import { withTx } from './withTx';
 
@@ -133,9 +134,14 @@ export async function spoilTargetSkills(db: Db): Promise<void> {
   // Phase 65. Readiness rows and a junk line of its log, which the rebuild must replace too.
   await db.execute(sql`update target_readiness set held = not held, bonus_used = 2, missed_today = not missed_today`);
   await db.execute(sql`
-    insert into target_readiness_events (target_id, gloss_id, dimension, session_id, day, before, after, why)
-    select target_id, gloss_id, 'spelling', gen_random_uuid(), '2000-01-01', 0, 1, 'bonus' from target_words`);
+    insert into target_readiness_events (target_id, gloss_id, dimension, session_id, day, before, after, why, position)
+    select target_id, gloss_id, 'spelling', gen_random_uuid(), '2000-01-01', 0, 1, 'bonus', 0 from target_words`);
   await db.execute(sql`update target_words set started_on = '2000-01-01'`);
+}
+
+/** Phase 65 (spec D3). What each skill read at the start of `day`, through the repo. */
+export function readFirstReadinessEvents(db: Db, targetId: string, day: string) {
+  return withTx(db, (tx) => createTargetReadinessRepo(tx).findFirstEventsOn(targetId, day));
 }
 
 /** Phase 65 (spec D2). A target's readiness rows, by gloss and dimension. */

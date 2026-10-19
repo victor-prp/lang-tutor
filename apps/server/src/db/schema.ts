@@ -1708,6 +1708,8 @@ export const targetReadinessEvents = pgTable(
     before: real('before').notNull(),
     after: real('after').notNull(),
     why: text('why').notNull(),
+    // Order within the session's write; its lines share created_at (the last answer's instant).
+    position: integer('position').notNull(),
     createdAt: timestamp('created_at', tz).notNull().defaultNow(),
   },
   (t) => [

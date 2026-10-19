@@ -33,6 +33,9 @@ export type TargetReadinessEvent = {
   before: number;
   after: number;
   why: ReadinessWhy;
+  /** The line's order in its session's write, which follows answer order: lines of one session
+   *  share their time, so this is what says which came first. */
+  position: number;
 };
 
 const keyOf = (glossId: string, dimension: Dimension) => `${glossId}\u0000${dimension}`;
@@ -84,6 +87,7 @@ export function readinessSessionWrite(input: {
           before: skillChance(start, target.dueOn),
           after: skillChance(applied.row, target.dueOn),
           why: applied.why,
+          position: events.length,
         });
       }
     }

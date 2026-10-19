@@ -105,7 +105,7 @@ export function createTargetReadinessRepo(tx: Tx) {
         })
         .from(targetReadinessEvents)
         .where(and(eq(targetReadinessEvents.targetId, targetId), eq(targetReadinessEvents.day, day)))
-        .orderBy(asc(targetReadinessEvents.createdAt), asc(targetReadinessEvents.id));
+        .orderBy(asc(targetReadinessEvents.createdAt), asc(targetReadinessEvents.position), asc(targetReadinessEvents.id));
       const seen = new Set<string>();
       const first: { glossId: string; dimension: Dimension; before: number }[] = [];
       for (const row of rows) {

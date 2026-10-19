@@ -39,6 +39,7 @@ CREATE TABLE "target_readiness_events" (
 	"before" real NOT NULL,
 	"after" real NOT NULL,
 	"why" text NOT NULL,
+	"position" integer NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "target_readiness_events_dimension_known" CHECK ("target_readiness_events"."dimension" in ('written_productive', 'spelling', 'spoken_productive')),
 	CONSTRAINT "target_readiness_events_why_known" CHECK ("target_readiness_events"."why" in ('first_right', 'first_miss', 'miss', 'bonus'))
