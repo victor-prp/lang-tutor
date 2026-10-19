@@ -567,8 +567,8 @@ test('practice more starts the next words early, and the target screen groups th
   // words to the cap, ruling T9-a), and the default miss rate keeps one more for misses:
   // ceil(1 / 0.8) = 2. The practice-more session below is that second one, and meets it (D7.6).
   expect(budget).toBe(2);
-  // Later words are still to start, which one more session would raise a lot: no sheet (spec D9).
-  expect(before.practice_more_little).toBe(false);
+  // Today reads done: a homework asks before practice more (phase 65b D1).
+  expect(before.practice_more_little).toBe(true);
   const more = await readyPathSession(page.request, enrollmentId, target.id);
   // Done for today, the homework is under My words: its dot, not its card, is on show.
   await openApp(page, `home-bar-${target.id}`);
@@ -580,7 +580,10 @@ test('practice more starts the next words early, and the target screen groups th
   await expect.poll(() => homeOrder(page), { message: report() }).toEqual(['main', target.id]);
   await showCard(page, target.id);
   await expectLabel(practice, 'לתרגל עוד');
-  await tapUntil(page, `target-practice-${target.id}`, 'progress-label');
+  // Today is done, so the button asks first (phase 65b D1); "לתרגל בכל זאת" starts the session.
+  await tapUntil(page, `target-practice-${target.id}`, 'practice-more-sheet');
+  await page.getByTestId('practice-more-anyway').click();
+  await expect(page.getByTestId('progress-label'), report()).toBeVisible();
   expect(createsSent(diagnostics), report()).toBeGreaterThan(0);
   expect((await readCurrent(page.request, enrollmentId, target.id)).current?.session_id).toBe(more);
   const asked = await playSessionRight(page, request, EVERY_WORD);
