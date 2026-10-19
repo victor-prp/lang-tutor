@@ -14,8 +14,10 @@ import { applyTargetSession, type TargetAnswer, type TargetSkillRow } from './ta
  */
 
 /** Spec D7.2. A target's budget for one learner day, as recorded (target_budgets): the sessions
- *  promised, the cards the play made, and the sessions of them that are room for misses. */
-export type TargetBudget = { targetId: string; day: string; sessions: number; cards: number; missRoom: number };
+ *  promised in all, the cards the play made, the sessions of them that are room for misses, and
+ *  the path's sessions already completed that day when it was set (`doneBefore`: one started the
+ *  day before and ended on it), which the promise counts as the day's. */
+export type TargetBudget = { targetId: string; day: string; sessions: number; cards: number; missRoom: number; doneBefore: number };
 
 /** Spec D7.1 (my call). A learner with fewer graded answers than MISS_RATE_MIN_ANSWERS on their
  *  last MISS_RATE_DAYS practice days is read at this miss rate. */

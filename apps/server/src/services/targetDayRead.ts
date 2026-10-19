@@ -132,10 +132,12 @@ export async function readTargetPickInput(repos: Repos, enrolled: Enrollment, ta
 }
 
 /**
- * Phase 65 (spec D7.1, D7.2). A target's budget for `today`, as it would be set now: the picker
- * played forward from the day as it stands, with no session in flight (playTodayForward), and
- * whole sessions of room for misses at the enrollment's miss rate over its last MISS_RATE_DAYS
- * practice days (missRateOf). Null when readTargetPickInput reads nothing.
+ * Phase 65 (spec D7.1–D7.3). A target's budget for `today`, as it would be set now: the picker
+ * played forward from the day as it stands, with no session in flight (playTodayForward), whole
+ * sessions of room for misses at the enrollment's miss rate over its last MISS_RATE_DAYS practice
+ * days (missRateOf), and the path's sessions already completed today, which the day's count of
+ * sessions done will hold too (a session started yesterday and ended today). Null when
+ * readTargetPickInput reads nothing.
  */
 export async function readTodayBudget(
   repos: Repos,
@@ -149,6 +151,7 @@ export async function readTodayBudget(
   // The play chooses its own day, mode and (none) in flight.
   const play = playTodayForward({ pick: picked.input, ...picked.read.dayInput });
   const missRate = missRateOf(await repos.session.findRecentAnswers(enrolled.id, today, MISS_RATE_DAYS));
-  const sessions = budgetSessions(play, missRate);
-  return { targetId: target.id, day: today, sessions, cards: play.cards, missRoom: sessions - play.sessions };
+  const promised = budgetSessions(play, missRate);
+  const doneBefore = await repos.session.countCompletedOn(enrolled.id, target.id, today);
+  return { targetId: target.id, day: today, sessions: promised + doneBefore, cards: play.cards, missRoom: promised - play.sessions, doneBefore };
 }

@@ -49,6 +49,7 @@ describe('repos', () => {
       findLatest: notStubbed,
       findAnswersOn: notStubbed,
       findRecentAnswers: notStubbed,
+      countCompletedOn: notStubbed,
       findIntroducedOn: notStubbed,
       // Phase 34 (spec D9).
       resolveRetry: notStubbed,

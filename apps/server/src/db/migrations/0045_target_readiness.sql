@@ -4,6 +4,7 @@ CREATE TABLE "target_budgets" (
 	"sessions" smallint NOT NULL,
 	"cards" smallint NOT NULL,
 	"miss_room" smallint NOT NULL,
+	"done_before" smallint DEFAULT 0 NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "target_budgets_pkey" PRIMARY KEY("target_id","day")
 );

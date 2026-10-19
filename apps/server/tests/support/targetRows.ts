@@ -191,6 +191,7 @@ export function readTargetBudgets(db: Db, targetId: string) {
       sessions: targetBudgets.sessions,
       cards: targetBudgets.cards,
       missRoom: targetBudgets.missRoom,
+      doneBefore: targetBudgets.doneBefore,
       createdAt: targetBudgets.createdAt,
     })
     .from(targetBudgets)

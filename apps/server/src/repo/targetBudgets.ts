@@ -21,6 +21,7 @@ export function createTargetBudgetRepo(tx: Tx) {
           sessions: targetBudgets.sessions,
           cards: targetBudgets.cards,
           missRoom: targetBudgets.missRoom,
+          doneBefore: targetBudgets.doneBefore,
         })
         .from(targetBudgets)
         .where(and(eq(targetBudgets.targetId, targetId), eq(targetBudgets.day, day)));

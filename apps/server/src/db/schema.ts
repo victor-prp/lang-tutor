@@ -1720,10 +1720,12 @@ export const targetReadinessEvents = pgTable(
   ],
 );
 
-// Phase 65 (spec D4, D7). A target's budget for one learner day: sessions, cards and miss room,
-// stored so the day reads alike however often it is read. Written once, by the start of its
-// path's first session of the day (services/sessions.ts startSession), and never rewritten. Not
-// rebuilt by the recompute.
+// Phase 65 (spec D4, D7). A target's budget for one learner day, stored so the day reads alike
+// however often it is read: `sessions` promised in all, made of the picker's play-forward (`cards`
+// its slots), `miss_room` sessions of room for misses, and `done_before`, the path's sessions
+// already completed that day when it was set (one started the day before and ended on it).
+// Written once, by the start of its path's first session of the day (services/sessions.ts
+// startSession), and never rewritten. Not rebuilt by the recompute.
 export const targetBudgets = pgTable(
   'target_budgets',
   {
@@ -1732,6 +1734,7 @@ export const targetBudgets = pgTable(
     sessions: smallint('sessions').notNull(),
     cards: smallint('cards').notNull(),
     missRoom: smallint('miss_room').notNull(),
+    doneBefore: smallint('done_before').notNull().default(0),
     createdAt: timestamp('created_at', tz).notNull().defaultNow(),
   },
   (t) => [

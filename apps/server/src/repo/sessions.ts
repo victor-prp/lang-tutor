@@ -402,6 +402,19 @@ export function createSessionRepo(tx: Tx) {
       return rows.length > 0;
     },
 
+    /** Phase 65 (spec D7.3). How many of `path`'s sessions were completed on `day`: those whose
+     *  practice_day it is, a session started the day before and ended on it among them. */
+    countCompletedOn: async (enrollmentId: string, path: Path, day: string): Promise<number> => {
+      const rows = await tx.execute<{ count: number }>(sql`
+        SELECT count(*)::int AS count
+        FROM sessions s
+        WHERE s.enrollment_id = ${enrollmentId}
+          AND ${onPath(path)}
+          AND s.status = 'completed'
+          AND s.practice_day = ${day}::date`);
+      return rows.rows[0].count;
+    },
+
     /** The enrollment's newest session: whether there has been any, and
      *  (phase 43, spec D6) whether the newest failed. Served by
      *  sessions_enrollment_created_idx. Phase 57 (spec D1): the newest of `path`'s sessions,

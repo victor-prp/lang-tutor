@@ -496,7 +496,7 @@ describe("a target's path (spec D1, D2, D10)", () => {
   const ownState = { id: 's1', userId: 'u1', enrollmentId: E, status: 'ready' as const, source: 'list' as const, targetId: 't_exam' };
 
   /** Today's budget for t_exam, set already. */
-  const SET = { targetId: 't_exam', day: TODAY, sessions: 4, cards: 30, missRoom: 1 };
+  const SET = { targetId: 't_exam', day: TODAY, sessions: 4, cards: 30, missRoom: 1, doneBefore: 0 };
 
   it("starts a target's session and asks for that path's next stock only, under its own key", async () => {
     const { service, jobs } = world(
@@ -532,9 +532,10 @@ describe("a target's path (spec D1, D2, D10)", () => {
     });
     const right = { glossId: 'g_a', sessionId: 's_old', targetId: null, type: 'typed_translation' as const, verdict: 'exact' as const };
 
-    function budgetWorld(found: typeof SET | undefined, recent: Awaited<ReturnType<SessionRepo['findRecentAnswers']>> = []) {
+    function budgetWorld(found: typeof SET | undefined, recent: Awaited<ReturnType<SessionRepo['findRecentAnswers']>> = [], done = 0) {
       const inserted: unknown[] = [];
       const asked: unknown[][] = [];
+      const counted: unknown[][] = [];
       let enqueuedAtInsert: number | null = null;
       const made = world(
         {
@@ -546,6 +547,10 @@ describe("a target's path (spec D1, D2, D10)", () => {
           findRecentAnswers: async (...args) => {
             asked.push(args);
             return recent;
+          },
+          countCompletedOn: async (...args) => {
+            counted.push(args);
+            return done;
           },
         },
         {
@@ -563,18 +568,23 @@ describe("a target's path (spec D1, D2, D10)", () => {
           }),
         },
       );
-      return { ...made, inserted, asked, enqueuedAtInsert: () => enqueuedAtInsert };
+      return { ...made, inserted, asked, counted, enqueuedAtInsert: () => enqueuedAtInsert };
     }
 
     it.each([
-      ['no recent answer: the default miss rate, one session of room', [], 3, 1],
-      ['twenty right answers: no miss, no room', Array.from({ length: 20 }, () => right), 2, 0],
-    ])('is set at the first session, from the picker played forward: %s', async (_, recent, sessions, missRoom) => {
-      const { service, inserted, asked, enqueuedAtInsert, jobs } = budgetWorld(undefined, recent);
+      ['no recent answer: the default miss rate, one session of room', [], 0, 3, 1],
+      ['twenty right answers: no miss, no room', Array.from({ length: 20 }, () => right), 0, 2, 0],
+      // Coordinator's ruling on Review Focus 4: a session started yesterday and ended today is one
+      // of today's sessions done, so the promise counts it too.
+      ['a session of the path already completed today, started yesterday', [], 1, 4, 1],
+    ])('is set at the first session, from the picker played forward: %s', async (_, recent, doneBefore, sessions, missRoom) => {
+      const { service, inserted, asked, counted, enqueuedAtInsert, jobs } = budgetWorld(undefined, recent, doneBefore);
       await service.startSession('u1', 's1', NO_DEVICES);
-      expect(inserted).toEqual([{ targetId: 't_exam', day: TODAY, sessions, cards: 2, missRoom }]);
-      // The miss rate reads the enrollment's last three practice days, up to today.
+      expect(inserted).toEqual([{ targetId: 't_exam', day: TODAY, sessions, cards: 2, missRoom, doneBefore }]);
+      // The miss rate reads the enrollment's last three practice days, up to today; the sessions
+      // done, the path's completed today.
       expect(asked).toEqual([[E, TODAY, 3]]);
+      expect(counted).toEqual([[E, 't_exam', TODAY]]);
       // Written before the next stock is asked for.
       expect(enqueuedAtInsert()).toBe(0);
       expect(jobs.enqueued).toHaveLength(1);
