@@ -50,13 +50,13 @@ export type WordDay = {
   state: 'owed' | 'done' | 'extra' | 'later';
   /** In today's quota and not met yet: its first card meets it. */
   toStart: boolean;
-  /** The counted skills its cards still ask today, the first asked first: `open`'s first `cardsLeft`. */
+  /** The practised skills its cards still ask today, the first asked first: `open`'s first `cardsLeft`. */
   owed: Dimension[];
-  /** Its counted skills not asked today, in the order its next card picks from (spec D2). */
+  /** Its practised skills not asked today, in the order its next card picks from (spec D2). */
   open: Dimension[];
   cardsLeft: number;
-  /** Its counted skills and their chances at the start of today, in writing, spelling, speaking order. */
-  counted: { dimension: Dimension; chance: number }[];
+  /** Its practised skills and their chances at the start of today, in writing, spelling, speaking order. */
+  practised: { dimension: Dimension; chance: number }[];
   /** Its readiness at the start of today, in percent. */
   readinessPct: number;
   /** A `later` word: the days until the quota first covers it; else null. */
@@ -77,7 +77,13 @@ export type TargetDay = {
   words: WordDay[];
 };
 
-/** Spec D2. The counted skill a card of `type` asks: what a typed or tiled answer writes, a
+/** Phase 53 D3 (Victor: the kind sets how strict a target is, never which skills are practised),
+ *  phase 67 (spec D2). The skills a target word's cards ask, whatever its kind: writing, spelling
+ *  and speaking among its live ones, whose cards test the receptive skills too. Its readiness, and
+ *  so whether it is below 90, counts only its kind's (phase 65). */
+export const practisedSkills = (live: readonly Dimension[]): Dimension[] => countedSkills('homework', live);
+
+/** Spec D2. The practised skill a card of `type` asks: what a typed or tiled answer writes, a
  *  dictation spells, a say translation says (also when answered by typing). Null for a card that
  *  asks none (reading a word is not what the check asks). */
 export function servedSkill(type: QuestionType): Dimension | null {
@@ -143,12 +149,13 @@ export function targetDay(input: TargetDayInput): TargetDay {
   let below = false;
   const chances: number[] = [];
   const out: WordDay[] = ordered.map((word) => {
-    const counted = countedSkills(input.kind, word.live).map((dimension) => ({
+    const practised = practisedSkills(word.live).map((dimension) => ({
       dimension,
       chance: startOf.get(`${word.glossId}|${dimension}`)?.chance ?? 0,
       movedOn: startOf.get(`${word.glossId}|${dimension}`)?.movedOn ?? null,
     }));
-    const chance = wordChance(counted.map((skill) => skill.chance));
+    const counted = new Set(countedSkills(input.kind, word.live));
+    const chance = wordChance(practised.filter((skill) => counted.has(skill.dimension)).map((skill) => skill.chance));
     const pct = Math.floor(100 * chance);
     const ready = pct >= READINESS_WORD_READY;
     chances.push(chance);
@@ -156,16 +163,16 @@ export function targetDay(input: TargetDayInput): TargetDay {
     else below = true;
 
     const asked = askedOf.get(word.glossId) ?? new Set<Dimension>();
-    const open = counted
+    const open = practised
       .filter((skill) => !asked.has(skill.dimension))
       .sort(
         (a, b) =>
           a.chance - b.chance ||
           (a.movedOn ?? '').localeCompare(b.movedOn ?? '') ||
-          counted.indexOf(a) - counted.indexOf(b),
+          practised.indexOf(a) - practised.indexOf(b),
       )
       .map((skill) => skill.dimension);
-    const base = { glossId: word.glossId, open, counted: counted.map(({ dimension, chance: c }) => ({ dimension, chance: c })), readinessPct: pct };
+    const base = { glossId: word.glossId, open, practised: practised.map(({ dimension, chance: c }) => ({ dimension, chance: c })), readinessPct: pct };
 
     const isPlanned = (word.startedOn !== null && word.startedOn < today) || inQuota.has(word.glossId);
     if (!isPlanned) {
@@ -176,9 +183,9 @@ export function targetDay(input: TargetDayInput): TargetDay {
       return { ...base, state: 'later', toStart: false, owed: [], cardsLeft: 0, startsIn: startsIn.get(word.glossId) ?? null };
     }
     planned += 1;
-    const need = daysLeft <= 0 ? 0 : eve ? (ready ? 1 : counted.length) : ready ? 0 : Math.min(2, counted.length);
-    const countedAsked = counted.filter((skill) => asked.has(skill.dimension)).length;
-    const cardsLeft = Math.min(open.length, Math.max(0, need - countedAsked));
+    const need = daysLeft <= 0 ? 0 : eve ? (ready ? 1 : practised.length) : ready ? 0 : Math.min(2, practised.length);
+    const askedSkills = practised.filter((skill) => asked.has(skill.dimension)).length;
+    const cardsLeft = Math.min(open.length, Math.max(0, need - askedSkills));
     const toStart = word.startedOn === null && cardsLeft > 0;
     if (cardsLeft === 0) done += 1;
     return { ...base, state: cardsLeft > 0 ? 'owed' : 'done', toStart, owed: open.slice(0, cardsLeft), cardsLeft, startsIn: null };

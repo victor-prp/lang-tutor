@@ -39,7 +39,7 @@ function wordOf(spec: WordSpec): WordDay {
   const state = spec.state ?? 'owed';
   const cardsLeft = state === 'owed' ? (spec.cardsLeft ?? 2) : 0;
   const readinessPct = Math.floor(100 * counted.reduce((product, skill) => product * skill.chance, 1));
-  return { glossId: spec.id, state, toStart: spec.toStart ?? false, owed: open.slice(0, cardsLeft), open, cardsLeft, counted, readinessPct, startsIn: null };
+  return { glossId: spec.id, state, toStart: spec.toStart ?? false, owed: open.slice(0, cardsLeft), open, cardsLeft, practised: counted, readinessPct, startsIn: null };
 }
 
 function dayOf(specs: WordSpec[], state: TargetDay['state'] = 'owed'): TargetDay {

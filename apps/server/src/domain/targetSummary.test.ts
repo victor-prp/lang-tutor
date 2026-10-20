@@ -270,8 +270,10 @@ describe('skillStarts (phase 67, spec D1)', () => {
     ]);
   });
 
-  it('counts only the skills the kind counts among the live ones: an exam word, writing and spelling', () => {
+  it('reads every practised skill among the live ones, whatever the kind: an exam word, writing, spelling and speaking (phase 53 D3)', () => {
     const starts = skillStarts({ kind: 'exam', dueOn: DUE, words: [{ glossId: 'g1', live: HOMEWORK_LIVE }], rows: [], memory: [], firstToday: [] });
-    expect(starts.map((start) => start.dimension)).toEqual(['written_productive', 'spelling']);
+    expect(starts.map((start) => start.dimension)).toEqual(['written_productive', 'spelling', 'spoken_productive']);
+    const silent = skillStarts({ kind: 'exam', dueOn: DUE, words: [{ glossId: 'g1', live: SILENT }], rows: [], memory: [], firstToday: [] });
+    expect(silent.map((start) => start.dimension)).toEqual(['written_productive', 'spelling']);
   });
 });

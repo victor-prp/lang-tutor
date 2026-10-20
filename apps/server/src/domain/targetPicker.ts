@@ -102,7 +102,7 @@ const PICKS_PER_WORD = 2;
  *  play-forward (phase 65, spec D7.1) answers this one. */
 export const cardOf = (dimension: Dimension, rung: 1 | 2): QuestionType => RUNGS[dimension][rung - 1][0];
 
-/** Phase 67 (spec D2). The rung a counted skill is asked at: writing recalled (translate, gap or
+/** Phase 67 (spec D2). The rung a practised skill is asked at: writing recalled (translate, gap or
  *  sentence), spelling as a dictation (typed when the device cannot listen, planCards' fallback),
  *  speaking said. */
 const rungOf = (dimension: Dimension): 1 | 2 => (dimension === 'spelling' ? 1 : 2);
@@ -117,7 +117,7 @@ type Word = {
   toStart: boolean;
   inFlight: boolean;
   readinessPct: number;
-  /** Its counted skills, the weakest at the start of today first. */
+  /** Its practised skills, the weakest at the start of today first. */
   weakest: Dimension[];
   /** The skills its cards still ask today, with the in-flight credit, the first asked first. */
   owed: Dimension[];
@@ -139,7 +139,7 @@ const byId = (a: Word, b: Word) => (a.glossId < b.glossId ? -1 : a.glossId > b.g
 export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
   const { day, mode } = input;
 
-  // Spec D2. The session in flight's cards count as asked today: per word, the counted skills
+  // Spec D2. The session in flight's cards count as asked today: per word, the practised skills
   // they ask. A word in flight is not met again.
   const flown = new Map<string, Set<Dimension>>();
   for (const card of input.inFlight) {
@@ -151,11 +151,11 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
 
   const words: Word[] = day.words.map((word, index) => {
     const asked = flown.get(word.glossId);
-    const counted = new Set(word.counted.map((skill) => skill.dimension));
-    const credited = [...(asked ?? [])].filter((skill) => counted.has(skill) && word.open.includes(skill)).length;
+    const practised = new Set(word.practised.map((skill) => skill.dimension));
+    const credited = [...(asked ?? [])].filter((skill) => practised.has(skill) && word.open.includes(skill)).length;
     const open = word.open.filter((skill) => !asked?.has(skill));
-    const weakest = [...word.counted]
-      .sort((a, b) => a.chance - b.chance || word.counted.indexOf(a) - word.counted.indexOf(b))
+    const weakest = [...word.practised]
+      .sort((a, b) => a.chance - b.chance || word.practised.indexOf(a) - word.practised.indexOf(b))
       .map((skill) => skill.dimension);
     const key = input.keys.get(word.glossId);
     return {
@@ -243,7 +243,7 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
   };
 
   /** Spec D6 (phase 57 D7 step 3, ruling T3-b, read from readiness). One card per met word not
-   *  yet asked this session, on its weakest counted skill: the lowest readiness first, a word
+   *  yet asked this session, on its weakest practised skill: the lowest readiness first, a word
    *  the session in flight asks last, then by gloss id. A word met early today is asked too, but
    *  not while the session in flight is meeting it. */
   const hardest = (pool: readonly Word[]) => {

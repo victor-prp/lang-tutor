@@ -87,14 +87,22 @@ describe('targetDay: the cards a day owes (spec D1, D2)', () => {
     expect(only(d, 0)).toMatchObject({ cardsLeft: 3, owed: [W, S, SAY] });
   });
 
-  it('asks two on the eve for an exam, which counts writing and spelling', () => {
-    const d = day(5, 4, { words: met, starts: starts([id(0)], 0.5, [W, S]) }, 'exam');
-    expect(only(d, 0)).toMatchObject({ cardsLeft: 2, owed: [W, S] });
+  it('asks an exam word every practised skill on the eve too: the kind sets how strict, never which skills are practised (phase 53 D3)', () => {
+    const d = day(5, 4, { words: met, starts: starts([id(0)], 0.5) }, 'exam');
+    expect(only(d, 0)).toMatchObject({ cardsLeft: 3, owed: [W, S, SAY] });
+  });
+
+  it("reads an exam word's readiness on writing and spelling alone, so a weak speaking skill does not hold it below 90", () => {
+    const d = day(5, 2, {
+      words: met,
+      starts: [...starts([id(0)], 0.97, [W, S]), { glossId: id(0), dimension: SAY, chance: 0.2, movedOn: null }],
+    }, 'exam');
+    expect(only(d, 0)).toMatchObject({ readinessPct: 94, state: 'done', cardsLeft: 0, open: [SAY, W, S] });
   });
 
   it('asks two on the eve for a homework word that cannot be said (Review Focus 1)', () => {
     const d = day(5, 4, { words: words(1, () => ({ startedOn: D0, live: SILENT })), starts: starts([id(0)], 0.5, [W, S]) });
-    expect(only(d, 0)).toMatchObject({ cardsLeft: 2, owed: [W, S], counted: [{ dimension: W, chance: 0.5 }, { dimension: S, chance: 0.5 }] });
+    expect(only(d, 0)).toMatchObject({ cardsLeft: 2, owed: [W, S], practised: [{ dimension: W, chance: 0.5 }, { dimension: S, chance: 0.5 }] });
   });
 
   it('checks a ready word once on the eve, on its weakest skill', () => {
@@ -102,6 +110,18 @@ describe('targetDay: the cards a day owes (spec D1, D2)', () => {
       words: met,
       starts: [...starts([id(0)], 0.99, [W, S]), { glossId: id(0), dimension: SAY, chance: 0.95, movedOn: null }],
     });
+    expect(only(d, 0)).toMatchObject({ state: 'owed', cardsLeft: 1, owed: [SAY] });
+  });
+
+  it("checks a ready exam word on the eve on its weakest practised skill, speaking too (phase 53 D3)", () => {
+    const d = day(5, 4, {
+      words: met,
+      starts: [
+        { glossId: id(0), dimension: W, chance: 0.99, movedOn: null },
+        { glossId: id(0), dimension: S, chance: 0.97, movedOn: null },
+        { glossId: id(0), dimension: SAY, chance: 0.3, movedOn: null },
+      ],
+    }, 'exam');
     expect(only(d, 0)).toMatchObject({ state: 'owed', cardsLeft: 1, owed: [SAY] });
   });
 
