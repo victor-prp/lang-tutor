@@ -218,29 +218,37 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       await expect(page.getByTestId('typed-input')).toHaveValue(STUB_GAP);
       await expect(page.getByTestId('feedback-wrong')).not.toBeVisible();
       await expectJudge(request, 'right');
-      // Phase 66 (spec D2, D3): asked as soon as the answer is judged, shown on a tap.
+      // Phase 66b (spec D1, D2): the sentence is checked with the word, in the one
+      // request, and the card says both: the word right, the sentence to fix.
       await expectExplain(request, {
         corrected: 'Она прочитала эту книгу вчера.',
-        mistakes: [{ wrong: '', right: '.', why: 'חסרה נקודה בסוף המשפט' }],
+        mistakes: [{ wrong: 'эта', right: 'эту', why: 'אחרי הפועל: יחסת מושא' }],
       });
-      const explained = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/explain'));
-      await answerTyped(page, 'Она прочитала эту книгу вчера');
+      const explainCalls: string[] = [];
+      page.on('request', (req) => {
+        if (req.url().endsWith('/explain')) explainCalls.push(req.url());
+      });
+      const judged = page.waitForResponse((res) => res.request().method() === 'POST' && res.url().endsWith('/judged-answer'));
+      await answerTyped(page, 'Она прочитала эта книгу вчера');
+      expect(await (await judged).json()).toMatchObject({ verdict: 'exact', explanation: { corrected: 'Она прочитала эту книгу вчера.' } });
       await expect(page.getByTestId('word-only')).not.toBeVisible();
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
-      await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
+      await expect(page.getByTestId('feedback-title')).toHaveText('המילה נכונה');
+      await expect(page.getByTestId('sentence-line')).toHaveText('המשפט צריך תיקון');
+      await expect(page.getByTestId('typed-box')).toHaveCSS('border-top-color', 'rgb(247, 144, 9)');
+      await expect(page.getByTestId('sentence-corrected')).toHaveText('✓ Она прочитала эту книгу вчера.');
       await expect(page.getByText('תרגום לדוגמה:')).toBeVisible();
       expect(stripIsolates(await page.getByTestId('translation-reference').textContent())).toBe(STUB_SENTENCE);
-      // The request goes out before any tap; the panel opens only on one.
-      expect((await explained).postDataJSON()).toMatchObject({ question_id: expect.any(String) });
+      // The reasons open only on a tap, and close on another.
       await expect(page.getByTestId('explain-panel')).toHaveCount(0);
       await page.getByTestId('explain-button').click();
-      await expect(page.getByTestId('explain-corrected')).toHaveText('Она прочитала эту книгу вчера.');
       await expect(page.getByTestId('explain-mistake')).toHaveCount(1);
-      await expect(page.getByTestId('explain-mistake')).toContainText('חסרה נקודה בסוף המשפט');
-      // A second tap closes it; nothing about the grade changed.
+      await expect(page.getByTestId('explain-mistake')).toContainText('אחרי הפועל: יחסת מושא');
       await page.getByTestId('explain-button').click();
       await expect(page.getByTestId('explain-panel')).toHaveCount(0);
+      // Nothing about the grade changed, and the card never asked /explain itself.
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
+      expect(explainCalls).toEqual([]);
       await page.getByTestId('continue-button').click();
     } else {
       await pass(page, card);

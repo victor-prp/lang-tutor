@@ -93,8 +93,9 @@ async function expectMarked(
  *   expectCheck's answer keeps every card as the batch stubs made it.
  *
  * - **explain** (phase 66, spec D2): not a preparation call, but every translation card
- *   answered with a sentence of its own asks it as soon as it is judged. No mistakes,
- *   so a spec that never looks at the הסבר panel sends no call into the generation stub.
+ *   answered with a sentence of its own asks it beside its judge (phase 66b, spec D1).
+ *   No mistakes, so a spec that never looks at the sentence's line sees "המשפט נכון",
+ *   and no call reaches the generation stub.
  *
  * Registered by clearGemini, so every spec has them however it clears.
  */
