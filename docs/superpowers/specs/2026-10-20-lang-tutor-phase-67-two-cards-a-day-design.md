@@ -1,0 +1,179 @@
+# Phase 67 — Two cards a day: readiness steers a target's practice
+
+- **Status:** Scoped and designed with Victor on 2026-10-20 in chat. He approved the direction ("yes"
+  to the simulation's rule, "I would split" for new words) and then said "Go till PR" (CLAUDE.md,
+  *Continue till PR*): the questions still open are answered below as **(my call)**.
+- **Date:** 2026-10-20
+- **Source:**
+  - The one-pager: `drafts/2026-10-20-target-prep-one-pager.md` (main checkout, gitignored).
+  - The evidence: `drafts/2026-10-20-target-prep-evidence/` (main checkout): a read-only replay of
+    lane 0's budget for homework `fe5861d3` on 2026-10-20 (22 sessions offered at 2 days left and
+    84% readiness), each word's readiness beside the meter, and a simulation of the rules on the same
+    15 words (`sim-rules.mts`, 400 runs a rule, a learner who answers with the memory model's chance).
+- **Builds on:** phase 53 (targets), 55 (ladders), 57 (paths, the plan, the target picker, practice
+  more), 60 (new meanings), 65 (readiness as a grade, today's budget), 65b (past the budget); ADR
+  0001, 0013, 0014.
+- **Replaces:** phase 57 D5–D7 as what steers a target's sessions (the cap's climb, the next-day
+  check, the plan's quota by practice days, the picker's below-cap work and its three speaking cards a
+  session), and phase 65 D7.1's play of that picker with its miss stretch.
+- **Touches:** the server's `domain/` (targetDay, targetPicker, targetBudget, targetSummary),
+  `services/targetDayRead.ts`, the target view, the day simulation and the target tests; the app's
+  word pill (one string); e2e.
+
+Lines marked **(Victor)** are his. **(my call)** are Claude's, made in the open, not yet confirmed.
+
+---
+
+## Goal
+
+At 2 days left and 84% readiness, Victor's 15-word homework asked for 22 sessions: "way too much".
+The sessions followed a practice meter climbing to a cap that rises toward the date, which knows how
+much was asked, not what is remembered: 74 of the 75 meter values sat at the same 5. Readiness (phase
+65) already knows: its words ran from 68 to 95. What matters **(Victor)**: "having as low sessions as
+possible so the learner feels it's easy, quality: the learner remembers the words indeed, variety: the
+sessions are not boring." A first design with stages felt "right but too complicated".
+
+**Done means:**
+
+1. Victor's manual test. **(Victor)**
+2. Unit tests prove it. **(Victor)** The day simulation plays a 5-day homework, a 2-day one and one
+   due tomorrow (15 words each) under the new rule, and gates each day's sessions, the session count
+   never growing during a day, and FSRS on the date.
+3. The evidence's simulation: 16 sessions instead of 52 for the 5-day homework, 9 instead of 39 for
+   2 days, 6 instead of 38 for tomorrow (meet + cards; the app's ladders take more, D3), memory on the
+   date no lower. (my call: the bar)
+4. `npm test`, `npm run test:all`, `npm run lint:arch` and `npm run e2e` pass.
+
+## Non-goals
+
+- The readiness model (phase 65 D1–D4): how answers move it, the 90 line, the card's look.
+- My words (the main path), sessions in stock (phase 43), the "practice more" sheet (phase 65b).
+- Removing the meter. `target_skills` is still written at session end and rebuilt by the recompute
+  (recorded state, phase 39), but nothing steers by it. Dropping it is a later phase (my call).
+- Long targets beyond what D3 does: a בוחן in 20 days with 40 words is not tuned here.
+
+## Anti-goals
+
+- A day's session count that grows during the day (phase 65 D7, kept).
+- Asking a card that cannot change anything while owed work is left (phase 57 anti-goal 1, kept).
+- Readiness 0% after a first evening of work: a homework word counts writing × spelling × speaking,
+  so a first day that never asks speaking shows nothing (why D2 asks two skills, not one).
+
+---
+
+## Decisions
+
+### D1. One score steers: readiness at the start of the day **(Victor: "use the current scores";
+the simulation's rule)**
+
+A word's day reads its readiness (phase 65's per-target skills: its row, else the main memory, else
+nothing) as it stood **at the start of today**: each counted skill's `before` of its first event
+today, else its chance now (what `readinessStartPct` already reads). It does not move during the day,
+so the day's work is fixed when the day starts. A word is **ready** at `READINESS_WORD_READY` (90).
+
+### D2. Each day's cards **(Victor: "yes"; numbers from the simulation)**
+
+Per word on its plan (D3), the counted skills it has live (`countedSkills`: homework writing,
+spelling, speaking; a בוחן writing and spelling):
+
+| The day | Below 90 at the start of today | Ready |
+|---|---|---|
+| any day before the eve | 2 cards, on 2 different skills | none: it rests |
+| the eve (1 day left) | 1 card on each counted skill | 1 check card |
+
+(At most its counted skills: a word that cannot be said has two.) A card **asks** the counted skill
+its type serves: translate, gap, sentence, letter tiles, choose-the-word → writing; dictation →
+spelling; say translation (also answered by typing) → speaking. A ladder asks writing. Cards answered
+today on the target's path count, right or wrong, and so do the cards of the session in flight, as the
+picker credits them today. A word's next card asks its counted skill not asked today with the lowest
+start chance, then the one whose readiness moved longest ago, then writing, spelling, speaking. Its
+card: writing at its recall rung (translate, gap or sentence, as `planCards` chooses), spelling at
+rung 1 (dictation; typed when the device cannot listen), speaking at rung 2 (say translation).
+
+**A miss adds no card (my call).** The word stays below 90, so it comes back tomorrow, on all its
+skills on the eve. This is what makes the count exact (D5).
+
+On the due date nothing is owed (`due_today`): its session is the last review, one card per word on
+its weakest skill, readiness frozen as phase 65 has it.
+
+### D3. New words: split **(Victor: "I would split (8 words a day is already a lot unless the
+student feels he can and want to learn more)")**
+
+A word is met (started) by its ladder (phase 55), or a known word by a recall card, or a new meaning
+by its new_meaning card (phase 60), as today. Each day's quota of words to meet, in the plan's order
+(added, then gloss): `min(8, ceil(unmet / meeting days left))`, where the meeting days run from today
+to the halfway day (phase 57 D6's `ceil(total / 2)` days left), at least one; on the eve, every word
+still unmet. Words met today count toward it. A word added later joins the unmet ones. Meeting more
+is the learner's choice: "practice more" starts the next words early (phase 57 D7.3, unchanged).
+
+| Homework of 15 words | Met each day |
+|---|---|
+| given 5 days ahead | 5, 5, 5 |
+| 2 days ahead | 8, 7 |
+| due tomorrow | 15 |
+
+The simulation: spreading 15 words over 5 days costs nothing on the date (93% against 94% meeting all
+on day one); over 2 days 8 + 7 costs some (83% against 88%), the price of Victor's 8 a day.
+
+### D4. The day's state and its words
+
+`TargetDay` keeps its shape and states, so the card, home, the target screen, reminders and stock read
+it as before. A word is **owed** when it is in today's quota and not started, or it has cards left
+today; **done** when its cards are answered (a ready word on a day before the eve is done from the
+start); **extra** when practice more started it today beyond the quota; **later** when it waits for
+a later quota (`startsIn`: the days until its quota day). The day is `owed`, `done`, `rest` or
+`due_today` as before. `owed` lists the skills its cards still ask, in D2's order. Phase 57's next-day
+check goes: the second day's two cards are that check. `readinessPct` and `readyCount` read readiness
+at the start of today. `nextPracticeIn`: 1 while any word is below 90 or unmet; else the days to the
+eve, for its check; else none. `capHalves` stays for the meter's write.
+
+### D5. Today's budget: the picker played forward, exactly (my call)
+
+Phase 65's budget stays as it is recorded and shown (set once at the day's first session, never
+raised). Its count is the new picker played forward over the day, every answer right, as now. Because
+a miss adds no card (D2), that play is the day itself: the miss stretch and the learner's miss rate
+go, and `miss_room` is written 0.
+
+### D6. The target picker
+
+The same steps, read from the new day: first the words to meet (two ladders a session at most, as
+`NEW_PER_SESSION`), then two rounds over the words with cards left, the word with the lowest start
+readiness first (each word's first card, then its second, so they sit apart); at most two picks a
+word a session and `SESSION_LENGTH` slots, as now. **No speaking limit on a target session (my call):**
+three a session made 15 say cards take five sessions; `planCards` already keeps one type from
+following itself. Practice more, past the budget and the due date's last review keep their order;
+their "hardest cards" read the start readiness, the lowest counted skill first, in place of the meter.
+
+### D7. The word pill **(Victor: "switch 'ready' to '100%' for consistency"; my call on the number)**
+
+The target screen's word pill shows the word's own percent at every value, green from 90, in place of
+"מוכנה". Not a literal "100%": ready starts at 90, so Grande at 90 would read 100% and the pills would
+no longer average to the card's number. A one-string change if Victor wants the literal 100%.
+
+---
+
+## Testing
+
+- `targetDay.test`: D1–D4 by table: the cards a day owes below and above 90, before and on the eve,
+  with answers today and in flight; the quota for 5, 2 and 1 days, words added later, the eve taking
+  the rest; a word that cannot be said; the states and `nextPracticeIn`.
+- `targetPicker.test`: D6: starts, the two rounds, weakest first, two picks a word, no speaking cap,
+  practice more and the last review by readiness.
+- `targetBudget.test`: the play equals the day's sessions; no miss stretch.
+- The day simulation (`day.test`): the phase 57 measures that read the meter's climb go (the plan at
+  100% on the eve, cap gates, the 2026-10-16 replay's "100% after N sessions"). New: the 5-day, 2-day
+  and due-tomorrow homeworks of 15 words, with the sessions each day, the day's count never growing,
+  and FSRS ready-on-due reported and gated at what this phase measures. `READY_ON_DUE_PASS` is never
+  lowered (phase 57 §7).
+- Services, integration and e2e: updated where they assert the old plan (owed skills, checks, the
+  speaking cap, the miss-stretched budget).
+
+## Left to the builder
+
+- Where the start chances are read (`readTargetDay` now needs the readiness rows, the memory and the
+  first events of today, which the target view already reads).
+- The marks of the new day-simulation scenarios, measured once and written with their date.
+
+## Rulings
+
+(none yet)
