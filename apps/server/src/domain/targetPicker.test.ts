@@ -3,10 +3,14 @@ import { describe, expect, it } from '@jest/globals';
 import { SESSION_LENGTH, type Dimension, type QuestionType } from '@lang-tutor/core/domain';
 
 import type { ChosenPick } from './choose';
-import { LADDER_SLOTS, NEW_PER_SESSION, TARGET_SPEAKING_PER_SESSION } from './chooseConstants';
-import { targetDay, type TargetDay, type WordDay } from './targetDay';
-import { chooseTargetPicks, owedWords, stockServes, stockToCheck, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
-import type { TargetSkillRow } from './targetSkills';
+import { LADDER_SLOTS, NEW_PER_SESSION } from './chooseConstants';
+import { planCards } from './plan';
+import type { TargetDay, WordDay } from './targetDay';
+import { cardOf, chooseTargetPicks, owedWords, stockServes, stockToCheck, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
+
+// Phase 67 (spec D6). The target picker reads each word's cards of the day: the words to meet
+// first, then each owed word's first card, then its second, the word with the lowest readiness
+// first; practice more and the last review by the start chances. Pure: the day is hand-built.
 
 const WR: Dimension = 'written_receptive';
 const WP: Dimension = 'written_productive';
@@ -14,29 +18,34 @@ const SR: Dimension = 'spoken_receptive';
 const SP: Dimension = 'spelling';
 const SK: Dimension = 'spoken_productive';
 const DIMS: Dimension[] = [WR, WP, SR, SP, SK];
+const COUNTED: Dimension[] = [WP, SP, SK];
 
-/** A word of a hand-built day: its halves per live skill (0 when absent), its state, whether it
- *  is to start and its next-day checks. An owed started word owes its skills below the cap. */
+/** A word of a hand-built day: its counted skills' chances (0 when absent), its state, whether it
+ *  is to start and how many cards it has left today (2 for an owed word unless said). Its open
+ *  skills are its counted ones by chance; it owes the first `cardsLeft` of them. */
 type WordSpec = {
   id: string;
-  halves?: Partial<Record<Dimension, number>>;
+  chances?: Partial<Record<Dimension, number>>;
   state?: WordDay['state'];
   toStart?: boolean;
-  checks?: Dimension[];
+  cardsLeft?: number;
   live?: Dimension[];
 };
 
-function dayOf(cap: number, specs: WordSpec[], state: TargetDay['state'] = 'owed'): TargetDay {
-  const words = specs.map((spec): WordDay => {
-    const skills = (spec.live ?? DIMS).map((dimension) => ({ dimension, halves: spec.halves?.[dimension] ?? 0 }));
-    const toStart = spec.toStart ?? false;
-    const wordState = spec.state ?? 'owed';
-    const owed = wordState === 'owed' && !toStart ? skills.filter((s) => s.halves < cap).map((s) => s.dimension) : [];
-    return { glossId: spec.id, state: wordState, toStart, owed, checks: spec.checks ?? [], readinessPct: 0, startsIn: null, skills };
-  });
+function wordOf(spec: WordSpec): WordDay {
+  const live = spec.live ?? DIMS;
+  const counted = COUNTED.filter((d) => live.includes(d)).map((dimension) => ({ dimension, chance: spec.chances?.[dimension] ?? 0 }));
+  const open = [...counted].sort((a, b) => a.chance - b.chance || counted.indexOf(a) - counted.indexOf(b)).map((skill) => skill.dimension);
+  const state = spec.state ?? 'owed';
+  const cardsLeft = state === 'owed' ? (spec.cardsLeft ?? 2) : 0;
+  const readinessPct = Math.floor(100 * counted.reduce((product, skill) => product * skill.chance, 1));
+  return { glossId: spec.id, state, toStart: spec.toStart ?? false, owed: open.slice(0, cardsLeft), open, cardsLeft, counted, readinessPct, startsIn: null };
+}
+
+function dayOf(specs: WordSpec[], state: TargetDay['state'] = 'owed'): TargetDay {
   return {
-    daysLeft: state === 'due_today' ? 0 : 1,
-    capHalves: cap,
+    daysLeft: state === 'due_today' ? 0 : 2,
+    capHalves: 16,
     state,
     planned: 0,
     done: 0,
@@ -44,14 +53,9 @@ function dayOf(cap: number, specs: WordSpec[], state: TargetDay['state'] = 'owed
     nextPracticeIn: null,
     readinessPct: 0,
     readyCount: 0,
-    words,
+    words: specs.map(wordOf),
   };
 }
-
-const at = (halves: number, over: Partial<Record<Dimension, number>> = {}) => ({
-  ...Object.fromEntries(DIMS.map((d) => [d, halves])),
-  ...over,
-});
 
 const base: Omit<TargetPickInput, 'day' | 'mode'> = {
   levels: new Map(),
@@ -61,11 +65,12 @@ const base: Omit<TargetPickInput, 'day' | 'mode'> = {
   inFlight: [],
 };
 
-const pick = (day: TargetDay, over: Partial<TargetPickInput> = {}) =>
-  chooseTargetPicks({ ...base, day, mode: targetMode(day), ...over });
+const pick = (day: TargetDay, over: Partial<TargetPickInput> = {}) => chooseTargetPicks({ ...base, day, mode: targetMode(day), ...over });
 
 const short = (picks: ChosenPick[]) => picks.map((p) => [p.glossId, p.dimension, p.rung]);
 const slotsOf = (picks: ChosenPick[]) => picks.reduce((sum, p) => sum + (p.ladder ? LADDER_SLOTS : 1), 0);
+/** A word whose speaking alone is below the rest. */
+const sayOwed = (id: string): WordSpec => ({ id, chances: { [WP]: 0.99, [SP]: 0.99, [SK]: 0.5 }, cardsLeft: 1 });
 
 describe('targetMode', () => {
   const cases: [TargetDay['state'], TargetMode][] = [
@@ -75,146 +80,69 @@ describe('targetMode', () => {
     ['rest', 'more'],
   ];
   it.each(cases)('a day %s is asked in mode %s', (state, mode) => {
-    expect(targetMode(dayOf(20, [], state))).toBe(mode);
+    expect(targetMode(dayOf([], state))).toBe(mode);
   });
 });
 
-describe('chooseTargetPicks, owed', () => {
-  it('the 2026-10-16 replay asks spelling and speaking, never written receptive', () => {
-    // Six words, due tomorrow, all started today: written skills and listening at the cap,
-    // spelling and speaking below it.
-    const D0 = '2026-10-16';
-    const ids = Array.from({ length: 6 }, (_, i) => `g${i}`);
-    const skills: TargetSkillRow[] = ids.flatMap((glossId) =>
-      DIMS.map((dimension) => ({
-        targetId: 't',
-        glossId,
-        dimension,
-        halves: dimension === SP ? 12 : dimension === SK ? 8 : 20,
-        sessionId: 's',
-        day: D0,
-      })),
-    );
-    const day = targetDay({
-      today: D0,
-      createdOn: D0,
-      dueOn: '2026-10-17',
-      words: ids.map((glossId) => ({ glossId, addedOn: D0, startedOn: D0, live: DIMS })),
-      skills,
-      rightToday: new Set(),
-      answeredToday: true,
-    });
-    expect(day.state).toBe('owed');
-
-    const picks = pick(day);
-    expect(picks.some((p) => p.dimension === WR)).toBe(false);
-    // Speaking is furthest below the cap: the first three words take it, the rest spelling,
-    // then each word its other owed skill while speaking has room.
-    expect(short(picks)).toEqual([
-      ['g0', SK, 2],
-      ['g1', SK, 2],
-      ['g2', SK, 2],
-      ['g3', SP, 2],
-      ['g4', SP, 2],
-      ['g5', SP, 2],
-      ['g0', SP, 2],
-      ['g1', SP, 2],
-      ['g2', SP, 2],
+describe('chooseTargetPicks, owed (spec D6)', () => {
+  it("asks each owed word its first card, then its second, the word with the lowest readiness first", () => {
+    const day = dayOf([
+      { id: 'A', chances: { [WP]: 0.9, [SP]: 0.95, [SK]: 0.5 } },
+      { id: 'B', chances: { [WP]: 0.5, [SP]: 0.6, [SK]: 0.7 } },
     ]);
-    expect(picks.every((p) => p.cls === 'TARGET' && !p.ladder && p.r === 1)).toBe(true);
-  });
-
-  it('a skill at 0 is asked at rung 1, a skill above it at rung 2', () => {
-    const zero = pick(dayOf(20, [{ id: 'g0', halves: at(20, { [WP]: 0 }) }]));
-    expect(short(zero)).toEqual([['g0', WP, 1]]);
-    const some = pick(dayOf(20, [{ id: 'g0', halves: at(20, { [WP]: 4 }) }]));
-    expect(short(some)).toEqual([['g0', WP, 2]]);
-  });
-
-  it('speaking is always rung 2, even at 0', () => {
-    expect(short(pick(dayOf(20, [{ id: 'g0', halves: at(20, { [SK]: 0 }) }])))).toEqual([['g0', SK, 2]]);
-  });
-
-  it('a word takes two picks at most, for different skills, each moving skills the other does not', () => {
-    // All five at 0: the tie goes to the skill whose recall card moves the most owed skills
-    // (typed translation: three), the earlier in ORDER between written productive and
-    // spelling; the second to the skill furthest below that the first card leaves, listening
-    // (dictation moves it and spelling) ahead of speaking by ORDER.
-    const picks = pick(dayOf(20, [{ id: 'g0', halves: at(0) }]));
-    expect(short(picks)).toEqual([
-      ['g0', WP, 1],
-      ['g0', SR, 1],
+    expect(short(pick(day))).toEqual([
+      ['B', WP, 2],
+      ['A', SK, 2],
+      ['B', SP, 1],
+      ['A', WP, 2],
     ]);
   });
 
-  it('a word furthest below the cap is asked first', () => {
-    const picks = pick(
-      dayOf(20, [
-        { id: 'g0', halves: at(20, { [SP]: 16 }) },
-        { id: 'g1', halves: at(20, { [SP]: 4 }) },
-      ]),
-    );
-    expect(picks.map((p) => p.glossId)).toEqual(['g1', 'g0']);
+  it('asks writing at its recall rung, spelling as a dictation and speaking as a say translation', () => {
+    expect(cardOf(WP, 2)).toBe('typed_translation');
+    expect(cardOf(SP, 1)).toBe('dictation');
+    expect(cardOf(SK, 2)).toBe('say_translation');
   });
 
-  it(`four words owing speaking are cut to ${TARGET_SPEAKING_PER_SESSION} speaking picks`, () => {
-    const day = dayOf(
-      20,
-      ['g0', 'g1', 'g2', 'g3'].map((id) => ({ id, halves: at(20, { [SK]: 8 }) })),
-    );
-    const picks = pick(day);
-    expect(picks.filter((p) => p.dimension === SK)).toHaveLength(TARGET_SPEAKING_PER_SESSION);
-    expect(picks.map((p) => p.glossId)).toEqual(['g0', 'g1', 'g2']);
+  it("asks a word two cards a session at most: the eve's third waits for the next session", () => {
+    expect(pick(dayOf([{ id: 'A', cardsLeft: 3 }]))).toHaveLength(2);
   });
 
-  it('speaking past its limit gives way to the next owed skill', () => {
-    const day = dayOf(
-      20,
-      ['g0', 'g1', 'g2', 'g3'].map((id) => ({ id, halves: at(20, { [SK]: 4, [SP]: 12 }) })),
-    );
-    expect(short(pick(day)).slice(0, 4)).toEqual([
-      ['g0', SK, 2],
-      ['g1', SK, 2],
-      ['g2', SK, 2],
-      ['g3', SP, 2],
-    ]);
+  it(`fills ${SESSION_LENGTH} slots at most`, () => {
+    const day = dayOf(Array.from({ length: 8 }, (_, i) => ({ id: `g${i}`, chances: { [WP]: 0.5, [SP]: 0.6, [SK]: 0.7 } })));
+    expect(slotsOf(pick(day))).toBe(SESSION_LENGTH);
   });
 
-  it('owed words to start come before owed skills, as ladders', () => {
-    const picks = pick(
-      dayOf(20, [
-        { id: 'g0', halves: at(20, { [WP]: 8 }) },
-        { id: 'g1', toStart: true },
-      ]),
-    );
+  it('has no speaking limit: fifteen words owing a say card take two sessions', () => {
+    const day = dayOf(Array.from({ length: 15 }, (_, i) => sayOwed(`g${String(i).padStart(2, '0')}`)));
+    const first = pick(day);
+    expect(first.map((p) => p.dimension)).toEqual(Array(SESSION_LENGTH).fill(SK));
+  });
+
+  it('meets owed words to start first, as ladders, then asks the owed words', () => {
+    const picks = pick(dayOf([{ id: 'g0', chances: { [WP]: 0.5, [SP]: 0.6, [SK]: 0.7 }, cardsLeft: 1 }, { id: 'g1', toStart: true }]));
     expect(picks).toEqual([
       { glossId: 'g1', dimension: WR, rung: 1, level: 1, r: null, cls: 'NEW', ladder: true },
       { glossId: 'g0', dimension: WP, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false },
     ]);
   });
 
-  it(`starts ${NEW_PER_SESSION} new words a session at most, and fills the rest`, () => {
-    const day = dayOf(20, [
-      { id: 'g0', toStart: true },
-      { id: 'g1', toStart: true },
-      { id: 'g2', toStart: true },
-      { id: 'g3', halves: at(20, { [WP]: 8 }) },
-      { id: 'g4', halves: at(20, { [WP]: 8 }) },
-      { id: 'g5', halves: at(20, { [WP]: 8 }) },
-    ]);
+  it(`meets ${NEW_PER_SESSION} new words a session at most, gives them no second card, and fills the rest`, () => {
+    const owed = (id: string): WordSpec => ({ id, chances: { [WP]: 0.5, [SP]: 0.6, [SK]: 0.7 }, cardsLeft: 1 });
+    const day = dayOf([{ id: 'g0', toStart: true }, { id: 'g1', toStart: true }, { id: 'g2', toStart: true }, owed('g3'), owed('g4')]);
     const picks = pick(day);
     expect(picks.filter((p) => p.ladder).map((p) => p.glossId)).toEqual(['g0', 'g1']);
     expect(picks.filter((p) => !p.ladder).map((p) => p.glossId)).toEqual(['g3', 'g4']);
     expect(slotsOf(picks)).toBe(SESSION_LENGTH);
   });
 
-  it('a known word starts with a recall card, no ladder', () => {
-    const picks = pick(dayOf(20, [{ id: 'g0', toStart: true }]), { known: new Set(['g0']) });
-    expect(picks).toEqual([{ glossId: 'g0', dimension: WP, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false }]);
+  it("starts a known word with a recall card on its first owed skill, no ladder, and no second card that session", () => {
+    const picks = pick(dayOf([{ id: 'g0', toStart: true, chances: { [WP]: 0.8, [SP]: 0.9, [SK]: 0.3 } }]), { known: new Set(['g0']) });
+    expect(picks).toEqual([{ glossId: 'g0', dimension: SK, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false }]);
   });
 
-  it("a family's new meaning starts with one NEW pick, no ladder, its new_meaning card (phase 60, spec D1)", () => {
-    const day = dayOf(20, [
+  it("starts a family's new meaning with one NEW pick, no ladder, its new_meaning card (phase 60, spec D1)", () => {
+    const day = dayOf([
       { id: 'g0', toStart: true },
       { id: 'g1', toStart: true },
     ]);
@@ -224,47 +152,24 @@ describe('chooseTargetPicks, owed', () => {
       { glossId: 'g1', dimension: WR, rung: 1, level: 1, r: null, cls: 'NEW', ladder: true },
     ]);
     expect(slotsOf(picks)).toBe(1 + LADDER_SLOTS);
-    // Practised (a missed new_meaning leaves an Again row), it is known: a recall card.
-    expect(pick(day, { newMeanings: new Set(['g0']), known: new Set(['g0']) })[0]).toEqual({
-      glossId: 'g0',
-      dimension: WP,
-      rung: 2,
-      level: 1,
-      r: 1,
-      cls: 'TARGET',
-      ladder: false,
-    });
+    // Practised, it is known: a recall card.
+    expect(pick(day, { newMeanings: new Set(['g0']), known: new Set(['g0']) })[0]).toMatchObject({ glossId: 'g0', dimension: WP, rung: 2, cls: 'TARGET', ladder: false });
   });
 
   it(`starts a family's new meaning past the session's ${NEW_PER_SESSION} ladders, and early only while the day has room (phase 60)`, () => {
-    const owed = dayOf(20, [{ id: 'g0', toStart: true }, { id: 'g1', toStart: true }, { id: 'g2', toStart: true }]);
-    const picks = pick(owed, { newMeanings: new Set(['g2']) });
-    expect(picks.map((p) => [p.glossId, p.ladder])).toEqual([
+    const owed = dayOf([{ id: 'g0', toStart: true }, { id: 'g1', toStart: true }, { id: 'g2', toStart: true }]);
+    expect(pick(owed, { newMeanings: new Set(['g2']) }).map((p) => [p.glossId, p.ladder])).toEqual([
       ['g0', true],
       ['g1', true],
       ['g2', false],
     ]);
-    const rest = dayOf(12, [{ id: 'g0', state: 'later' }], 'rest');
+    const rest = dayOf([{ id: 'g0', state: 'later' }], 'rest');
     expect(short(pick(rest, { newMeanings: new Set(['g0']) }))).toEqual([['g0', WR, 1]]);
     expect(pick(rest, { newMeanings: new Set(['g0']), newRoom: 0 })).toEqual([]);
   });
 
-  it('next-day checks come after below-cap work, at rung 2, as few cards as cover them', () => {
-    const picks = pick(
-      dayOf(20, [
-        { id: 'g0', halves: at(20), checks: DIMS },
-        { id: 'g1', halves: at(20, { [WP]: 8 }) },
-      ]),
-    );
-    expect(short(picks)).toEqual([
-      ['g1', WP, 2],
-      ['g0', WP, 2],
-      ['g0', SK, 2],
-    ]);
-  });
-
-  it('a pick carries the main level of its skill, 1 when there is none', () => {
-    const picks = pick(dayOf(20, [{ id: 'g0', halves: at(20, { [SP]: 8 }) }, { id: 'g1', toStart: true }]), {
+  it('carries the main level of its skill, 1 when there is none', () => {
+    const picks = pick(dayOf([{ id: 'g0', chances: { [WP]: 0.9, [SP]: 0.5, [SK]: 0.9 }, cardsLeft: 1 }, { id: 'g1', toStart: true }]), {
       levels: new Map([['g0|spelling', 3]]),
     });
     expect(picks.map((p) => [p.glossId, p.level])).toEqual([
@@ -274,122 +179,94 @@ describe('chooseTargetPicks, owed', () => {
   });
 
   it('asks one gloss per key', () => {
-    const day = dayOf(20, [
-      { id: 'g0', halves: at(20, { [SP]: 8 }) },
-      { id: 'g1', halves: at(20, { [SP]: 8 }) },
-    ]);
-    const picks = pick(day, { keys: new Map([['g0', 'casa'], ['g1', 'casa']]) });
-    expect(picks.map((p) => p.glossId)).toEqual(['g0']);
+    const day = dayOf([{ id: 'g0', cardsLeft: 1 }, { id: 'g1', cardsLeft: 1 }]);
+    expect(pick(day, { keys: new Map([['g0', 'casa'], ['g1', 'casa']]) }).map((p) => p.glossId)).toEqual(['g0']);
   });
 
-  it('with nothing owed the result is empty', () => {
-    const day = dayOf(20, [{ id: 'g0', state: 'done', halves: at(20) }], 'done');
+  it('asks nothing when nothing is owed', () => {
+    const day = dayOf([{ id: 'g0', state: 'done' }], 'done');
     expect(chooseTargetPicks({ ...base, day, mode: 'owed' })).toEqual([]);
+  });
+
+  it('keeps the spelling card a spelling card on a device that cannot listen: planCards falls back to typed (Review Focus 2)', () => {
+    const plan = planCards(
+      [{ form: 'casa', translation: 'בית', tiles: true, speakable: true, clozeGap: true, dimension: SP, rung: 1, level: 1, r: 1, step: false }],
+      { listening: false, speaking: false, target: true },
+    );
+    expect(['typed_translation', 'cloze_typed']).toContain(plan.types[0]);
   });
 });
 
-describe('chooseTargetPicks, in flight', () => {
+describe('chooseTargetPicks, in flight (Review Focus 3)', () => {
   const flight = (glossId: string, ...types: QuestionType[]) => types.map((type) => ({ glossId, type }));
 
-  it("credits the in-flight session's typed translation, so word A's speaking comes next", () => {
-    const day = dayOf(20, [{ id: 'A', halves: at(20, { [WP]: 16, [SP]: 16, [SK]: 16 }) }]);
-    expect(short(pick(day))[0]).toEqual(['A', WP, 2]);
+  it("credits an in-flight typed translation: the word's next card is its other owed skill", () => {
+    const day = dayOf([{ id: 'A', chances: { [WP]: 0.5, [SP]: 0.9, [SK]: 0.6 } }]);
+    expect(short(pick(day))).toEqual([['A', WP, 2], ['A', SK, 2]]);
     expect(short(pick(day, { inFlight: flight('A', 'typed_translation') }))).toEqual([['A', SK, 2]]);
   });
 
-  it('credits one change per skill, the recall points when any card was recall', () => {
-    // Two recognition cards on written productive give +2 once: 12 → 14, still below 16.
-    const day = dayOf(16, [{ id: 'A', halves: at(16, { [WP]: 12 }) }]);
-    const twice = pick(day, { inFlight: flight('A', 'reverse_choice', 'reverse_choice') });
-    expect(short(twice)).toEqual([['A', WP, 2]]);
-    // A recall card among them gives +4, to the cap: written productive is no longer owed.
-    expect(pick(day, { inFlight: flight('A', 'typed_translation', 'reverse_choice') })).toEqual([]);
+  it('counts an in-flight card on an open skill it does not owe toward its two', () => {
+    const day = dayOf([{ id: 'A', chances: { [WP]: 0.5, [SP]: 0.6, [SK]: 0.9 } }]);
+    expect(short(pick(day, { inFlight: flight('A', 'say_translation') }))).toEqual([['A', WP, 2]]);
   });
 
-  it('credits no skill that is not live', () => {
-    // Speaking is not live for A: its say translation credits listening alone, and nothing
-    // is owed. Crediting speaking from 0 would make it owed.
-    const day = dayOf(20, [{ id: 'A', halves: at(20, { [WP]: 18 }), live: [WR, WP, SR, SP] }]);
-    expect(pick(day, { inFlight: flight('A', 'typed_translation', 'say_translation') })).toEqual([]);
+  it('counts two in-flight cards on one skill once', () => {
+    const day = dayOf([{ id: 'A', chances: { [WP]: 0.5, [SP]: 0.6, [SK]: 0.9 } }]);
+    expect(short(pick(day, { inFlight: flight('A', 'typed_translation', 'cloze_typed') }))).toEqual([['A', SP, 1]]);
   });
 
-  it('answers the checks its cards test', () => {
-    const day = dayOf(20, [{ id: 'A', halves: at(20), checks: DIMS }]);
-    expect(short(pick(day, { inFlight: flight('A', 'typed_translation') }))).toEqual([['A', SK, 2]]);
+  it('credits no skill that is not counted: a say card credits nothing for a word that cannot be said', () => {
+    const day = dayOf([{ id: 'A', live: [WR, WP, SR, SP], chances: { [WP]: 0.5, [SP]: 0.6 } }]);
+    expect(short(pick(day, { inFlight: flight('A', 'say_translation') }))).toEqual([['A', WP, 2], ['A', SP, 1]]);
   });
 
-  it('does not start again a word whose ladder is in flight', () => {
-    const day = dayOf(20, [{ id: 'A', toStart: true }, { id: 'B', toStart: true }]);
+  it('does not meet again a word whose ladder is in flight', () => {
+    const day = dayOf([{ id: 'A', toStart: true }, { id: 'B', toStart: true }]);
     const inFlight = flight('A', 'meet', 'letter_tiles', 'multiple_choice', 'reverse_choice', 'typed_translation');
     const picks = pick(day, { inFlight });
     expect(picks.filter((p) => p.ladder).map((p) => p.glossId)).toEqual(['B']);
-    expect(picks.filter((p) => !p.ladder).every((p) => p.glossId === 'A' && p.cls === 'TARGET')).toBe(true);
-    expect(picks.some((p) => p.glossId === 'A')).toBe(true);
+    expect(picks.filter((p) => p.glossId === 'A').every((p) => p.cls === 'TARGET' && p.dimension !== WP)).toBe(true);
   });
 });
 
 describe('chooseTargetPicks, practice more', () => {
-  it('asks extra words below the cap before new ladders, then the hardest cards', () => {
+  it('starts the next later words early, then one card per met word, extra ones too, on its weakest counted skill, the lowest readiness first', () => {
     const day = dayOf(
-      12,
       [
-        { id: 'g0', state: 'done', halves: at(12) },
-        { id: 'g1', state: 'extra', halves: at(12, { [SP]: 4 }) },
+        { id: 'g0', state: 'done', chances: { [WP]: 0.99, [SP]: 0.99, [SK]: 0.95 } },
+        { id: 'g1', state: 'extra', chances: { [WP]: 0.6, [SP]: 0.4, [SK]: 0.7 } },
         { id: 'g2', state: 'later' },
-      ],
-      'done',
-    );
-    expect(pick(day)).toEqual([
-      { glossId: 'g1', dimension: SP, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false },
-      { glossId: 'g2', dimension: WR, rung: 1, level: 1, r: null, cls: 'NEW', ladder: true },
-      { glossId: 'g0', dimension: WP, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false },
-    ]);
-  });
-
-  it('starts a known later word with a recall card', () => {
-    const day = dayOf(12, [{ id: 'g0', state: 'later' }], 'rest');
-    expect(short(pick(day, { known: new Set(['g0']) }))).toEqual([['g0', WP, 2]]);
-  });
-
-  it('gives the hardest cards first to the word with the fewest halves in its hard skills', () => {
-    // The date moved later: values above today's cap stay. g1 is lower in its hard skills.
-    const day = dayOf(
-      8,
-      [
-        { id: 'g0', state: 'done', halves: at(16) },
-        { id: 'g1', state: 'done', halves: at(16, { [SK]: 8, [SP]: 12 }) },
-        { id: 'g2', state: 'done', halves: at(16, { [WR]: 8 }) },
+        { id: 'g3', state: 'done', chances: { [WP]: 0.8, [SP]: 0.9, [SK]: 0.9 } },
       ],
       'done',
     );
     expect(short(pick(day))).toEqual([
-      ['g1', SK, 2],
-      ['g0', WP, 2],
-      ['g2', WP, 2],
+      ['g2', WR, 1],
+      ['g1', SP, 1],
+      ['g3', WP, 2],
+      ['g0', SK, 2],
     ]);
   });
 
-  it('asks a word whose hard card is in flight last', () => {
-    const day = dayOf(
-      8,
-      [
-        { id: 'g0', state: 'done', halves: at(8) },
-        { id: 'g1', state: 'done', halves: at(8) },
-      ],
-      'done',
-    );
-    const picks = pick(day, { inFlight: [{ glossId: 'g0', type: 'typed_translation' }] });
-    expect(picks.map((p) => p.glossId)).toEqual(['g1', 'g0']);
+  it('starts a known later word with a recall card', () => {
+    const day = dayOf([{ id: 'g0', state: 'later' }], 'rest');
+    expect(short(pick(day, { known: new Set(['g0']) }))).toEqual([['g0', WP, 2]]);
+  });
+
+  it('asks a word with a card in flight last', () => {
+    const day = dayOf([{ id: 'g0', state: 'done' }, { id: 'g1', state: 'done' }], 'done');
+    expect(pick(day, { inFlight: [{ glossId: 'g0', type: 'typed_translation' }] }).map((p) => p.glossId)).toEqual(['g1', 'g0']);
   });
 });
 
 // Phase 65b (spec D2). Past the day's budget a session asks the owed work first, then fills with
 // practice more, so a session never ends after one owed card.
 describe('chooseTargetPicks, past the budget', () => {
-  const day = dayOf(12, [
-    { id: 'g0', state: 'owed', halves: at(12, { [WP]: 8 }) },
-    { id: 'g1', state: 'done', halves: at(12) },
-    { id: 'g2', state: 'done', halves: at(12, { [SK]: 4 }) },
+  const day = dayOf([
+    { id: 'g0', chances: { [WP]: 0.5, [SP]: 0.9, [SK]: 0.9 }, cardsLeft: 1 },
+    { id: 'g1', state: 'done', chances: { [WP]: 0.99, [SP]: 0.99, [SK]: 0.99 } },
+    { id: 'g2', state: 'done', chances: { [WP]: 0.99, [SP]: 0.99, [SK]: 0.4 } },
     { id: 'g3', state: 'later' },
   ]);
 
@@ -400,15 +277,11 @@ describe('chooseTargetPicks, past the budget', () => {
   it('asks the owed card first, then the practice more cards, in one session', () => {
     const picks = pick(day, { mode: 'past_budget' });
     expect(short(picks)[0]).toEqual(['g0', WP, 2]);
-    expect(short(picks.slice(1))).toEqual(short(pick({ ...day, words: day.words }, { mode: 'more' })).filter(([id]) => id !== 'g0'));
     expect(picks.map((p) => p.glossId)).toEqual(expect.arrayContaining(['g1', 'g2', 'g3']));
   });
 
   it('stays within a session: owed work and the fill share one slot count', () => {
-    const many = dayOf(
-      12,
-      Array.from({ length: 8 }, (_, i) => ({ id: `g${i}`, state: i < 4 ? ('owed' as const) : ('done' as const), halves: at(12, i < 4 ? { [WP]: 4, [SP]: 4 } : {}) })),
-    );
+    const many = dayOf(Array.from({ length: 8 }, (_, i) => ({ id: `g${i}`, state: i < 4 ? ('owed' as const) : ('done' as const), chances: { [WP]: 0.5, [SP]: 0.6, [SK]: 0.9 } })));
     const owedOnly = pick(many);
     const picks = pick(many, { mode: 'past_budget' });
     expect(slotsOf(picks)).toBeLessThanOrEqual(SESSION_LENGTH);
@@ -417,7 +290,7 @@ describe('chooseTargetPicks, past the budget', () => {
   });
 
   it('asks as practice more when nothing is owed', () => {
-    const done = dayOf(12, [{ id: 'g1', state: 'done', halves: at(12) }, { id: 'g3', state: 'later' }], 'done');
+    const done = dayOf([{ id: 'g1', state: 'done' }, { id: 'g3', state: 'later' }], 'done');
     expect(pick(done, { mode: 'past_budget' })).toEqual(pick(done, { mode: 'more' }));
   });
 
@@ -430,15 +303,7 @@ describe('chooseTargetPicks, past the budget', () => {
 // Ruling T3-n (spec D8).
 describe("chooseTargetPicks, the day's room for new words", () => {
   it('starts early only as many new words as the day has room for, and known ones whatever it says', () => {
-    const day = dayOf(
-      12,
-      [
-        { id: 'g0', state: 'later' },
-        { id: 'g1', state: 'later' },
-        { id: 'g2', state: 'later' },
-      ],
-      'rest',
-    );
+    const day = dayOf([{ id: 'g0', state: 'later' }, { id: 'g1', state: 'later' }, { id: 'g2', state: 'later' }], 'rest');
     expect(pick(day).filter((p) => p.ladder).map((p) => p.glossId)).toEqual(['g0', 'g1']);
     expect(pick(day, { newRoom: 1 }).filter((p) => p.ladder).map((p) => p.glossId)).toEqual(['g0']);
     expect(pick(day, { newRoom: 0 }).filter((p) => p.ladder)).toEqual([]);
@@ -446,32 +311,28 @@ describe("chooseTargetPicks, the day's room for new words", () => {
   });
 
   it('never holds an owed start back', () => {
-    const day = dayOf(4, [
-      { id: 'g0', toStart: true },
-      { id: 'g1', toStart: true },
-    ]);
+    const day = dayOf([{ id: 'g0', toStart: true }, { id: 'g1', toStart: true }]);
     expect(pick(day, { newRoom: 0 }).filter((p) => p.ladder).map((p) => p.glossId)).toEqual(['g0', 'g1']);
   });
 });
 
 describe('chooseTargetPicks, last review', () => {
-  it('asks a skill at 16 before the hardest cards', () => {
+  it('asks one card per word on the date, its weakest counted skill, the lowest readiness first', () => {
     const day = dayOf(
-      20,
       [
-        { id: 'g0', state: 'done', halves: at(20) },
-        { id: 'g1', halves: at(20, { [SR]: 16 }) },
+        { id: 'g0', state: 'done', chances: { [WP]: 0.99, [SP]: 0.99, [SK]: 0.95 } },
+        { id: 'g1', state: 'done', chances: { [WP]: 0.7, [SP]: 0.9, [SK]: 0.9 } },
       ],
       'due_today',
     );
     expect(short(pick(day))).toEqual([
-      ['g1', SR, 2],
-      ['g0', WP, 2],
+      ['g1', WP, 2],
+      ['g0', SK, 2],
     ]);
   });
 
-  it('starts a word never started, so the morning can still reach ready', () => {
-    const day = dayOf(20, [{ id: 'g0', toStart: true }], 'due_today');
+  it('meets a word never met, so the morning can still help', () => {
+    const day = dayOf([{ id: 'g0', state: 'later' }], 'due_today');
     expect(pick(day).map((p) => [p.glossId, p.ladder])).toEqual([['g0', true]]);
   });
 });

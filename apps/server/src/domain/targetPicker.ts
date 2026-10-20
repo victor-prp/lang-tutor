@@ -1,25 +1,22 @@
 import {
   MIN_LEVEL,
   SESSION_LENGTH,
-  dimensionsTested,
   normaliseGloss,
   type Dimension,
   type QuestionType,
 } from '@lang-tutor/core/domain';
 
-import { ORDER, type ChosenPick } from './choose';
-import { LADDER_SLOTS, NEW_PER_SESSION, TARGET_POINTS_HALVES, TARGET_SPEAKING_PER_SESSION } from './chooseConstants';
+import type { ChosenPick } from './choose';
+import { LADDER_SLOTS, NEW_PER_SESSION } from './chooseConstants';
 import { RUNGS } from './plan';
-import type { TargetDay, WordDay } from './targetDay';
-import { isRecallCard } from './targetSkills';
+import { servedSkill, type TargetDay, type WordDay } from './targetDay';
 
 /**
- * Phase 57 (spec D7, D10). What a target's own session asks, from its day (Task 2's plan and
- * work today) and nothing else: target skills, never FSRS. While work is owed: the words to
- * start, then the skills below today's cap, the word furthest below first, then the next-day
- * checks, so every card serves owed work (anti-goal 1). Once the day is done, practice more; on
- * the due date, the last review. Pure (ADR 0001): no clock, rng or I/O; every tie falls to a
- * fixed order.
+ * Phase 57 (spec D7, D10), phase 67 (spec D6). What a target's own session asks, from its day
+ * and nothing else: while work is owed, the words to meet, then each owed word's cards of the
+ * day, so every card serves owed work (anti-goal 1). Once the day is done, practice more; on the
+ * due date, the last review. Pure (ADR 0001): no clock, rng or I/O; every tie falls to a fixed
+ * order.
  */
 
 /** Spec D7, D10. `owed` asks only owed work; `more` is practice more on a done or rest day;
@@ -95,21 +92,20 @@ export function stockServes(recorded: StockChoice | undefined, today: StockChoic
   );
 }
 
-const SPEAKING: Dimension = 'spoken_productive';
-
-/** Spec D7. The productive skills the hardest cards ask. */
-const HARD: readonly Dimension[] = ['written_productive', 'spelling', SPEAKING];
-
 /** Spec D7 (my call there). A word takes this many picks a session at most, each for a
  *  different skill. */
 const PICKS_PER_WORD = 2;
 
 /** The card a skill is asked at a rung as the picker reads it: the rung's first type in RUNGS
- *  (typed translation for written productive and spelling at rung 2, dictation for listening,
- *  say translation for speaking). The prepare job may choose another type of the rung; only the
- *  tie-breaks and the skills a pick serves read this one, and (phase 65, spec D7.1) the budget's
- *  play-forward, which answers it. */
+ *  (typed translation for written productive at rung 2, dictation for spelling at rung 1, say
+ *  translation for speaking). The prepare job may choose another type of the rung; the budget's
+ *  play-forward (phase 65, spec D7.1) answers this one. */
 export const cardOf = (dimension: Dimension, rung: 1 | 2): QuestionType => RUNGS[dimension][rung - 1][0];
+
+/** Phase 67 (spec D2). The rung a counted skill is asked at: writing recalled (translate, gap or
+ *  sentence), spelling as a dictation (typed when the device cannot listen, planCards' fallback),
+ *  speaking said. */
+const rungOf = (dimension: Dimension): 1 | 2 => (dimension === 'spelling' ? 1 : 2);
 
 type Word = {
   glossId: string;
@@ -117,67 +113,63 @@ type Word = {
   index: number;
   key: string;
   state: WordDay['state'];
-  /** Owed a start: neither asked by the target before nor in the session in flight. */
+  /** To meet: in today's quota, neither met before nor in the session in flight. */
   toStart: boolean;
   inFlight: boolean;
-  /** Its live skills' values, in half-points, with the in-flight credit. */
-  halves: Map<Dimension, number>;
-  /** Next-day checks no card in flight answers. */
-  checks: Dimension[];
-  /** This session's picks' skills, and the skills their cards move. */
+  readinessPct: number;
+  /** Its counted skills, the weakest at the start of today first. */
+  weakest: Dimension[];
+  /** The skills its cards still ask today, with the in-flight credit, the first asked first. */
+  owed: Dimension[];
+  /** This session's picks' skills. */
   picked: Dimension[];
-  moved: Set<Dimension>;
 };
 
 const byId = (a: Word, b: Word) => (a.glossId < b.glossId ? -1 : a.glossId > b.glossId ? 1 : 0);
 
 /**
- * Spec D7, D10, rulings T3-a and T3-b. A target session's picks, in the order they were chosen:
- * starts, then each word's first below-cap pick, then the second ones (so a word's two cards sit
- * apart), then the checks, then the hardest cards. A pick is `TARGET` with `r: 1`, so the job's
- * card choice reads the rung (a written receptive pick with no R would be multiple choice); a
- * ladder is `NEW` with `r: null`, as chooseWords makes one, and so is a family's new meaning,
- * with no ladder (phase 60), which the caller gives its known meanings. At most SESSION_LENGTH
- * slots, a ladder LADDER_SLOTS of them; a target with fewer picks makes a shorter session.
+ * Phase 57 (spec D7, D10), phase 67 (spec D6). A target session's picks, in the order they were
+ * chosen: the words to meet, then each owed word's first card, then its second (so a word's two
+ * cards sit apart), the word with the lowest readiness at the start of today first. A pick is
+ * `TARGET` with `r: 1`, so the job's card choice reads the rung; a ladder is `NEW` with `r: null`,
+ * as chooseWords makes one, and so is a family's new meaning, with no ladder (phase 60). At most
+ * SESSION_LENGTH slots, a ladder LADDER_SLOTS of them; a target with fewer picks makes a shorter
+ * session. No limit on speaking cards (spec D6): planCards keeps a type from following itself.
  */
 export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
   const { day, mode } = input;
-  const cap = day.capHalves;
 
-  // Spec D4's tally of the session in flight: per word and skill, recall when any recall card
-  // tested it, else recognition. One change per skill per session, as applyTargetSession.
-  const flown = new Map<string, Map<Dimension, boolean>>();
+  // Spec D2. The session in flight's cards count as asked today: per word, the counted skills
+  // they ask. A word in flight is not met again.
+  const flown = new Map<string, Set<Dimension>>();
   for (const card of input.inFlight) {
-    const tested = flown.get(card.glossId) ?? new Map<Dimension, boolean>();
-    for (const dimension of dimensionsTested(card.type)) {
-      tested.set(dimension, tested.get(dimension) === true || isRecallCard(card.type));
-    }
-    flown.set(card.glossId, tested);
+    const asked = flown.get(card.glossId) ?? new Set<Dimension>();
+    const skill = servedSkill(card.type);
+    if (skill !== null) asked.add(skill);
+    flown.set(card.glossId, asked);
   }
 
   const words: Word[] = day.words.map((word, index) => {
-    const tested = flown.get(word.glossId);
-    const halves = new Map(word.skills.map((skill) => [skill.dimension, skill.halves]));
-    for (const [dimension, recall] of tested ?? []) {
-      const before = halves.get(dimension);
-      // A skill not live for the word gets no credit.
-      if (before === undefined) continue;
-      const after = Math.min(before + TARGET_POINTS_HALVES[recall ? 'recall' : 'recognition'], cap);
-      halves.set(dimension, Math.max(before, after));
-    }
+    const asked = flown.get(word.glossId);
+    const counted = new Set(word.counted.map((skill) => skill.dimension));
+    const credited = [...(asked ?? [])].filter((skill) => counted.has(skill) && word.open.includes(skill)).length;
+    const open = word.open.filter((skill) => !asked?.has(skill));
+    const weakest = [...word.counted]
+      .sort((a, b) => a.chance - b.chance || word.counted.indexOf(a) - word.counted.indexOf(b))
+      .map((skill) => skill.dimension);
     const key = input.keys.get(word.glossId);
     return {
       glossId: word.glossId,
       index,
       key: key === undefined ? `\u0000${word.glossId}` : normaliseGloss(key),
       // The session in flight started a word it asks; one it started early is extra.
-      state: tested !== undefined && word.state === 'later' ? 'extra' : word.state,
-      toStart: word.toStart && tested === undefined,
-      inFlight: tested !== undefined,
-      halves,
-      checks: word.checks.filter((dimension) => !tested?.has(dimension)),
+      state: asked !== undefined && word.state === 'later' ? 'extra' : word.state,
+      toStart: word.toStart && asked === undefined,
+      inFlight: asked !== undefined,
+      readinessPct: word.readinessPct,
+      weakest,
+      owed: open.slice(0, Math.max(0, word.cardsLeft - credited)),
       picked: [],
-      moved: new Set(),
     };
   });
 
@@ -186,7 +178,6 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
   const keys = new Map<string, string>();
   let slots = 0;
   let ladders = 0;
-  let spoken = 0;
   let newRoom = input.newRoom ?? Number.POSITIVE_INFINITY;
 
   const levelOf = (glossId: string, dimension: Dimension) => input.levels.get(`${glossId}|${dimension}`) ?? MIN_LEVEL;
@@ -207,99 +198,67 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
     slots += start === 'ladder' ? LADDER_SLOTS : 1;
     keys.set(word.key, word.glossId);
     word.picked.push(dimension);
-    const moves =
-      start === 'ladder' ? word.halves.keys() : dimensionsTested(start === 'meaning' ? 'new_meaning' : cardOf(dimension, rung));
-    for (const moved of moves) word.moved.add(moved);
-    if (start === 'ladder') ladders++;
-    if (dimension === SPEAKING) spoken++;
+    // Spec D2: a ladder asks writing; any other card its own skill.
+    const asked = start === 'ladder' ? 'written_productive' : start === 'meaning' ? null : dimension;
+    if (asked !== null && word.owed.includes(asked)) word.owed = word.owed.filter((skill) => skill !== asked);
+    else if (asked !== null && start === 'ladder') word.owed = word.owed.slice(1);
   };
 
-  /** Spec D7. Of `from`, the skill to ask: the fewest halves (furthest below the cap), then the
-   *  one whose recall card moves the most of `still`, then ORDER. Speaking only while the session
-   *  has room for it; never a skill the word was already asked this session. */
-  const skillOf = (word: Word, from: readonly Dimension[], still: readonly Dimension[]): Dimension | undefined => {
-    const moves = (dimension: Dimension) => dimensionsTested(cardOf(dimension, 2)).filter((d) => still.includes(d)).length;
-    return from
-      .filter((d) => (d !== SPEAKING || spoken < TARGET_SPEAKING_PER_SESSION) && !word.picked.includes(d))
-      .sort((a, b) => word.halves.get(a)! - word.halves.get(b)! || moves(b) - moves(a) || ORDER.indexOf(a) - ORDER.indexOf(b))[0];
-  };
-
-  /** Live skills below the cap that no card of this session moves yet. */
-  const belowCap = (word: Word) => [...word.halves].filter(([d, halves]) => halves < cap && !word.moved.has(d)).map(([d]) => d);
-  const shortfall = (word: Word) => [...word.halves.values()].reduce((sum, halves) => sum + Math.max(0, cap - halves), 0);
-  /** Spec D7: the word furthest below the cap first, then the plan's order. */
-  const furthest = (pool: readonly Word[]) => [...pool].sort((a, b) => shortfall(b) - shortfall(a) || a.index - b.index);
-
-  /** Spec D6, D7 step 1, ruling T3-a. In the plan's order: a new word's ladder, NEW_PER_SESSION
-   *  a session at most; a known word's one recall card on its skill furthest below the cap.
-   *  Phase 60 (spec D1): a family's new meaning, its one new_meaning card, no ladder.
-   *  Ruling T3-n: an early start (`early`) is a new word of the day's only while it has room. */
+  /** Spec D3, D6, ruling T3-a. In the plan's order: a new word's ladder, NEW_PER_SESSION a
+   *  session at most; a known word's recall card on its first owed skill (its weakest when it
+   *  owes none, started early); a family's new meaning, its one new_meaning card (phase 60).
+   *  Ruling T3-n: an early start (`early`) is a new word only while the day has room. */
   const start = (pool: readonly Word[], early: boolean) => {
     for (const word of pool) {
       if (input.known.has(word.glossId)) {
         if (!open(word, 1)) continue;
-        const all = [...word.halves].filter(([, halves]) => halves < cap).map(([d]) => d);
-        const dimension = skillOf(word, all, all);
-        if (dimension) add(word, dimension, 2);
+        const dimension = word.owed[0] ?? word.weakest[0];
+        if (dimension) add(word, dimension, rungOf(dimension));
       } else if (input.newMeanings.has(word.glossId)) {
         if ((early && newRoom <= 0) || !open(word, 1)) continue;
         add(word, 'written_receptive', 1, 'meaning');
         if (early) newRoom -= 1;
       } else if (ladders < NEW_PER_SESSION && (!early || newRoom > 0) && open(word, LADDER_SLOTS)) {
         add(word, 'written_receptive', 1, 'ladder');
+        ladders += 1;
         if (early) newRoom -= 1;
       }
     }
   };
 
-  /** Spec D7 step 2. Started words with skills below the cap, in two rounds: every word's first
-   *  pick before any word's second, which serves a skill the first card does not move. Rung 1
-   *  for a skill at 0, else 2; speaking always 2 (read aloud writes nothing). */
-  const belowCapWork = (pool: readonly Word[]) => {
-    const order = furthest(pool.filter((word) => !word.toStart));
+  /** Spec D6. The owed words met before this session, in two rounds: every word's first card
+   *  before any word's second, the lowest readiness first. A word met this session waits for
+   *  the next for its other cards. */
+  const owedWork = (pool: readonly Word[]) => {
+    const order = pool
+      .filter((word) => !word.toStart && word.picked.length === 0 && word.owed.length > 0)
+      .sort((a, b) => a.readinessPct - b.readinessPct || a.index - b.index);
     for (let round = 0; round < PICKS_PER_WORD; round++) {
       for (const word of order) {
         if (word.picked.length !== round || !open(word, 1)) continue;
-        const owed = belowCap(word);
-        const dimension = skillOf(word, owed, owed);
-        if (dimension) add(word, dimension, dimension === SPEAKING || word.halves.get(dimension)! > 0 ? 2 : 1);
+        const dimension = word.owed[0];
+        if (dimension) add(word, dimension, rungOf(dimension));
       }
     }
   };
 
-  /** Spec D5. The next-day checks, after all below-cap work, at rung 2: while a word has a pick
-   *  left, the check skill whose recall card answers the most checks still open. */
-  const checkWork = (pool: readonly Word[]) => {
-    for (const word of furthest(pool.filter((w) => w.checks.length > 0))) {
-      while (open(word, 1)) {
-        const left = word.checks.filter((d) => !word.moved.has(d));
-        const dimension = skillOf(word, left, left);
-        if (!dimension) break;
-        add(word, dimension, 2);
-      }
-    }
-  };
-
-  /** Spec D7 step 3, ruling T3-b. One rung-2 card per planned word not yet asked this session, in
-   *  its hard skill with the fewest halves: the word with the fewest halves over its hard skills
-   *  first, a word the session in flight asks last, then by gloss id. */
+  /** Spec D6 (phase 57 D7 step 3, ruling T3-b, read from readiness). One card per met word not
+   *  yet asked this session, on its weakest counted skill: the lowest readiness first, a word
+   *  the session in flight asks last, then by gloss id. */
   const hardest = (pool: readonly Word[]) => {
-    const hardHalves = (word: Word) => HARD.reduce((sum, d) => sum + (word.halves.get(d) ?? 0), 0);
     const order = pool
-      .filter((word) => !word.toStart && word.picked.length === 0 && (word.state === 'done' || word.state === 'owed'))
-      .sort((a, b) => Number(a.inFlight) - Number(b.inFlight) || hardHalves(a) - hardHalves(b) || byId(a, b));
+      .filter((word) => !word.toStart && word.picked.length === 0 && (word.state === 'done' || word.state === 'owed' || word.state === 'extra'))
+      .sort((a, b) => Number(a.inFlight) - Number(b.inFlight) || a.readinessPct - b.readinessPct || byId(a, b));
     for (const word of order) {
       if (!open(word, 1)) continue;
-      const hard = HARD.filter((d) => word.halves.has(d));
-      const dimension = skillOf(word, hard, hard);
-      if (dimension) add(word, dimension, 2);
+      const dimension = word.weakest[0];
+      if (dimension) add(word, dimension, rungOf(dimension));
     }
   };
 
-  /** Spec D7 step 3: today's extra words up to the cap, then the next planned words started early
-   *  as extra, then the hardest cards. */
+  /** Spec D6 (phase 57 D7 step 3): the next planned words started early as extra, then the
+   *  hardest cards. */
   const practiceMore = () => {
-    belowCapWork(words.filter((word) => word.state === 'extra'));
     start(
       words.filter((word) => word.state === 'later'),
       true,
@@ -309,17 +268,21 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
 
   if (mode === 'more') {
     practiceMore();
+  } else if (mode === 'last_review') {
+    // Spec D2: the due date owes nothing; its session meets a word never met, then asks every
+    // word one card on its weakest skill.
+    start(
+      words.filter((word) => word.state === 'later'),
+      false,
+    );
+    hardest(words);
   } else {
-    // Spec D7 steps 1–2 and D5's checks; on the due date (D10) the cap is 20, so this asks the
-    // skills below 20, furthest first, and then the hardest cards fill what is left.
     const owed = words.filter((word) => word.state === 'owed');
     start(
       owed.filter((word) => word.toStart),
       false,
     );
-    belowCapWork(owed);
-    checkWork(owed);
-    if (mode === 'last_review') hardest(words);
+    owedWork(owed);
     // Phase 65b (spec D2): past the budget, the rest of the session is practice more.
     if (mode === 'past_budget') practiceMore();
   }

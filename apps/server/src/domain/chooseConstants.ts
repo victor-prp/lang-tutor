@@ -96,6 +96,3 @@ export const TARGET_CAP_DUE_HALVES = 20;
  *  +4, a recognition card +2, an Again costs 4. A starting value, named here to tune. */
 export const TARGET_POINTS_HALVES = { recall: 4, recognition: 2, miss: 4 } as const;
 
-/** Phase 57. Speaking cards in a target-only session; the main path keeps
- *  SPEAKING_PER_SESSION. */
-export const TARGET_SPEAKING_PER_SESSION = 3;
