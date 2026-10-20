@@ -21,7 +21,8 @@ export const EXPLAIN_MARKER = "list the mistakes in the learner's sentence";
 export const MAX_MISTAKES = 6;
 
 /** The explainer's thinking budget, in tokens: measured with the explain eval
- *  group. Nothing waits on the call, so it may think more than the judge. */
+ *  group. Phase 66b (spec D1): the judged answer now waits on this call beside the
+ *  judge's, so more thinking here is a slower grade for every translation. */
 export const EXPLAIN_THINKING = 1024;
 
 export type Explanation = { corrected: string; mistakes: SentenceMistake[] };
@@ -67,4 +68,11 @@ export function explainRuleResult(reference: string, text: string): Explanation 
   const typed = normaliseTyped(text);
   if (typed === '' || typed === normaliseTyped(reference)) return { corrected: text.trim(), mistakes: [] };
   return null;
+}
+
+/** Phase 66b (spec D1, final review M1). Whether a text holds a sentence to
+ *  check: one empty, or of spaces and punctuation alone, holds none, so it is
+ *  never called a right sentence. */
+export function hasSentence(text: string): boolean {
+  return normaliseTyped(text) !== '';
 }

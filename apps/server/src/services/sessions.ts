@@ -76,7 +76,7 @@ import {
 } from '../domain/distractors';
 import { candidateItems, gapCheckItem, gapFaults, pointFaults, rewriteItems, rewriteOthers, type GapFault, type GapJudged } from '../domain/gapRewrite';
 import { familyChanges, isEmptyFamilyWrite } from '../domain/glossFamilyRecord';
-import { buildExplainPrompt, explainRuleResult, parseExplain, type Explanation } from '../domain/explain';
+import { buildExplainPrompt, explainRuleResult, hasSentence, parseExplain, type Explanation } from '../domain/explain';
 import { buildFitJudgePrompt, judgePrompt, parseFitJudge, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import {
   ACCEPT_RENDERING,
@@ -288,8 +288,9 @@ export function createSessionService({
   /** Phase 45 (spec D3). The sentence translation's judge: it thinks before it
    *  answers, which a dropped detail needs, and the meaning judge does not. */
   translationJudge: LlmClient;
-  /** Phase 66 (spec D2). Explains a translation card's answer, on its own client:
-   *  nothing waits on it, so it thinks longer than the judge. */
+  /** Phase 66 (spec D2). Explains a translation card's answer, on its own client,
+   *  thinking longer than the judge. Phase 66b (spec D1): the judged answer waits on
+   *  it beside the judge, so its thinking is on the learner's wait. */
   explainer: LlmClient;
   /** Phase 50 (spec D4). The pronunciation score at which an unheard
    *  transcript is the card's word; its pairs are scored on `judge`. */
@@ -377,8 +378,8 @@ export function createSessionService({
   }
 
   /**
-   * Phase 66b (spec D1). A translation's text checked beside its grade. An empty
-   * text is not checked, and the reference as typed needs no call. It never
+   * Phase 66b (spec D1). A translation's text checked beside its grade. A text
+   * with no sentence in it is not checked, and the reference as typed needs no call. It never
    * rejects: a failed call is null, so the grade is never lost to it. `called`
    * says whether the model found it, which is what gets stored.
    */
@@ -388,7 +389,7 @@ export function createSessionService({
     text: string,
     record: ModelCallRecord,
   ): Promise<{ explanation: Explanation; called: boolean } | null> {
-    if (text.trim() === '') return null;
+    if (!hasSentence(text)) return null;
     const ruled = explainRuleResult(question.sentence, text);
     if (ruled) return { explanation: ruled, called: false };
     try {
@@ -399,23 +400,31 @@ export function createSessionService({
   }
 
   /**
-   * Phase 66b (spec D1). A sentence check once its answer is recorded: dropped
-   * while the card waits for its second try, whose own request checks its text.
-   * What the model found is stored, the first stored standing. That write is
-   * independent of the answer's and idempotent, so it is a transaction of its own
-   * (ADR 0001 R8): the answer is right without it, and `/explain` can still make it.
+   * Phase 66b (spec D1). A sentence check once its answer is recorded: dropped,
+   * without waiting for it, while the card waits for its second try, whose own
+   * request checks its text (final review I1). When an overlapping request
+   * recorded another text first, the check of ours is dropped too, and the
+   * recorded text's is answered as a replay would (final review I2). What the
+   * model found is stored, the first stored standing. That write is independent
+   * of the answer's and idempotent, so it is a transaction of its own (ADR 0001
+   * R8): the answer is right without it, and `/explain` can still make it.
    */
   async function sentenceRecorded(
     sessionId: string,
     position: number,
+    question: SentenceTranslationQuestion,
     answer: AnswerRecord | undefined,
-    text: string,
-    found: { explanation: Explanation; called: boolean } | null,
+    sent: { text: string; retry: boolean },
+    checking: Promise<{ explanation: Explanation; called: boolean } | null>,
   ): Promise<Explanation | null> {
-    if (found === null || !answer || answer.retry_state === 'pending') return null;
-    if (!found.called) return found.explanation;
+    if (!answer || answer.retry_state === 'pending') return null;
+    if ((sent.retry ? answer.retry_answer_string : answer.answer_string) !== sent.text) {
+      return transaction((repos) => recordedSentence(repos, sessionId, position, question, answer));
+    }
+    const found = await checking;
+    if (found === null || !found.called) return found?.explanation ?? null;
     return transaction(async (repos) => {
-      await repos.session.insertExplanation(sessionId, position, { text, ...found.explanation });
+      await repos.session.insertExplanation(sessionId, position, { text: sent.text, ...found.explanation });
       return (await repos.session.findExplanation(sessionId, position)) ?? found.explanation;
     });
   }
@@ -430,7 +439,7 @@ export function createSessionService({
     const stored = await repos.session.findExplanation(sessionId, position);
     if (stored) return stored;
     const text = answer.retry_answer_string ?? answer.answer_string;
-    return text.trim() === '' ? null : explainRuleResult(question.sentence, text);
+    return hasSentence(text) ? explainRuleResult(question.sentence, text) : null;
   }
 
   /**
@@ -1468,7 +1477,10 @@ export function createSessionService({
       const session = await service.submitAnswer(actorUserId, sessionId, input.questionId, answer, { retry, tapped: input.tapped });
       const position = session.answers.findIndex((a) => a.question_id === input.questionId);
       const stored = session.answers[position];
-      const sentence = checking === null ? {} : { explanation: await sentenceRecorded(sessionId, position, stored, text, await checking) };
+      const sentence =
+        checking === null || checked.current.type !== 'sentence_translation'
+          ? {}
+          : { explanation: await sentenceRecorded(sessionId, position, checked.current, stored, { text, retry }, checking) };
       // Phase 56 (spec D3). A helped answer is stored wrong, and the app tells
       // "right, with help" by the judge's own verdict, so that is the one reported.
       if (input.helped) return { verdict, session, ...sentence };

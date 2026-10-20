@@ -352,8 +352,9 @@ export function createServerDeps(io: {
     timeoutMs: io.judgeTimeoutMs,
     thinkingBudget: TRANSLATION_JUDGE_THINKING,
   });
-  // Phase 66 (spec D2). The explainer: the judge's budget, and more thinking, since
-  // nothing waits on it.
+  // Phase 66 (spec D2). The explainer: the judge's timeout, and more thinking. Phase
+  // 66b (spec D1): a translation's grade now waits on it beside the judge, so that
+  // timeout is the grade's cap too.
   const explainer: LlmClient = createGeminiClient({
     fetch: io.fetch,
     baseUrl: io.gemini.baseUrl,

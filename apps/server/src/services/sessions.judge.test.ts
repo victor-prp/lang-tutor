@@ -57,7 +57,8 @@ const record = (questions: Question[] = [MEANING, CHOICE], answers: SessionRecor
 
 function setup(
   judge: ReturnType<typeof createFakeLlmClient>,
-  loaded: SessionRecord = record(),
+  // Phase 66b (final review I2): or each load's record, in turn, for an overlapping request.
+  loaded: SessionRecord | (() => SessionRecord) = record(),
   context: typeof CONTEXT = CONTEXT,
   translationJudge: ReturnType<typeof createFakeLlmClient> = judge,
   // Phase 66b (spec D1). The explainer, and the explanations stored before this answer.
@@ -68,7 +69,7 @@ function setup(
   const resolved: unknown[] = [];
   const logger = createFakeLogger();
   const session = stub<SessionRepo>({
-    loadSession: async () => loaded,
+    loadSession: async () => (typeof loaded === 'function' ? loaded() : loaded),
     findEnrollmentId: async () => 'e1',
     // Phase 43 (spec D2). Started by its start call before any of these answers.
     markStarted: async () => false,
@@ -355,6 +356,43 @@ describe('answerJudged, the sentence checked beside the word', () => {
     const second = await retried.service.answerJudged('u1', SESSION, sentence('I want to book a tabel', { retry: true }));
     expect(second.explanation).toEqual(EXPLAINED);
     expect(retried.explanations).toEqual([{ position: 0, text: 'I want to book a tabel', ...EXPLAINED }]);
+  });
+
+  // Final review I1: the hold is known once the answer is recorded, and its check is dropped.
+  it('answers a held card without waiting for its check', async () => {
+    let release = () => undefined as void;
+    const explainer = createFakeLlmClient(
+      () =>
+        new Promise<string>((resolve) => {
+          release = () => resolve(JSON.stringify(EXPLAINED));
+        }),
+    );
+    const { service } = setup(createFakeLlmClient('{"verdict":"other_word"}'), first(), CONTEXT, undefined, explainer);
+    const waited = new Promise<'waited'>((resolve) => setTimeout(() => resolve('waited'), 50));
+    const result = await Promise.race([service.answerJudged('u1', SESSION, sentence('I want to reserve a tabel')), waited]);
+    release();
+    expect(result).toMatchObject({ verdict: 'alternative', explanation: null });
+  });
+
+  // Final review I2: what is stored and answered is the recorded text's check.
+  it('stores nothing of its own when an overlapping request recorded another text first', async () => {
+    const recorded = record([SENTENCE, CHOICE], [{ question_id: 's1', is_correct: true, answer_string: 'I want to book a table please', verdict: 'exact', ...NO_RETRY }]);
+    let loads = 0;
+    const { service, explanations } = setup(createFakeLlmClient('{"verdict":"right"}'), () => (++loads === 1 ? first() : recorded), CONTEXT, undefined, explains());
+    const result = await service.answerJudged('u1', SESSION, sentence('I want to book a tabel'));
+    expect(result.explanation).toBeNull();
+    expect(explanations).toEqual([]);
+  });
+
+  // Final review M1, re-graded: a text of punctuation alone is no sentence, never a right one.
+  it('checks no sentence in a text of punctuation alone, sent or replayed', async () => {
+    const explainer = explains();
+    const sent = await setup(createFakeLlmClient('{"verdict":"wrong"}'), first(), CONTEXT, undefined, explainer).service.answerJudged('u1', SESSION, sentence(' . '));
+    expect(sent.explanation).toBeNull();
+    const answered = record([SENTENCE, CHOICE], [{ question_id: 's1', is_correct: false, answer_string: '?', verdict: 'wrong', ...NO_RETRY }]);
+    const replayed = await setup(createFakeLlmClient('{"verdict":"wrong"}'), answered, CONTEXT, undefined, explainer).service.answerJudged('u1', SESSION, sentence('?'));
+    expect(replayed.explanation).toBeNull();
+    expect(explainer.calls).toHaveLength(0);
   });
 
   it('checks a helped answer too, which is stored wrong', async () => {
