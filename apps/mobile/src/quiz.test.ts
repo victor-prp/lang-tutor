@@ -50,6 +50,7 @@ const BASE: QuizState = {
   helpPressed: false,
   helpMarks: null,
   tapped: [],
+  explanation: null,
 };
 
 describe('applyQueued (spec D9, Review Focus 3)', () => {
@@ -186,6 +187,21 @@ describe('the second try (phase 34 D9)', () => {
 
     it('a second try keeps the hold it answered, for the banner', () => {
       expect(landed({ ...ON_CARD, retry: PENDING }, { text: 'porta' }, response(NEXT, null), null).retry).toEqual(PENDING);
+    });
+
+    // Phase 66b (spec D2). A translation's sentence check lands with its answer.
+    const EXPLAINED = { corrected: 'La finestra è aperta.', mistakes: [{ wrong: 'il', right: 'la', why: 'finestra היא נקבה' }] };
+
+    it("keeps the sentence check that came with the answer, and none when it came with none", () => {
+      expect(landed(ON_CARD, { text: 'il finestra', judged: 'exact' }, response(NEXT, null), null, EXPLAINED).explanation).toEqual(EXPLAINED);
+      expect(landed(ON_CARD, { text: 'finestra' }, response(NEXT, null), null).explanation).toBeNull();
+    });
+
+    it('drops it for a hold, and the next card starts with none', () => {
+      expect(landed(ON_CARD, { text: 'vetrata', judged: 'alternative' }, response(TYPED, PENDING), null, EXPLAINED).explanation).toBeNull();
+      const answered = landed(ON_CARD, { text: 'il finestra', judged: 'exact' }, response(NEXT, null), null, EXPLAINED);
+      expect(applyQueued(answered, answered.queued!).explanation).toBeNull();
+      expect(enteredState('s1').explanation).toBeNull();
     });
   });
 

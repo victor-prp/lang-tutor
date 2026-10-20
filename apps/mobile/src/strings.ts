@@ -177,13 +177,14 @@ export const strings = {
   // One word on a translation card is asked again, not sent.
   wordOnlyNotice: 'כתבו את כל המשפט, לא רק את המילה',
   translationReference: 'תרגום לדוגמה:',
-  // Phase 66 (spec D3). The button beside the reference that explains the learner's
-  // own sentence, and what a tap on it shows. Information only: nothing is graded.
+  // Phase 66 (spec D3). The button that explains the learner's own sentence; phase
+  // 66b (spec D2) puts it on the banner's sentence line. Information only: nothing is graded.
   explainButton: 'הסבר',
-  explainCorrected: 'המשפט שלך, מתוקן:',
-  explainNone: 'המשפט שלך נכון',
-  explainLoading: 'מכין הסבר…',
-  explainFailed: 'ההסבר לא זמין כרגע',
+  // Phase 66b (spec D2). The banner's two lines on a translation whose sentence was
+  // checked: the word, then the sentence around it.
+  feedbackWordCorrect: 'המילה נכונה',
+  sentenceRight: 'המשפט נכון',
+  sentenceNeedsFix: 'המשפט צריך תיקון',
   // A mistake's reason, in Hebrew, often opening with the Italian word it names. U+200F
   // RIGHT-TO-LEFT MARK first: Android takes a line's direction from its first strong
   // letter, and writingDirection is iOS-only (see isolateLtr above).

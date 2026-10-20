@@ -1,4 +1,5 @@
 import type {
+  ExplainResponse,
   MissedQuestion,
   NextStepRequest,
   NextStepResponse,
@@ -69,6 +70,9 @@ export type QuizState = {
    *  index in its `words`, in the order first tapped: kept through its second
    *  try, none on the next card. */
   tapped: number[];
+  /** Phase 66b (spec D2). A sentence translation's check, which came with its
+   *  answer: null until then, when it was not checked, and on every other card. */
+  explanation: ExplainResponse | null;
 };
 
 /** Phase 19. What a session starts as before its first card is read: starting
@@ -95,6 +99,7 @@ export function enteredState(sessionId: string): QuizState {
     helpPressed: false,
     helpMarks: null,
     tapped: [],
+    explanation: null,
   };
 }
 
@@ -132,6 +137,7 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
       helpPressed: false,
       helpMarks: null,
       tapped: [],
+      explanation: null,
     };
   }
   const same = queued.question.id === current.question?.id;
@@ -154,6 +160,7 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
     helpMarks: null,
     // Phase 59 (spec D5): and its taps.
     tapped: same ? current.tapped : [],
+    explanation: null,
   };
 }
 
@@ -338,8 +345,9 @@ export function answerRoute(
   return state.judging === 'failed' || opensRetry(question, answer) || checksFit(question, answer) ? 'server' : 'banner';
 }
 
-/** What a sent answer came back as: the answer the card shows, and the step. */
-export type Sent = { answer: CardAnswer; next: NextStepResponse };
+/** What a sent answer came back as: the answer the card shows, and the step.
+ *  Phase 66b (spec D2): a judged translation's sentence check comes with it. */
+export type Sent = { answer: CardAnswer; next: NextStepResponse; explanation?: ExplainResponse | null };
 
 /** Phase 34 (spec D9). A sent answer once settled: `met` is the hold it met and
  *  resolved as that card's second try (see metHold), or null. */
@@ -386,10 +394,16 @@ export async function settle(
  *  the second try at once, with no banner to continue from. Otherwise the card
  *  is answered and the next step queued; `met` is a hold this answer resolved,
  *  kept with a second try's own so the banner is a second try's (ruling R16). */
-export function landed(current: QuizState, answer: CardAnswer, next: NextStepResponse, met: PendingRetry | null): QuizState {
+export function landed(
+  current: QuizState,
+  answer: CardAnswer,
+  next: NextStepResponse,
+  met: PendingRetry | null,
+  explanation: ExplainResponse | null = null,
+): QuizState {
   const queued = queuedFrom(next);
   if (holds(queued)) return applyQueued(current, queued);
   const retry = met ?? current.retry;
   // Phase 55 (spec D7): a first typed answer sent after a failed check may open the retype too.
-  return { ...current, judging: 'idle', speech: IDLE_ATTEMPT, answer, queued, retry, retype: retypeFor(current.question, answer, retry) };
+  return { ...current, judging: 'idle', speech: IDLE_ATTEMPT, answer, queued, retry, retype: retypeFor(current.question, answer, retry), explanation };
 }
