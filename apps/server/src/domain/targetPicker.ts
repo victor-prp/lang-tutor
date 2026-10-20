@@ -65,8 +65,9 @@ export function owedWords(day: TargetDay, mode: TargetMode): string[] {
     .sort();
 }
 
-/** What a target path's stock recorded of its day (session_targets), as its stale check reads it. */
-export type StockChoice = { capHalves: number; owedGlossIds: readonly string[] };
+/** What a target path's stock recorded of its day (session_targets), as its stale check reads it;
+ *  `pastBudget`, whether it was chosen past the day's budget (phase 65b). */
+export type StockChoice = { capHalves: number; owedGlossIds: readonly string[]; pastBudget?: boolean };
 
 /**
  * Phase 53 (ruling R-D12), per path since phase 57 (spec D2, final review C1). Whether a target
@@ -83,10 +84,13 @@ export function stockToCheck(stock: { chosenOn: string } & Pick<StockChoice, 'ow
 }
 
 /** Phase 53 (ruling R-D12), phase 57 (spec D2). A checked stock is played as it is when today's
- *  choice has the cap and the owed words it recorded; one that recorded nothing is replaced. */
+ *  choice has the cap and the owed words it recorded; one that recorded nothing is replaced.
+ *  Phase 67 (final review 2): one chosen past the budget never is. Checked, it was chosen on an
+ *  earlier day (it records the owed words), and holds that day's practice more, not today's cards. */
 export function stockServes(recorded: StockChoice | undefined, today: StockChoice): boolean {
   return (
     recorded !== undefined &&
+    recorded.pastBudget !== true &&
     recorded.capHalves === today.capHalves &&
     recorded.owedGlossIds.join(' ') === today.owedGlossIds.join(' ')
   );
@@ -121,6 +125,8 @@ type Word = {
   weakest: Dimension[];
   /** The skills its cards still ask today, with the in-flight credit, the first asked first. */
   owed: Dimension[];
+  /** Its practised skills not asked today, with the in-flight credit, in the order D2 picks from. */
+  open: Dimension[];
   /** This session's picks' skills. */
   picked: Dimension[];
 };
@@ -168,6 +174,7 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
       inFlight: asked !== undefined,
       readinessPct: word.readinessPct,
       weakest,
+      open,
       owed: open.slice(0, Math.max(0, word.cardsLeft - credited)),
       picked: [],
     };
@@ -243,7 +250,7 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
   };
 
   /** Spec D6 (phase 57 D7 step 3, ruling T3-b, read from readiness). One card per met word not
-   *  yet asked this session, on its weakest practised skill: the lowest readiness first, a word
+   *  yet asked this session, on a skill not asked today, else its weakest: the lowest readiness first, a word
    *  the session in flight asks last, then by gloss id. A word met early today is asked too, but
    *  not while the session in flight is meeting it. */
   const hardest = (pool: readonly Word[]) => {
@@ -252,7 +259,8 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
       .sort((a, b) => Number(a.inFlight) - Number(b.inFlight) || a.readinessPct - b.readinessPct || byId(a, b));
     for (const word of order) {
       if (!open(word, 1)) continue;
-      const dimension = word.weakest[0];
+      // Final review 3: a skill not asked today first, so practice more varies its cards.
+      const dimension = word.open[0] ?? word.weakest[0];
       if (dimension) add(word, dimension, rungOf(dimension));
     }
   };

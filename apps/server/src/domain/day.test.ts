@@ -1152,7 +1152,7 @@ function runPaths(
           return known ? [[pick.glossId, known] as const] : [];
         }),
       );
-      return { picks, mode, chosenOn: date, recorded: { capHalves: day.capHalves, owedGlossIds: owedWords(day, mode) }, meanings };
+      return { picks, mode, chosenOn: date, recorded: { capHalves: day.capHalves, owedGlossIds: owedWords(day, mode), pastBudget: mode === 'past_budget' }, meanings };
     };
     /** services/sessions.ts createNextSession: the path's stock, replaced when stale; else built. */
     const nextOf = (target: SimTarget): Choice => {
@@ -1936,4 +1936,26 @@ describe.each<[number]>([[5], [2], [1]])('a homework of fifteen words given %i d
 
   itReportsTheDate(runs, homework);
   itKeepsTheTargetPaths(runs[0], [homework], runs);
+});
+
+/** Final review 2 (phase 67, spec D5). A small homework over many days, one session a day: the
+ *  stock chosen beside each day's only session is past its budget, and the next day's owed words
+ *  are the same. Kept, it would meet the next day's budget with practice-more cards while every
+ *  word still owes its own. */
+describe("a homework of three words due in 10 days, each day's stock chosen beside its only session (final review 2)", () => {
+  const homework = targetOf('homework', 10, listIds(1, 3));
+  const runs = EVERY_PHASE.map((learner) => runPaths(withList(3), 11, { untilDone: 25 }, [homework], learner, { stockLag: true }));
+
+  it("plays each day's budget and no more, and ends each day with nothing owed", () => {
+    for (const run of runs) {
+      for (const budget of run.budgets) {
+        const day = run.days[dayIndex(budget.date)];
+        expect({ date: budget.date, played: day.played, state: day.end.get(homework.id)!.state }).toEqual({
+          date: budget.date,
+          played: budget.sessions,
+          state: 'done',
+        });
+      }
+    }
+  });
 });

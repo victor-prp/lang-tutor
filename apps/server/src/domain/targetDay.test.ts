@@ -220,6 +220,15 @@ describe('targetDay: new words, split (spec D3)', () => {
     expect(d.extra).toBe(1);
   });
 
+  it('keeps known words already ready out of the quota before the eve: the others are met as if they were not there (final review 1)', () => {
+    const d = day(5, 0, { words: words(15), starts: starts([0, 1, 2, 3, 4].map(id), 0.97) });
+    for (const i of [0, 1, 2, 3, 4]) expect(only(d, i)).toMatchObject({ state: 'done', toStart: false, cardsLeft: 0 });
+    // Ten words to meet over three days: ceil(10 / 3) = 4 today.
+    expect(d.words.filter((w) => w.toStart).map((w) => w.glossId)).toEqual([5, 6, 7, 8].map(id));
+    expect(d.state).toBe('owed');
+    expect(d.planned).toBe(9);
+  });
+
   it('rests a known word already ready on joining until the eve, which starts it by its check (Review Focus 4)', () => {
     const before = day(5, 0, { words: words(1), starts: starts([id(0)], 0.97) });
     expect(only(before, 0)).toMatchObject({ state: 'done', toStart: false, cardsLeft: 0 });

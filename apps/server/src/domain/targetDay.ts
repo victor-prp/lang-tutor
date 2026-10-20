@@ -125,7 +125,14 @@ export function targetDay(input: TargetDayInput): TargetDay {
   const ordered = [...words].sort(
     (a, b) => (a.addedOn < b.addedOn ? -1 : a.addedOn > b.addedOn ? 1 : a.glossId < b.glossId ? -1 : a.glossId > b.glossId ? 1 : 0),
   );
-  const pool = ordered.filter((word) => word.startedOn === null || word.startedOn === today);
+  const startOf = new Map(input.starts.map((start) => [`${start.glossId}|${start.dimension}`, start]));
+  const chanceOf = (word: TargetWordInput) =>
+    wordChance(countedSkills(input.kind, word.live).map((dimension) => startOf.get(`${word.glossId}|${dimension}`)?.chance ?? 0));
+  const readyOf = (word: TargetWordInput) => Math.floor(100 * chanceOf(word)) >= READINESS_WORD_READY;
+  // Final review 1: a known word already ready waits for the eve's check, outside the quota, so
+  // the words still to meet are met as if it were not there.
+  const waitsForEve = (word: TargetWordInput) => word.startedOn === null && !eve && daysLeft > 0 && readyOf(word);
+  const pool = ordered.filter((word) => (word.startedOn === null || word.startedOn === today) && !waitsForEve(word));
   const quota = daysLeft <= 0 ? 0 : quotaOf(pool.length, daysLeft, half);
   const inQuota = new Set(pool.slice(0, quota).map((word) => word.glossId));
   // A later word's day: the quotas of the days ahead played over the words still unmet.
@@ -137,7 +144,6 @@ export function targetDay(input: TargetDayInput): TargetDay {
     waiting = waiting.slice(taken);
   }
 
-  const startOf = new Map(input.starts.map((start) => [`${start.glossId}|${start.dimension}`, start]));
   const askedOf = new Map<string, Set<Dimension>>();
   for (const card of input.askedToday) {
     const skill = servedSkill(card.type);
@@ -157,7 +163,7 @@ export function targetDay(input: TargetDayInput): TargetDay {
       chance: startOf.get(`${word.glossId}|${dimension}`)?.chance ?? 0,
       movedOn: startOf.get(`${word.glossId}|${dimension}`)?.movedOn ?? null,
     }));
-    const chance = wordChance(countedSkills(input.kind, word.live).map((dimension) => startOf.get(`${word.glossId}|${dimension}`)?.chance ?? 0));
+    const chance = chanceOf(word);
     const pct = Math.floor(100 * chance);
     const ready = pct >= READINESS_WORD_READY;
     chances.push(chance);
@@ -176,7 +182,7 @@ export function targetDay(input: TargetDayInput): TargetDay {
       .map((skill) => skill.dimension);
     const base = { glossId: word.glossId, open, practised: practised.map(({ dimension, chance: c }) => ({ dimension, chance: c })), readinessPct: pct };
 
-    const isPlanned = (word.startedOn !== null && word.startedOn < today) || inQuota.has(word.glossId);
+    const isPlanned = (word.startedOn !== null && word.startedOn < today) || inQuota.has(word.glossId) || waitsForEve(word);
     if (!isPlanned) {
       if (word.startedOn === today) {
         extra += 1;

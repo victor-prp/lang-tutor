@@ -25,6 +25,8 @@ const COUNTED: Dimension[] = [WP, SP, SK];
 type WordSpec = {
   id: string;
   chances?: Partial<Record<Dimension, number>>;
+  /** Skills asked today: out of its open ones. */
+  asked?: Dimension[];
   state?: WordDay['state'];
   toStart?: boolean;
   cardsLeft?: number;
@@ -34,7 +36,10 @@ type WordSpec = {
 function wordOf(spec: WordSpec): WordDay {
   const live = spec.live ?? DIMS;
   const counted = COUNTED.filter((d) => live.includes(d)).map((dimension) => ({ dimension, chance: spec.chances?.[dimension] ?? 0 }));
-  const open = [...counted].sort((a, b) => a.chance - b.chance || counted.indexOf(a) - counted.indexOf(b)).map((skill) => skill.dimension);
+  const open = [...counted]
+    .sort((a, b) => a.chance - b.chance || counted.indexOf(a) - counted.indexOf(b))
+    .map((skill) => skill.dimension)
+    .filter((dimension) => !spec.asked?.includes(dimension));
   const state = spec.state ?? 'owed';
   const cardsLeft = state === 'owed' ? (spec.cardsLeft ?? 2) : 0;
   const readinessPct = Math.floor(100 * counted.reduce((product, skill) => product * skill.chance, 1));
@@ -240,6 +245,13 @@ describe('chooseTargetPicks, practice more', () => {
     ]);
   });
 
+  it('asks a skill not asked today before its weakest, so a second practice-more session asks another card (final review 3)', () => {
+    const day = dayOf([{ id: 'g0', state: 'done', chances: { [WP]: 0.5, [SP]: 0.9, [SK]: 0.6 }, asked: [WP, SK] }], 'done');
+    expect(short(pick(day))).toEqual([['g0', SP, 1]]);
+    const all = dayOf([{ id: 'g0', state: 'done', chances: { [WP]: 0.5, [SP]: 0.9, [SK]: 0.6 }, asked: [WP, SP, SK] }], 'done');
+    expect(short(pick(all))).toEqual([['g0', WP, 2]]);
+  });
+
   it('starts a known later word with a recall card', () => {
     const day = dayOf([{ id: 'g0', state: 'later' }], 'rest');
     expect(short(pick(day, { known: new Set(['g0']) }))).toEqual([['g0', WP, 2]]);
@@ -351,6 +363,10 @@ describe('stockServes', () => {
     ['nothing recorded', undefined, false],
   ])('a stock that recorded %s: %s', (_, recorded, serves) => {
     expect(stockServes(recorded, today)).toBe(serves);
+  });
+
+  it('never serves a stock chosen past the budget again: checked, it was chosen on an earlier day (final review 2)', () => {
+    expect(stockServes({ capHalves: 10, owedGlossIds: ['g0', 'g1'], pastBudget: true }, today)).toBe(false);
   });
 
   it('keeps a practice-more stock while practice more is still the choice', () => {
