@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import type { Enrollment, Question } from '@lang-tutor/core/api';
+import type { Enrollment, Question, SentenceMistake } from '@lang-tutor/core/api';
 
 import {
   createFakeClock,
@@ -60,6 +60,9 @@ function setup(
   loaded: SessionRecord = record(),
   context: typeof CONTEXT = CONTEXT,
   translationJudge: ReturnType<typeof createFakeLlmClient> = judge,
+  // Phase 66b (spec D1). The explainer, and the explanations stored before this answer.
+  explainer: ReturnType<typeof createFakeLlmClient> = createFakeLlmClient(''),
+  explanations: { position: number; text: string; corrected: string; mistakes: SentenceMistake[] }[] = [],
 ) {
   const inserted: unknown[] = [];
   const resolved: unknown[] = [];
@@ -74,6 +77,14 @@ function setup(
     },
     resolveRetry: async (...args) => {
       resolved.push(args);
+    },
+    // Phase 66 (spec D2): the first stored stands.
+    findExplanation: async (_session, position) => {
+      const row = explanations.find((e) => e.position === position);
+      return row ? { corrected: row.corrected, mistakes: row.mistakes } : null;
+    },
+    insertExplanation: async (_session, position, explained) => {
+      if (!explanations.some((e) => e.position === position)) explanations.push({ position, ...explained });
     },
   });
   const enrollment = stub<EnrollmentRepo>({ findById: async () => ENROLLMENT });
@@ -95,10 +106,10 @@ function setup(
     transcriber: createFakeTranscriber(''),
     judge,
     translationJudge,
-    explainer: createFakeLlmClient(''),
+    explainer,
     soundAlikeThreshold: 0.95,
   });
-  return { service, inserted, resolved, logger };
+  return { service, inserted, resolved, logger, explanations };
 }
 
 const answer = (text: string) => ({ questionId: 'm1', text });
@@ -278,6 +289,103 @@ describe('answerJudged (spec D3)', () => {
       expect((await service.answerJudged('u1', SESSION, sentence('I want to bok a table'))).verdict).toBe('near_miss');
       expect(inserted).toEqual([[SESSION, 0, 's1', { text: 'I want to bok a table', verdict: 'near_miss', helped: null }]]);
     });
+  });
+});
+
+// Phase 66b (spec D1). A translation's sentence is checked beside its word, in
+// the one request, and what the check found comes back with the verdict.
+describe('answerJudged, the sentence checked beside the word', () => {
+  const sentence = (text: string, more: { retry?: boolean; helped?: boolean } = {}) => ({ questionId: 's1', text, ...more });
+  const first = () => record([SENTENCE, CHOICE]);
+  const EXPLAINED = { corrected: 'I want to book a table.', mistakes: [{ wrong: 'tabel', right: 'table', why: 'איות' }] };
+  const explains = () => createFakeLlmClient(JSON.stringify(EXPLAINED));
+
+  it('asks the explainer before the judge has answered, and returns and stores what it found', async () => {
+    const explainer = explains();
+    let explainedFirst = false;
+    const judge = createFakeLlmClient(() => {
+      explainedFirst = explainer.calls.length === 1;
+      return '{"verdict":"right"}';
+    });
+    const { service, explanations } = setup(judge, first(), CONTEXT, judge, explainer);
+    const result = await service.answerJudged('u1', SESSION, sentence('I want to book a tabel'));
+    expect(result.verdict).toBe('exact');
+    expect(result.explanation).toEqual(EXPLAINED);
+    expect(explainedFirst).toBe(true);
+    expect(explainer.calls[0].record).toEqual({ kind: 'sentence_explain', sessionId: SESSION, enrollmentId: 'e1', userId: 'u1' });
+    expect(JSON.parse(explainer.calls[0].user)).toMatchObject({ answer: 'I want to book a tabel' });
+    expect(explanations).toEqual([{ position: 0, text: 'I want to book a tabel', ...EXPLAINED }]);
+  });
+
+  it('returns the explanation stored first when an overlapping request stored one', async () => {
+    const stored = { position: 0, text: 'I want to book a tabel', corrected: 'I want to book one table.', mistakes: [] };
+    const { service } = setup(createFakeLlmClient('{"verdict":"right"}'), first(), CONTEXT, undefined, explains(), [stored]);
+    expect((await service.answerJudged('u1', SESSION, sentence('I want to book a tabel'))).explanation).toEqual({ corrected: stored.corrected, mistakes: [] });
+  });
+
+  it('keeps the verdict when the explainer fails or is unreadable, with no explanation and nothing stored', async () => {
+    for (const explainer of [createFakeLlmClient(new LlmUnavailable('timed out')), createFakeLlmClient('not json')]) {
+      const { service, inserted, explanations, logger } = setup(createFakeLlmClient('{"verdict":"right"}'), first(), CONTEXT, undefined, explainer);
+      const result = await service.answerJudged('u1', SESSION, sentence('I want to book a tabel'));
+      expect([result.verdict, result.explanation]).toEqual(['exact', null]);
+      expect(inserted).toHaveLength(1);
+      expect(explanations).toEqual([]);
+      expect(logger.events).toContainEqual(expect.objectContaining({ event: 'answer_explain_failed', session_id: SESSION }));
+    }
+  });
+
+  it('answers the reference as typed with no mistakes, and an empty text with none, both without a call', async () => {
+    const explainer = explains();
+    const reference = await setup(createFakeLlmClient('{"verdict":"wrong"}'), first(), CONTEXT, undefined, explainer).service.answerJudged('u1', SESSION, sentence('i want to book a table'));
+    expect(reference.explanation).toEqual({ corrected: 'i want to book a table', mistakes: [] });
+    const empty = await setup(createFakeLlmClient('{"verdict":"wrong"}'), first(), CONTEXT, undefined, explainer).service.answerJudged('u1', SESSION, sentence(' '));
+    expect(empty.explanation).toBeNull();
+    expect(explainer.calls).toHaveLength(0);
+  });
+
+  it('drops what it found when the answer waits for its second try, then checks the second try', async () => {
+    const held = setup(createFakeLlmClient('{"verdict":"other_word"}'), first(), CONTEXT, undefined, explains());
+    const result = await held.service.answerJudged('u1', SESSION, sentence('I want to reserve a tabel'));
+    expect([result.verdict, result.explanation]).toEqual(['alternative', null]);
+    expect(held.explanations).toEqual([]);
+
+    const firstAnswer = { question_id: 's1', is_correct: true, answer_string: 'I want to reserve a tabel', verdict: 'alternative' as const };
+    const pending = record([SENTENCE, CHOICE], [{ ...firstAnswer, retry_state: 'pending', retry_answer_string: null, retry_verdict: null }]);
+    const retried = setup(createFakeLlmClient('{"verdict":"right"}'), pending, CONTEXT, undefined, explains());
+    const second = await retried.service.answerJudged('u1', SESSION, sentence('I want to book a tabel', { retry: true }));
+    expect(second.explanation).toEqual(EXPLAINED);
+    expect(retried.explanations).toEqual([{ position: 0, text: 'I want to book a tabel', ...EXPLAINED }]);
+  });
+
+  it('checks a helped answer too, which is stored wrong', async () => {
+    const result = await setup(createFakeLlmClient('{"verdict":"right"}'), first(), CONTEXT, undefined, explains()).service.answerJudged(
+      'u1',
+      SESSION,
+      sentence('I want to book a tabel', { helped: true }),
+    );
+    expect([result.verdict, result.explanation]).toEqual(['exact', EXPLAINED]);
+  });
+
+  it('replays the stored explanation, or the rule, or none, without a call', async () => {
+    const answered = (text: string) =>
+      record([SENTENCE, CHOICE], [{ question_id: 's1', is_correct: true, answer_string: text, verdict: 'exact', ...NO_RETRY }]);
+    const stored = [{ position: 0, text: 'I want to book a tabel', ...EXPLAINED }];
+    const explainer = explains();
+    const judge = createFakeLlmClient('{"verdict":"wrong"}');
+    const replay = await setup(judge, answered('I want to book a tabel'), CONTEXT, undefined, explainer, stored).service.answerJudged('u1', SESSION, sentence('I want to book a tabel'));
+    expect(replay.explanation).toEqual(EXPLAINED);
+    const ruled = await setup(judge, answered('I want to book a table'), CONTEXT, undefined, explainer).service.answerJudged('u1', SESSION, sentence('I want to book a table'));
+    expect(ruled.explanation).toEqual({ corrected: 'I want to book a table', mistakes: [] });
+    const unchecked = await setup(judge, answered('I want to book a tabel'), CONTEXT, undefined, explainer).service.answerJudged('u1', SESSION, sentence('I want to book a tabel'));
+    expect(unchecked.explanation).toBeNull();
+    expect([judge.calls.length, explainer.calls.length]).toEqual([0, 0]);
+  });
+
+  it('checks nothing on a typed meaning, whose result has no explanation', async () => {
+    const explainer = explains();
+    const result = await setup(createFakeLlmClient('{"verdict":"right"}'), record(), CONTEXT, undefined, explainer).service.answerJudged('u1', SESSION, answer('לשריין'));
+    expect(result).not.toHaveProperty('explanation');
+    expect(explainer.calls).toHaveLength(0);
   });
 });
 

@@ -182,7 +182,9 @@ export type SpeechResult = { heard: string; verdict: SpeechVerdict; session: Ses
 type SoundLook = { score: number | null; form: string | null; called: boolean; ms: number };
 
 /** Phase 27. A judged answer: its verdict, and the session it was recorded in. */
-export type JudgedResult = { verdict: TypedVerdict; session: SessionResult };
+/** Phase 66b (spec D1). `explanation` only on a sentence translation: null when its
+ *  sentence was not checked, or the check failed. */
+export type JudgedResult = { verdict: TypedVerdict; session: SessionResult; explanation?: Explanation | null };
 
 /** Phase 43 (spec D5). The session create answers, and whether this call made it. */
 type NextSession = { sessionId: string; status: SessionStatus; source: SessionSource; created: boolean };
@@ -344,6 +346,91 @@ export function createSessionService({
       });
       return null;
     }
+  }
+
+  /**
+   * Phase 66 (spec D2). One explain call for a translation's text, outside any
+   * transaction (ADR 0001 R8), logged either way. It throws when the call fails or
+   * cannot be read: `/explain` answers that 502, and the judged answer drops it.
+   */
+  async function callExplainer(
+    question: SentenceTranslationQuestion,
+    context: JudgeContext,
+    text: string,
+    record: ModelCallRecord,
+  ): Promise<Explanation> {
+    const started = now();
+    try {
+      const explained = parseExplain(await explainer({ ...buildExplainPrompt(question, context, text), record }));
+      if (explained === null) throw new LlmUnavailable('the explanation was unreadable');
+      logger.info({ event: 'answer_explained', session_id: record.sessionId, mistakes: explained.mistakes.length, explain_ms: now() - started });
+      return explained;
+    } catch (error) {
+      logger.info({
+        event: 'answer_explain_failed',
+        session_id: record.sessionId,
+        explain_ms: now() - started,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Phase 66b (spec D1). A translation's text checked beside its grade. An empty
+   * text is not checked, and the reference as typed needs no call. It never
+   * rejects: a failed call is null, so the grade is never lost to it. `called`
+   * says whether the model found it, which is what gets stored.
+   */
+  async function checkSentence(
+    question: SentenceTranslationQuestion,
+    context: JudgeContext,
+    text: string,
+    record: ModelCallRecord,
+  ): Promise<{ explanation: Explanation; called: boolean } | null> {
+    if (text.trim() === '') return null;
+    const ruled = explainRuleResult(question.sentence, text);
+    if (ruled) return { explanation: ruled, called: false };
+    try {
+      return { explanation: await callExplainer(question, context, text, record), called: true };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Phase 66b (spec D1). A sentence check once its answer is recorded: dropped
+   * while the card waits for its second try, whose own request checks its text.
+   * What the model found is stored, the first stored standing. That write is
+   * independent of the answer's and idempotent, so it is a transaction of its own
+   * (ADR 0001 R8): the answer is right without it, and `/explain` can still make it.
+   */
+  async function sentenceRecorded(
+    sessionId: string,
+    position: number,
+    answer: AnswerRecord | undefined,
+    text: string,
+    found: { explanation: Explanation; called: boolean } | null,
+  ): Promise<Explanation | null> {
+    if (found === null || !answer || answer.retry_state === 'pending') return null;
+    if (!found.called) return found.explanation;
+    return transaction(async (repos) => {
+      await repos.session.insertExplanation(sessionId, position, { text, ...found.explanation });
+      return (await repos.session.findExplanation(sessionId, position)) ?? found.explanation;
+    });
+  }
+
+  /**
+   * Phase 66b (spec D1). What a recorded translation answer's sentence check is
+   * without a call: the stored explanation, else the rule's for its final text,
+   * else none. A card held for its second try has none yet.
+   */
+  async function recordedSentence(repos: Repos, sessionId: string, position: number, question: SentenceTranslationQuestion, answer: AnswerRecord): Promise<Explanation | null> {
+    if (answer.retry_state === 'pending') return null;
+    const stored = await repos.session.findExplanation(sessionId, position);
+    if (stored) return stored;
+    const text = answer.retry_answer_string ?? answer.answer_string;
+    return text.trim() === '' ? null : explainRuleResult(question.sentence, text);
   }
 
   /**
@@ -1301,7 +1388,14 @@ export function createSessionService({
         if (attempt.kind === 'replay') {
           const verdict = judgedVerdictOf(attempt.answer, attempt.of);
           if (verdict === null) throw new QuestionDesynced(input.questionId);
-          return { replay: { verdict, session: { ...loaded, progress: await progressOf(repos, sessionId, loaded) } } };
+          // Phase 66b (spec D1): and its sentence's check as recorded, no call either.
+          const position = loaded.answers.indexOf(attempt.answer);
+          const question = loaded.questions[position];
+          const sentence =
+            question?.type === 'sentence_translation'
+              ? { explanation: await recordedSentence(repos, sessionId, position, question, attempt.answer) }
+              : {};
+          return { replay: { verdict, session: { ...loaded, progress: await progressOf(repos, sessionId, loaded) }, ...sentence } };
         }
         const current = attempt.question;
         if (!isJudged(current)) throw new AnswerKindMismatch(input.questionId);
@@ -1324,6 +1418,13 @@ export function createSessionService({
         logger.info({ event: 'answer_wrong_script', session_id: sessionId, question_type: checked.current.type });
         throw new WrongScript(input.questionId, LANGUAGES[expected].name);
       }
+      // Phase 66b (spec D1). The sentence is checked beside the word, not after it:
+      // started before the judge's call, and never rejecting, so a failed check
+      // leaves the grade as it was. A judge that fails drops it.
+      const checking =
+        checked.current.type === 'sentence_translation'
+          ? checkSentence(checked.current, checked.context, text, { kind: 'sentence_explain', sessionId, ...checked.owner })
+          : null;
       let verdict = ruleVerdict(checked.current, text, checked.context.alternatives);
       const judgedBy = verdict === null ? 'model' : 'rule';
       const started = now();
@@ -1365,13 +1466,15 @@ export function createSessionService({
       });
       const answer = input.helped === undefined ? { text, judged: verdict } : { text, judged: verdict, helped: input.helped };
       const session = await service.submitAnswer(actorUserId, sessionId, input.questionId, answer, { retry, tapped: input.tapped });
+      const position = session.answers.findIndex((a) => a.question_id === input.questionId);
+      const stored = session.answers[position];
+      const sentence = checking === null ? {} : { explanation: await sentenceRecorded(sessionId, position, stored, text, await checking) };
       // Phase 56 (spec D3). A helped answer is stored wrong, and the app tells
       // "right, with help" by the judge's own verdict, so that is the one reported.
-      if (input.helped) return { verdict, session };
+      if (input.helped) return { verdict, session, ...sentence };
       // Two overlapping requests may both have paid for a call; step replayed
       // the first, so report the verdict stored for this card, not our own.
-      const stored = session.answers.find((a) => a.question_id === input.questionId);
-      return { verdict: (stored && judgedVerdictOf(stored, retry ? 'retry' : 'answer')) ?? verdict, session };
+      return { verdict: (stored && judgedVerdictOf(stored, retry ? 'retry' : 'answer')) ?? verdict, session, ...sentence };
     },
 
     /**
@@ -1418,26 +1521,7 @@ export function createSessionService({
       });
       if ('done' in checked) return checked.done;
 
-      const started = now();
-      let explained: Explanation | null;
-      try {
-        const raw = await explainer({
-          ...buildExplainPrompt(checked.question, checked.context, checked.text),
-          record: { kind: 'sentence_explain', sessionId, ...checked.owner },
-        });
-        explained = parseExplain(raw);
-        if (explained === null) throw new LlmUnavailable('the explanation was unreadable');
-      } catch (error) {
-        logger.info({
-          event: 'answer_explain_failed',
-          session_id: sessionId,
-          explain_ms: now() - started,
-          reason: error instanceof Error ? error.message : String(error),
-        });
-        throw error;
-      }
-      logger.info({ event: 'answer_explained', session_id: sessionId, mistakes: explained.mistakes.length, explain_ms: now() - started });
-      const answered = explained;
+      const answered = await callExplainer(checked.question, checked.context, checked.text, { kind: 'sentence_explain', sessionId, ...checked.owner });
       return transaction(async (repos) => {
         await repos.session.insertExplanation(sessionId, checked.position, { text: checked.text, ...answered });
         return (await repos.session.findExplanation(sessionId, checked.position)) ?? answered;

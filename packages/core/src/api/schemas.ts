@@ -601,14 +601,6 @@ export const JudgedAnswerRequestSchema = z.object({
   tapped: TappedSchema.optional(),
 });
 
-export const JudgedAnswerResponseSchema = z.object({
-  // Phase 56 (spec D3): the judgement of the text, also for a helped answer,
-  // which is stored wrong; the app tells "right, with help" by it.
-  verdict: TypedVerdictSchema,
-  // The next-step response, which the app queues while the banner shows.
-  next: NextStepResponseSchema,
-});
-
 // Phase 66 (spec D2). One mistake in a translated sentence: the words as the
 // learner wrote them (empty when something is missing), what they should be,
 // and why, in the learner's language. Shown, never graded.
@@ -629,6 +621,18 @@ export const ExplainRequestSchema = z.object({
 export const ExplainResponseSchema = z.object({
   corrected: z.string(),
   mistakes: z.array(SentenceMistakeSchema),
+});
+
+export const JudgedAnswerResponseSchema = z.object({
+  // Phase 56 (spec D3): the judgement of the text, also for a helped answer,
+  // which is stored wrong; the app tells "right, with help" by it.
+  verdict: TypedVerdictSchema,
+  // The next-step response, which the app queues while the banner shows.
+  next: NextStepResponseSchema,
+  // Phase 66b (spec D1). A sentence translation's text checked beside its grade:
+  // null when it was not checked (an empty text, a second try still to come) or
+  // the check failed. Absent on a typed meaning. It grades nothing.
+  explanation: ExplainResponseSchema.nullable().optional(),
 });
 
 // Phase 19. The home screen's one read. `current` is the enrollment's newest

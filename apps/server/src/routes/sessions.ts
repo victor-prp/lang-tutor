@@ -258,7 +258,7 @@ const judgedAnswerRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current card that the server judges',
   description:
-    'Takes the text answer to the current `typed_meaning` card. An empty text is judged by rule, and so is the stored meaning, the gloss key (the citation form the word list shows), or one of the stored alternatives of the card\'s rendering or of its gloss; any other text is judged by a language model, which costs money on every call. The answer is recorded with its verdict, and `next` is the next-step response. Re-sending an answer that was recorded replays it without a model call. A judged card takes no answer through `next-step`. An `alternative` (another sense of a `typed_meaning` card, another word in a `sentence_translation`) holds the card for one second try (`next.pending_retry`): a text sent with `retry: true` is that try, judged as the first, and an empty one gives up, answered `wrong`; one sent without it replays the first.',
+    'Takes the text answer to the current `typed_meaning` card. An empty text is judged by rule, and so is the stored meaning, the gloss key (the citation form the word list shows), or one of the stored alternatives of the card\'s rendering or of its gloss; any other text is judged by a language model, which costs money on every call. The answer is recorded with its verdict, and `next` is the next-step response. Re-sending an answer that was recorded replays it without a model call. A judged card takes no answer through `next-step`. An `alternative` (another sense of a `typed_meaning` card, another word in a `sentence_translation`) holds the card for one second try (`next.pending_retry`): a text sent with `retry: true` is that try, judged as the first, and an empty one gives up, answered `wrong`; one sent without it replays the first. A `sentence_translation` answer also has its sentence checked, by a second model call made at the same time as the judging one: `explanation` lists the mistakes in the text (as `/explain` does) and grades nothing. It is null for an empty text, for an answer held for its second try (that try is checked), and when the check failed or timed out, which never fails the answer. A replay returns the stored check, with no call. A `typed_meaning` answer has no `explanation`.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: JudgedAnswerRequestSchema } } },
@@ -504,7 +504,9 @@ export function createSessionsRouter(sessions: SessionService) {
         helped: body.helped,
         tapped: body.tapped,
       });
-      return c.json({ verdict: result.verdict, next: buildNextStepResponse(id, result.session) }, 200);
+      // Phase 66b (spec D1): a translation's sentence check comes with its verdict.
+      const sentence = result.explanation === undefined ? {} : { explanation: result.explanation };
+      return c.json({ verdict: result.verdict, next: buildNextStepResponse(id, result.session), ...sentence }, 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
