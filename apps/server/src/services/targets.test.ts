@@ -942,15 +942,12 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
     ...memory('g_sole', ALL_SKILLS, fading),
   ];
 
-  const skillRows = (glossId: string, halves: number, dims: readonly Dimension[] = ALL_SKILLS): TargetSkillRow[] =>
-    dims.map((dimension) => ({ targetId: 't1', glossId, dimension, halves, sessionId: null, day: null }));
-
   it('reads each word’s day, its state and what it owes, and its readiness: its chance and its counted skills’ (phase 65, spec D10)', async () => {
     const { service } = world({
       saved: ['g_casa', 'g_gatto', 'g_cane'],
       targets: [target({ words: ['g_casa', 'g_gatto', 'g_cane'] })],
-      // The plan: g_casa at 10 points in every skill. Readiness reads its own rows, not these.
-      skills: skillRows('g_casa', 20),
+      // Phase 67 (spec D2): g_casa, met yesterday and ready, rests today.
+      startedOn: { g_casa: '2026-10-14' },
       readiness: [...readinessRows('g_casa', ALL_SKILLS, solid), ...readinessRows('g_gatto', ['spelling'], fading)],
       devices: { listening: true, speaking: true },
     });
@@ -963,7 +960,7 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
       form: 'casa',
       meaning: WORDS.g_casa.key,
       readiness_pct: 99,
-      today: 'owed',
+      today: 'done',
       owed: [],
       starts_in: null,
       skills: [
@@ -987,8 +984,6 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
       saved: READ,
       targets: [target({ words: READ })],
       memory: MEMORY,
-      // The plan's points say nothing of readiness now.
-      skills: skillRows('g_casa', 19),
       devices: { listening: true, speaking: true },
     });
 
@@ -1218,9 +1213,9 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
     const { service } = world({
       saved: ['g_casa'],
       targets: [target({ words: ['g_casa'] })],
-      // Started two days ago, every skill at its full points, and the path practised today.
+      // Started two days ago, ready (phase 67: it rests, no card owed), and the path practised today.
       startedOn: { g_casa: '2026-10-13' },
-      skills: ALL_SKILLS.map((dimension) => ({ targetId: 't1', glossId: 'g_casa', dimension, halves: 20, sessionId: null, day: null })),
+      readiness: readinessRows('g_casa', ALL_SKILLS, solid),
       answersOn: [{ glossId: 'g_casa', sessionId: 's1', targetId: 't1', type: 'multiple_choice', correct: true }],
       budgets: { [`t1|${TODAY}`]: budget(5, 20) },
       completed: { [`t1|${TODAY}`]: 3 },
@@ -1240,19 +1235,18 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
 
     const read = await service.getTarget(OWNER, 't1');
 
-    // The picker played forward over the day: casa's ladder (4 cards), whose practice cards take its
-    // written skills to 4 half-points (ruling T9-a), then one typed translation to the cap of 7, in
-    // a second session; one session of room at the default miss rate (ceil(2 / 0.8) = 3); and the
-    // one session done today. Five cards, at 30 s each: about 3 minutes.
+    // The picker played forward over the day (phase 67, spec D2, D5): casa, below 90, on a device
+    // that cannot listen, owes its writing card, which asks spelling too: its ladder (4 cards). No
+    // room for misses; and the one session done today. Four cards, at 30 s each: 2 minutes.
     expect(read.today).toMatchObject({
       state: 'owed',
       sessions_budget: null,
-      sessions_offer: 2 + 1 + 1,
+      sessions_offer: 1 + 1,
       sessions_done: 1,
       ended_early: false,
-      minutes: 3,
+      minutes: 2,
     });
-    expect(reads).toContain('findRecentAnswers');
+    expect(reads).not.toContain('findRecentAnswers');
   });
 
   // Final review I4. The home list's cost: the offer plays the picker forward only while the plan
@@ -1261,9 +1255,9 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
     const { service, reads } = world({
       saved: ['g_casa'],
       targets: [target({ words: ['g_casa'] })],
-      // Started two days ago, every skill at its full points, and the path practised today.
+      // Started two days ago, ready (phase 67: it rests, no card owed), and the path practised today.
       startedOn: { g_casa: '2026-10-13' },
-      skills: ALL_SKILLS.map((dimension) => ({ targetId: 't1', glossId: 'g_casa', dimension, halves: 20, sessionId: null, day: null })),
+      readiness: readinessRows('g_casa', ALL_SKILLS, solid),
       answersOn: [{ glossId: 'g_casa', sessionId: 's1', targetId: 't1', type: 'multiple_choice', correct: true }],
       completed: { [`t1|${TODAY}`]: 1 },
     });
@@ -1290,9 +1284,30 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
       ['t2', 'owed', null],
     ]);
     expect(listed.targets.every((one) => one.today.sessions_offer > 0)).toBe(true);
-    for (const once of ['findRecentAnswers', 'listSavedGlosses', 'findAnswersOn', 'countCompletedOn t1', 'countCompletedOn t2']) {
+    for (const once of ['listSavedGlosses', 'findAnswersOn', 'countCompletedOn t1', 'countCompletedOn t2']) {
       expect(reads.filter((name) => name === once)).toHaveLength(1);
     }
+  });
+
+  it('owes cards only for the words below 90 and offers exactly their sessions: homework at 2 days left (phase 67, spec D2, D5)', async () => {
+    const { service } = world({
+      saved: ['g_casa', 'g_gatto', 'g_cane'],
+      targets: [target({ kind: 'homework', dueOn: '2026-10-17', words: ['g_casa', 'g_gatto', 'g_cane'] })],
+      startedOn: { g_casa: '2026-10-13', g_gatto: '2026-10-13', g_cane: '2026-10-13' },
+      // casa ready in all three skills; gatto only spells; cane has nothing yet.
+      readiness: [...readinessRows('g_casa', ALL_SKILLS, solid), ...readinessRows('g_gatto', ['spelling'], fading)],
+      devices: { listening: true, speaking: true },
+    });
+
+    const read = await service.getTarget(OWNER, 't1');
+
+    expect(read.words.map((w) => [w.gloss_id, w.today, w.owed])).toEqual([
+      ['g_casa', 'done', []],
+      ['g_gatto', 'owed', ['written_productive', 'spoken_productive']],
+      ['g_cane', 'owed', ['written_productive', 'spelling']],
+    ]);
+    // Four cards, two a word: one session, about 2 minutes.
+    expect(read.today).toMatchObject({ state: 'owed', sessions_budget: null, sessions_offer: 1, minutes: 2 });
   });
 
   it("counts today's completed sessions of the target's path only (Review Focus 4: by practice_day)", async () => {

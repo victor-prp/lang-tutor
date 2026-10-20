@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { FSRS6_DEFAULT, readinessFromMemory, type Dimension, type MemoryState, type ReadinessRow } from '@lang-tutor/core/domain';
 
-import { asksBeforePracticeMore, readinessSummary, todaySummary } from './targetSummary';
+import { asksBeforePracticeMore, readinessSummary, skillStarts, todaySummary } from './targetSummary';
 
 // Phase 65 (spec D1, D3.7, D4, D7, D9, D10). The numbers a target's summary carries: its
 // readiness, where today started and its ready words; whether "practice more" asks first (phase
@@ -250,5 +250,30 @@ describe('todaySummary (spec D7)', () => {
   it('is due_today on and after the date, whatever the budget says', () => {
     expect(day({ daysLeft: 0, plan: 'due_today', budget: { sessions: 2, cards: 8 }, sessionsDone: 2 })).toMatchObject({ state: 'due_today', endedEarly: false });
     expect(day({ daysLeft: -3, plan: 'due_today' })).toMatchObject({ state: 'due_today', sessionsOffer: 0, minutes: 0 });
+  });
+});
+
+describe('skillStarts (phase 67, spec D1)', () => {
+  it("reads each counted skill at the start of today: its first line's before, else its row, else the main memory, else 0; and the day it last moved", () => {
+    const starts = skillStarts({
+      kind: 'homework',
+      dueOn: DUE,
+      words: [{ glossId: 'g1', live: HOMEWORK_LIVE }],
+      rows: [{ glossId: 'g1', dimension: 'written_productive', row: row(AT_96, { day: TODAY }) }],
+      memory: [{ glossId: 'g1', dimension: 'spelling', state: AT_90 }],
+      firstToday: [{ glossId: 'g1', dimension: 'written_productive', before: 0.5 }],
+    });
+    expect(starts).toEqual([
+      { glossId: 'g1', dimension: 'written_productive', chance: 0.5, movedOn: TODAY },
+      { glossId: 'g1', dimension: 'spelling', chance: expect.closeTo(0.9, 4), movedOn: TODAY },
+      { glossId: 'g1', dimension: 'spoken_productive', chance: 0, movedOn: null },
+    ]);
+  });
+
+  it('reads every practised skill among the live ones, whatever the kind: an exam word, writing, spelling and speaking (phase 53 D3)', () => {
+    const starts = skillStarts({ kind: 'exam', dueOn: DUE, words: [{ glossId: 'g1', live: HOMEWORK_LIVE }], rows: [], memory: [], firstToday: [] });
+    expect(starts.map((start) => start.dimension)).toEqual(['written_productive', 'spelling', 'spoken_productive']);
+    const silent = skillStarts({ kind: 'exam', dueOn: DUE, words: [{ glossId: 'g1', live: SILENT }], rows: [], memory: [], firstToday: [] });
+    expect(silent.map((start) => start.dimension)).toEqual(['written_productive', 'spelling']);
   });
 });

@@ -26,6 +26,7 @@ import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
 import type { SessionRepo } from '../repo/sessions';
 import type { TargetBudgetRepo } from '../repo/targetBudgets';
+import type { TargetReadinessRepo } from '../repo/targetReadiness';
 import type { TargetSkillRepo } from '../repo/targetSkills';
 import type { UserRepo } from '../repo/users';
 import type { VocabularyRepo } from '../repo/vocabulary';
@@ -85,6 +86,8 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
       }),
       vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => SAVED, countEntries: async () => SAVED.length, markKnown: async () => {} }),
       memory: stub<MemoryRepo>({ findRows: async () => [], findEnrollmentRows: async () => [] }),
+      // Phase 67 (spec D1): no readiness yet, so every target word reads below 90.
+      targetReadiness: stub<TargetReadinessRepo>({ findRows: async () => [], findFirstEventsOn: async () => [] }),
       progress: stub<ProgressRepo>({ findRows: async () => [] }),
       glossFamilies: stub<GlossFamiliesRepo>({ load: async () => [] }),
       dict: stub<DictRepo>({
@@ -518,22 +521,12 @@ describe("a target's path (spec D1, D2, D10)", () => {
   // in the transaction that starts it and before its next stock is asked for; a later one leaves
   // it as it is.
   describe("today's budget (phase 65, spec D7)", () => {
-    /** Three days left: the cap is 10 half-points. g_b, started a week ago, owes its written
-     *  productive skill alone, 8 below the cap: two typed translations, one a session. */
+    /** Three days left. g_b, started a week ago, reads below 90 (no readiness yet). The device
+     *  cannot listen, so its writing card asks spelling too: today it owes one card, one session
+     *  (phase 67, spec D2). */
     const exam = target('t_exam', '2026-10-15', ['g_b']);
-    const skills = stub<TargetSkillRepo>({
-      findRows: async () =>
-        (
-          [
-            ['written_receptive', 10],
-            ['written_productive', 2],
-            ['spelling', 10],
-          ] as const
-        ).map(([dimension, halves]) => ({ targetId: 't_exam', glossId: 'g_b', dimension, halves, sessionId: null, day: '2026-10-06' })),
-    });
-    const right = { glossId: 'g_a', sessionId: 's_old', targetId: null, type: 'typed_translation' as const, verdict: 'exact' as const };
 
-    function budgetWorld(found: typeof SET | undefined, recent: Awaited<ReturnType<SessionRepo['findRecentAnswers']>> = [], done = 0) {
+    function budgetWorld(found: typeof SET | undefined, done = 0) {
       const inserted: unknown[] = [];
       const asked: unknown[][] = [];
       const counted: unknown[][] = [];
@@ -547,7 +540,7 @@ describe("a target's path (spec D1, D2, D10)", () => {
           findSessionCards: async () => [],
           findRecentAnswers: async (...args) => {
             asked.push(args);
-            return recent;
+            return [];
           },
           countCompletedOn: async (...args) => {
             counted.push(args);
@@ -559,7 +552,6 @@ describe("a target's path (spec D1, D2, D10)", () => {
             findTarget: async () => exam,
             listWords: async () => [{ glossId: 'g_b', addedAt: exam.createdAt, startedOn: '2026-10-05' }],
           }),
-          targetSkills: skills,
           targetBudgets: stub<TargetBudgetRepo>({
             find: async () => found,
             insert: async (budget) => {
@@ -572,24 +564,17 @@ describe("a target's path (spec D1, D2, D10)", () => {
       return { ...made, inserted, asked, counted, enqueuedAtInsert: () => enqueuedAtInsert };
     }
 
-    /** A miss the learner gave on an earlier day. */
-    const wrong = { ...right, verdict: 'wrong' as const };
-
     it.each([
-      ['no recent answer: the default miss rate, one session of room', [], 0, 3, 1],
-      ['twenty right answers: no miss, no room', Array.from({ length: 20 }, () => right), 0, 2, 0],
-      // Ruling T5-b: a rate of 0.5 is read at MISS_RATE_CAP, 0.25, so the play's two sessions double.
-      ['twenty answers, half missed: the rate capped, the play doubled', [...Array.from({ length: 10 }, () => right), ...Array.from({ length: 10 }, () => wrong)], 0, 4, 2],
+      ['no session done today: the play itself, no room for misses', 0, 1],
       // Coordinator's ruling on Review Focus 4: a session started yesterday and ended today is one
       // of today's sessions done, so the promise counts it too.
-      ['a session of the path already completed today, started yesterday', [], 1, 4, 1],
-    ])('is set at the first session, from the picker played forward: %s', async (_, recent, doneBefore, sessions, missRoom) => {
-      const { service, inserted, asked, counted, enqueuedAtInsert, jobs } = budgetWorld(undefined, recent, doneBefore);
+      ['a session of the path already completed today, started yesterday', 1, 2],
+    ])('is set at the first session, from the picker played forward: %s', async (_, doneBefore, sessions) => {
+      const { service, inserted, asked, counted, enqueuedAtInsert, jobs } = budgetWorld(undefined, doneBefore);
       await service.startSession('u1', 's1', NO_DEVICES);
-      expect(inserted).toEqual([{ targetId: 't_exam', day: TODAY, sessions, cards: 2, missRoom, doneBefore }]);
-      // The miss rate reads the enrollment's last three practice days, up to today; the sessions
-      // done, the path's completed today.
-      expect(asked).toEqual([[E, TODAY, 3]]);
+      expect(inserted).toEqual([{ targetId: 't_exam', day: TODAY, sessions, cards: 1, missRoom: 0, doneBefore }]);
+      // Phase 67 (spec D5): no miss rate is read; the sessions done, the path's completed today.
+      expect(asked).toEqual([]);
       expect(counted).toEqual([[E, 't_exam', TODAY]]);
       // Written before the next stock is asked for.
       expect(enqueuedAtInsert()).toBe(0);
@@ -652,20 +637,12 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
   const PRACTICE_MORE = { capHalves: 7, owedGlossIds: [] };
   const STOCK_DEVICES = { listening: true, speaking: false };
 
-  /** Both words started two days ago, every skill at the cap: the day is done, so today's choice
-   *  is practice more. */
-  const atCap = stub<TargetSkillRepo>({
-    findRows: async () =>
-      exam.glossIds.flatMap((glossId) =>
-        (['written_receptive', 'written_productive', 'spoken_receptive', 'spelling'] as const).map((dimension) => ({
-          targetId: 't_exam',
-          glossId,
-          dimension,
-          halves: 7,
-          sessionId: null,
-          day: '2026-10-10',
-        })),
-      ),
+  /** Both words, started two days ago, ready at the start of today (phase 67, spec D1): no card
+   *  is owed before the eve, so today's choice is practice more. */
+  const allReady = stub<TargetReadinessRepo>({
+    findRows: async () => [],
+    findFirstEventsOn: async () =>
+      exam.glossIds.flatMap((glossId) => (['written_productive', 'spelling'] as const).map((dimension) => ({ glossId, dimension, before: 0.97 }))),
   });
 
   /** A learner whose exam's stock s_stock recorded `recorded`; `paths` are the next-session locks
@@ -744,7 +721,7 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
   it('keeps a practice-more stock chosen today while practice more is still the choice: no churn', async () => {
     const { service, retired, inserted, paths } = examWorld(stockChosenOn(TODAY), PRACTICE_MORE, {
       startedOn: '2026-10-10',
-      targetSkills: atCap,
+      targetReadiness: allReady,
     });
     expect((await service.currentSession('u1', E, 't_exam')).current?.id).toBe('s_stock');
     expect(await service.createNextSession('u1', E, NO_DEVICES, 't_exam')).toEqual({
@@ -842,15 +819,15 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
 describe("a target path's choice beside its session in flight (rulings T3-j, T3-m, T3-n)", () => {
   const G_C = { ...SAVED[1], glossId: 'g_c', key: 'סוס', variantId: 'v_c', lexemeId: 'l_c', lemma: 'horse', form: 'horse' };
   const ALL = [...SAVED, G_C];
-  const LIVE = ['written_receptive', 'written_productive', 'spelling'] as const;
 
   /** A learner with no device (live: the written three) whose target `found` holds `words`, each
-   *  started on its day or not; `skills` its values in half-points; `cards` the cards of the
-   *  session started on its path; `introduced` every path's first meetings today. */
+   *  started on its day or not; `starts` each word's chance at the start of today in both its
+   *  counted skills (phase 67, spec D1; none: 0); `cards` the cards of the session started on
+   *  its path; `introduced` every path's first meetings today. */
   function pathWorld(input: {
     found: ReturnType<typeof target>;
     words: Record<string, string | null>;
-    skills?: Record<string, number>;
+    starts?: Record<string, number>;
     cards: { glossId: string; type: QuestionType; intro: boolean }[];
     introduced?: string[];
     /** Phase 65b (spec D2): today's budget, if set, and the path's sessions completed today. */
@@ -875,10 +852,11 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
           find: async (targetId, day) =>
             input.budget === undefined ? undefined : { targetId, day, sessions: input.budget, cards: 0, missRoom: 0, doneBefore: 0 },
         }),
-        targetSkills: stub<TargetSkillRepo>({
-          findRows: async () =>
-            Object.entries(input.skills ?? {}).flatMap(([glossId, halves]) =>
-              LIVE.map((dimension) => ({ targetId: input.found.id, glossId, dimension, halves, sessionId: null, day: '2026-10-11' })),
+        targetReadiness: stub<TargetReadinessRepo>({
+          findRows: async () => [],
+          findFirstEventsOn: async () =>
+            Object.entries(input.starts ?? {}).flatMap(([glossId, before]) =>
+              (['written_productive', 'spelling'] as const).map((dimension) => ({ glossId, dimension, before })),
             ),
         }),
         vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => ALL, countEntries: async () => ALL.length }),
@@ -915,12 +893,12 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
   });
 
   it('chooses practice more, recording no owed word, when the session in flight covers every owed word (ruling T3-m)', async () => {
-    // Both words started yesterday at 4 of 7: below the cap, and owed their next-day checks. A
-    // typed translation of each in flight takes every live skill to the cap and answers the checks.
+    // Both words started yesterday, below 90. The device cannot listen, so each owes one card today,
+    // its writing card, which asks spelling too: a typed translation of each in flight covers them.
     const { service, jobs, targets, logger } = pathWorld({
       found: target('t_exam', '2026-10-17', ['g_a', 'g_b']),
       words: { g_a: YESTERDAY, g_b: YESTERDAY },
-      skills: { g_a: 4, g_b: 4 },
+      starts: { g_a: 0.5, g_b: 0.5 },
       cards: [
         { glossId: 'g_a', type: 'typed_translation', intro: false },
         { glossId: 'g_b', type: 'typed_translation', intro: false },
@@ -928,7 +906,7 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
     });
     await build(service, 't_exam');
     expect(writes(targets, 'insertSessionTarget')).toEqual([['s_new', expect.objectContaining({ capHalves: 7, owedGlossIds: [] })]]);
-    // The hardest cards: one rung-2 card per word in a productive skill.
+    // The hardest cards: one card per word on its weakest counted skill.
     expect(picksOf(jobs)).toEqual([
       ['g_a', 'written_productive'],
       ['g_b', 'written_productive'],
@@ -937,25 +915,26 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
   });
 
   it('fills a session past the budget with practice more after the owed work (phase 65b D2)', async () => {
-    // Both words started yesterday at 4 of 7. The session in flight takes g_b to the cap and
-    // answers its checks; g_a is still owed. The budget is 2, one session is done, one in flight.
+    // Both words started yesterday, below 90, each owing its writing card (the device cannot listen).
+    // The session in flight asks g_b's; g_a still owes its own. The budget is 2, one session is
+    // done, one in flight.
     const world = (done: number) =>
       pathWorld({
         found: target('t_exam', '2026-10-17', ['g_a', 'g_b']),
         words: { g_a: YESTERDAY, g_b: YESTERDAY },
-        skills: { g_a: 4, g_b: 4 },
+        starts: { g_a: 0.5, g_b: 0.5 },
         cards: [{ glossId: 'g_b', type: 'typed_translation', intro: false }],
         budget: 2,
         done,
       });
     const before = world(0);
     await build(before.service, 't_exam');
-    // Before the budget: owed work only.
-    expect(picksOf(before.jobs).map(([glossId]) => glossId)).toEqual(['g_a']);
+    // Before the budget: owed work only, g_a's card.
+    expect(picksOf(before.jobs)).toEqual([['g_a', 'written_productive']]);
 
     const past = world(1);
     await build(past.service, 't_exam');
-    // Past it: g_a's owed card first, then practice more's hardest card for g_b.
+    // Past it: g_a's owed card first, then practice more's card for g_b.
     expect(picksOf(past.jobs)[0]).toEqual(picksOf(before.jobs)[0]);
     expect(picksOf(past.jobs).slice(1)).toEqual([['g_b', 'written_productive']]);
     // The stock records the day's owed words, as an owed stock does, for its stale check.
@@ -965,13 +944,13 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
   });
 
   it("leaves practice more only the day's room for new words, less the in-flight session's first meetings (ruling T3-n)", async () => {
-    // Forty days left, made today: one word of three planned today (g_a, started and at the far
-    // cap, so the day is done) and two later. Fourteen first meetings today, g_a's among them,
-    // and the in-flight session meets g_b early: the day's fifteenth. g_c waits for tomorrow.
+    // Forty days left, made today: one word of three planned today (g_a, started and ready, so
+    // the day is done) and two later. Fourteen first meetings today, g_a's among them, and the
+    // in-flight session meets g_b early: the day's fifteenth. g_c waits for tomorrow.
     const { service, jobs } = pathWorld({
       found: { ...target('t_exam', '2026-11-21', ['g_a', 'g_b', 'g_c']), createdAt: new Date('2026-10-12T09:00:00Z') },
       words: { g_a: TODAY, g_b: null, g_c: null },
-      skills: { g_a: 2 },
+      starts: { g_a: 0.97 },
       cards: [
         { glossId: 'g_b', type: 'meet', intro: true },
         { glossId: 'g_b', type: 'multiple_choice', intro: false },

@@ -14,7 +14,7 @@ import { insertGlossMemory, moveAnswersBack, readLearnerDay, readMemory, setLeve
 import { asChoice, insertListSession, type AskedGloss } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, makeBot, seedUser, setTimeZone } from '../../support/seedUser';
-import { endTargetNow, markPastBudget, readSessionTargets, readStartedOn, readStockRow, readTargetBudgets, readTargetEvents, readFirstReadinessEvents, readTargetReadiness, readTargetReadinessEvents, readTargetSkills, seedTarget, setTargetWord } from '../../support/targetRows';
+import { endTargetNow, markPastBudget, readSessionTargets, readStartedOn, readStockRow, readTargetBudgets, readTargetEvents, readFirstReadinessEvents, readTargetReadiness, readTargetReadinessEvents, readTargetSkills, seedTarget, setTargetReadiness, setTargetWord } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -535,10 +535,12 @@ describe("a target's stock chosen on an earlier day (spec D2, phase 53 R4 per pa
     const exam = await addTarget('exam', '2030-01-20', ids(words.slice(0, 3)));
     const { sessionId: stale } = await service.createNextSession('u_1', E, NO_DEVICES, exam);
     const [a, b] = sorted(ids(words.slice(0, 3)));
-    expect(await readSessionTargets(t.db, stale)).toMatchObject([{ capHalves: 5, owedGlossIds: [a, b] }]);
+    // Phase 67 (spec D3): twelve days out, one word of three is met today.
+    expect(await readSessionTargets(t.db, stale)).toMatchObject([{ capHalves: 5, owedGlossIds: [a] }]);
 
-    // `a` was started two days before, and is at the cap in every live skill: done today.
-    await setTargetWord(t.db, { targetId: exam, glossId: a, startedOn: '2030-01-07', halves: Object.fromEntries(LIVE.map((d) => [d, 5])) });
+    // `a` was started two days before and is ready: it rests, and the next day meets `b`.
+    await setTargetWord(t.db, { targetId: exam, glossId: a, startedOn: '2030-01-07', halves: {} });
+    await setTargetReadiness(t.db, { targetId: exam, glossId: a, dimensions: ['written_productive', 'spelling'], stability: 400, lastDay: '2030-01-07' });
     await makeBot(t.db, 'u_1', NEXT_DAY);
     const { current } = await service.currentSession('u_1', E, exam);
 
@@ -573,14 +575,16 @@ describe("a target's stock chosen on an earlier day (spec D2, phase 53 R4 per pa
   });
 });
 
-// Final review C1 (spec D2's stock lag, anti-goal 1). A target's stock is chosen at its session's
-// start, crediting that session's cards as right; when they cover every owed word, it is practice
-// more. A miss in that session leaves work owed that practice more does not serve, so the next
-// create replaces it, the same day; with every answer right the day is done and it is played.
-describe("a target's practice-more stock chosen beside the session that covered the day (final review C1)", () => {
-  /** The exam's one word, started yesterday at 4 of 7 in its written skills: owed its cap and
-   *  its next-day checks, all of which one typed translation in flight covers. S1 is that card,
-   *  started; its start asks for the path's stock, built here beside it. */
+// Final review C1 (spec D2's stock lag, anti-goal 1), phase 67 (spec D2, D5). A target's stock is
+// chosen at its session's start, crediting that session's cards as asked. When they are the day's
+// last owed card, the session in flight is the budget's last, so the stock is past the budget (phase
+// 65b) and records the owed word. A miss adds no card, so the day is done whatever the session's
+// answers, and the stock is played as it is.
+describe("a target's stock chosen beside the session that asks the day's last card (final review C1, phase 67)", () => {
+  /** The exam's one word, met yesterday and below 90: on a device that cannot listen it owes one
+   *  card today, its writing card, which one typed translation in flight asks. S1 is that card,
+   *  started; its start sets the day's budget, one session, and asks for the path's stock, built
+   *  here beside it. */
   async function coveredDay() {
     const words = await savedWords();
     const [word] = words;
@@ -591,7 +595,7 @@ describe("a target's practice-more stock chosen beside the session that covered 
     const [job] = await stockJobs();
     await service.stockSession(job.data);
     const { stock } = (await readOpen(exam))!;
-    expect(await readSessionTargets(t.db, stock)).toMatchObject([{ capHalves: 7, owedGlossIds: [] }]);
+    expect(await readSessionTargets(t.db, stock)).toMatchObject([{ capHalves: 7, owedGlossIds: [word.glossId] }]);
     return { word, exam, s1, stock };
   }
   const readOpen = async (exam: string) => {
@@ -599,39 +603,13 @@ describe("a target's practice-more stock chosen beside the session that covered 
     return stock && (await readStockRow(t.db, stock.session_id)).targetId === exam ? { stock: stock.session_id } : undefined;
   };
 
-  it('is replaced by the next create once that session ends with a miss: the target owes work again', async () => {
+  it.each([
+    ['a miss: it adds no card', 'zzzz'],
+    ['every answer right', null],
+  ])('is played as it is once that session ends with %s: the day is done', async (_, typed) => {
     const { word, exam, s1, stock } = await coveredDay();
 
-    await service.submitAnswer('u_1', s1.sessionId, s1.questions[0].id, { text: 'zzzz' });
-
-    const next = await service.createNextSession('u_1', E, NO_DEVICES, exam);
-    expect(next).toMatchObject({ status: 'preparing', source: 'list', created: true });
-    expect(next.sessionId).not.toBe(stock);
-    expect((await readStockRow(t.db, stock)).status).toBe('skipped');
-    expect(await readSessionTargets(t.db, next.sessionId)).toMatchObject([{ capHalves: 7, owedGlossIds: [word.glossId] }]);
-    // Owed work only: the word's skills the miss took below the cap (anti-goal 1).
-    expect([...new Set(await picksOf(next.sessionId))]).toEqual([word.glossId]);
-    expect(logged('session_retired')).toEqual([{ event: 'session_retired', enrollment_id: E, session_id: stock, reason: 'stale_target' }]);
-    // Chosen today for owed work, the new stock is the one home offers next, with the word owed.
-    expect(await service.currentSession('u_1', E, exam)).toMatchObject({ current: { id: next.sessionId }, dueCount: 1 });
-  });
-
-  it('is replaced on the home read too, which is where home learns of it', async () => {
-    const { exam, s1, stock } = await coveredDay();
-
-    await service.submitAnswer('u_1', s1.sessionId, s1.questions[0].id, { text: 'zzzz' });
-
-    const { current, dueCount } = await service.currentSession('u_1', E, exam);
-    expect(dueCount).toBe(1);
-    expect(current?.id).not.toBe(stock);
-    expect((await readStockRow(t.db, stock)).status).toBe('skipped');
-    expect(await service.createNextSession('u_1', E, NO_DEVICES, exam)).toMatchObject({ sessionId: current?.id, created: false });
-  });
-
-  it('is played as it is once that session ends with every answer right: the day is done', async () => {
-    const { word, exam, s1, stock } = await coveredDay();
-
-    await service.submitAnswer('u_1', s1.sessionId, s1.questions[0].id, { text: word.form });
+    await service.submitAnswer('u_1', s1.sessionId, s1.questions[0].id, { text: typed ?? word.form });
     expect((await service.currentSession('u_1', E, exam)).dueCount).toBe(0);
 
     expect(await service.createNextSession('u_1', E, NO_DEVICES, exam)).toMatchObject({ sessionId: stock, created: false });
@@ -907,10 +885,10 @@ describe("today's budget (phase 65, spec D7)", () => {
     // skills to 4 half-points (ruling T9-a), then one card to the cap of 7 in a second session;
     // with no answer to read a miss rate from, the default's one session of room (ceil(2 / 0.8)).
     const set = await readTargetBudgets(t.db, exam);
-    expect(set).toEqual([{ day: DAY, sessions: 3, cards: 5, missRoom: 1, doneBefore: 0, createdAt: expect.any(Date) }]);
+    expect(set).toEqual([{ day: DAY, sessions: 1, cards: 4, missRoom: 0, doneBefore: 0, createdAt: expect.any(Date) }]);
 
-    // Its card answered right, the session ends and the word is started: played forward now, the
-    // day would be 3 sessions and 4 cards. A second session the same day leaves the budget be.
+    // Its card answered right, the session ends and the word is started. A second session the same
+    // day leaves the budget be.
     const card = asChoice(first.questions[0]);
     await service.submitAnswer('u_1', first.sessionId, card.id, { option_index: card.correct_option });
     expect(await readStockRow(t.db, first.sessionId)).toMatchObject({ status: 'completed', practiceDay: DAY });
@@ -933,7 +911,7 @@ describe("today's budget (phase 65, spec D7)", () => {
 
     // The same budget the start call sets in the test above: the day before this answer.
     const set = await readTargetBudgets(t.db, exam);
-    expect(set).toEqual([{ day: DAY, sessions: 3, cards: 5, missRoom: 1, doneBefore: 0, createdAt: expect.any(Date) }]);
+    expect(set).toEqual([{ day: DAY, sessions: 1, cards: 4, missRoom: 0, doneBefore: 0, createdAt: expect.any(Date) }]);
     // The start call that lands after it leaves it be, as does the session's next answer.
     await service.startSession('u_1', first.sessionId, NO_DEVICES);
     const card = asChoice(first.questions[1]);
@@ -962,11 +940,11 @@ describe("today's budget (phase 65, spec D7)", () => {
     const next = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [planned], types: ['typed_translation'], targetId: exam });
     await service.startSession('u_1', next.sessionId, NO_DEVICES);
 
-    // The word started and its receptive skill at 2 of the cap's 7: the picker played forward is 3
-    // sessions of 2, 1 and 1 cards; one session of room at the default miss rate; and the one done.
+    // Phase 67 (spec D2, D5): the word, met yesterday and below 90, owes its writing card today (the
+    // device cannot listen): one session of one card, no room for misses; and the one done.
     expect(await readTargetBudgets(t.db, exam)).toEqual([
       ...eveBudget,
-      { day: DAY, sessions: 3 + 1 + 1, cards: 4, missRoom: 1, doneBefore: 1, createdAt: expect.any(Date) },
+      { day: DAY, sessions: 1 + 1, cards: 1, missRoom: 0, doneBefore: 1, createdAt: expect.any(Date) },
     ]);
   });
 
@@ -987,14 +965,14 @@ describe("today's budget (phase 65, spec D7)", () => {
     const card = asChoice(eve.questions[0]);
     await service.submitAnswer('u_1', eve.sessionId, card.id, { option_index: card.correct_option });
 
-    // Today: no session started yet, so no budget; the offer is today's play (3 sessions of 4
-    // cards), one session of room, and the one done, as the day's first start would set it.
+    // Today: no session started yet, so no budget; the offer is today's play (one session of one
+    // card, phase 67) and the one done, as the day's first start would set it.
     expect((await targets.getTarget('u_1', exam)).today).toMatchObject({
       state: 'owed',
       sessions_budget: null,
-      sessions_offer: 3 + 1 + 1,
+      sessions_offer: 1 + 1,
       sessions_done: 1,
-      minutes: 2,
+      minutes: 1,
     });
     // Read back on the eve, it is not the eve's.
     await makeBot(t.db, 'u_1', PREVIOUS_DAY);

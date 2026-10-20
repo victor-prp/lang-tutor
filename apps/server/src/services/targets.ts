@@ -158,7 +158,7 @@ export function createTargetService({
       const createdOn = read?.createdOn ?? (await learnerDays(repos, enrolled.user_id, [target.createdAt.getTime()]))[0];
       const day =
         read?.day ??
-        targetDay({ today, createdOn: today, dueOn: target.dueOn, words: [], skills: [], rightToday: new Set(), answeredToday: false });
+        targetDay({ today, createdOn: today, dueOn: target.dueOn, kind: target.kind, words: [], starts: [], askedToday: [], answeredToday: false });
       const dayOf = new Map(day.words.map((word) => [word.glossId, word]));
       const liveOf = new Map((read?.dayInput.words ?? []).map((word) => [word.glossId, word.live]));
       const shown = target.glossIds.filter((glossId) => savedOf.has(glossId) && dayOf.has(glossId));

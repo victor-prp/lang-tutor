@@ -37,6 +37,10 @@ export const NEW_FLOOR = 1;
 /** Research's choice; Anki's default is 20 cards a day. New words a day. */
 export const DAY_NEW_CAP = 15;
 
+/** Phase 67 (spec D3, Victor: "8 words a day is already a lot"). The most new words a target's
+ *  plan meets in a day before its eve; practice more can start more. */
+export const NEW_TARGET_WORDS_PER_DAY = 8;
+
 /** Research's choice. Picks testing one dimension, at most, counted against the
  *  dimension's expansions only (phase 37 D3): a newly live dimension does not flood
  *  a session, and a due word is never held back for it. */
@@ -92,6 +96,3 @@ export const TARGET_CAP_DUE_HALVES = 20;
  *  +4, a recognition card +2, an Again costs 4. A starting value, named here to tune. */
 export const TARGET_POINTS_HALVES = { recall: 4, recognition: 2, miss: 4 } as const;
 
-/** Phase 57. Speaking cards in a target-only session; the main path keeps
- *  SPEAKING_PER_SESSION. */
-export const TARGET_SPEAKING_PER_SESSION = 3;

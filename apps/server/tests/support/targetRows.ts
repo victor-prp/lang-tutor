@@ -1,5 +1,7 @@
 import { asc, eq, sql } from 'drizzle-orm';
 
+import { FSRS6_DEFAULT, readinessFromMemory, type Dimension } from '@lang-tutor/core/domain';
+
 import type { Db } from '../../src/db/client';
 import { sessions, sessionTargets, targetBudgets, targetEvents } from '../../src/db/schema';
 import type { TargetKind } from '../../src/domain/targets';
@@ -181,6 +183,20 @@ export async function setTargetWord(
       insert into target_skills (target_id, gloss_id, dimension, halves) values (${input.targetId}, ${input.glossId}, ${dimension}, ${halves!})
       on conflict (target_id, gloss_id, dimension) do update set halves = excluded.halves`);
   }
+}
+
+/** Phase 67 (spec D1). A target word's readiness in `dimensions`, through the repo: every skill at
+ *  `stability` days, last moved on `lastDay`, as an answer that day would leave it. */
+export function setTargetReadiness(
+  db: Db,
+  input: { targetId: string; glossId: string; dimensions: readonly Dimension[]; stability: number; lastDay: string },
+): Promise<void> {
+  const state = { stability: input.stability, difficulty: 5, lastDay: input.lastDay, reps: 3, lapses: 0, params: FSRS6_DEFAULT.id };
+  return withTx(db, (tx) =>
+    createTargetReadinessRepo(tx).upsertRows(
+      input.dimensions.map((dimension) => ({ targetId: input.targetId, glossId: input.glossId, dimension, row: readinessFromMemory(state), sessionId: null })),
+    ),
+  );
 }
 
 /** Phase 65 (spec D7.2). A target's budgets, one a learner day, with when each was written. */

@@ -11,7 +11,7 @@ import {
   type ReadinessRow,
 } from '@lang-tutor/core/domain';
 
-import type { TargetDay } from './targetDay';
+import type { SkillStart, TargetDay } from './targetDay';
 
 /**
  * Phase 65 (spec D1, D3.7, D4, D7, D9, D10). The numbers a target's summary carries: its
@@ -28,6 +28,49 @@ export type WordReadiness = { glossId: string; readinessPct: number; skills: Ski
 
 const keyOf = (glossId: string, dimension: Dimension) => `${glossId}\u0000${dimension}`;
 const percent = (chance: number) => Math.floor(100 * chance);
+
+type SkillReads = {
+  dueOn: string;
+  rows: readonly { glossId: string; dimension: Dimension; row: ReadinessRow }[];
+  memory: readonly { glossId: string; dimension: Dimension; state: MemoryState }[];
+  firstToday: readonly { glossId: string; dimension: Dimension; before: number }[];
+};
+
+/** Spec R1, D3.7. A skill's row: its own, else one read from the main memory last moved before
+ *  the date, else none; and each skill's `before` of its first line today. */
+function readersOf(input: SkillReads) {
+  const stored = new Map(input.rows.map((entry) => [keyOf(entry.glossId, entry.dimension), entry.row]));
+  const memory = new Map(input.memory.map((entry) => [keyOf(entry.glossId, entry.dimension), entry.state]));
+  const firstToday = new Map(input.firstToday.map((entry) => [keyOf(entry.glossId, entry.dimension), entry.before]));
+  const rowOf = (glossId: string, dimension: Dimension): ReadinessRow | null => {
+    const key = keyOf(glossId, dimension);
+    const own = stored.get(key);
+    if (own) return own;
+    const state = memory.get(key);
+    return state && state.lastDay < input.dueOn ? readinessFromMemory(state) : null;
+  };
+  return { rowOf, firstToday: { get: (glossId: string, dimension: Dimension) => firstToday.get(keyOf(glossId, dimension)) } };
+}
+
+/**
+ * Phase 67 (spec D1). Each word's writing, spelling and speaking among its live ones, at the start
+ * of today, what its day is planned from (the skills it practises, and its kind's counted ones): the chance its skill's first line today started from, else its chance now (its row, else
+ * the main memory, else 0, as readinessSummary reads it), and the day its readiness last moved.
+ */
+export function skillStarts(input: SkillReads & { kind: ReadinessKind; words: readonly { glossId: string; live: readonly Dimension[] }[] }): SkillStart[] {
+  const { rowOf, firstToday } = readersOf(input);
+  return input.words.flatMap((word) =>
+    countedSkills('homework', word.live).map((dimension) => {
+      const row = rowOf(word.glossId, dimension);
+      return {
+        glossId: word.glossId,
+        dimension,
+        chance: firstToday.get(word.glossId, dimension) ?? skillChance(row, input.dueOn),
+        movedOn: row?.day ?? null,
+      };
+    }),
+  );
+}
 
 /**
  * Spec D1, D4, D9, R1. Per word, its counted skills among its live ones (readTargetDay's: speaking
@@ -53,22 +96,13 @@ export function readinessSummary(input: {
   firstToday: readonly { glossId: string; dimension: Dimension; before: number }[];
 }): { readinessPct: number; readinessStartPct: number; readyCount: number; words: WordReadiness[] } {
   const { kind, dueOn, today } = input;
-  const stored = new Map(input.rows.map((entry) => [keyOf(entry.glossId, entry.dimension), entry.row]));
-  const memory = new Map(input.memory.map((entry) => [keyOf(entry.glossId, entry.dimension), entry.state]));
-  const firstToday = new Map(input.firstToday.map((entry) => [keyOf(entry.glossId, entry.dimension), entry.before]));
-  const rowOf = (glossId: string, dimension: Dimension): ReadinessRow | null => {
-    const key = keyOf(glossId, dimension);
-    const own = stored.get(key);
-    if (own) return own;
-    const state = memory.get(key);
-    return state && state.lastDay < dueOn ? readinessFromMemory(state) : null;
-  };
+  const { rowOf, firstToday } = readersOf(input);
 
   const counted = input.words.map((word) => {
     const skills = countedSkills(kind, word.live).map((dimension) => {
       const row = rowOf(word.glossId, dimension);
       const chance = skillChance(row, dueOn);
-      return { dimension, row, chance, start: firstToday.get(keyOf(word.glossId, dimension)) ?? chance };
+      return { dimension, row, chance, start: firstToday.get(word.glossId, dimension) ?? chance };
     });
     return { glossId: word.glossId, skills, chance: wordChance(skills.map((skill) => skill.chance)) };
   });

@@ -1,5 +1,5 @@
 import type { PartOfSpeech, TargetKind, UnavailableReason } from '@lang-tutor/core/api';
-import { READINESS_WORD_READY, type Dimension, type QuestionType } from '@lang-tutor/core/domain';
+import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
 
 // U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
 //
@@ -482,8 +482,8 @@ export const strings = {
   homePhotoSeveral: (count: number) => `${isolateLtr(String(count))} רשימות מתמונות מחכות לסקירה`,
   // Phase 53 (spec D10, D11). Preparing for homework or a test.
   targetKindName: (kind: TargetKind): string => TARGET_KIND_NAMES[kind],
-  // Phase 57 (spec D9, D12). A word's readiness is a percent, and "ready" at 100%.
-  targetReadinessName: (readinessPct: number): string => (readinessPct >= READINESS_WORD_READY ? 'מוכנה' : isolateLtr(`${readinessPct}%`)),
+  // Phase 57 (spec D9, D12), phase 67 (spec D7). A word's readiness is a percent, ready or not.
+  targetReadinessName: (readinessPct: number): string => isolateLtr(`${readinessPct}%`),
   targetTomorrow: 'מחר',
   targetInDays: (days: number) => `בעוד ${isolateLtr(String(days))} ימים`,
   // A target read after its date has come is no longer counted down to.
