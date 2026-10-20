@@ -4,7 +4,6 @@ import { SESSION_LENGTH, type Dimension, type QuestionType } from '@lang-tutor/c
 
 import type { ChosenPick } from './choose';
 import { LADDER_SLOTS, NEW_PER_SESSION } from './chooseConstants';
-import { planCards } from './plan';
 import type { TargetDay, WordDay } from './targetDay';
 import { cardOf, chooseTargetPicks, owedWords, stockServes, stockToCheck, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
 
@@ -186,14 +185,6 @@ describe('chooseTargetPicks, owed (spec D6)', () => {
   it('asks nothing when nothing is owed', () => {
     const day = dayOf([{ id: 'g0', state: 'done' }], 'done');
     expect(chooseTargetPicks({ ...base, day, mode: 'owed' })).toEqual([]);
-  });
-
-  it('keeps the spelling card a spelling card on a device that cannot listen: planCards falls back to typed (Review Focus 2)', () => {
-    const plan = planCards(
-      [{ form: 'casa', translation: 'בית', tiles: true, speakable: true, clozeGap: true, dimension: SP, rung: 1, level: 1, r: 1, step: false }],
-      { listening: false, speaking: false, target: true },
-    );
-    expect(['typed_translation', 'cloze_typed']).toContain(plan.types[0]);
   });
 });
 

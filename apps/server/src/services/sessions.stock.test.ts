@@ -521,8 +521,9 @@ describe("a target's path (spec D1, D2, D10)", () => {
   // in the transaction that starts it and before its next stock is asked for; a later one leaves
   // it as it is.
   describe("today's budget (phase 65, spec D7)", () => {
-    /** Three days left. g_b, started a week ago, reads below 90 (no readiness yet): today it owes
-     *  two cards, writing and spelling, one session (phase 67, spec D2). */
+    /** Three days left. g_b, started a week ago, reads below 90 (no readiness yet). The device
+     *  cannot listen, so its writing card asks spelling too: today it owes one card, one session
+     *  (phase 67, spec D2). */
     const exam = target('t_exam', '2026-10-15', ['g_b']);
 
     function budgetWorld(found: typeof SET | undefined, done = 0) {
@@ -571,7 +572,7 @@ describe("a target's path (spec D1, D2, D10)", () => {
     ])('is set at the first session, from the picker played forward: %s', async (_, doneBefore, sessions) => {
       const { service, inserted, asked, counted, enqueuedAtInsert, jobs } = budgetWorld(undefined, doneBefore);
       await service.startSession('u1', 's1', NO_DEVICES);
-      expect(inserted).toEqual([{ targetId: 't_exam', day: TODAY, sessions, cards: 2, missRoom: 0, doneBefore }]);
+      expect(inserted).toEqual([{ targetId: 't_exam', day: TODAY, sessions, cards: 1, missRoom: 0, doneBefore }]);
       // Phase 67 (spec D5): no miss rate is read; the sessions done, the path's completed today.
       expect(asked).toEqual([]);
       expect(counted).toEqual([[E, 't_exam', TODAY]]);
@@ -892,17 +893,15 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
   });
 
   it('chooses practice more, recording no owed word, when the session in flight covers every owed word (ruling T3-m)', async () => {
-    // Both words started yesterday, below 90: each owes its two cards today, writing and
-    // spelling. A typed translation and a dictation of each in flight cover them all.
+    // Both words started yesterday, below 90. The device cannot listen, so each owes one card today,
+    // its writing card, which asks spelling too: a typed translation of each in flight covers them.
     const { service, jobs, targets, logger } = pathWorld({
       found: target('t_exam', '2026-10-17', ['g_a', 'g_b']),
       words: { g_a: YESTERDAY, g_b: YESTERDAY },
       starts: { g_a: 0.5, g_b: 0.5 },
       cards: [
         { glossId: 'g_a', type: 'typed_translation', intro: false },
-        { glossId: 'g_a', type: 'dictation', intro: false },
         { glossId: 'g_b', type: 'typed_translation', intro: false },
-        { glossId: 'g_b', type: 'dictation', intro: false },
       ],
     });
     await build(service, 't_exam');
@@ -916,33 +915,28 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
   });
 
   it('fills a session past the budget with practice more after the owed work (phase 65b D2)', async () => {
-    // Both words started yesterday, below 90. The session in flight asks both of g_b's cards;
-    // g_a still owes its two. The budget is 2, one session is done, one in flight.
+    // Both words started yesterday, below 90, each owing its writing card (the device cannot listen).
+    // The session in flight asks g_b's; g_a still owes its own. The budget is 2, one session is
+    // done, one in flight.
     const world = (done: number) =>
       pathWorld({
         found: target('t_exam', '2026-10-17', ['g_a', 'g_b']),
         words: { g_a: YESTERDAY, g_b: YESTERDAY },
         starts: { g_a: 0.5, g_b: 0.5 },
-        cards: [
-          { glossId: 'g_b', type: 'typed_translation', intro: false },
-          { glossId: 'g_b', type: 'dictation', intro: false },
-        ],
+        cards: [{ glossId: 'g_b', type: 'typed_translation', intro: false }],
         budget: 2,
         done,
       });
     const before = world(0);
     await build(before.service, 't_exam');
-    // Before the budget: owed work only, g_a's two cards.
-    expect(picksOf(before.jobs)).toEqual([
-      ['g_a', 'written_productive'],
-      ['g_a', 'spelling'],
-    ]);
+    // Before the budget: owed work only, g_a's card.
+    expect(picksOf(before.jobs)).toEqual([['g_a', 'written_productive']]);
 
     const past = world(1);
     await build(past.service, 't_exam');
-    // Past it: g_a's owed cards first, then practice more's card for g_b.
-    expect(picksOf(past.jobs).slice(0, 2)).toEqual(picksOf(before.jobs));
-    expect(picksOf(past.jobs).slice(2)).toEqual([['g_b', 'written_productive']]);
+    // Past it: g_a's owed card first, then practice more's card for g_b.
+    expect(picksOf(past.jobs)[0]).toEqual(picksOf(before.jobs)[0]);
+    expect(picksOf(past.jobs).slice(1)).toEqual([['g_b', 'written_productive']]);
     // The stock records the day's owed words, as an owed stock does, for its stale check.
     const owedOf = (made: ReturnType<typeof world>) => (writes(made.targets, 'insertSessionTarget')[0][1] as { owedGlossIds: string[] }).owedGlossIds;
     expect(owedOf(past)).toEqual(owedOf(before));

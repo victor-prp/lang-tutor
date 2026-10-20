@@ -1235,17 +1235,16 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
 
     const read = await service.getTarget(OWNER, 't1');
 
-    // The picker played forward over the day (phase 67, spec D5): casa, below 90, owes two cards,
-    // writing and spelling. Its ladder (4 cards) asks writing; its dictation waits for a second
-    // session. No room for misses; and the one session done today. Five cards, at 30 s each:
-    // about 3 minutes.
+    // The picker played forward over the day (phase 67, spec D2, D5): casa, below 90, on a device
+    // that cannot listen, owes its writing card, which asks spelling too: its ladder (4 cards). No
+    // room for misses; and the one session done today. Four cards, at 30 s each: 2 minutes.
     expect(read.today).toMatchObject({
       state: 'owed',
       sessions_budget: null,
-      sessions_offer: 2 + 1,
+      sessions_offer: 1 + 1,
       sessions_done: 1,
       ended_early: false,
-      minutes: 3,
+      minutes: 2,
     });
     expect(reads).not.toContain('findRecentAnswers');
   });

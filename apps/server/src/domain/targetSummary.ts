@@ -11,7 +11,7 @@ import {
   type ReadinessRow,
 } from '@lang-tutor/core/domain';
 
-import { practisedSkills, type SkillStart, type TargetDay } from './targetDay';
+import type { SkillStart, TargetDay } from './targetDay';
 
 /**
  * Phase 65 (spec D1, D3.7, D4, D7, D9, D10). The numbers a target's summary carries: its
@@ -53,14 +53,14 @@ function readersOf(input: SkillReads) {
 }
 
 /**
- * Phase 67 (spec D1). Each word's practised skills at the start of today, what its day is planned
- * from: the chance its skill's first line today started from, else its chance now (its row, else
+ * Phase 67 (spec D1). Each word's writing, spelling and speaking among its live ones, at the start
+ * of today, what its day is planned from (the skills it practises, and its kind's counted ones): the chance its skill's first line today started from, else its chance now (its row, else
  * the main memory, else 0, as readinessSummary reads it), and the day its readiness last moved.
  */
 export function skillStarts(input: SkillReads & { kind: ReadinessKind; words: readonly { glossId: string; live: readonly Dimension[] }[] }): SkillStart[] {
   const { rowOf, firstToday } = readersOf(input);
   return input.words.flatMap((word) =>
-    practisedSkills(word.live).map((dimension) => {
+    countedSkills('homework', word.live).map((dimension) => {
       const row = rowOf(word.glossId, dimension);
       return {
         glossId: word.glossId,

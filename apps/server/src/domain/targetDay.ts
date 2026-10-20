@@ -79,9 +79,12 @@ export type TargetDay = {
 
 /** Phase 53 D3 (Victor: the kind sets how strict a target is, never which skills are practised),
  *  phase 67 (spec D2). The skills a target word's cards ask, whatever its kind: writing, spelling
- *  and speaking among its live ones, whose cards test the receptive skills too. Its readiness, and
- *  so whether it is below 90, counts only its kind's (phase 65). */
-export const practisedSkills = (live: readonly Dimension[]): Dimension[] => countedSkills('homework', live);
+ *  and speaking among its live ones, whose cards test the receptive skills too. Spelling has a card
+ *  of its own, the dictation, only where the device can listen; elsewhere the writing card, whose
+ *  typed answer grades spelling, asks it. Its readiness, and so whether it is below 90, counts only
+ *  its kind's (phase 65). */
+export const practisedSkills = (live: readonly Dimension[]): Dimension[] =>
+  countedSkills('homework', live).filter((dimension) => dimension !== 'spelling' || live.includes('spoken_receptive'));
 
 /** Spec D2. The practised skill a card of `type` asks: what a typed or tiled answer writes, a
  *  dictation spells, a say translation says (also when answered by typing). Null for a card that
@@ -154,8 +157,7 @@ export function targetDay(input: TargetDayInput): TargetDay {
       chance: startOf.get(`${word.glossId}|${dimension}`)?.chance ?? 0,
       movedOn: startOf.get(`${word.glossId}|${dimension}`)?.movedOn ?? null,
     }));
-    const counted = new Set(countedSkills(input.kind, word.live));
-    const chance = wordChance(practised.filter((skill) => counted.has(skill.dimension)).map((skill) => skill.chance));
+    const chance = wordChance(countedSkills(input.kind, word.live).map((dimension) => startOf.get(`${word.glossId}|${dimension}`)?.chance ?? 0));
     const pct = Math.floor(100 * chance);
     const ready = pct >= READINESS_WORD_READY;
     chances.push(chance);

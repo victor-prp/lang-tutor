@@ -105,6 +105,14 @@ describe('targetDay: the cards a day owes (spec D1, D2)', () => {
     expect(only(d, 0)).toMatchObject({ cardsLeft: 2, owed: [W, S], practised: [{ dimension: W, chance: 0.5 }, { dimension: S, chance: 0.5 }] });
   });
 
+  it('practises spelling through the writing card on a device that cannot listen: no dictation, so no spelling card of its own (Review Focus 2)', () => {
+    const deaf: Dimension[] = ['written_receptive', 'written_productive', 'spelling', 'spoken_productive'];
+    const d = day(5, 4, { words: words(1, () => ({ startedOn: D0, live: deaf })), starts: starts([id(0)], 0.5) });
+    expect(only(d, 0)).toMatchObject({ cardsLeft: 2, owed: [W, SAY], practised: [{ dimension: W, chance: 0.5 }, { dimension: SAY, chance: 0.5 }] });
+    // Its readiness still counts spelling, which its typed answers grade.
+    expect(only(d, 0).readinessPct).toBe(12);
+  });
+
   it('checks a ready word once on the eve, on its weakest skill', () => {
     const d = day(5, 4, {
       words: met,
