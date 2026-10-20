@@ -147,6 +147,17 @@ export async function moveTargetBack(targetId: string, days: number): Promise<vo
   }
 }
 
+/** Phase 67 (spec D2). Makes every readiness row of a target as sure as can be (a stability of ten
+ *  thousand days): its answered words are ready, so before the eve they rest. */
+export async function makeTargetReady(targetId: string): Promise<void> {
+  const handle = createDb(E2E_DATABASE_URL, { max: 1, onError: () => {} });
+  try {
+    await handle.db.execute(sql`update target_readiness set stability = 10000 where target_id = ${targetId}`);
+  } finally {
+    await handle.close();
+  }
+}
+
 /** Home's path cards, in the order home stacks them: `main` for My words, else the target's
  *  id. Phase 64 (spec D3): one card shows at a time, so the order is the bars' (phase 64b); a
  *  stack of one has no bars, and the order is the one card on show. */
@@ -248,11 +259,11 @@ export const EVERY_WORD: readonly Word[] = [...MY_WORDS, ...HOMEWORK_WORDS];
 
 /**
  * A learner past the seed, on a device with no voice and no microphone (so a word's live
- * skills are the written three), with MY_WORDS of their own and a homework of HOMEWORK_WORDS
- * due in 40 days: the plan starts a third of its words on its first day (spec D6), so two
- * are owed today and four come later, and the cap is the far one, which a new word's ladder
- * answered right reaches. Each path's session is stocked as the words come (spec D2), so the
- * generation is stubbed before.
+ * skills are the written three, and its writing card asks spelling too), with MY_WORDS of their
+ * own and a homework of HOMEWORK_WORDS due in 40 days: the plan meets its words over the days to
+ * its halfway point (phase 67, spec D3), so one is owed today, met by its ladder, and five come
+ * later. Each path's session is stocked as the words come (spec D2), so the generation is stubbed
+ * before.
  */
 export async function homework(page: Page, request: APIRequestContext, username: string) {
   await withVoices(page, []);
@@ -268,8 +279,8 @@ export async function homework(page: Page, request: APIRequestContext, username:
     due_on: addDays(today, 40),
     entries: homeworkEntries.flat(),
   });
-  expect(formsOf(target, 'owed'), JSON.stringify(target.words)).toHaveLength(2);
-  expect(formsOf(target, 'later')).toHaveLength(4);
+  expect(formsOf(target, 'owed'), JSON.stringify(target.words)).toHaveLength(1);
+  expect(formsOf(target, 'later')).toHaveLength(5);
   return { enrollmentId, target };
 }
 
