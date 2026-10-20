@@ -6,7 +6,7 @@ import { DAY_NEW_CAP } from '../domain/chooseConstants';
 import { glossFamilies } from '../domain/glossFamilies';
 import type { Devices, Path, SavedGloss } from '../domain/session';
 import type { DayAnswer } from '../domain/today';
-import { MISS_RATE_DAYS, budgetSessions, missRateOf, playTodayForward, type TargetBudget } from '../domain/targetBudget';
+import { playTodayForward, type TargetBudget } from '../domain/targetBudget';
 import { targetDay } from '../domain/targetDay';
 import { targetMode, type TargetPickInput } from '../domain/targetPicker';
 import { activeOn } from '../domain/targets';
@@ -38,8 +38,6 @@ export function enrollmentReads(repos: Repos, enrolled: Enrollment, devices: Dev
     answersOn: once(() => repos.session.findAnswersOn(enrollmentId, today)),
     /** Today's first meetings, every path's. */
     introduced: once(() => repos.session.findIntroducedOn(enrollmentId, today)),
-    /** The miss rate over the last MISS_RATE_DAYS practice days (missRateOf). */
-    missRate: once(async () => missRateOf(await repos.session.findRecentAnswers(enrollmentId, today, MISS_RATE_DAYS))),
   };
 }
 
@@ -174,13 +172,11 @@ export async function readTargetPickInput(
 }
 
 /**
- * Phase 65 (spec D7.1–D7.3, ruling T5-b). A target's budget for `today`, as it would be set now:
- * the picker played forward from the day as it stands, with no session in flight
- * (playTodayForward), stretched for the misses at the enrollment's miss rate over its last
- * MISS_RATE_DAYS practice days (missRateOf, budgetSessions), and the path's sessions already
- * completed today, which the day's count of sessions done will hold too (a session started
- * yesterday and ended today). Null when readTargetPickInput reads nothing. `shared`: as
- * readTargetPickInput's.
+ * Phase 65 (spec D7.1–D7.3), phase 67 (spec D5). A target's budget for `today`, as it would be
+ * set now: the picker played forward from the day as it stands, with no session in flight
+ * (playTodayForward), and the path's sessions already completed today, which the day's count of
+ * sessions done will hold too (a session started yesterday and ended today). Null when
+ * readTargetPickInput reads nothing. `shared`: as readTargetPickInput's.
  */
 export async function readTodayBudget(
   repos: Repos,
@@ -194,7 +190,7 @@ export async function readTodayBudget(
   if (!picked) return null;
   // The play chooses its own day, mode and (none) in flight.
   const play = playTodayForward({ pick: picked.input, ...picked.read.dayInput });
-  const promised = budgetSessions(play, await shared.missRate());
   const doneBefore = await repos.session.countCompletedOn(enrolled.id, target.id, today);
-  return { targetId: target.id, day: today, sessions: promised + doneBefore, cards: play.cards, missRoom: promised - play.sessions, doneBefore };
+  // Phase 67 (spec D5): a miss adds no card, so the play is the day; no room is kept for misses.
+  return { targetId: target.id, day: today, sessions: play.sessions + doneBefore, cards: play.cards, missRoom: 0, doneBefore };
 }
