@@ -6,6 +6,7 @@ import { ACCEPT_MARKER } from '../../src/domain/accept';
 import { CHECK_MARKER } from '../../src/domain/check';
 import { CONTEXT_MARKER } from '../../src/domain/context';
 import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
+import { EXPLAIN_MARKER, type Explanation } from '../../src/domain/explain';
 import { JUDGE_MARKER } from '../../src/domain/judge';
 import { PHOTO_READING_MARKER } from '../../src/domain/photoReading';
 import { POINT_MARKER } from '../../src/domain/pointing';
@@ -496,7 +497,7 @@ export async function expectSoundAlike(ns: string, ...scores: number[]): Promise
  * transcription stub in the same namespace cannot answer it. Consumed once, and
  * prioritised so it wins over a broader stub registered earlier.
  */
-export async function expectJudge(ns: string, verdict: 'right' | 'other_sense' | 'wrong' | 'fits'): Promise<void> {
+export async function expectJudge(ns: string, verdict: 'right' | 'other_sense' | 'other_word' | 'wrong' | 'fits'): Promise<void> {
   await expectation(ns, {
     match: { body: { type: 'REGEX', regex: `[\\s\\S]*${JUDGE_MARKER}[\\s\\S]*` } },
     action: {
@@ -543,6 +544,24 @@ export async function expectAccept(
             body,
             ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
           },
+    },
+  });
+}
+
+/**
+ * Phase 66 (spec D2). The explain call's answer, matched on EXPLAIN_MARKER so the
+ * judge's stub cannot answer it. Consumed once; `status` makes it a failed call.
+ */
+export async function expectExplain(ns: string, answer: Explanation, opts: { status?: number } = {}): Promise<void> {
+  const failed = opts.status !== undefined && opts.status !== 200;
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${EXPLAIN_MARKER}[\\s\\S]*` } },
+    action: {
+      priority: 10,
+      times: { remainingTimes: 1, unlimited: false },
+      httpResponse: failed
+        ? { statusCode: opts.status, body: '{"error":{"message":"upstream"}}' }
+        : { statusCode: 200, headers: { 'content-type': ['application/json'] }, body: JSON.stringify(geminiResponse(answer)) },
     },
   });
 }

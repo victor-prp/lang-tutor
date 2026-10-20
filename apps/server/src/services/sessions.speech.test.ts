@@ -82,6 +82,7 @@ function setup(
     transcriber,
     judge,
     translationJudge: createFakeLlmClient(''),
+    explainer: createFakeLlmClient(''),
     soundAlikeThreshold: 0.95,
   });
   return { service, inserted, resolved, logger, judge, pronunciation };
@@ -222,6 +223,7 @@ describe('answerBySpeech (spec D5)', () => {
       transcriber: createFakeTranscriber('{"heard":"gatto"}'),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      explainer: createFakeLlmClient(''),
       soundAlikeThreshold: 0.95,
     });
     await expect(service.answerBySpeech('u1', SESSION, attempt)).rejects.toBeInstanceOf(QuestionDesynced);

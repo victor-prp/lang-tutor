@@ -5,6 +5,8 @@ import {
   CurrentSessionQuerySchema,
   CurrentSessionResponseSchema,
   ErrorSchema,
+  ExplainRequestSchema,
+  ExplainResponseSchema,
   JudgedAnswerRequestSchema,
   JudgedAnswerResponseSchema,
   NextStepRequestSchema,
@@ -36,6 +38,7 @@ import {
   NoSavedWords,
   OptionOutOfRange,
   QuestionDesynced,
+  RetryPending,
   SessionNotFound,
   SessionNotReady,
   SessionNotSkippable,
@@ -275,6 +278,32 @@ const judgedAnswerRoute = createRoute({
   },
 });
 
+// Phase 66 (spec D2). The mistakes in a translation card's answer, shown on request.
+const explainRoute = createRoute({
+  method: 'post',
+  path: '/sessions/{id}/explain',
+  tags: ['sessions'],
+  summary: "Explain the mistakes in a translation card's answer",
+  description:
+    "Lists the mistakes in the recorded answer to a `sentence_translation` card of the session: its final text, the second try's when there was one, read from the record. `corrected` is that text minimally fixed; each mistake has the words as written (`wrong`, empty when something is missing), what they should be (`right`) and one line on why, in the learner's language (`why`). No mistakes means the sentence is right. It is information only: nothing is graded or changed. An empty text or the reference as typed is answered without a model call; otherwise a language model is called once and its answer stored, so asking again answers the same, with no call.",
+  request: {
+    params: sessionIdParam,
+    body: { required: true, content: { 'application/json': { schema: ExplainRequestSchema } } },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: ExplainResponseSchema } },
+      description: 'The explanation.',
+    },
+    400: failure('The request body did not validate, or `question_id` is not an answered `sentence_translation` card of the session.'),
+    404: failure('No session has this id.'),
+    409: failure('The card waits for its second try, so its final text is not known yet.'),
+    502: failure('The model failed or timed out; nothing was stored, and the request may be sent again.'),
+    ...learnerResponses,
+    403: NOT_YOURS,
+  },
+});
+
 const currentSessionRoute = createRoute({
   method: 'get',
   path: '/enrollments/{id}/sessions/current',
@@ -488,6 +517,22 @@ export function createSessionsRouter(sessions: SessionService) {
       if (error instanceof AnswerKindMismatch) return c.json({ error: 'the current card is not judged by the server' }, 400);
       if (error instanceof WrongScript) return c.json({ error: `the answer is not written in ${error.language}'s alphabet` }, 422);
       if (error instanceof LlmUnavailable) return c.json({ error: 'judge unavailable' }, 502);
+      throw error;
+    }
+  });
+
+  router.openapi(explainRoute, async (c) => {
+    const { id } = c.req.valid('param');
+    const body = c.req.valid('json');
+    try {
+      const explained = await sessions.explainAnswer(c.var.actor, id, { questionId: body.question_id });
+      return c.json({ corrected: explained.corrected, mistakes: explained.mistakes }, 200);
+    } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
+      if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
+      if (error instanceof AnswerKindMismatch) return c.json({ error: 'the card is not an answered sentence translation' }, 400);
+      if (error instanceof RetryPending) return c.json({ error: 'the card waits for its second try' }, 409);
+      if (error instanceof LlmUnavailable) return c.json({ error: 'explanation unavailable' }, 502);
       throw error;
     }
   });

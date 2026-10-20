@@ -143,15 +143,22 @@ describe('buildTranslationJudgePrompt', () => {
   });
   it('names the four verdicts and what each means', () => {
     for (const verdict of ['"right"', '"misspelled"', '"other_word"', '"wrong"']) expect(prompt.system).toContain(verdict);
-    expect(prompt.system).toContain('conveying the');
-    expect(prompt.system).toContain('any form the sentence needs');
-    expect(prompt.system).toContain('ignore slips in other words');
+    expect(prompt.system).toContain('a form the sentence needs');
     expect(prompt.system).toContain('one-letter or accent slip');
-    expect(prompt.system).toContain('another word instead of it');
+    expect(prompt.system).toContain("in the practised word's place");
     expect(prompt.system).toContain('including the wrong form');
-    // Phase 45 (spec D2). "clearly" left out of a sentence about communicating clearly.
-    expect(prompt.system).toContain('changed or left out');
-    expect(prompt.system).toContain('how something is done, such as clearly, quickly or very');
+  });
+  // Phase 66 (spec D1). Only the practised word is graded: mistakes elsewhere in
+  // the sentence are explained by another call and cost nothing.
+  it('grades the practised word alone, ignoring the rest of the answer', () => {
+    expect(prompt.system).toContain('Judge the practised word alone');
+    expect(prompt.system).toContain('ignore everything else in the answer');
+    expect(prompt.system).not.toContain('changed or left out');
+    expect(prompt.system).not.toContain('conveys the sentence');
+    // Review: a correct two-word sentence ("Lui corre.") is a sentence; only the
+    // word alone is not, and the rule (wordOnly) already refuses that.
+    expect(prompt.system).not.toContain('a word or two');
+    expect(prompt.system).toContain('the practised word alone');
   });
 });
 

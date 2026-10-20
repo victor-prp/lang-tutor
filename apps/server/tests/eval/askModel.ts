@@ -23,6 +23,7 @@ import type {
 import { buildAcceptPrompt, parseAccept, validateAccept, type AcceptInput } from '../../src/domain/accept';
 import { buildCheckPrompt, parseCheck, type CheckItem } from '../../src/domain/check';
 import { buildContextPrompt, parseLlmContext, type ContextItem } from '../../src/domain/context';
+import { buildExplainPrompt, parseExplain, type Explanation } from '../../src/domain/explain';
 import {
   buildDistractorPrompt,
   parseLlmDistractors,
@@ -193,6 +194,15 @@ export async function askTranslationJudge(
   return parseTranslationJudge(
     await llm({ ...buildTranslationJudgePrompt(kase.question, kase.context, kase.answer), record: { kind: 'translation_judge' } }),
   );
+}
+
+/** Phase 66 (spec D2). The real explain prompt and parser over one answer, as
+ *  explainAnswer sends it when no rule decides. Null when unreadable. */
+export async function askExplain(
+  llm: LlmClient,
+  kase: { question: SentenceTranslationQuestion; context: JudgeContext; answer: string },
+): Promise<Explanation | null> {
+  return parseExplain(await llm({ ...buildExplainPrompt(kase.question, kase.context, kase.answer), record: { kind: 'sentence_explain' } }));
 }
 
 /** Phase 50 (spec D2). The real sound-alike prompt and parser, as answerBySpeech

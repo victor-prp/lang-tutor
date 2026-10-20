@@ -4,9 +4,11 @@ import { and, asc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import type { Devices, Path, SessionRecord, SessionState, SessionSummary, SkippedType } from '../domain/session';
+import type { Explanation } from '../domain/explain';
 import type { Tap } from '../domain/taps';
 import type { DayAnswer } from '../domain/today';
 import {
+  answerExplanations,
   answerTaps,
   answers,
   dictLexemes,
@@ -591,6 +593,24 @@ export function createSessionRepo(tx: Tx) {
         // Phase 63 (spec D11): a choice after help, read back as a miss.
         helped: answer.helped ?? null,
       });
+    },
+
+    /** Phase 66 (spec D2). The explanation stored for the answer at `position`. */
+    findExplanation: async (sessionId: string, position: number): Promise<Explanation | null> => {
+      const [row] = await tx
+        .select({ corrected: answerExplanations.corrected, mistakes: answerExplanations.mistakes })
+        .from(answerExplanations)
+        .where(and(eq(answerExplanations.sessionId, sessionId), eq(answerExplanations.position, position)));
+      return row ?? null;
+    },
+
+    /** Phase 66 (spec D2). Stores an explanation; the first stored stands, so two
+     *  overlapping requests read back the same one. */
+    insertExplanation: async (sessionId: string, position: number, explained: Explanation & { text: string }): Promise<void> => {
+      await tx
+        .insert(answerExplanations)
+        .values({ sessionId, position, text: explained.text, corrected: explained.corrected, mistakes: explained.mistakes })
+        .onConflictDoNothing();
     },
 
     /** Phase 34 (spec D9). The pending answer at `position` takes its retry's

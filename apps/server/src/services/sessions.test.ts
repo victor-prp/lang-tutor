@@ -54,6 +54,9 @@ describe('repos', () => {
       // Phase 34 (spec D9).
       resolveRetry: notStubbed,
       resolvePendingRetry: notStubbed,
+      // Phase 66 (spec D2).
+      findExplanation: notStubbed,
+      insertExplanation: notStubbed,
       // Phase 43 (spec D1–D4).
       markStarted: notStubbed,
       lockNextSession: notStubbed,
@@ -364,6 +367,7 @@ describe('repos', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      explainer: createFakeLlmClient(''),
       soundAlikeThreshold: 0.95,
     });
 
@@ -424,6 +428,7 @@ describe('repos', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      explainer: createFakeLlmClient(''),
       soundAlikeThreshold: 0.95,
     });
 
@@ -452,6 +457,7 @@ describe('repos', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      explainer: createFakeLlmClient(''),
       soundAlikeThreshold: 0.95,
     });
 
@@ -559,6 +565,7 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      explainer: createFakeLlmClient(''),
       soundAlikeThreshold: 0.95,
     });
 
@@ -623,6 +630,7 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      explainer: createFakeLlmClient(''),
       soundAlikeThreshold: 0.95,
     });
 
@@ -679,6 +687,7 @@ describe('createNextSession, phase 31 (spec D12)', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      explainer: createFakeLlmClient(''),
       soundAlikeThreshold: 0.95,
     });
     return { service, jobs, reads };

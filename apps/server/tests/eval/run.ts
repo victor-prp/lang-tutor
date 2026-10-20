@@ -31,6 +31,7 @@ import { POINT_REWRITE_ROUNDS, judgePoint, pointItem, readPoint, type PointFindi
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import type { SentenceContent } from '../../src/domain/sentences';
 import { TRANSLATION_JUDGE_THINKING } from '../../src/domain/judge';
+import { EXPLAIN_THINKING } from '../../src/domain/explain';
 import { DEFAULT_SOUND_ALIKE_THRESHOLD } from '../../src/domain/soundAlike';
 import { POINT_CHECK_THINKING, SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
 import type { ReadItem } from '../../src/domain/photoReading';
@@ -38,7 +39,7 @@ import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient }
 import { judgeSpoken, judgeTyped, normaliseGloss } from '@lang-tutor/core/domain';
 import type { LlmAccept, LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askAccept, askCheck, askContext, askDistractors, askFitJudge, askGapGuesses, askJudge, askModel, askPoint, askRendering, askSoundAlike, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
+import { askAccept, askCheck, askContext, askDistractors, askExplain, askFitJudge, askGapGuesses, askJudge, askModel, askPoint, askRendering, askSoundAlike, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
 import {
   ACCEPT_CASES,
   CASES,
@@ -55,7 +56,9 @@ import {
   TRANSCRIPTION_CASES,
   TRANSLATE_CASES,
   TRANSLATION_JUDGE_CASES,
+  EXPLAIN_CASES,
   type AcceptCase,
+  type ExplainCase,
   type CheckCase,
   type ContextCase,
   type DistractorCase,
@@ -905,6 +908,8 @@ async function main(): Promise<void> {
   const sentenceCases = SENTENCE_CASES.filter((kase) => matches(kase.label));
   const translateCases = TRANSLATE_CASES.filter((kase) => matches(kase.label));
   const tjudgeCases = TRANSLATION_JUDGE_CASES.filter((kase) => matches(kase.label));
+  // Phase 66. Every label starts "explain ", so that filter selects the group.
+  const explainCases = EXPLAIN_CASES.filter((kase) => matches(kase.label));
   const fitCases = FIT_JUDGE_CASES.filter((kase) => matches(kase.label));
   const contextCases = CONTEXT_CASES.filter((kase) => matches(kase.label));
   const checkCases = CHECK_CASES.filter((kase) => matches(kase.label));
@@ -917,7 +922,7 @@ async function main(): Promise<void> {
     cases.length + renderingCases.length + acceptCases.length + distractorCases.length + transcriptionCases.length +
       photoCases.length + matchCases.length + judgeCases.length +
       gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length + fitCases.length + contextCases.length +
-      checkCases.length + soundCases.length + pointCases.length === 0
+      checkCases.length + soundCases.length + pointCases.length + explainCases.length === 0
   ) {
     throw new Error(`filter "${filter}" matched no case`);
   }
@@ -976,6 +981,17 @@ async function main(): Promise<void> {
     now: Date.now,
     timeoutMs: TIMEOUT_MS,
     thinkingBudget: TRANSLATION_JUDGE_THINKING,
+  });
+  // Phase 66 (spec D2). The explainer's own client, as composition.ts builds it.
+  const explainLlm = createGeminiClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
+    timeoutMs: TIMEOUT_MS,
+    thinkingBudget: EXPLAIN_THINKING,
   });
   const transcriber = createGeminiTranscriber({
     fetch: globalThis.fetch,
@@ -1607,6 +1623,37 @@ async function main(): Promise<void> {
     }
   };
 
+  const scoreExplain = async (kase: ExplainCase): Promise<Row> => {
+    try {
+      const explained = await askExplain(explainLlm, kase);
+      const found = (fix: string) =>
+        explained !== null &&
+        [explained.corrected, ...explained.mistakes.map((m) => m.right)].some((text) => text.toLowerCase().includes(fix.toLowerCase()));
+      const mistakes = explained?.mistakes ?? [];
+      return {
+        label: kase.label,
+        text: kase.answer,
+        tier1: [{ name: 'the answer parses', ok: explained !== null, detail: explained === null ? 'unreadable' : undefined }],
+        tier2: [
+          kase.fixes.length === 0
+            ? { name: 'no mistakes', ok: explained !== null && mistakes.length === 0, detail: `${mistakes.length} listed` }
+            : { name: 'mistakes listed', ok: mistakes.length > 0, detail: `${mistakes.length} listed` },
+          ...kase.fixes.map((fix) => ({ name: `names the fix ${fix}`, ok: found(fix), detail: explained?.corrected })),
+          { name: 'every reason in Hebrew', ok: mistakes.every((m) => /[\u0590-\u05FF]/.test(m.why)) },
+        ],
+        verdict: explained === null ? undefined : mistakes.map((m) => `${m.wrong} → ${m.right} (${m.why})`).join('; ') || 'none',
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text: kase.answer,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
   /** Phase 34. The same contract, for the context call. */
   const scoreContext = async (kase: ContextCase): Promise<Row> => {
     const text = `${kase.form} (${kase.type})`;
@@ -1649,7 +1696,7 @@ async function main(): Promise<void> {
   const started = Date.now();
   const [
     translationRows, renderingRows, acceptRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows,
-    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows, fitRows, soundRows, pointRows,
+    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows, fitRows, soundRows, pointRows, explainRows,
   ] = await Promise.all([
     mapWithConcurrency(cases, CONCURRENCY, scoreCase),
     mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
@@ -1669,10 +1716,11 @@ async function main(): Promise<void> {
     mapWithConcurrency(fitCases, CONCURRENCY, scoreFitJudge),
     mapWithConcurrency(soundCases, CONCURRENCY, scoreSoundAlike),
     mapWithConcurrency(pointCases, CONCURRENCY, scorePoint),
+    mapWithConcurrency(explainCases, CONCURRENCY, scoreExplain),
   ]);
   const rows = [
     ...translationRows, ...renderingRows, ...acceptRows, ...distractorRows, ...transcriptionRows, ...photoRows, ...matchRows,
-    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows, ...fitRows, ...soundRows, ...pointRows,
+    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows, ...fitRows, ...soundRows, ...pointRows, ...explainRows,
   ];
   const elapsedMs = Date.now() - started;
 
@@ -1713,6 +1761,9 @@ async function main(): Promise<void> {
     // Phase 62d (spec D6). The point check, a line of its own: a reader who calls every
     // sentence clear, or none, must fail here.
     { name: 'pointing check', rows: pointRows, passed: 0, total: 0 },
+    // Phase 66 (spec D2). The explainer, a line of its own: one that finds a
+    // mistake in every sentence, or in none, must fail here.
+    { name: 'explain', rows: explainRows, passed: 0, total: 0 },
   ];
 
   for (const row of rows) {
@@ -1818,7 +1869,7 @@ async function main(): Promise<void> {
       `${photoCases.length} photo + ${matchCases.length} match + ${judgeCases.length} judge + ` +
       `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge + ` +
       `${contextCases.length} context + ${checkCases.length} checker + ${fitCases.length} fit judge + ${soundCases.length} sound alike + ` +
-      `${pointCases.length} pointing check cases in ` +
+      `${pointCases.length} pointing check + ${explainCases.length} explain cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );

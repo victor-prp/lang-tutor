@@ -115,7 +115,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all forty-one paths and nothing else', async () => {
+  it('contains all forty-two paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/auth/email-otp/send-verification-otp',
@@ -147,6 +147,7 @@ describe('the document as a whole', () => {
       '/api/photo-imports/{id}/save',
       '/api/sessions',
       '/api/sessions/{id}',
+      '/api/sessions/{id}/explain',
       '/api/sessions/{id}/judged-answer',
       NEXT_STEP,
       '/api/sessions/{id}/skip',

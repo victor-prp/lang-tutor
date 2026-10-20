@@ -26,6 +26,9 @@ const unreachableSessions: SessionService = {
   answerBySpeech: () => {
     throw new Error('the health route must not reach the session service');
   },
+  explainAnswer: () => {
+    throw new Error('the health route must not reach the session service');
+  },
   createNextSession: () => {
     throw new Error('the health route must not reach the session service');
   },

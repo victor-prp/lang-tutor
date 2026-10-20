@@ -1619,11 +1619,14 @@ const enTable: Sentence = { hebrew: 'אני רוצה להזמין שולחן ל�
 const enYesterday: Sentence = { hebrew: 'הזמנתי אתמול שולחן לשניים.', reference: 'I booked a table for two yesterday.', gap: 'booked' };
 const enBookWord = { form: 'book', pos: 'verb' as const, meaning: 'להזמין' };
 
-// Phase 45 (spec D2). A manner word left out is a changed detail. Lane 0's card,
-// and a held-out one on a word the prompt does not name.
+// Phase 45 (spec D2). Lane 0's card, and a held-out one on a word the prompt does
+// not name. Phase 66 (spec D1): a manner word left out no longer costs the word.
 const enClearly: Sentence = { hebrew: 'חשוב לתקשר בבירור עם כולם.', reference: 'It is important to communicate clearly with everyone.', gap: 'communicate' };
 const enCommunicate = { form: 'communicate', pos: 'verb' as const, meaning: 'לתקשר' };
 const ruFast: Sentence = { hebrew: 'הוא רץ מהר.', reference: 'Он быстро бегает.', gap: 'бегает' };
+// Phase 66 review. A sentence of two words is a sentence.
+const itRuns: Sentence = { hebrew: 'הוא רץ.', reference: 'Lui corre.', gap: 'corre' };
+const itRun = { form: 'correre', pos: 'verb' as const, meaning: 'לרוץ' };
 const ruRun = { form: 'бегать', pos: 'verb' as const, meaning: 'לרוץ' };
 
 export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
@@ -1633,7 +1636,12 @@ export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
   tjudge('it', itBook, itTable, 'Voglio prenottare un tavolo per due.', 'near_miss', 'misspelled word'),
   tjudge('it', itBook, itTable, 'Voglio riservare un tavolo per due.', 'alternative', 'other word'),
   tjudge('it', itBook, itTable, 'Voglio prenotato un tavolo per due.', 'wrong', 'wrong form of the word'),
-  tjudge('it', itBook, itTable, 'Voglio prenotare una camera per tre.', 'wrong', 'missed meaning'),
+  // Phase 66 (spec D1): only the practised word is graded, so a sentence whose other
+  // words change its meaning is right when the word is.
+  tjudge('it', itBook, itTable, 'Voglio prenotare una camera per tre.', 'exact', 'other words changed'),
+  tjudge('it', itBook, itTable, 'Io volere prenotare il tavola per due persona.', 'exact', 'word right, grammar mistakes around it'),
+  tjudge('it', itBook, itYesterday, 'Ieri prenoto un tavolo per due.', 'wrong', 'word in a tense the sentence does not need'),
+  tjudge('it', itBook, itTable, 'Voglio un tavolo per due.', 'wrong', 'word left out'),
   tjudge('it', itBook, itTable, 'Non capisco.', 'wrong', 'not a translation'),
   tjudge('it', itBook, itTable, 'Voglio prenotare un tavolo per dui.', 'exact', 'slip in another word'),
 
@@ -1644,6 +1652,7 @@ export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
   tjudge('ru', ruBeautiful, ruCity, 'Этот город очень прекрасный.', 'alternative', 'other word'),
   tjudge('ru', ruBeautiful, ruCity, 'Этот город очень красивая.', 'wrong', 'wrong form of the word'),
   tjudge('ru', ruBeautiful, ruCity, 'Этот город очень большой.', 'wrong', 'missed meaning'),
+  tjudge('ru', ruBeautiful, ruCity, 'Эта город очен красивый.', 'exact', 'word right, grammar mistakes around it'),
   tjudge('ru', ruBeautiful, ruCity, 'красивый', 'wrong', 'not a sentence'),
   tjudge('ru', ruBeautiful, ruCity, 'Этот горот очень красивый.', 'exact', 'slip in another word'),
 
@@ -1653,19 +1662,59 @@ export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
   tjudge('en', enBookWord, enTable, 'I want to bok a table for two.', 'near_miss', 'misspelled word'),
   tjudge('en', enBookWord, enTable, 'I want to reserve a table for two.', 'alternative', 'other word'),
   tjudge('en', enBookWord, enTable, 'I want to booking a table for two.', 'wrong', 'wrong form of the word'),
-  tjudge('en', enBookWord, enTable, 'I want to book a table for four.', 'wrong', 'missed meaning'),
+  tjudge('en', enBookWord, enTable, 'I want to book a table for four.', 'exact', 'other words changed'),
+  tjudge('en', enBookWord, enTable, 'I wants to book table for two peoples.', 'exact', 'word right, grammar mistakes around it'),
+  tjudge('en', enBookWord, enYesterday, 'I book a table for two yesterday.', 'wrong', 'word in a tense the sentence does not need'),
   tjudge('en', enBookWord, enTable, 'table', 'wrong', 'not a sentence'),
   tjudge('en', enBookWord, enTable, 'I want to book a tabel for two.', 'exact', 'slip in another word'),
-  tjudge('en', enCommunicate, enClearly, 'It is important to talk with everyone.', 'wrong', 'manner word left out'),
+  tjudge('en', enCommunicate, enClearly, 'It is important to talk with everyone.', 'alternative', 'other word, manner word left out'),
   tjudge('en', enCommunicate, enClearly, "It's important to communicate clearly with everyone.", 'exact', 'contraction'),
   tjudge('en', enCommunicate, enClearly, 'It is important to talk clearly with everyone.', 'alternative', 'other word, every detail kept'),
-  // Review M1. The detail rule must spare a slip in the manner word, a synonym of it,
+  // Phase 45 review M1. A slip in the manner word, a synonym of it,
   // and its other place.
   tjudge('en', enCommunicate, enClearly, 'It is important to communicate clerly with everyone.', 'exact', 'slip in the manner word'),
   tjudge('en', enCommunicate, enClearly, 'It is important to communicate plainly with everyone.', 'exact', 'synonym of the manner word'),
   tjudge('en', enCommunicate, enClearly, 'It is important to clearly communicate with everyone.', 'exact', 'other adverb order'),
-  tjudge('ru', ruRun, ruFast, 'Он бегает.', 'wrong', 'manner word left out'),
+  tjudge('ru', ruRun, ruFast, 'Он бегает.', 'exact', 'manner word left out'),
   tjudge('ru', ruRun, ruFast, 'Он бегает быстро.', 'exact', 'other word order'),
+  tjudge('it', itRun, itRuns, 'Egli corre.', 'exact', 'a sentence of two words'),
+];
+
+/**
+ * Phase 66 (spec D2). The explain call over a translation card's answer: a
+ * sentence with known mistakes must name each fix (in some mistake's `right` or
+ * in `corrected`, ignoring case), and a correct sentence in other words must
+ * have none. Every reason must be in Hebrew, the learner's language.
+ */
+export type ExplainCase = {
+  label: string;
+  question: SentenceTranslationQuestion;
+  context: JudgeContext;
+  answer: string;
+  /** Empty: the answer is correct and must have no mistakes. */
+  fixes: string[];
+};
+
+const explain = (
+  language: 'it' | 'ru' | 'en',
+  practised: { form: string; lemma?: string; pos: PartOfSpeech; meaning: string },
+  sentence: Sentence,
+  answer: string,
+  fixes: string[],
+  what: string,
+): ExplainCase => {
+  const { question, context } = tjudge(language, practised, sentence, answer, 'exact', what);
+  return { label: `explain ${language} ${what}: ${answer}`, question, context, answer, fixes };
+};
+
+export const EXPLAIN_CASES: ExplainCase[] = [
+  explain('it', itBook, itTable, 'Io volere prenotare il tavola per due.', ['voglio'], 'grammar mistakes'),
+  explain('it', itBook, itTable, 'Voglio prenotare una camera per tre.', ['tavolo', 'due'], 'meaning changed'),
+  explain('it', itBook, itTable, 'Voglio prenotare un tavolo per due persone.', [], 'correct in other words'),
+  explain('ru', ruBeautiful, ruCity, 'Эта город очен красивый.', ['этот', 'очень'], 'grammar mistakes'),
+  explain('ru', ruBeautiful, ruCity, 'Этот город очень красив.', [], 'correct in other words'),
+  explain('en', enBookWord, enTable, 'I wants to book table for two peoples.', ['want', 'a table'], 'grammar mistakes'),
+  explain('en', enBookWord, enTable, 'I want to book a table for two people.', [], 'correct in other words'),
 ];
 
 /**

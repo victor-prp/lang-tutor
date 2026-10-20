@@ -56,7 +56,9 @@ export type ModelCallKind =
   | 'gap_point'
   | 'gloss_merge'
   // Phase 50 (spec D2). On the judge's client.
-  | 'sound_alike';
+  | 'sound_alike'
+  // Phase 66 (spec D2). The explanation of a translation card's answer, on its own client.
+  | 'sentence_explain';
 
 /** Phase 47 (spec D3). A handle the call site does not have is left out. */
 export type ModelCallRecord = {

@@ -97,6 +97,11 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
     url: `/api/sessions/${ids.session}/judged-answer`,
     body: { question_id: 'q', text: 'x' },
   }),
+  // Phase 66 (spec D2).
+  'post /api/sessions/{id}/explain': () => ({
+    url: `/api/sessions/${ids.session}/explain`,
+    body: { question_id: 'q' },
+  }),
   'get /api/enrollments/{id}/sessions/current': () => ({ url: `/api/enrollments/${ids.enrollment}/sessions/current` }),
   'get /api/enrollments/{id}/vocabulary': () => ({ url: `/api/enrollments/${ids.enrollment}/vocabulary` }),
   'post /api/enrollments/{id}/vocabulary': () => ({
@@ -199,6 +204,7 @@ async function written() {
   const rows = await countRows(t.db, [
     'sessions',
     'answers',
+    'answer_explanations',
     'session_progress',
     'gloss_progress',
     'vocabulary_entries',

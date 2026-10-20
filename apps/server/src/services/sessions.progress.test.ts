@@ -183,6 +183,7 @@ function world(opts: {
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
     translationJudge: createFakeLlmClient(''),
+    explainer: createFakeLlmClient(''),
     soundAlikeThreshold: 0.95,
   });
   return { service, calls, jobs };
