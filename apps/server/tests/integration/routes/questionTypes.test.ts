@@ -7,7 +7,8 @@ import { ACT_AS, actAs } from '../../support/actAs';
 import { createFakeLogger } from '../../support/fakes';
 import { seedGrant } from '../../support/grantRows';
 import { jobPayloads } from '../../support/jobs';
-import { insertListSession } from '../../support/questions';
+import { readProgress, readSnapshot } from '../../support/progressRows';
+import { asChoice, insertListSession } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, seedUser, setTester } from '../../support/seedUser';
 import { markSeed, markStarted, readSessionPaths, readSessionRows, seedPastSession } from '../../support/sessionRows';
@@ -167,17 +168,47 @@ describe('POST question-type-sessions', () => {
     expect(rows.filter((row) => row.kind === 'question_types').map((row) => row.status)).toEqual(['preparing']);
   });
 
-  it('is 409 session_open while a session is started, and writes nothing', async () => {
-    const { sessionId } = await insertListSession(t.db, {
-      userId: OWNER,
-      enrollmentId: ENROLLMENT,
-      asked: [{ glossId: word.glossIds[0], variantId: word.variantId, lexemeId: word.lexemeId, form: 'house', lemma: 'house', translation: 'בית' }],
-    });
-    await markStarted(t.db, sessionId);
+  // A tester asking for a word's types ends the main path's started session, as a skip would:
+  // the answers given before it count, and the stock beside it is retired.
+  it('skips a started session, counting its answers, and retires the stock beside it', async () => {
+    const asked = [0, 1].map((i) => ({
+      glossId: word.glossIds[i],
+      variantId: word.variantId,
+      lexemeId: word.lexemeId,
+      form: 'house',
+      lemma: 'house',
+      translation: ['בית', 'משכן'][i],
+    }));
+    // Two cards, one answered: the session is still open when the create comes.
+    const { sessionId: started, questions } = await insertListSession(t.db, { userId: OWNER, enrollmentId: ENROLLMENT, asked });
+    await markStarted(t.db, started);
+    const { sessionId: stock } = await insertListSession(t.db, { userId: OWNER, enrollmentId: ENROLLMENT, asked });
+    const card = asChoice(questions[0]);
+    const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+    await deps.sessions.submitAnswer(OWNER, started, card.id, { option_index: card.correct_option });
+
     const res = await create(body(['meet']));
-    expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: 'session_open' });
-    expect((await sessionRows()).length).toBe(1);
+    expect(res.status).toBe(201);
+    const created = ((await res.json()) as { session_id: string }).session_id;
+    expect((await sessionRows()).map((row) => [row.id, row.status, row.kind])).toEqual([
+      [started, 'skipped', 'practice'],
+      [stock, 'skipped', 'practice'],
+      [created, 'preparing', 'question_types'],
+    ]);
+    const progress = await readProgress(t.db, ENROLLMENT);
+    expect(progress.find((row) => row.glossId === word.glossIds[0] && row.dimension === 'written_receptive')).toMatchObject({ level: 2 });
+    expect((await readSnapshot(t.db, started)).length).toBeGreaterThan(0);
+  });
+
+  it('skips a started session with no answers, writing no progress', async () => {
+    const asked = [{ glossId: word.glossIds[0], variantId: word.variantId, lexemeId: word.lexemeId, form: 'house', lemma: 'house', translation: 'בית' }];
+    const { sessionId: started } = await insertListSession(t.db, { userId: OWNER, enrollmentId: ENROLLMENT, asked });
+    await markStarted(t.db, started);
+
+    const res = await create(body(['meet']));
+    expect(res.status).toBe(201);
+    expect((await sessionRows()).map((row) => row.status)).toEqual(['skipped', 'preparing']);
+    expect(await readSnapshot(t.db, started)).toEqual([]);
   });
 
   // Phase 57 (ADR 0014). The session is the main path's: a target's started session and its

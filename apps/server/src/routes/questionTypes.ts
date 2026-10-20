@@ -16,7 +16,6 @@ import {
   QuestionTypeUnavailable,
   RenderingMismatch,
   SeedPending,
-  SessionOpen,
 } from '../errors';
 import type { QuestionTypesService } from '../services/questionTypes';
 import { forbidden, learnerResponses, type ActorEnv } from './actor';
@@ -54,7 +53,7 @@ const createSessionRoute = createRoute({
   tags: ['sessions'],
   summary: "A session of one saved meaning's question types",
   description:
-    'For testers. One card per chosen type, in the read\'s order, answered and counted as any session. It is put in stock, preparing, in place of a list session waiting there; read it with GET /sessions/{id}. A chosen type no card could be generated for is named in the session\'s `skipped_types`.',
+    'For testers. One card per chosen type, in the read\'s order, answered and counted as any session. It is put in stock, preparing, in place of a list session waiting there; a session started on the main path is skipped first, its answers counting as a skip\'s do. Read it with GET /sessions/{id}. A chosen type no card could be generated for is named in the session\'s `skipped_types`.',
   request: {
     params: enrollmentParams,
     body: { required: true, content: { 'application/json': { schema: CreateQuestionTypeSessionRequestSchema } } },
@@ -66,7 +65,7 @@ const createSessionRoute = createRoute({
       'The body did not validate, a type is unavailable (`question_type_unavailable`), or `sense_id` is not the rendering the read answered (`rendering_mismatch`).',
     ),
     404: NOT_FOUND,
-    409: json(ErrorSchema, 'A session is started (`session_open`), or the first, seeded session waits (`seed_pending`).'),
+    409: json(ErrorSchema, 'The first, seeded session waits (`seed_pending`).'),
     ...learnerResponses,
     403: TESTERS_ONLY,
   },
@@ -116,7 +115,6 @@ export function createQuestionTypesRouter(questionTypes: QuestionTypesService) {
       if (known) return c.json(known.body, known.status);
       if (error instanceof QuestionTypeUnavailable) return c.json({ error: 'question_type_unavailable' }, 400);
       if (error instanceof RenderingMismatch) return c.json({ error: 'rendering_mismatch' }, 400);
-      if (error instanceof SessionOpen) return c.json({ error: 'session_open' }, 409);
       if (error instanceof SeedPending) return c.json({ error: 'seed_pending' }, 409);
       throw error;
     }

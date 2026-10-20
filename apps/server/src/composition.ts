@@ -419,7 +419,7 @@ export function createServerDeps(io: {
       explainer,
       soundAlikeThreshold: io.soundAlikeThreshold,
     }),
-    questionTypes: createQuestionTypesService({ transaction, logger: io.logger }),
+    questionTypes: createQuestionTypesService({ transaction, logger: io.logger, now: io.now }),
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations,

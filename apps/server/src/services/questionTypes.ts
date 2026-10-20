@@ -11,10 +11,11 @@ import {
   QuestionTypeUnavailable,
   RenderingMismatch,
   SeedPending,
-  SessionOpen,
 } from '../errors';
 import type { Logger } from '../logger';
 import { authorizeEnrollment } from './access';
+import { learnerDay } from './learnerDay';
+import { closeOpenSession, lastAnswerDay, recordProgress } from './sessionEnd';
 import type { Repos, Transaction } from './transaction';
 
 /** Phase 57 (ADR 0014). A tester's question-types session is the main path's. */
@@ -53,7 +54,15 @@ async function readWord(repos: Repos, logger: Logger, actorUserId: string, enrol
   return { enrolled, rendering, others, types };
 }
 
-export function createQuestionTypesService({ transaction, logger }: { transaction: Transaction; logger: Logger }) {
+export function createQuestionTypesService({
+  transaction,
+  logger,
+  now,
+}: {
+  transaction: Transaction;
+  logger: Logger;
+  now: () => number;
+}) {
   return {
     /** Phase 61 (spec D2). Which question types one saved meaning can have on this device. */
     read: (actorUserId: string, enrollmentId: string, query: QuestionTypesQuery): Promise<QuestionTypesResponse> =>
@@ -63,17 +72,20 @@ export function createQuestionTypesService({ transaction, logger }: { transactio
       }),
 
     /**
-     * Phase 61 (spec D3, D4). A session of one card per chosen type, put in stock: a
-     * started session is SessionOpen and a seeded stock SeedPending, both before anything
-     * is written; any other stock is retired. The job carries the types in
-     * QUESTION_TYPE_ORDER and the one pick, with the word's other saved meanings for a
-     * new_meaning card.
+     * Phase 61 (spec D3, D4). A session of one card per chosen type, put in stock: a seeded
+     * stock is SeedPending, before anything is written; any other stock is retired. The job
+     * carries the types in QUESTION_TYPE_ORDER and the one pick, with the word's other saved
+     * meanings for a new_meaning card.
+     *
+     * A started session is skipped, not refused: the tester asked for this one, so the one
+     * they left open ends as a skip would end it (skipOpenSession), its answers counting, on
+     * its last answer's learner day as a target's end skips one (lastAnswerDay).
      *
      * Phase 57 (ADR 0014). The session is the main path's (target_id null), whatever target
      * holds the word: it takes the main path's stock place under the main path's lock alone,
-     * and only the main path's started session refuses it, as create on the main path does. A
-     * target's started session or stock is another path's and is left as it is. The seed
-     * check is create's: any session of any path puts the seed behind (spec D2, R25).
+     * and only the main path's started session is skipped. A target's started session or
+     * stock is another path's and is left as it is. The seed check is create's: any session
+     * of any path puts the seed behind (spec D2, R25).
      */
     create: async (
       actorUserId: string,
@@ -81,7 +93,7 @@ export function createQuestionTypesService({ transaction, logger }: { transactio
       request: CreateQuestionTypeSessionRequest,
     ): Promise<{ session_id: string; status: 'preparing' }> => {
       const devices = { listening: request.listening, speaking: request.speaking };
-      const { sessionId, retired, types } = await transaction(async (repos) => {
+      const { sessionId, skipped, retired, types } = await transaction(async (repos) => {
         const { enrolled, rendering, others, types: availability } = await readWord(repos, logger, actorUserId, enrollmentId, {
           glossId: request.gloss_id,
           variantId: request.variant_id,
@@ -96,10 +108,16 @@ export function createQuestionTypesService({ transaction, logger }: { transactio
 
         await repos.session.lockNextSession(enrollmentId, MAIN);
         const open = await repos.session.findOpen(enrollmentId, MAIN);
-        if (open.started) throw new SessionOpen(enrollmentId);
         // The seed comes first: waiting in stock, or not yet made (no session at all, of any path).
         if (open.stock?.source === 'seed' || !(await repos.session.findLatest(enrollmentId, 'any'))) throw new SeedPending(enrollmentId);
+        // Both rows change before recordProgress takes the progress lock (ADR 0014 R4).
+        let skipped: string | null = null;
+        if (open.started) {
+          const day = await lastAnswerDay(repos, enrolled.user_id, open.started.id, await learnerDay(repos, enrolled.user_id, now()));
+          if (await closeOpenSession(repos, open.started.id, day)) skipped = open.started.id;
+        }
         const retired = open.stock && (await repos.session.retireStock(open.stock.id)) ? open.stock.id : null;
+        if (skipped) await recordProgress(repos, skipped, enrollmentId);
 
         const sessionId = await repos.session.insertQuestionTypesSession(enrolled.user_id, enrollmentId, devices, MAIN);
         await repos.jobs.enqueue(PREPARE_SESSION, {
@@ -122,8 +140,9 @@ export function createQuestionTypesService({ transaction, logger }: { transactio
           speaking: devices.speaking,
           question_types: ordered,
         });
-        return { sessionId, retired, types: ordered };
+        return { sessionId, skipped, retired, types: ordered };
       });
+      if (skipped) logger.info({ event: 'session_skipped', session_id: skipped, reason: 'question_types' });
       if (retired) logger.info({ event: 'stock_retired', session_id: retired, reason: 'question_types' });
       logger.info({ event: 'question_types_session_created', session_id: sessionId, enrollment_id: enrollmentId, types: types as QuestionType[] });
       return { session_id: sessionId, status: 'preparing' };

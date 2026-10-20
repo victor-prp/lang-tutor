@@ -654,7 +654,6 @@ export const strings = {
   questionTypesFailed: 'לא נוצרה אף שאלה.',
   questionTypesSkipped: 'לא נוצרו שאלות מהסוגים:',
   questionTypesContinue: 'המשך לתרגול',
-  questionTypesSessionOpen: 'יש תרגול פתוח. סיימו אותו קודם.',
   questionTypesSeedPending: 'סיימו קודם את התרגול הראשון.',
   questionTypesStartFailed: 'ההתחלה נכשלה. נסו שוב.',
   questionTypeName: (type: QuestionType): string => QUESTION_TYPE_NAMES[type],
