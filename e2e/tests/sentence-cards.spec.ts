@@ -222,14 +222,21 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       // request, and the card says both: the word right, the sentence to fix.
       await expectExplain(request, {
         corrected: 'Она прочитала эту книгу вчера.',
-        mistakes: [{ wrong: 'эта', right: 'эту', why: 'אחרי הפועל: יחסת מושא' }],
+        mistakes: [
+          { wrong: 'эта', right: 'эту', why: 'אחרי הפועל: יחסת מושא' },
+          { wrong: 'книга', right: 'книгу', why: 'גם שם העצם ביחסת מושא' },
+          { wrong: 'вчеру', right: 'вчера', why: 'איות' },
+          { wrong: '', right: '.', why: 'חסרה נקודה בסוף המשפט' },
+        ],
       });
+      // On a phone's screen, where the banner covers the bottom of it.
+      await page.setViewportSize({ width: 390, height: 844 });
       const explainCalls: string[] = [];
       page.on('request', (req) => {
         if (req.url().endsWith('/explain')) explainCalls.push(req.url());
       });
       const judged = page.waitForResponse((res) => res.request().method() === 'POST' && res.url().endsWith('/judged-answer'));
-      await answerTyped(page, 'Она прочитала эта книгу вчера');
+      await answerTyped(page, 'Она прочитала эта книга вчеру');
       expect(await (await judged).json()).toMatchObject({ verdict: 'exact', explanation: { corrected: 'Она прочитала эту книгу вчера.' } });
       await expect(page.getByTestId('word-only')).not.toBeVisible();
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
@@ -242,8 +249,16 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       // The reasons open only on a tap, and close on another.
       await expect(page.getByTestId('explain-panel')).toHaveCount(0);
       await page.getByTestId('explain-button').click();
-      await expect(page.getByTestId('explain-mistake')).toHaveCount(1);
-      await expect(page.getByTestId('explain-mistake')).toContainText('אחרי הפועל: יחסת מושא');
+      await expect(page.getByTestId('explain-mistake')).toHaveCount(4);
+      await expect(page.getByTestId('explain-mistake').first()).toContainText('אחרי הפועל: יחסת מושא');
+      // Final review M4: the screen scrolls the last reason clear of the banner.
+      await expect
+        .poll(async () => {
+          const last = await page.getByTestId('explain-mistake').last().boundingBox();
+          const banner = await page.getByTestId('feedback-correct').boundingBox();
+          return last !== null && banner !== null && last.y + last.height <= banner.y;
+        })
+        .toBe(true);
       await page.getByTestId('explain-button').click();
       await expect(page.getByTestId('explain-panel')).toHaveCount(0);
       // Nothing about the grade changed, and the card never asked /explain itself.
