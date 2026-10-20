@@ -217,3 +217,30 @@ Made while building, each with what it costs if wrong.
   FSRS ready-on-due 0.87, 0.60 and 0.45, gated as `HOMEWORK_PASS`. The scratch simulation's 16 / 9 /
   6 met a word with one card, not a ladder of four. `READY_ON_DUE_PASS` holds: exam 0.76 (≥ 0.57),
   homework 0.94 (≥ 0.85).
+- **R10 (D3, final review).** Ruling: a known word already ready waits for the eve's check outside
+  the quota (planned, done, no slot), so the words still to meet are met as if it were not there.
+  It took a slot a day, so five known words in fifteen made the first day read "rest" with ten
+  unmet. Cost: none found.
+- **R11 (D5, final review).** Ruling: a stock chosen past the budget is never served again when
+  checked (it is checked only when chosen on an earlier day). Kept, it met the next day's budget
+  with practice-more cards while every word still owed its own. Cost: one more stock built on such
+  a day.
+- **R12 (D6, final review).** Ruling: practice more asks a word's skill not asked today first,
+  else its weakest, so two practice-more sessions do not repeat the same card. Cost: a weaker
+  skill already asked today waits for a later session.
+
+**Open for Victor (final review 4).** Done 3's "memory no lower" holds for the share ready by FSRS
+but not for readiness on the date. The reviewer ran the same 15-word homeworks under phase 66's
+rules in the day simulation:
+
+| Homework of 15 words | Sessions | Readiness on the date | Ready by FSRS |
+|---|---|---|---|
+| given 5 days ahead | ~90 → 21 | 94 → 88 | 0.76 → 0.87 |
+| given 2 days ahead | ~48 → 12 | 87 → 79 | 0.48 → 0.60 |
+| due tomorrow | 25 (capped) → 10 | 81 → 74 | 0.47 → 0.45 |
+| the 2026-10-16 replay (6 words) | 14 → 4 | 85 → 78 | 0.83 → 0.50 |
+
+The card's number reads 6–8 points lower on the date. The likely cause, not measured: fewer cards a
+day earn fewer same-day bonuses. The share ready by FSRS is as good or better, except a single
+evening (0.47 → 0.45) and the 6-word replay (0.83 → 0.50).
+
