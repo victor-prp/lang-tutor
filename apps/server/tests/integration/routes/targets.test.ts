@@ -285,7 +285,8 @@ describe('GET /api/enrollments/{id}/targets', () => {
             readiness_pct: 0,
             readiness_start_pct: 0,
             practice_more_little: true,
-            today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 3, ...UNSET },
+            // Phase 67 (spec D4): its word below 90, it practises again tomorrow.
+            today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1, ...UNSET },
             session: null,
           },
         ],
@@ -325,11 +326,11 @@ describe('GET /api/targets/{id}', () => {
     expect((await read((await made('homework', eve, apple)).id)).practice_more_little).toBe(true);
   });
 
-  // Phase 65 (spec D1, D7, D10). A new exam: no word answered, so readiness 0 from the start of
-  // today, every first try left; each word counted on write and spell; and today's offer, the
-  // picker played forward (one word planned of two: its ladder of 4 cards, whose practice cards
-  // take its written skills to 4 half-points (ruling T9-a), then one card to the cap of 7 in a
-  // second session) with one session of room at the default miss rate: ceil(2 / 0.8) = 3.
+  // Phase 65 (spec D1, D7, D10), phase 67 (spec D2, D5). A new exam: no word answered, so readiness
+  // 0 from the start of today, every first try left; each word counted on write and spell; and
+  // today's offer, the picker played forward (one word planned of two, below 90, on a device that
+  // cannot listen: its writing card, which asks spelling too, is its ladder of 4 cards), with no
+  // room for misses: 1 session, about 2 minutes.
   it('answers readiness, where today started, and today as an offer of sessions before the first', async () => {
     const [apple, bread] = [await word('apple', 'תפוח'), await word('bread', 'לחם')];
     const exam = await made('exam', DUE, apple, bread);
@@ -345,10 +346,10 @@ describe('GET /api/targets/{id}', () => {
       extra: 0,
       next_practice_in: 1,
       sessions_budget: null,
-      sessions_offer: 3,
+      sessions_offer: 1,
       sessions_done: 0,
       ended_early: false,
-      minutes: 3,
+      minutes: 2,
     });
     for (const shown of body.words) {
       expect(shown.skills).toEqual([
