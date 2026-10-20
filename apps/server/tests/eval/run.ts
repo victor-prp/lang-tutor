@@ -75,6 +75,7 @@ import {
 import { askPhoto, askSenseMatch } from './askPhoto';
 import { checkTier1, checkTier2, checkWritten } from './checkChecks';
 import { contextItemOf, contextTier1, contextTier2, contextWritten } from './contextChecks';
+import { retryOverloaded } from './overload';
 import { MATCH_CASES, PHOTO_CASES, type MatchCase, type PhotoCase } from './photoCases';
 
 const TIER2_THRESHOLD = 0.85;
@@ -97,6 +98,9 @@ const PHOTO_TIMEOUT_MS = 120_000;
  * lower it to 1 if a run reports `responded 429`.
  */
 const CONCURRENCY = Math.max(1, Number(process.env.EVAL_CONCURRENCY) || 4);
+
+// One 503 retried before it counts (overload.ts): every client of the run uses it.
+const evalFetch = retryOverloaded(globalThis.fetch);
 
 type Check = { name: string; ok: boolean; detail?: string };
 
@@ -928,7 +932,7 @@ async function main(): Promise<void> {
   }
 
   const llm = createGeminiClient({
-    fetch: globalThis.fetch,
+    fetch: evalFetch,
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
@@ -939,7 +943,7 @@ async function main(): Promise<void> {
   // Phase 47 (spec D1). The session-generation prompt on the client composition.ts
   // gives it: thinking capped. The rest of the prompts keep the plain client.
   const sessionLlm = createGeminiClient({
-    fetch: globalThis.fetch,
+    fetch: evalFetch,
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
@@ -950,7 +954,7 @@ async function main(): Promise<void> {
   });
   // Phase 62d (spec D2). The point check on the client composition.ts gives it: thinking capped.
   const pointLlm = createGeminiClient({
-    fetch: globalThis.fetch,
+    fetch: evalFetch,
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
@@ -962,7 +966,7 @@ async function main(): Promise<void> {
   // Matches the options composition.ts gives the judge client, except the
   // timeout: the eval uses its own TIMEOUT_MS (30 s), not production's budget.
   const judgeLlm = createGeminiClient({
-    fetch: globalThis.fetch,
+    fetch: evalFetch,
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
@@ -973,7 +977,7 @@ async function main(): Promise<void> {
   });
   // Phase 45 (spec D3). The translation judge's own client, as composition.ts builds it.
   const translationJudgeLlm = createGeminiClient({
-    fetch: globalThis.fetch,
+    fetch: evalFetch,
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
@@ -994,7 +998,7 @@ async function main(): Promise<void> {
     thinkingBudget: EXPLAIN_THINKING,
   });
   const transcriber = createGeminiTranscriber({
-    fetch: globalThis.fetch,
+    fetch: evalFetch,
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
@@ -1003,7 +1007,7 @@ async function main(): Promise<void> {
     timeoutMs: TIMEOUT_MS,
   });
   const vision = createGeminiVisionClient({
-    fetch: globalThis.fetch,
+    fetch: evalFetch,
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
