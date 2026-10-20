@@ -244,10 +244,11 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
 
   /** Spec D6 (phase 57 D7 step 3, ruling T3-b, read from readiness). One card per met word not
    *  yet asked this session, on its weakest counted skill: the lowest readiness first, a word
-   *  the session in flight asks last, then by gloss id. */
+   *  the session in flight asks last, then by gloss id. A word met early today is asked too, but
+   *  not while the session in flight is meeting it. */
   const hardest = (pool: readonly Word[]) => {
     const order = pool
-      .filter((word) => !word.toStart && word.picked.length === 0 && (word.state === 'done' || word.state === 'owed' || word.state === 'extra'))
+      .filter((word) => !word.toStart && word.picked.length === 0 && (word.state === 'done' || word.state === 'owed' || (word.state === 'extra' && !word.inFlight)))
       .sort((a, b) => Number(a.inFlight) - Number(b.inFlight) || a.readinessPct - b.readinessPct || byId(a, b));
     for (const word of order) {
       if (!open(word, 1)) continue;

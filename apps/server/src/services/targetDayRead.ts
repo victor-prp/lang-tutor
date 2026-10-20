@@ -1,5 +1,5 @@
 import type { Enrollment } from '@lang-tutor/core/api';
-import { gradesFor, speakable } from '@lang-tutor/core/domain';
+import { speakable } from '@lang-tutor/core/domain';
 
 import { liveDimensions } from '../domain/choose';
 import { DAY_NEW_CAP } from '../domain/chooseConstants';
@@ -7,7 +7,8 @@ import { glossFamilies } from '../domain/glossFamilies';
 import type { Devices, Path, SavedGloss } from '../domain/session';
 import type { DayAnswer } from '../domain/today';
 import { playTodayForward, type TargetBudget } from '../domain/targetBudget';
-import { targetDay } from '../domain/targetDay';
+import { targetDay, type TargetDayInput } from '../domain/targetDay';
+import { skillStarts } from '../domain/targetSummary';
 import { targetMode, type TargetPickInput } from '../domain/targetPicker';
 import { activeOn } from '../domain/targets';
 import type { TargetRow } from '../repo/targets';
@@ -73,21 +74,28 @@ export async function readTargetDay(
   const live = liveDimensions(devices.listening, devices.speaking);
   const liveOf = (glossId: string) => (speakable(formOf.get(glossId)!) ? live : live.filter((dimension) => dimension !== 'spoken_productive'));
   const glossIds = words.map((word) => word.glossId);
-  const skills = await repos.targetSkills.findRows([target.id], glossIds);
   const answers = await answersOn();
-  const rightToday = new Set(
-    answers.flatMap((answer) =>
-      answer.intro ? [] : gradesFor(answer).flatMap((piece) => (piece.grade > 1 ? [`${answer.glossId}|${piece.dimension}`] : [])),
-    ),
-  );
-  const dayInput: Parameters<typeof targetDay>[0] = {
+  const onPath = answers.filter((answer) => answer.targetId === target.id);
+  const dayWords = words.map((word, i) => ({ glossId: word.glossId, addedOn: addedOn[i], startedOn: word.startedOn, live: liveOf(word.glossId) }));
+  // Phase 67 (spec D1): each counted skill's readiness at the start of today, as the target view reads it.
+  const starts = skillStarts({
+    kind: target.kind,
+    dueOn: target.dueOn,
+    words: dayWords,
+    rows: (await repos.targetReadiness.findRows([target.id], glossIds)).filter((row) => row.targetId === target.id),
+    memory: await repos.memory.findRows({ enrollmentId: enrolled.id, glossIds }),
+    firstToday: await repos.targetReadiness.findFirstEventsOn(target.id, today),
+  });
+  const dayInput: TargetDayInput = {
     today,
     createdOn,
     dueOn: target.dueOn,
-    words: words.map((word, i) => ({ glossId: word.glossId, addedOn: addedOn[i], startedOn: word.startedOn, live: liveOf(word.glossId) })),
-    skills,
-    rightToday,
-    answeredToday: answers.some((answer) => answer.targetId === target.id),
+    kind: target.kind,
+    words: dayWords,
+    starts,
+    // Spec D2: the cards asked today on the target's path, right or wrong.
+    askedToday: onPath.map((answer) => ({ glossId: answer.glossId, type: answer.type })),
+    answeredToday: onPath.length > 0,
   };
   const day = targetDay(dayInput);
   return { day, dayInput, createdOn, glossIds, live, canSay: (glossId: string) => speakable(formOf.get(glossId)!) };
