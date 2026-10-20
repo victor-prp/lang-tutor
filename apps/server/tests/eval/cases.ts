@@ -1291,7 +1291,8 @@ export type SentenceCase = {
   checked?: boolean;
   /** Phase 59 (spec D1). The learner's practised words, which the target-language
    *  sentence is built from as much as it can (tier 2, LIST_SHARE_THRESHOLD).
-   *  Phase 62 (spec D1): a gap or sentence item's too, not only a translation's. */
+   *  Phase 62 (spec D1): a gap or sentence item's too, not only a translation's.
+   *  Victor's ruling (2026-10-20): a gap to choose's share is printed, not gated. */
   learner?: { word: string; meaning: string }[];
 };
 

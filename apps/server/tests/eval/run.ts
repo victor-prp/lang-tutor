@@ -1207,8 +1207,10 @@ async function main(): Promise<void> {
           ...sentenceTier2(kase, shown),
           // Phase 62d (ruling R4): a typed gap's list share is the batch's first answer's, as on
           // master; a rescued sentence may leave the list where pointing needs it (R2), and its
-          // share is printed below, not gated.
-          ...listShare(kase, pointed ? answer : shown),
+          // share is printed below, not gated. Victor's ruling (2026-10-20): a gap to choose is
+          // first a card only its word fits, then one of the learner's words, and one with none
+          // of them is still a good card, so its list share is printed below, not gated.
+          ...(kase.task === 'gap' ? [] : listShare(kase, pointed ? answer : shown)),
           // Phase 62 (spec D1, ruling R5): today's checks, unchanged: the probe on a typed
           // gap's sentence, the checker on a gap to choose's (every gap case is `checked`).
           ...(kase.task === 'sentence' ? await pointsToWord(kase, shown) : []),
@@ -1220,6 +1222,7 @@ async function main(): Promise<void> {
           ...(rescue?.written ?? []),
           ...(pointed?.written ?? []),
           ...(pointed && pointed.shown !== answer ? listShare(kase, pointed.shown).map((check) => `shown list share, not gated: ${check.name}: ${check.detail}`) : []),
+          ...(kase.task === 'gap' ? listShare(kase, shown).map((check) => `list share, not gated: ${check.name}: ${check.detail}`) : []),
         ],
       };
     } catch (error) {
