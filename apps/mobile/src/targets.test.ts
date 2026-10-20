@@ -152,11 +152,11 @@ describe('readinessName', () => {
     expect(readinessName(88)).toBe('\u206688%\u2069');
   });
 
-  // Phase 65: a word is ready from READINESS_WORD_READY (90).
-  it('says ready from 90%', () => {
+  // Phase 67 (spec D7): a ready word shows its own number too, as every other pill does.
+  it('writes its own percent from 90% too, not a word', () => {
     expect(readinessName(89)).toBe('\u206689%\u2069');
-    expect(readinessName(90)).toBe('מוכנה');
-    expect(readinessName(100)).toBe('מוכנה');
+    expect(readinessName(92)).toBe('\u206692%\u2069');
+    expect(readinessName(100)).toBe('\u2066100%\u2069');
   });
 });
 
