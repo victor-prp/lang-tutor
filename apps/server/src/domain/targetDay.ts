@@ -1,11 +1,23 @@
-import type { Dimension } from '@lang-tutor/core/domain';
+import {
+  READINESS_WORD_READY,
+  countedSkills,
+  readinessPct as meanPct,
+  wordChance,
+  type Dimension,
+  type QuestionType,
+  type ReadinessKind,
+} from '@lang-tutor/core/domain';
 
+import { NEW_TARGET_WORDS_PER_DAY } from './chooseConstants';
 import { daysBetween } from './progress';
-import { capHalves, nextPracticeIn, practiceDays, type TargetSkillRow } from './targetSkills';
+import { capHalves } from './targetSkills';
 
 /**
- * Phase 57 (spec D6, D9). A target's plan and its work today, from the words, their target
- * skills and what was answered right today. Pure (ADR 0001): the day is passed in.
+ * Phase 57 (spec D6, D9), phase 67 (spec D1–D4). A target's plan and its work today, from the
+ * words, each counted skill's readiness at the start of today and the cards asked today on the
+ * target's path. A word below 90 gets two cards a day on two different skills; on the eve one
+ * per counted skill, and a ready word one check; new words are met split, at most
+ * NEW_TARGET_WORDS_PER_DAY a day. Pure (ADR 0001): the day is passed in.
  */
 
 export type TargetWordInput = {
@@ -16,22 +28,44 @@ export type TargetWordInput = {
   live: readonly Dimension[];
 };
 
+/** Phase 67 (spec D1). A counted skill's chance (0..1) at the start of today, and the day its
+ *  readiness last moved (null: never). */
+export type SkillStart = { glossId: string; dimension: Dimension; chance: number; movedOn: string | null };
+
+export type TargetDayInput = {
+  today: string;
+  createdOn: string;
+  dueOn: string;
+  kind: ReadinessKind;
+  words: readonly TargetWordInput[];
+  starts: readonly SkillStart[];
+  /** Spec D2. The cards answered today on the target's path, right or wrong, and the cards of its
+   *  session in flight when the caller credits them. */
+  askedToday: readonly { glossId: string; type: QuestionType }[];
+  answeredToday: boolean;
+};
+
 export type WordDay = {
   glossId: string;
   state: 'owed' | 'done' | 'extra' | 'later';
+  /** In today's quota and not met yet: its first card meets it. */
   toStart: boolean;
-  /** Live skills below today's cap. */
+  /** The counted skills its cards still ask today, the first asked first: `open`'s first `cardsLeft`. */
   owed: Dimension[];
-  /** Live skills owing the next-day check: one right answer today. */
-  checks: Dimension[];
+  /** Its counted skills not asked today, in the order its next card picks from (spec D2). */
+  open: Dimension[];
+  cardsLeft: number;
+  /** Its counted skills and their chances at the start of today, in writing, spelling, speaking order. */
+  counted: { dimension: Dimension; chance: number }[];
+  /** Its readiness at the start of today, in percent. */
   readinessPct: number;
-  /** A `later` word: the days until the intro day whose quota first covers it; else null. */
+  /** A `later` word: the days until the quota first covers it; else null. */
   startsIn: number | null;
-  skills: { dimension: Dimension; halves: number }[];
 };
 
 export type TargetDay = {
   daysLeft: number;
+  /** The meter's cap by days left: it no longer steers, the meter's write reads it. */
   capHalves: number;
   state: 'owed' | 'done' | 'rest' | 'due_today';
   planned: number;
@@ -43,105 +77,128 @@ export type TargetDay = {
   words: WordDay[];
 };
 
-/** A skill's full value in half-points. */
-const FULL_HALVES = 20;
+/** Spec D2. The counted skill a card of `type` asks: what a typed or tiled answer writes, a
+ *  dictation spells, a say translation says (also when answered by typing). Null for a card that
+ *  asks none (reading a word is not what the check asks). */
+export function servedSkill(type: QuestionType): Dimension | null {
+  switch (type) {
+    case 'typed_translation':
+    case 'cloze_typed':
+    case 'sentence_translation':
+    case 'letter_tiles':
+    case 'reverse_choice':
+    case 'cloze_choice':
+      return 'written_productive';
+    case 'dictation':
+      return 'spelling';
+    case 'say_translation':
+      return 'spoken_productive';
+    default:
+      return null;
+  }
+}
 
-const pct = (halves: number, live: number) => (live === 0 ? 0 : Math.floor((100 * halves) / (FULL_HALVES * live)));
+/** Spec D3. Today's quota of words to meet, of `pool` (unmet, or met today): spread to the
+ *  halfway day at most NEW_TARGET_WORDS_PER_DAY a day, and on the eve all of them. */
+function quotaOf(pool: number, daysLeft: number, half: number): number {
+  if (daysLeft <= 1) return pool;
+  const meeting = Math.max(1, daysLeft - half + 1);
+  return Math.min(NEW_TARGET_WORDS_PER_DAY, Math.ceil(pool / meeting));
+}
 
-export function targetDay(input: {
-  today: string;
-  createdOn: string;
-  dueOn: string;
-  words: readonly TargetWordInput[];
-  skills: readonly TargetSkillRow[];
-  /** `${glossId}|${dimension}` answered right today. */
-  rightToday: ReadonlySet<string>;
-  answeredToday: boolean;
-}): TargetDay {
+export function targetDay(input: TargetDayInput): TargetDay {
   const { today, words } = input;
   const daysLeft = daysBetween(today, input.dueOn);
-  const cap = capHalves(daysLeft);
-
-  // The plan: the words meet the student on the intro days, the rest as the due date nears.
   const total = Math.max(1, daysBetween(input.createdOn, input.dueOn));
   const half = Math.ceil(total / 2);
-  const introDays = [total, ...practiceDays().filter((d) => d >= half && d < total)];
-  const reached = introDays.filter((d) => d >= daysLeft).length;
+  const eve = daysLeft === 1;
+
   const ordered = [...words].sort(
     (a, b) => (a.addedOn < b.addedOn ? -1 : a.addedOn > b.addedOn ? 1 : a.glossId < b.glossId ? -1 : a.glossId > b.glossId ? 1 : 0),
   );
-  const quota = Math.ceil((ordered.length * reached) / introDays.length);
+  const pool = ordered.filter((word) => word.startedOn === null || word.startedOn === today);
+  const quota = daysLeft <= 0 ? 0 : quotaOf(pool.length, daysLeft, half);
+  const inQuota = new Set(pool.slice(0, quota).map((word) => word.glossId));
+  // A later word's day: the quotas of the days ahead played over the words still unmet.
+  const startsIn = new Map<string, number>();
+  let waiting = pool.slice(quota).filter((word) => word.startedOn === null);
+  for (let ahead = 1; ahead < daysLeft && waiting.length > 0; ahead++) {
+    const taken = quotaOf(waiting.length, daysLeft - ahead, half);
+    for (const word of waiting.slice(0, taken)) startsIn.set(word.glossId, ahead);
+    waiting = waiting.slice(taken);
+  }
 
-  const halvesOf = new Map<string, number>();
-  for (const row of input.skills) halvesOf.set(`${row.glossId}|${row.dimension}`, row.halves);
+  const startOf = new Map(input.starts.map((start) => [`${start.glossId}|${start.dimension}`, start]));
+  const askedOf = new Map<string, Set<Dimension>>();
+  for (const card of input.askedToday) {
+    const skill = servedSkill(card.type);
+    if (skill === null) continue;
+    askedOf.set(card.glossId, (askedOf.get(card.glossId) ?? new Set()).add(skill));
+  }
 
-  let sumHalves = 0;
-  let sumLive = 0;
   let planned = 0;
   let done = 0;
   let extra = 0;
   let readyCount = 0;
-  let startedToday = false;
-  const out: WordDay[] = [];
+  let below = false;
+  const chances: number[] = [];
+  const out: WordDay[] = ordered.map((word) => {
+    const counted = countedSkills(input.kind, word.live).map((dimension) => ({
+      dimension,
+      chance: startOf.get(`${word.glossId}|${dimension}`)?.chance ?? 0,
+      movedOn: startOf.get(`${word.glossId}|${dimension}`)?.movedOn ?? null,
+    }));
+    const chance = wordChance(counted.map((skill) => skill.chance));
+    const pct = Math.floor(100 * chance);
+    const ready = pct >= READINESS_WORD_READY;
+    chances.push(chance);
+    if (ready) readyCount += 1;
+    else below = true;
 
-  ordered.forEach((word, i) => {
-    const skills = word.live.map((dimension) => ({ dimension, halves: halvesOf.get(`${word.glossId}|${dimension}`) ?? 0 }));
-    const wordHalves = skills.reduce((sum, s) => sum + s.halves, 0);
-    sumHalves += wordHalves;
-    sumLive += word.live.length;
-    const readinessPct = pct(wordHalves, word.live.length);
-    if (readinessPct === 100) readyCount += 1;
-    if (word.startedOn === today) startedToday = true;
+    const asked = askedOf.get(word.glossId) ?? new Set<Dimension>();
+    const open = counted
+      .filter((skill) => !asked.has(skill.dimension))
+      .sort(
+        (a, b) =>
+          a.chance - b.chance ||
+          (a.movedOn ?? '').localeCompare(b.movedOn ?? '') ||
+          counted.indexOf(a) - counted.indexOf(b),
+      )
+      .map((skill) => skill.dimension);
+    const base = { glossId: word.glossId, open, counted: counted.map(({ dimension, chance: c }) => ({ dimension, chance: c })), readinessPct: pct };
 
-    const isPlanned =
-      i < quota ||
-      daysBetween(word.addedOn, input.dueOn) < half ||
-      (word.startedOn !== null && word.startedOn < today);
-
-    let state: WordDay['state'];
-    let startsIn: number | null = null;
-    let toStart = false;
-    let owed: Dimension[] = [];
-    let checks: Dimension[] = [];
-    if (isPlanned) {
-      planned += 1;
-      if (word.startedOn === null) toStart = true;
-      else {
-        owed = skills.filter((s) => s.halves < cap).map((s) => s.dimension);
-        if (daysLeft > 0 && daysBetween(word.startedOn, today) === 1) {
-          checks = word.live.filter((d) => !input.rightToday.has(`${word.glossId}|${d}`));
-        }
+    const isPlanned = (word.startedOn !== null && word.startedOn < today) || inQuota.has(word.glossId);
+    if (!isPlanned) {
+      if (word.startedOn === today) {
+        extra += 1;
+        return { ...base, state: 'extra', toStart: false, owed: [], cardsLeft: 0, startsIn: null };
       }
-      if (toStart || owed.length > 0 || checks.length > 0) state = 'owed';
-      else {
-        state = 'done';
-        done += 1;
-      }
-    } else if (word.startedOn === today) {
-      state = 'extra';
-      extra += 1;
-    } else {
-      state = 'later';
-      const first = introDays.findIndex((_, j) => Math.ceil((ordered.length * (j + 1)) / introDays.length) > i);
-      startsIn = first === -1 ? null : daysLeft - introDays[first];
+      return { ...base, state: 'later', toStart: false, owed: [], cardsLeft: 0, startsIn: startsIn.get(word.glossId) ?? null };
     }
-    out.push({ glossId: word.glossId, state, toStart, owed, checks, readinessPct, startsIn, skills });
+    planned += 1;
+    const need = daysLeft <= 0 ? 0 : eve ? (ready ? 1 : counted.length) : ready ? 0 : Math.min(2, counted.length);
+    const countedAsked = counted.filter((skill) => asked.has(skill.dimension)).length;
+    const cardsLeft = Math.min(open.length, Math.max(0, need - countedAsked));
+    const toStart = word.startedOn === null && cardsLeft > 0;
+    if (cardsLeft === 0) done += 1;
+    return { ...base, state: cardsLeft > 0 ? 'owed' : 'done', toStart, owed: open.slice(0, cardsLeft), cardsLeft, startsIn: null };
   });
 
   let state: TargetDay['state'];
   if (daysLeft <= 0) state = 'due_today';
-  else if (out.some((w) => w.state === 'owed')) state = 'owed';
+  else if (out.some((word) => word.state === 'owed')) state = 'owed';
   else state = input.answeredToday ? 'done' : 'rest';
 
+  const unmet = out.some((word) => word.state === 'later' || word.toStart);
   return {
     daysLeft,
-    capHalves: cap,
+    capHalves: capHalves(daysLeft),
     state,
     planned,
     done,
     extra,
-    nextPracticeIn: startedToday ? 1 : nextPracticeIn(daysLeft),
-    readinessPct: pct(sumHalves, sumLive),
+    nextPracticeIn: daysLeft <= 1 ? null : below || unmet ? 1 : daysLeft - 1,
+    readinessPct: meanPct(chances),
     readyCount,
     words: out,
   };
