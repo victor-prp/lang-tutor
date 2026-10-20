@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { EXPLAIN_MARKER, MAX_MISTAKES, buildExplainPrompt, explainRuleResult, parseExplain } from './explain';
+import { EXPLAIN_MARKER, MAX_MISTAKES, buildExplainPrompt, explainRuleResult, hasSentence, parseExplain } from './explain';
 import { JUDGE_MARKER, type JudgeContext } from './judge';
 
 const CONTEXT: JudgeContext = {
@@ -87,5 +87,16 @@ describe('explainRuleResult', () => {
   });
   it('leaves anything else to the model', () => {
     expect(explainRuleResult('Voglio prenotare un tavolo.', 'Io voglio prenotare il tavola.')).toBeNull();
+  });
+});
+
+// Phase 66b (final review M1). What the judged answer checks at all.
+describe('hasSentence', () => {
+  it('is a text with any word in it', () => {
+    expect(hasSentence('Io voglio un tavolo')).toBe(true);
+    expect(hasSentence('tavolo.')).toBe(true);
+  });
+  it('is not an empty text, or one of spaces and punctuation alone', () => {
+    for (const text of ['', '   ', '.', ' ? ', '…', '!!']) expect(hasSentence(text)).toBe(false);
   });
 });

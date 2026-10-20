@@ -11,13 +11,14 @@ import type {
 } from '@lang-tutor/core/api';
 import { MAX_JUDGED_TEXT, rightAnswer } from '@lang-tutor/core/domain';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Keyboard, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type TextStyle } from 'react-native';
+import { Keyboard, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 
 import { ContextLine, type SentenceTaps } from '@/components/ContextLine';
 import { HelpButton } from '@/components/HelpButton';
 import { ListenPrompt } from '@/components/ListenPrompt';
 import { RetryNotice } from '@/components/RetryNotice';
 import { contextLanguage } from '@/context';
+import { inputTone, type InputTone, type SentenceLine } from '@/explain';
 import { retryText } from '@/feedback';
 import type { Retype } from '@/retype';
 import { strings, type Instruction } from '@/strings';
@@ -87,6 +88,11 @@ type Props = {
   onRetype?: (text: string) => void;
   /** Phase 62 (spec D3). A typed meaning's context line is tapped word by word. */
   taps?: SentenceTaps;
+  /** Phase 66b (spec D2). A translation's sentence, checked with its word: one to
+   *  fix makes the input orange, unless the word is wrong. */
+  sentence?: SentenceLine | null;
+  /** Phase 66b (spec D2). What shows under the input once answered: the corrected sentence. */
+  below?: ReactNode;
 };
 
 /**
@@ -114,6 +120,8 @@ export function TypedAnswerView({
   onRetypeTyping,
   onRetype,
   taps,
+  sentence = null,
+  below,
 }: Props) {
   const [text, setText] = useState('');
   // Phase 39 (spec D8): the last send was in the wrong alphabet, or one word
@@ -172,8 +180,8 @@ export function TypedAnswerView({
   }
 
   // Phase 55 (spec D7): the input is plain while a retype is open.
-  const border =
-    verdict === null || retyping ? styles.inputIdle : verdict === 'wrong' ? styles.inputWrong : styles.inputCorrect;
+  // Phase 66b (spec D2): orange for a sentence to fix around a word that is not wrong.
+  const border = BORDERS[retyping ? 'idle' : inputTone(verdict, sentence)];
 
   return (
     <View style={styles.container} testID={ROOT_TEST_IDS[question.type]}>
@@ -284,6 +292,7 @@ export function TypedAnswerView({
           />
         </View>
       </View>
+      {below}
       {refused === 'wrong_script' && answerLanguage !== null && !locked ? (
         <View testID="wrong-script">
           <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} languageTestId="wrong-script-language" style={styles.wrongScript} />
@@ -440,9 +449,18 @@ const styles = StyleSheet.create({
   inputIdle: { borderColor: colors.border },
   inputCorrect: { borderColor: colors.correct, backgroundColor: colors.correctSurface },
   inputWrong: { borderColor: colors.wrong, backgroundColor: colors.wrongSurface },
+  inputFix: { borderColor: colors.amber, backgroundColor: colors.amberSurface },
   // Phase 55 (spec D7). The retype: the first answer's title and the word, as the banner words them.
   retype: { gap: spacing.xs, alignItems: 'center' },
   retypeTitle: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, fontWeight: '700', textAlign: 'center', writingDirection: 'rtl' },
   retypeAnswer: { fontSize: fontSizes.xl, lineHeight: lineHeights.xl, color: colors.text, fontWeight: '700', textAlign: 'center', writingDirection: 'ltr' },
   retypeNotice: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.text, textAlign: 'center', writingDirection: 'rtl' },
 });
+
+// Phase 66b (spec D2). The input's border by its tone.
+const BORDERS: Record<InputTone, StyleProp<ViewStyle>> = {
+  idle: styles.inputIdle,
+  correct: styles.inputCorrect,
+  wrong: styles.inputWrong,
+  fix: styles.inputFix,
+};

@@ -12,14 +12,14 @@ import { MeetCardView } from '@/components/MeetCardView';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
 import { NewMeaningPrompt } from '@/components/NewMeaningPrompt';
 import { ProgressBar } from '@/components/ProgressBar';
-import { SentenceExplain } from '@/components/SentenceExplain';
+import { SentenceCorrection } from '@/components/SentenceCorrection';
 import { SentenceGap } from '@/components/SentenceGap';
 import { SpeakButton } from '@/components/SpeakButton';
 import { TappableSentence } from '@/components/TappableSentence';
 import { SpeakingCardView } from '@/components/SpeakingCardView';
 import { TypedAnswerView } from '@/components/TypedAnswerView';
 import { confirm } from '@/confirm';
-import { explainText } from '@/explain';
+import { sentenceFeedback, sentenceLine } from '@/explain';
 import { feedbackFor } from '@/feedback';
 import { useCardVoice } from '@/hooks/useCardVoice';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -89,9 +89,6 @@ function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, taps: Sen
 function translatePrompt(question: SentenceTranslationQuestion, session: SessionValue, language: string) {
   const answered = session.answered;
   const { before, word, after } = splitAtGap(question.sentence, question.gap);
-  // Phase 66 (spec D3): the learner's own sentence explained on request, when it is
-  // not the reference. Keyed by the card, so the next card asks afresh.
-  const explains = answered && session.sessionId !== null && explainText(question, session.answer) !== null;
   return (
     <View style={styles.gapCard}>
       {/* Phase 59 (spec D3): each word a tap shows the Italian of; the practised word's is help.
@@ -126,9 +123,6 @@ function translatePrompt(question: SentenceTranslationQuestion, session: Session
             </Text>
             <SpeakButton text={question.sentence} language={language} testID="speak-reference" />
           </View>
-          {explains && session.sessionId !== null ? (
-            <SentenceExplain key={question.id} sessionId={session.sessionId} questionId={question.id} />
-          ) : null}
         </View>
       ) : null}
     </View>
@@ -197,7 +191,7 @@ function ClozeTypedCard({ question, session, language, learner, answerLanguage }
 // means a new case here plus a view component; the header, progress bar,
 // feedback banner and scoring are untouched, and the `never` below fails the
 // build for a type with no case.
-function renderQuestion(question: Question, session: SessionValue, language: string, learner: string) {
+function renderQuestion(question: Question, session: SessionValue, language: string, learner: string, explainOpen: boolean) {
   // Phase 39 (spec D7, D8): the language a typed card's answer is checked in, by the server's rule.
   const answerLanguage = scriptGate(question, language, learner);
   switch (question.type) {
@@ -293,6 +287,13 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           onSubmit={session.submitJudged}
           retry={session.retry}
           prompt={translatePrompt(question, session, language)}
+          // Phase 66b (spec D2): the sentence's check, which came with the word's grade.
+          sentence={sentenceLine(session.explanation)}
+          below={
+            session.explanation !== null && session.answer !== null && 'text' in session.answer ? (
+              <SentenceCorrection text={session.answer.text} explanation={session.explanation} open={explainOpen} />
+            ) : null
+          }
         />
       );
     case 'typed_meaning':
@@ -450,6 +451,15 @@ export default function SessionScreen() {
   const { active } = useCurrentUser();
   // Re-entry guard: a fast double tap on skip must not stack two confirms.
   const skipping = useRef(false);
+  // Phase 66b (spec D2). The card whose sentence's reasons הסבר opened, by its id,
+  // so the next card starts closed. They open under the banner, which covers the
+  // bottom of the screen, so the screen scrolls down to them.
+  const [explained, setExplained] = useState<string | null>(null);
+  const explainOpen = session.question !== undefined && explained === session.question.id;
+  const scroll = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (explainOpen) requestAnimationFrame(() => scroll.current?.scrollToEnd({ animated: true }));
+  }, [explainOpen]);
   // A session is always entered from home, which needs an active enrollment;
   // an empty language only drops the name from the instruction.
   const language = active?.target_language ?? '';
@@ -502,6 +512,7 @@ export default function SessionScreen() {
 
   // Phase 39 (spec D9): a typed meaning is answered in the learner's language.
   const learner = active?.source_language ?? 'he';
+  const line = sentenceLine(session.explanation);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -526,6 +537,7 @@ export default function SessionScreen() {
         {/* "handled": with the keyboard up, the first tap on בדיקה must submit,
             not merely dismiss the keyboard. */}
         <ScrollView
+          ref={scroll}
           contentContainerStyle={styles.body}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -537,13 +549,18 @@ export default function SessionScreen() {
               {strings.noMicrophone}
             </Text>
           ) : null}
-          {renderQuestion(question, session, language, learner)}
+          {renderQuestion(question, session, language, learner, explainOpen)}
         </ScrollView>
       </KeyboardAvoidingView>
 
       {/* Phase 55 (spec D7): none while a retype is open; then how it ended. */}
+      {/* Phase 66b (spec D2): a translation's sentence line under its word's. */}
       {session.answer && hasBanner(session.answer, session.retype) ? (
-        <FeedbackBanner feedback={feedbackFor(question, session.answer, session.retry, session.retype)} onContinue={session.next} />
+        <FeedbackBanner
+          feedback={sentenceFeedback(feedbackFor(question, session.answer, session.retry, session.retype), line)}
+          onContinue={session.next}
+          sentence={line === null ? null : { line, open: explainOpen, onExplain: () => setExplained(explainOpen ? null : question.id) }}
+        />
       ) : null}
     </SafeAreaView>
   );

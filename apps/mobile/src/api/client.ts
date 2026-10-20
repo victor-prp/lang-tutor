@@ -14,8 +14,6 @@ import type {
   Grant,
   GrantList,
   HealthResponse,
-  ExplainRequest,
-  ExplainResponse,
   JudgedAnswerRequest,
   JudgedAnswerResponse,
   MeResponse,
@@ -236,16 +234,6 @@ export function createApiClient({
           request,
           { signal: controller.signal },
         );
-      } finally {
-        clearTimeout(timer);
-      }
-    },
-    // Phase 66 (spec D3). Waits on a model call, so it is given up as a judged answer is.
-    explainAnswer: async (sessionId: string, request: ExplainRequest) => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), JUDGE_REQUEST_TIMEOUT_MS);
-      try {
-        return await postJson<ExplainResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/explain`, request, { signal: controller.signal });
       } finally {
         clearTimeout(timer);
       }

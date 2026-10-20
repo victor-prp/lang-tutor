@@ -1,4 +1,4 @@
-import type { MissedQuestion, NextStepResponse, PendingRetry, Question, SessionProgressItem } from '@lang-tutor/core/api';
+import type { ExplainResponse, MissedQuestion, NextStepResponse, PendingRetry, Question, SessionProgressItem } from '@lang-tutor/core/api';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { router } from 'expo-router';
 import {
@@ -51,6 +51,8 @@ export type SessionValue = {
   total: number;
   /** Phase 23. The answer to the card on screen: an option or a typed text. */
   answer: CardAnswer | null;
+  /** Phase 66b (spec D2). A sentence translation's check, which came with its answer. */
+  explanation: ExplainResponse | null;
   /** The chosen option, for a choice card; null otherwise. */
   selectedOption: number | null;
   answered: boolean;
@@ -225,8 +227,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         latest !== null && latest.sessionId === sessionId && latest.question?.id === questionId && latest.answer === null && latest.judging === 'checking';
       setState((current) => (current ? { ...current, judging: 'checking' } : current));
       void call
-        .then(({ answer, next, met }) => {
-          setState((latest) => (latest && mine(latest) ? landed(latest, answer, next, met) : latest));
+        .then(({ answer, next, met, explanation }) => {
+          setState((latest) => (latest && mine(latest) ? landed(latest, answer, next, met, explanation ?? null) : latest));
         })
         .catch(() => {
           setState((latest) => (latest && mine(latest) ? { ...latest, judging: 'failed' } : latest));
@@ -377,7 +379,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         settle(question, retry, (as) =>
           api
             .judgeAnswer(sessionId, retried({ question_id: question.id, text, ...helps, ...taps }, as))
-            .then((response) => ({ answer: judgedAnswer(text, response, helped), next: response.next })),
+            // Phase 66b (spec D2): with the sentence's check, which came with the verdict.
+            .then((response) => ({ answer: judgedAnswer(text, response, helped), next: response.next, explanation: response.explanation ?? null })),
         ),
       );
     },
@@ -473,6 +476,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         position: 0,
         total: SESSION_LENGTH,
         answer: null,
+        explanation: null,
         selectedOption: null,
         answered: false,
         complete: false,
@@ -512,6 +516,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       position: state.position,
       total: state.total,
       answer: state.answer,
+      explanation: state.explanation,
       selectedOption: state.answer && 'option_index' in state.answer ? state.answer.option_index : null,
       answered: state.answer !== null,
       complete: state.complete,
