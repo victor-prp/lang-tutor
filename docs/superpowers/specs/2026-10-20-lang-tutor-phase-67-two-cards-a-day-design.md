@@ -73,19 +73,22 @@ so the day's work is fixed when the day starts. A word is **ready** at `READINES
 
 ### D2. Each day's cards **(Victor: "yes"; numbers from the simulation)**
 
-Per word on its plan (D3), the counted skills it has live (`countedSkills`: homework writing,
-spelling, speaking; a בוחן writing and spelling):
+Per word on its plan (D3), its **practised skills**: writing, spelling and speaking among its live
+ones, for every kind (R1: phase 53 D3, Victor: "the kind sets how strict a target is, never which
+skills are practised"); spelling only where the device can listen (R4). Whether it is below 90 reads
+its readiness, which counts its kind's skills (homework writing, spelling, speaking; a בוחן writing
+and spelling):
 
 | The day | Below 90 at the start of today | Ready |
 |---|---|---|
 | any day before the eve | 2 cards, on 2 different skills | none: it rests |
-| the eve (1 day left) | 1 card on each counted skill | 1 check card |
+| the eve (1 day left) | 1 card on each practised skill | 1 check card |
 
-(At most its counted skills: a word that cannot be said has two.) A card **asks** the counted skill
-its type serves: translate, gap, sentence, letter tiles, choose-the-word → writing; dictation →
+(At most its practised skills: a word that cannot be said has two.) A card **asks** the practised
+skill its type serves: translate, gap, sentence, letter tiles, choose-the-word → writing; dictation →
 spelling; say translation (also answered by typing) → speaking. A ladder asks writing. Cards answered
 today on the target's path count, right or wrong, and so do the cards of the session in flight, as the
-picker credits them today. A word's next card asks its counted skill not asked today with the lowest
+picker credits them today. A word's next card asks its practised skill not asked today with the lowest
 start chance, then the one whose readiness moved longest ago, then writing, spelling, speaking. Its
 card: writing at its recall rung (translate, gap or sentence, as `planCards` chooses), spelling at
 rung 1 (dictation; typed when the device cannot listen), speaking at rung 2 (say translation).
@@ -176,4 +179,41 @@ no longer average to the card's number. A one-string change if Victor wants the 
 
 ## Rulings
 
-(none yet)
+Made while building, each with what it costs if wrong.
+
+- **R1 (D2).** Ruling: a word's cards choose among writing, spelling and speaking for every kind;
+  only "below 90" reads the kind's counted skills. Phase 53 D3 is Victor's ("the kind sets how
+  strict a target is, never which skills are practised"); the first D2 said counted skills, which
+  left an exam never practising speaking: FSRS ready-on-due 0.00 against its 0.57 gate. Cost: an
+  exam's eve asks three cards, not two.
+- **R2 (D2).** Ruling: a ready word's eve check asks its weakest practised skill, not its weakest
+  counted one. A counted-only check dropped the exam's FSRS ready-on-due to 0.51 (gate 0.57, never
+  lowered). Cost: an exam's check can land on speaking, which its readiness does not count.
+- **R3 (D6).** Ruling: practice more asks words met early today (extra) too, lowest readiness
+  first, but not while the session in flight is meeting one. Cost: a word met early waits one
+  session for its practice-more card.
+- **R4 (D2, Review Focus 2).** Ruling: where the device cannot listen, spelling is no practised
+  skill of its own: the writing card, whose typed answer grades spelling, asks it. Dictation is
+  spelling's only card; its fallback typed card counted as writing, which left spelling owed all
+  day. Answers do not record the skill a pick was for, and recording it is a migration. Cost: a
+  word on such a device gets one card fewer a day, its spelling read from typed answers alone.
+- **R5 (D5).** Ruling: the stock beside the day's last budgeted session is past the budget (phase
+  65b) and records the owed word; a miss adds no card, so it is played as it is after a miss too.
+  The phase 57 cases "replaced after a miss" are gone. Cost: a card missed on the day's last
+  session is not asked again that day.
+- **R6 (testing).** Ruling: the day simulation's anti-goal 1 check accepts a card on any skill
+  still open while its word has cards left: the stock chosen beside a session in flight ranks ties
+  by `movedOn` as it stood then. Cost: none for the count; the card order can differ from home's.
+- **R7 (testing).** Ruling: the cold-miss anti-goal scenario misses the cold words' writing on
+  every day they are asked, not only the last two: a word ready before its last two days gets no
+  writing card then. The anti-goal (a בוחן missed cold reads below 90 on its date) is still gated.
+  Cost: the scenario no longer shows earlier rights overridden by the last two days' misses.
+- **R8 (testing).** Ruling: the phase 57 measures of the meter's climb are gone from the day
+  simulation (the plan at 100% only on the eve, ten practice evenings for a 20-day exam, the
+  practice-day carry-over); the 20-day exam now gates every word ready on its date and reports its
+  evenings, ungated. Cost: long targets are reported, not tuned (Non-goals).
+- **R9 (Done 3).** The bar, measured in the day simulation with the app's ladders (2026-10-20, five
+  phases): 21 sessions over 5 days, 12 over 2, 10 for tomorrow, readiness on the date 88, 79 and 74,
+  FSRS ready-on-due 0.87, 0.60 and 0.45, gated as `HOMEWORK_PASS`. The scratch simulation's 16 / 9 /
+  6 met a word with one card, not a ladder of four. `READY_ON_DUE_PASS` holds: exam 0.76 (≥ 0.57),
+  homework 0.94 (≥ 0.85).
