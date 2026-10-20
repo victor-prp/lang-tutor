@@ -174,3 +174,26 @@ Names inside the app, the diff helper's tokenising, the icons' drawing, and how 
 lines are laid out within the mockup.
 
 ## Rulings made while building
+
+Ruling: R1. Phase 66's `/explain` integration tests now register a failing explain stub before the
+judged answer wherever they test `/explain`'s own call, since the judged answer checks the
+sentence itself. They still prove `/explain`'s model, 409 and 502 paths.
+
+Ruling: R2. (Final review I1.) A card held for its second try answers without waiting for the
+check it drops. Waiting would add about a second to the "another word, try again" path, for
+nothing.
+
+Ruling: R3. (Final review I2.) When an overlapping request recorded another text first, this
+request's check is neither stored nor returned. The recorded text's check is returned instead, as
+a replay would return it. Without this, a stored row could explain a text the record doesn't
+hold.
+
+Ruling: R4. (Final review M1, re-graded.) A text of spaces and punctuation alone has no sentence
+to check (`hasSentence`), so it is never called "המשפט נכון".
+
+Ruling: R5. The corrected line marks a word green only when the word itself changed. A fix of
+case or of punctuation alone shows only under הסבר.
+
+Ruling: R6. (Final review M4.) Measured, not changed: on a 390×844 web screen the last of four
+reasons clears the banner once the screen scrolls. The e2e check fails when the scroll is turned
+off. Android, with its taller navigation inset, is part of Victor's phone check.
