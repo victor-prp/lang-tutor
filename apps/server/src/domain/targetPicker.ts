@@ -44,6 +44,10 @@ export type TargetPickInput = {
   /** Spec D8, ruling T3-n. New words the day still has room for (DAY_NEW_CAP less today's new
    *  words): the ladders practice more starts early, never an owed start. Absent: no limit. */
   newRoom?: number;
+  /** Phase 67b (spec D5). Each word's readiness now, not at the start of today: its card value and
+   *  its counted skills, the lowest chance now first (targetSummary pickNow). Absent, practice
+   *  more reads the start of today. */
+  now?: ReadonlyMap<string, { pct: number; counted: readonly Dimension[]; weakestOpen?: boolean }>;
 };
 
 /** Spec D7, D10. A day with work owed asks it; the due date gives the last review; a done or
@@ -233,6 +237,17 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
     }
   };
 
+  /** Phase 67b (spec D4). A word met by its ladder this session is asked its speaking in it too,
+   *  as its second card of the day, wherever speaking is a practised skill of it. */
+  const firstSay = () => {
+    for (const word of words) {
+      const laddered = picks.some((one) => one.glossId === word.glossId && one.ladder);
+      if (laddered && word.picked.length === 1 && word.weakest.includes('spoken_productive') && open(word, 1)) {
+        add(word, 'spoken_productive', rungOf('spoken_productive'));
+      }
+    }
+  };
+
   /** Spec D6. The owed words met before this session, in two rounds: every word's first card
    *  before any word's second, the lowest readiness first. A word met this session waits for
    *  the next for its other cards. */
@@ -253,14 +268,27 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
    *  yet asked this session, on a skill not asked today, else its weakest: the lowest readiness first, a word
    *  the session in flight asks last, then by gloss id. A word met early today is asked too, but
    *  not while the session in flight is meeting it. */
-  const hardest = (pool: readonly Word[]) => {
-    const order = pool
-      .filter((word) => !word.toStart && word.picked.length === 0 && (word.state === 'done' || word.state === 'owed' || (word.state === 'extra' && !word.inFlight)))
-      .sort((a, b) => Number(a.inFlight) - Number(b.inFlight) || a.readinessPct - b.readinessPct || byId(a, b));
+  const hardest = (pool: readonly Word[], belowBarOnly: boolean) => {
+    // Phase 67b (spec D5): readiness now when the caller reads it, else at the start of today.
+    const pctOf = (word: Word) => input.now?.get(word.glossId)?.pct ?? word.readinessPct;
+    // Review C1: before the eve only a skill's first answer counts and only the weakest moves a
+    // word, so the words whose weakest is still open today come first.
+    const shut = (word: Word) => Number(day.daysLeft > 1 && input.now?.get(word.glossId)?.weakestOpen === false);
+    const eligible = pool.filter(
+      (word) => !word.toStart && word.picked.length === 0 && (word.state === 'done' || word.state === 'owed' || (word.state === 'extra' && !word.inFlight)),
+    );
+    // Phase 67b (spec D5): a word at its bar counts 100 on the card, so a right adds nothing to it and
+    // a miss lowers it: while any word is below its bar, practice more asks only those. Not on the
+    // due date, whose card is frozen (review I1).
+    const below = input.now && belowBarOnly ? eligible.filter((word) => pctOf(word) < 100) : eligible;
+    const order = (below.length > 0 ? below : eligible).sort(
+      (a, b) => Number(a.inFlight) - Number(b.inFlight) || shut(a) - shut(b) || pctOf(a) - pctOf(b) || byId(a, b),
+    );
     for (const word of order) {
       if (!open(word, 1)) continue;
-      // Final review 3: a skill not asked today first, so practice more varies its cards.
-      const dimension = word.open[0] ?? word.weakest[0];
+      // Phase 67b (spec D5): the counted skill weakest now. Without it, final review 3: a skill
+      // not asked today first, so practice more varies its cards.
+      const dimension = input.now?.get(word.glossId)?.counted[0] ?? word.open[0] ?? word.weakest[0];
       if (dimension) add(word, dimension, rungOf(dimension));
     }
   };
@@ -272,7 +300,8 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
       words.filter((word) => word.state === 'later'),
       true,
     );
-    hardest(words);
+    firstSay();
+    hardest(words, true);
   };
 
   if (mode === 'more') {
@@ -284,13 +313,14 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
       words.filter((word) => word.state === 'later'),
       false,
     );
-    hardest(words);
+    hardest(words, false);
   } else {
     const owed = words.filter((word) => word.state === 'owed');
     start(
       owed.filter((word) => word.toStart),
       false,
     );
+    firstSay();
     owedWork(owed);
     // Phase 65b (spec D2): past the budget, the rest of the session is practice more.
     if (mode === 'past_budget') practiceMore();

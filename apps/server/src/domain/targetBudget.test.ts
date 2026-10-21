@@ -61,12 +61,13 @@ describe('playTodayForward (phase 67, spec D5)', () => {
     expect(play({ words: words(15, '2026-10-17'), starts: starts(15, 0.5), askedToday, answeredToday: true })).toEqual({ sessions: 0, cards: 0 });
   });
 
-  it("meets fifteen new words on the eve two ladders a session, then asks each its spelling and speaking", () => {
+  it("meets fifteen new words on the eve two ladders a session, each with its say card, then asks each its spelling", () => {
     const day = play({ createdOn: TODAY, dueOn: TOMORROW, words: words(15, null) });
-    // A ladder is four slots and asks writing; its word's other two cards are one slot each. The
-    // first session holds its two ladders alone (8 slots): no word is met yet to fill the rest.
+    // A ladder is four slots and asks writing; its word's other two cards are one slot each. Phase
+    // 67b (spec D4): a session that meets two words fills its ten slots with their ladders and
+    // say cards, so the day takes one session fewer than phase 67's 10.
     expect(day.cards).toBe(15 * 4 + 15 * 2);
-    expect(day.sessions).toBe(10);
+    expect(day.sessions).toBe(9);
   });
 
   it(`cuts a very large day short at ${PLAY_SESSIONS_MAX} sessions`, () => {

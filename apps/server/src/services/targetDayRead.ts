@@ -8,7 +8,7 @@ import type { Devices, Path, SavedGloss } from '../domain/session';
 import type { DayAnswer } from '../domain/today';
 import { playTodayForward, type TargetBudget } from '../domain/targetBudget';
 import { targetDay, type TargetDayInput } from '../domain/targetDay';
-import { skillStarts } from '../domain/targetSummary';
+import { pickNow, readinessSummary, skillStarts } from '../domain/targetSummary';
 import { targetMode, type TargetPickInput } from '../domain/targetPicker';
 import { activeOn } from '../domain/targets';
 import type { TargetRow } from '../repo/targets';
@@ -78,14 +78,20 @@ export async function readTargetDay(
   const onPath = answers.filter((answer) => answer.targetId === target.id);
   const dayWords = words.map((word, i) => ({ glossId: word.glossId, addedOn: addedOn[i], startedOn: word.startedOn, live: liveOf(word.glossId) }));
   // Phase 67 (spec D1): each counted skill's readiness at the start of today, as the target view reads it.
+  const readinessRows = (await repos.targetReadiness.findRows([target.id], glossIds)).filter((row) => row.targetId === target.id);
+  const memory = await repos.memory.findRows({ enrollmentId: enrolled.id, glossIds });
   const starts = skillStarts({
     kind: target.kind,
     dueOn: target.dueOn,
     words: dayWords,
-    rows: (await repos.targetReadiness.findRows([target.id], glossIds)).filter((row) => row.targetId === target.id),
-    memory: await repos.memory.findRows({ enrollmentId: enrolled.id, glossIds }),
+    rows: readinessRows,
+    memory,
     firstToday: await repos.targetReadiness.findFirstEventsOn(target.id, today),
   });
+  // Phase 67b (spec D5): readiness now, for practice more's order and skill.
+  const now = pickNow(
+    readinessSummary({ kind: target.kind, dueOn: target.dueOn, today, words: dayWords, rows: readinessRows, memory, firstToday: [] }).words,
+  );
   const dayInput: TargetDayInput = {
     today,
     createdOn,
@@ -98,7 +104,7 @@ export async function readTargetDay(
     answeredToday: onPath.length > 0,
   };
   const day = targetDay(dayInput);
-  return { day, dayInput, createdOn, glossIds, live, canSay: (glossId: string) => speakable(formOf.get(glossId)!) };
+  return { day, dayInput, createdOn, glossIds, live, now, canSay: (glossId: string) => speakable(formOf.get(glossId)!) };
 }
 
 /**
@@ -175,6 +181,7 @@ export async function readTargetPickInput(
     // Ruling T3-j: a ladder's intro stage grades nothing.
     inFlight: cards.filter((card) => !card.intro),
     newRoom: Math.max(0, DAY_NEW_CAP - introduced.length - meeting.size),
+    now: read.now,
   };
   return { read: { ...read, saved, memory, families, inFlight: started != null }, input };
 }

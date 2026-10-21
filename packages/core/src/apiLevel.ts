@@ -31,6 +31,11 @@
  * chances. A target's `readiness_pct` and `ready_count` keep their names and change meaning, and a
  * word's skills carry `chance` and `held` in place of `value` and `cap`: an older app would draw
  * the grade as points and read `undefined` where it drew a skill's bar (spec D10).
+ *
+ * Not raised by phase 67b (review I3): `readiness_pct`, `readiness_start_pct`, a word's
+ * `readiness_pct` and `ready_count` now count a word at its kind's bar as 100 and `practice_more_little`
+ * means "no session today can raise the card". The fields keep their types and an older app still
+ * draws a percent and asks before practice more less often, so none of it breaks one.
  */
 export const API_LEVEL = 6;
 

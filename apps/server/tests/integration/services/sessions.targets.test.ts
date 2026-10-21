@@ -782,12 +782,12 @@ describe("a session past the budget moves its target's plan only for its owed wo
 });
 
 // Phase 65 (spec D2, D3). A session's end writes a target's readiness and its log, from the
-// answers in order: the first try of the day decides, a miss counts once, a right after counts
-// as a bonus.
+// answers in order. Phase 67b (spec D3): before the eve only a skill's first answer of the day
+// counts; on the eve a miss counts once and a right after it is a bonus.
 describe("a session's end records the target's readiness (phase 65)", () => {
-  it('writes one row per counted skill and an event per applied answer: right, wrong, right', async () => {
+  const playThree = async (dueOn: string) => {
     const words = await savedWords();
-    const homework = await addTarget('homework', '2030-01-13', [words[0].glossId]);
+    const homework = await addTarget('homework', dueOn, [words[0].glossId]);
     const own = await insertListSession(t.db, {
       userId: 'u_1',
       enrollmentId: E,
@@ -799,14 +799,23 @@ describe("a session's end records the target's readiness (phase 65)", () => {
     for (const [i, right] of [true, false, true].entries()) {
       await service.submitAnswer('u_1', own.sessionId, own.questions[i].id, { text: right ? words[0].form : 'zzzz' });
     }
-
     const events = await readTargetReadinessEvents(t.db, homework);
-    const productive = events.filter((event) => event.dimension === 'written_productive');
-    expect(productive.map((event) => event.why).sort()).toEqual(['bonus', 'first_right', 'miss']);
-    expect(productive.every((event) => event.day === DAY && event.sessionId === own.sessionId)).toBe(true);
     const rows = await readTargetReadiness(t.db, homework);
+    return { own, events: events.filter((event) => event.dimension === 'written_productive'), rows };
+  };
+
+  it('writes one row per counted skill and, before the eve, an event for the first answer only: right, (wrong), (right)', async () => {
+    const { own, events, rows } = await playThree('2030-01-13');
+    expect(events.map((event) => event.why)).toEqual(['first_right']);
+    expect(events.every((event) => event.day === DAY && event.sessionId === own.sessionId)).toBe(true);
     expect(rows.filter((row) => row.dimension === 'written_productive')).toHaveLength(1);
     expect(rows.every((row) => ['written_productive', 'spelling', 'spoken_productive'].includes(row.dimension))).toBe(true);
+    expect(rows.find((row) => row.dimension === 'written_productive')).toMatchObject({ day: DAY, missedToday: false, bonusUsed: 0, held: false, sessionId: own.sessionId });
+  });
+
+  it('on the eve writes an event per applied answer: right, wrong, right', async () => {
+    const { own, events, rows } = await playThree('2030-01-09');
+    expect(events.map((event) => event.why).sort()).toEqual(['bonus', 'first_right', 'miss']);
     expect(rows.find((row) => row.dimension === 'written_productive')).toMatchObject({ day: DAY, missedToday: true, bonusUsed: 1, held: false, sessionId: own.sessionId });
   });
 

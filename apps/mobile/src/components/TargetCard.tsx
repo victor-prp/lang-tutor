@@ -154,7 +154,9 @@ export function Readiness({ target, readiness }: { target: TargetSummary; readin
 const paleOf = (hsl: string) => hsl.replace('hsl(', 'hsla(').replace(/\)$/, ', 0.45)');
 
 /** Phase 65 (spec D7). Today as a budget: its words and what is left or why it ended, then a
- *  dot per session (green done, grey to do, dashed when faded, blue bonus). A screen reader reads
+ *  dot per session (green done, grey to do, dashed when faded, blue bonus). Phase 67b (spec D7):
+ *  the line is grey until the day's goal is met, then blue while more practice can raise the
+ *  card and green when it cannot or at 100%, with its second part under it. A screen reader reads
  *  the row as one Hebrew sentence (sessionsSpoken) and not the dots, which are drawing only; each
  *  dot's kind is in its testID (`target-session-dot-<kind>`). */
 export function Sessions({ target }: { target: TargetSummary }) {
@@ -162,16 +164,21 @@ export function Sessions({ target }: { target: TargetSummary }) {
   const line = sessionsLine(target);
   const dots = sessionDots(target);
   if (!line.text && !line.side && dots.length === 0) return null;
-  const met = line.kind === 'met' || line.kind === 'early';
+  const met = line.tone !== 'plain';
+  const tone = TONE_STYLES[line.tone];
   return (
     <View testID={`target-sessions-${id}`} accessible accessibilityLabel={sessionsSpoken(target)} style={styles.sessions}>
       <View style={styles.sessionsLine}>
-        <Text
-          testID={met ? `target-praise-${id}` : `target-today-${id}`}
-          style={[styles.line, styles.sessionsText, met ? styles.met : null]}
-        >
-          {line.text}
-        </Text>
+        <View style={styles.sessionsWords}>
+          <Text testID={met ? `target-praise-${id}` : `target-today-${id}`} style={[styles.line, styles.sessionsText, tone]}>
+            {line.text}
+          </Text>
+          {line.sub ? (
+            <Text testID={`target-sessions-${id}-sub`} style={[styles.sessionsSub, tone]}>
+              {line.sub}
+            </Text>
+          ) : null}
+        </View>
         {line.side ? <Text testID={`target-sessions-${id}-side`} style={met ? styles.sideMet : styles.side}>{line.side}</Text> : null}
       </View>
       <View
@@ -188,6 +195,13 @@ export function Sessions({ target }: { target: TargetSummary }) {
     </View>
   );
 }
+
+/** Phase 67b (spec D7). The line's colour by tone: grey to do, blue more helps, green done. */
+const TONE_STYLES = {
+  plain: { color: '#344054' },
+  more: { color: colors.primary, fontWeight: '700' },
+  done: { color: colors.correct, fontWeight: '700' },
+} as const;
 
 const DOT_STYLES = {
   done: { backgroundColor: colors.progress },
@@ -267,9 +281,10 @@ const styles = StyleSheet.create({
   gain: { minHeight: 14, fontSize: 11.5, lineHeight: 14, fontWeight: '700', color: colors.correct, textAlign: 'right', writingDirection: 'rtl' },
   gainDown: { color: colors.muted },
   sessions: { gap: spacing.sm },
-  sessionsLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
+  sessionsLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 },
+  sessionsWords: { flexShrink: 1 },
   sessionsText: { fontSize: fontSizes.sm },
-  met: { color: colors.correct, fontWeight: '700' },
+  sessionsSub: { fontSize: 13, lineHeight: 20, writingDirection: 'rtl' },
   side: { fontSize: fontSizes.sm, color: '#344054', fontWeight: '600', writingDirection: 'rtl' },
   sideMet: { fontSize: fontSizes.sm, color: colors.muted, writingDirection: 'rtl' },
   dots: { flexDirection: 'row', gap: 5, alignItems: 'center' },

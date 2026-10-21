@@ -63,27 +63,30 @@ function replay(kind: ReadinessKind): { day: string; pct: number }[] {
 const dayEnds = (r: { day: string; pct: number }[]) =>
   Object.fromEntries(r.map((x) => [x.day, x.pct]));
 
+// Phase 67b (spec D1, D3), measured 2026-10-21: the weakest skill, and before the eve only a
+// skill's first answer of the day. Phase 65 read homework 45, 70, 83 and the exam 53, 55, 77
+// with 60 then 46 inside 18 Oct. The numbers are the forecast (readinessPct), not the card.
 describe("replay of the 2026-10-17 homework", () => {
-  it("homework reads 45, 70, 83 at the day ends", () => {
+  it("homework reads 51, 69, 81 at the day ends", () => {
     const ends = dayEnds(replay("homework"));
     expect({
       a: ends["2026-10-17"],
       b: ends["2026-10-18"],
       c: ends["2026-10-19"],
-    }).toEqual({ a: 45, b: 70, c: 83 });
+    }).toEqual({ a: 51, b: 69, c: 81 });
   });
 
-  it("exam reads 53, 55, 77 at the day ends, with 60 then 46 inside 18 Oct", () => {
+  it("exam reads 56, 54, 73 at the day ends, with 62 then 48 inside 18 Oct (a cold miss's hold)", () => {
     const r = replay("exam");
     const ends = dayEnds(r);
     expect({
       a: ends["2026-10-17"],
       b: ends["2026-10-18"],
       c: ends["2026-10-19"],
-    }).toEqual({ a: 53, b: 55, c: 77 });
+    }).toEqual({ a: 56, b: 54, c: 73 });
     const seq = r.filter((x) => x.day === "2026-10-18").map((x) => x.pct);
-    const i = seq.indexOf(60);
+    const i = seq.indexOf(62);
     expect(i).toBeGreaterThanOrEqual(0);
-    expect(seq[i + 1]).toBe(46);
+    expect(seq[i + 1]).toBe(48);
   });
 });

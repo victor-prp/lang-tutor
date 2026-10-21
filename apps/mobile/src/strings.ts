@@ -561,7 +561,8 @@ export const strings = {
   targetGoodLuck: 'בהצלחה!',
   lastReview: 'חזרה אחרונה',
   // The target screen's word groups and each word's line for today (spec D12).
-  targetGroupTitle: { owed: 'נשאר להיום', done: 'סיימת להיום', extra: 'נוספו היום', later: 'בהמשך' } as const,
+  // Phase 67b (spec D9): words practised today, not "done for today".
+  targetGroupTitle: { owed: 'נשאר להיום', done: 'תורגלו היום', extra: 'נוספו היום', later: 'בהמשך' } as const,
   targetWordOwed: (names: string[]) => `היום נשאר: ${names.join(', ')}`,
   targetWordDone: 'היום ✓',
   targetSkillHeld: 'חצי עד שתענה נכון מחר',
@@ -576,19 +577,27 @@ export const strings = {
   targetReadinessFor: (kind: TargetKind): string => TARGET_FOR[kind],
   targetGainUp: (pct: number) => `${isolateLtr(`+${pct}%`)} היום`,
   targetGainDown: (pct: number) => `${isolateLtr(`−${pct}%`)} היום`,
-  targetSessionsOffer: (offer: number) => `היום: ${isolateLtr(String(offer))} תרגולים`,
+  // Phase 67b (spec D7, Victor). The day's line: its goal, the way there, and once it is met,
+  // whether more practice can still raise the card (blue ↑) or not (green ✓), or 100%.
+  targetSessionsGoal: (sessions: number) =>
+    sessions === 1 ? 'היעד של היום: תרגול אחד' : `היעד של היום: ${isolateLtr(String(sessions))} תרגולים`,
+  targetSessionsGoodStart: (left: number) => `התחלה טובה · עוד ${isolateLtr(String(left))} ליעד של היום`,
+  targetSessionsOneLeft: 'כמעט שם · עוד תרגול אחד',
+  targetSessionsMetMore: 'עשית עבודה טובה להיום ↑',
+  targetSessionsMetMoreSub: 'עוד כמה תרגולים יחזקו עוד יותר',
+  targetSessionsMetMoreSpoken: 'עשית עבודה טובה להיום',
+  targetSessionsMetDone: 'עשית עבודה מצוינת להיום ✓',
+  targetSessionsMetDoneSub: 'מחר נחזק עוד',
+  targetSessionsMetDoneSpoken: 'עשית עבודה מצוינת להיום',
+  targetSessionsAllReady: 'עשית את זה! ✓',
+  targetSessionsAllReadySpoken: 'עשית את זה!',
   targetSessionsMinutes: (minutes: number) => `כ-${isolateLtr(String(minutes))} דקות`,
-  targetSessionsProgress: (done: number, budget: number) =>
-    `היום: ${isolateLtr(String(done))} מתוך ${isolateLtr(String(budget))} תרגולים`,
-  targetSessionsLeft: (left: number) => `עוד ${isolateLtr(String(left))}`,
-  targetSessionsMet: 'סיימת להיום ✓',
   targetSessionsEarly: (done: number, budget: number) => `${isolateLtr(String(done))} במקום ${isolateLtr(String(budget))}`,
   targetSessionsBonus: (extra: number) => `${isolateLtr(`+${extra}`)} בונוס`,
   // What a screen reader says of the sessions row, its dots hidden: the count they draw.
   targetSessionsSpoken: (done: number, budget: number, bonus: number) =>
     `${isolateLtr(String(done))} מתוך ${isolateLtr(String(budget))} תרגולים היום` +
     (bonus > 0 ? ` ועוד ${isolateLtr(String(bonus))} בונוס` : ''),
-  targetSessionsMetSpoken: 'סיימת להיום',
   targetReadinessPct: (kind: TargetKind, pct: number) => `מוכנות ${TARGET_FOR[kind]}: ${isolateLtr(`${pct}%`)}`,
   practiceNow: 'לתרגל עכשיו',
   // Phase 64 (spec D4, D5). The card's blue header: the countdown's big line, the fuse's label
@@ -605,9 +614,9 @@ export const strings = {
   /** `daysLeft` is 1 (tomorrow) or 0 (the date itself); `missing` the words not ready, at least 1. */
   targetNotReady: (kind: TargetKind, daysLeft: number, missing: number): string => {
     const day = daysLeft < 1 ? 'היום' : 'מחר';
-    const words = missing === 1 ? 'ומילה אחת עוד לא מוכנה' : `ו-${isolateLtr(String(missing))} מילים עוד לא מוכנות`;
-    const help = daysLeft < 1 ? 'חזרה אחרונה תעזור.' : 'עוד תרגול אחד יעזור.';
-    return `${TARGET_THE[kind]} ${day} ${words}. ${help}`;
+    // Phase 67b (spec D9, Victor): the words that need strengthening, and no second sentence.
+    const words = missing === 1 ? 'ומילה אחת צריכה חיזוק' : `ו-${isolateLtr(String(missing))} מילים צריכות חיזוק`;
+    return `${TARGET_THE[kind]} ${day} ${words}`;
   },
   targetAllReady: (kind: TargetKind): string => `כל המילים מוכנות ${TARGET_FOR[kind]} ✓`,
   // My words' header: the number, and what it counts.
@@ -616,8 +625,9 @@ export const strings = {
   myWordsSaved: (language: string) => `משמעויות שמורות ב${language}`,
   practiceMore: 'לתרגל עוד',
   // Phase 65 (spec D9). The sheet that asks before practising past the day's budget; no number.
-  practiceMoreSheetTitle: 'סיימת את התרגול של היום',
-  practiceMoreSheetBody: 'עוד תרגול היום יעלה את המוכנות רק מעט. מחר, אחרי לילה, התרגול יעזור הרבה יותר.',
+  // Phase 67b (spec D8, Victor).
+  practiceMoreSheetTitle: 'עשית עבודה מצוינת להיום',
+  practiceMoreSheetBody: 'עוד תרגול היום לא יתרום הרבה',
   practiceMoreLater: 'אחזור מחר',
   practiceMoreAnyway: 'לתרגל בכל זאת',
   practiceMoreStopAsking: 'אל תציג לי את זה שוב',

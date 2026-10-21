@@ -1075,7 +1075,9 @@ export const CreateQuestionTypeSessionResponseSchema = z.object({
 // is the grade the learner would get if the target's words were checked on its date, in
 // percent, rounded down: a word's chance is its counted skills' chances multiplied (homework:
 // write, spell, say; exam: write, spell; each only where it is live), the target's the mean
-// of its words'. On and after the date it is the eve's, final.
+// of its words'. On and after the date it is the eve's, final. Phase 67b (spec D1, D2): a word's
+// chance is its weakest counted skill, and a word at its kind's bar (homework 90, exam 95) counts
+// as 100, so 100 means every word is at its bar.
 export const TargetKindSchema = z.enum(['homework', 'exam']);
 // A calendar day, not only the shape of one: 2026-02-30 and 2026-13-01 match the pattern, reached
 // Postgres, which raises 22008, and answered 500. The parts must survive a round trip through UTC,
@@ -1102,13 +1104,16 @@ export const TargetSummarySchema = z.object({
   created_on: LearnerDaySchema,
   days_left: z.number().int(),
   word_count: z.number().int(),
-  // Phase 65 (spec D4). Words whose chance is at least 90%: ready.
+  // Phase 65 (spec D4). Words whose chance is at least 90%: ready. Phase 67b (spec D2): at least
+  // the kind's bar (homework 90, exam 95).
   ready_count: z.number().int(),
   readiness_pct: Percent,
   // Phase 65 (spec D5, D10). Readiness at the start of today, before today's first answers.
   readiness_start_pct: Percent,
-  // Phase 65 (spec D9). Whether one more session today, every answer right, could add only a
-  // little (under 2 points): the app asks before practising past the day's budget.
+  // Phase 65 (spec D9). Whether one more session today could add only a little: the app asks
+  // before practising past the day's budget. Phase 67b (spec D6): true when no session today can
+  // raise readiness (before the eve every word below its bar has had each counted skill's first
+  // answer today and none is left to meet; on and after the date; at 100).
   practice_more_little: z.boolean(),
   // Phase 57 (spec D9, D10). Today's work on the target's path: owed, done, rest (nothing owed
   // and nothing practised today) or due_today (the date has come). `done`, `planned` and
@@ -1141,6 +1146,7 @@ export const TargetWordSchema = z.object({
   form: z.string(),
   meaning: z.string(),
   // Phase 65 (spec D1). The word's chance of being right on the date: every counted skill right.
+  // Phase 67b (spec D1, D2): its weakest counted skill, and 100 at its kind's bar.
   readiness_pct: Percent,
   // Phase 57 (spec D9). The word's day: owed work, done, started early (extra) or still to come.
   today: z.enum(['owed', 'done', 'extra', 'later']),

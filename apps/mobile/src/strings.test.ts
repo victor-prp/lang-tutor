@@ -290,7 +290,28 @@ describe("home's cards (phase 57 D10, D11)", () => {
   it("says today's sessions row for a screen reader, isolating each number (phase 65)", () => {
     expect(strings.targetSessionsSpoken(3, 5, 0)).toBe(ltr('3') + ' מתוך ' + ltr('5') + ' תרגולים היום');
     expect(strings.targetSessionsSpoken(5, 5, 2)).toBe(ltr('5') + ' מתוך ' + ltr('5') + ' תרגולים היום ועוד ' + ltr('2') + ' בונוס');
-    expect(strings.targetSessionsMetSpoken).toBe('סיימת להיום');
+  });
+
+  it("words the day's line in its states, as Victor wrote them (phase 67b D7)", () => {
+    expect(strings.targetSessionsGoal(4)).toBe('היעד של היום: ' + ltr('4') + ' תרגולים');
+    expect(strings.targetSessionsGoal(1)).toBe('היעד של היום: תרגול אחד');
+    expect(strings.targetSessionsGoodStart(3)).toBe('התחלה טובה · עוד ' + ltr('3') + ' ליעד של היום');
+    expect(strings.targetSessionsOneLeft).toBe('כמעט שם · עוד תרגול אחד');
+    expect(strings.targetSessionsMetMore).toBe('עשית עבודה טובה להיום ↑');
+    expect(strings.targetSessionsMetMoreSub).toBe('עוד כמה תרגולים יחזקו עוד יותר');
+    expect(strings.targetSessionsMetDone).toBe('עשית עבודה מצוינת להיום ✓');
+    expect(strings.targetSessionsMetDoneSub).toBe('מחר נחזק עוד');
+    expect(strings.targetSessionsAllReady).toBe('עשית את זה! ✓');
+    // A screen reader says the lines without their marks.
+    expect(strings.targetSessionsMetMoreSpoken).toBe('עשית עבודה טובה להיום');
+    expect(strings.targetSessionsMetDoneSpoken).toBe('עשית עבודה מצוינת להיום');
+    expect(strings.targetSessionsAllReadySpoken).toBe('עשית את זה!');
+  });
+
+  it('words the practice-more sheet and the group of words practised today (phase 67b D8, D9)', () => {
+    expect(strings.practiceMoreSheetTitle).toBe('עשית עבודה מצוינת להיום');
+    expect(strings.practiceMoreSheetBody).toBe('עוד תרגול היום לא יתרום הרבה');
+    expect(strings.targetGroupTitle.done).toBe('תורגלו היום');
   });
 
   it("words a counted skill's chance, the percent isolated (phase 65, spec D6)", () => {

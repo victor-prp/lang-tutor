@@ -277,7 +277,8 @@ describe('withoutWord', () => {
     ready_count: 1,
     ...DAY,
     words: [
-      { ...WORD, gloss_id: 'g1', form: 'cane', meaning: 'כלב', readiness_pct: 90 },
+      // Phase 67b (spec D2): a ready word reads 100, the card's value at its bar.
+      { ...WORD, gloss_id: 'g1', form: 'cane', meaning: 'כלב', readiness_pct: 100 },
       { ...WORD, gloss_id: 'g2', form: 'casa', meaning: 'בית', readiness_pct: 80 },
       { ...WORD, gloss_id: 'g3', form: 'gatto', meaning: 'חתול', readiness_pct: 0 },
     ],
@@ -291,6 +292,11 @@ describe('withoutWord', () => {
       words: [target.words[0], target.words[2]],
     });
     expect(withoutWord(target, 'g1')).toMatchObject({ word_count: 2, ready_count: 0 });
+  });
+
+  it("counts a test's word ready only at the test's bar, 95 (phase 67b D2)", () => {
+    const almost: Target = { ...target, ready_count: 0, words: [{ ...WORD, gloss_id: 'g1', readiness_pct: 94 }] };
+    expect(withoutWord(almost, 'g1')).toMatchObject({ word_count: 2, ready_count: 0 });
   });
 
   it('leaves a target without the word as it was, and never changes the one it is given', () => {
@@ -503,7 +509,7 @@ describe('wordGroups', () => {
 
   it('titles the groups', () => {
     expect(groupTitle('owed')).toBe('נשאר להיום');
-    expect(groupTitle('done')).toBe('סיימת להיום');
+    expect(groupTitle('done')).toBe('תורגלו היום');
     expect(groupTitle('extra')).toBe('נוספו היום');
     expect(groupTitle('later')).toBe('בהמשך');
   });
@@ -594,10 +600,10 @@ describe('urgencyOf (phase 64, spec D5)', () => {
   const of = (kind: 'exam' | 'homework', days_left: number, word_count: number, ready_count: number) =>
     urgencyOf({ kind, days_left, word_count, ready_count });
 
-  it('names the words not ready in the last two days', () => {
-    expect(of('exam', 1, 8, 5)).toEqual({ kind: 'not-ready', text: `הבוחן מחר ו-${ltr('3')} מילים עוד לא מוכנות. עוד תרגול אחד יעזור.` });
-    expect(of('homework', 0, 6, 4)).toEqual({ kind: 'not-ready', text: `שיעורי הבית היום ו-${ltr('2')} מילים עוד לא מוכנות. חזרה אחרונה תעזור.` });
-    expect(of('exam', 1, 8, 7)).toEqual({ kind: 'not-ready', text: 'הבוחן מחר ומילה אחת עוד לא מוכנה. עוד תרגול אחד יעזור.' });
+  it('names the words that need strengthening in the last two days (phase 67b D9, Victor)', () => {
+    expect(of('homework', 1, 8, 5)).toEqual({ kind: 'not-ready', text: `שיעורי הבית מחר ו-${ltr('3')} מילים צריכות חיזוק` });
+    expect(of('homework', 0, 6, 4)).toEqual({ kind: 'not-ready', text: `שיעורי הבית היום ו-${ltr('2')} מילים צריכות חיזוק` });
+    expect(of('exam', 1, 8, 7)).toEqual({ kind: 'not-ready', text: 'הבוחן מחר ומילה אחת צריכה חיזוק' });
   });
 
   it('says every word is ready once none is missing', () => {
@@ -707,72 +713,109 @@ describe('readinessBar (phase 65)', () => {
   });
 });
 
-describe('sessionDots and sessionsLine (phase 65)', () => {
-  const today = (state: TodayState, over: Partial<TargetSummary['today']>) => summary('t', state, '2026-10-21', { today: over });
+describe('sessionDots and sessionsLine (phase 65, phase 67b D7)', () => {
+  const today = (state: TodayState, over: Partial<TargetSummary['today']>, top: Partial<Omit<TargetSummary, 'today'>> = {}) =>
+    summary('t', state, '2026-10-21', { ...top, today: over });
+  const line = (kind: string, text: string, rest: { sub?: string | null; tone?: 'plain' | 'more' | 'done'; side?: string | null } = {}) => ({
+    kind,
+    text,
+    sub: rest.sub ?? null,
+    tone: rest.tone ?? 'plain',
+    side: rest.side ?? null,
+  });
+  const MORE = { sub: 'עוד כמה תרגולים יחזקו עוד יותר', tone: 'more' as const };
+  const DONE = { sub: 'מחר נחזק עוד', tone: 'done' as const };
 
-  it('offers the count before the first session, with the minutes', () => {
+  it("sets the day's goal before its first session, with the minutes", () => {
     const t = today('owed', { sessions_budget: null, sessions_offer: 5, minutes: 25 });
     expect(sessionDots(t)).toEqual(['todo', 'todo', 'todo', 'todo', 'todo']);
-    expect(sessionsLine(t)).toEqual({ kind: 'offer', text: `היום: ${ltr('5')} תרגולים`, side: `כ-${ltr('25')} דקות` });
+    expect(sessionsLine(t)).toEqual(line('offer', `היעד של היום: ${ltr('5')} תרגולים`, { side: `כ-${ltr('25')} דקות` }));
   });
 
-  it('counts the sessions done out of the budget, and what is left', () => {
+  it('says one session as one, never "1 תרגולים" (Review focus 5)', () => {
+    expect(sessionsLine(today('owed', { sessions_budget: 1, sessions_done: 0, minutes: 5 })).text).toBe('היעד של היום: תרגול אחד');
+  });
+
+  it('encourages while more than one session is left, the count in the words, no side', () => {
     const t = today('owed', { sessions_budget: 5, sessions_done: 3 });
     expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'todo', 'todo']);
-    expect(sessionsLine(t)).toEqual({ kind: 'progress', text: `היום: ${ltr('3')} מתוך ${ltr('5')} תרגולים`, side: `עוד ${ltr('2')}` });
+    expect(sessionsLine(t)).toEqual(line('progress', `התחלה טובה · עוד ${ltr('2')} ליעד של היום`));
   });
 
-  it('fades the unused dots when the work ran out, and says so', () => {
-    const t = today('done', { sessions_budget: 5, sessions_done: 4, ended_early: true });
-    expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'done', 'faded']);
-    expect(sessionsLine(t)).toEqual({ kind: 'early', text: 'סיימת להיום ✓', side: `${ltr('4')} במקום ${ltr('5')}` });
+  it('says almost there with one left', () => {
+    expect(sessionsLine(today('owed', { sessions_budget: 5, sessions_done: 4 }))).toEqual(line('one_left', 'כמעט שם · עוד תרגול אחד'));
   });
 
-  it('is met: all dots done, nothing more to say', () => {
+  it('keeps the grey lines while work is owed, at 100% too (the eve check)', () => {
+    expect(sessionsLine(today('owed', { sessions_budget: 3, sessions_done: 1 }, { readiness_pct: 100 })).kind).toBe('progress');
+  });
+
+  it('is blue once the goal is met while another session can raise the card', () => {
     const t = today('done', { sessions_budget: 5, sessions_done: 5 });
     expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'done', 'done']);
-    expect(sessionsLine(t)).toEqual({ kind: 'met', text: 'סיימת להיום ✓', side: null });
+    expect(sessionsLine(t)).toEqual(line('met_more', 'עשית עבודה טובה להיום ↑', MORE));
+  });
+
+  it('is green once the goal is met and nothing more can move the card today', () => {
+    expect(sessionsLine(today('done', { sessions_budget: 5, sessions_done: 5 }, { practice_more_little: true }))).toEqual(
+      line('met_done', 'עשית עבודה מצוינת להיום ✓', DONE),
+    );
+  });
+
+  it('says "you did it" at 100% once the goal is met', () => {
+    expect(sessionsLine(today('done', { sessions_budget: 5, sessions_done: 5 }, { readiness_pct: 100, practice_more_little: true }))).toEqual(
+      line('all_ready', 'עשית את זה! ✓', { tone: 'done' }),
+    );
   });
 
   it('reads a done day as met even when the budget was never set', () => {
-    const t = today('done', { sessions_budget: null, sessions_offer: 5, ended_early: false });
-    expect(sessionsLine(t)).toEqual({ kind: 'met', text: 'סיימת להיום ✓', side: null });
+    expect(sessionsLine(today('done', { sessions_budget: null, sessions_offer: 5, ended_early: false })).kind).toBe('met_more');
+  });
+
+  it('fades the unused dots when the work ran out, and says so beside the met line', () => {
+    const t = today('done', { sessions_budget: 5, sessions_done: 4, ended_early: true });
+    expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'done', 'faded']);
+    expect(sessionsLine(t)).toEqual(line('met_more', 'עשית עבודה טובה להיום ↑', { ...MORE, side: `${ltr('4')} במקום ${ltr('5')}` }));
   });
 
   it('draws the sessions past the budget as bonus dots', () => {
     const t = today('done', { sessions_budget: 5, sessions_done: 6 });
     expect(sessionDots(t)).toEqual(['done', 'done', 'done', 'done', 'done', 'bonus']);
-    expect(sessionsLine(t)).toEqual({ kind: 'met', text: 'סיימת להיום ✓', side: `${ltr('+1')} בונוס` });
+    expect(sessionsLine(t)).toEqual(line('met_more', 'עשית עבודה טובה להיום ↑', { ...MORE, side: `${ltr('+1')} בונוס` }));
   });
 
-  it('shows a rest day only bonus dots, if any practice happened', () => {
+  it('shows a rest day only bonus dots, if any practice happened; at 100% it says "you did it" (Review focus 4)', () => {
     expect(sessionDots(today('rest', { sessions_budget: null, sessions_offer: 0 }))).toEqual([]);
-    expect(sessionsLine(today('rest', {}))).toEqual({ kind: 'rest', text: '', side: null });
+    expect(sessionsLine(today('rest', {}))).toEqual(line('rest', ''));
     const practised = today('rest', { sessions_done: 2 });
     expect(sessionDots(practised)).toEqual(['bonus', 'bonus']);
-    expect(sessionsLine(practised)).toEqual({ kind: 'rest', text: '', side: `${ltr('+2')} בונוס` });
+    expect(sessionsLine(practised)).toEqual(line('rest', '', { side: `${ltr('+2')} בונוס` }));
+    expect(sessionsLine(today('rest', {}, { readiness_pct: 100 }))).toEqual(line('all_ready', 'עשית את זה! ✓', { tone: 'done' }));
   });
 
   it('says nothing of sessions on the date', () => {
     const t = today('due_today', { sessions_budget: null, sessions_offer: 3 });
     expect(sessionDots(t)).toEqual([]);
-    expect(sessionsLine(t)).toEqual({ kind: 'none', text: '', side: null });
+    expect(sessionsLine(t)).toEqual(line('none', ''));
   });
 
   // The dots are hidden from a screen reader: the row says in Hebrew what they draw.
-  it("says the row for a screen reader: the offer as written, else the count the dots draw, after the day's end", () => {
+  it("says the row for a screen reader: the line's words without marks, then the count the dots draw", () => {
     expect(sessionsSpoken(today('owed', { sessions_budget: null, sessions_offer: 5, minutes: 25 }))).toBe(
-      `היום: ${ltr('5')} תרגולים, כ-${ltr('25')} דקות`,
+      `היעד של היום: ${ltr('5')} תרגולים, כ-${ltr('25')} דקות`,
     );
-    expect(sessionsSpoken(today('owed', { sessions_budget: 5, sessions_done: 3 }))).toBe(`${ltr('3')} מתוך ${ltr('5')} תרגולים היום`);
-    expect(sessionsSpoken(today('done', { sessions_budget: 5, sessions_done: 4, ended_early: true }))).toBe(
-      `סיימת להיום, ${ltr('4')} מתוך ${ltr('5')} תרגולים היום`,
+    expect(sessionsSpoken(today('owed', { sessions_budget: 5, sessions_done: 3 }))).toBe(
+      `התחלה טובה · עוד ${ltr('2')} ליעד של היום, ${ltr('3')} מתוך ${ltr('5')} תרגולים היום`,
+    );
+    expect(sessionsSpoken(today('done', { sessions_budget: 5, sessions_done: 4, ended_early: true }, { practice_more_little: true }))).toBe(
+      `עשית עבודה מצוינת להיום, מחר נחזק עוד, ${ltr('4')} מתוך ${ltr('5')} תרגולים היום`,
     );
     expect(sessionsSpoken(today('done', { sessions_budget: 5, sessions_done: 6 }))).toBe(
-      `סיימת להיום, ${ltr('5')} מתוך ${ltr('5')} תרגולים היום ועוד ${ltr('1')} בונוס`,
+      `עשית עבודה טובה להיום, עוד כמה תרגולים יחזקו עוד יותר, ${ltr('5')} מתוך ${ltr('5')} תרגולים היום ועוד ${ltr('1')} בונוס`,
     );
     expect(sessionsSpoken(today('rest', { sessions_done: 2 }))).toBe(`${ltr('+2')} בונוס`);
     expect(sessionsSpoken(today('rest', {}))).toBe('');
+    expect(sessionsSpoken(today('rest', {}, { readiness_pct: 100 }))).toBe('עשית את זה!');
   });
 });
 
@@ -826,7 +869,11 @@ describe('askBeforePracticeMore', () => {
     ({ id: 't1', kind: 'exam', due_on: '2026-10-20', created_on: '2026-10-10', days_left: 5, word_count: 4, ready_count: 1,
       ...DAY, practice_more_little: little, today: { ...DAY.today, state } }) as TargetSummary;
 
-  it('asks only when today is done, another session adds little, and the learner has not opted out', () => {
+  it('never asks at 100%: the card has nothing left to gain (phase 67b D8)', () => {
+    expect(askBeforePracticeMore({ ...target('done', true), readiness_pct: 100 }, false)).toBe(false);
+  });
+
+  it('asks only when today is done, another session cannot raise the card, and the learner has not opted out', () => {
     expect(askBeforePracticeMore(target('done', true), false)).toBe(true);
     expect(askBeforePracticeMore(target('done', true), true)).toBe(false);
     expect(askBeforePracticeMore(target('done', false), false)).toBe(false);

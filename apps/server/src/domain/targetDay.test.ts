@@ -66,13 +66,14 @@ describe('targetDay: the cards a day owes (spec D1, D2)', () => {
         { glossId: id(0), dimension: SAY, chance: 0.5, movedOn: null },
       ],
     });
-    expect(only(d, 0)).toMatchObject({ state: 'owed', toStart: false, cardsLeft: 2, owed: [SAY, W], open: [SAY, W, S], readinessPct: 42 });
+    expect(only(d, 0)).toMatchObject({ state: 'owed', toStart: false, cardsLeft: 2, owed: [SAY, W], open: [SAY, W, S], readinessPct: 50 });
     expect(d.state).toBe('owed');
   });
 
   it('rests a ready word before the eve: no card, done, and the day a rest day', () => {
     const d = day(5, 2, { words: met, starts: starts([id(0)], 0.97) });
-    expect(only(d, 0)).toMatchObject({ state: 'done', cardsLeft: 0, owed: [], readinessPct: 91 });
+    // Phase 67b (spec D1): the weakest skill, 97.
+    expect(only(d, 0)).toMatchObject({ state: 'done', cardsLeft: 0, owed: [], readinessPct: 97 });
     expect(d.state).toBe('rest');
     expect(d.readyCount).toBe(1);
   });
@@ -97,7 +98,7 @@ describe('targetDay: the cards a day owes (spec D1, D2)', () => {
       words: met,
       starts: [...starts([id(0)], 0.97, [W, S]), { glossId: id(0), dimension: SAY, chance: 0.2, movedOn: null }],
     }, 'exam');
-    expect(only(d, 0)).toMatchObject({ readinessPct: 94, state: 'done', cardsLeft: 0, open: [SAY, W, S] });
+    expect(only(d, 0)).toMatchObject({ readinessPct: 97, state: 'done', cardsLeft: 0, open: [SAY, W, S] });
   });
 
   it('asks two on the eve for a homework word that cannot be said (Review Focus 1)', () => {
@@ -109,8 +110,8 @@ describe('targetDay: the cards a day owes (spec D1, D2)', () => {
     const deaf: Dimension[] = ['written_receptive', 'written_productive', 'spelling', 'spoken_productive'];
     const d = day(5, 4, { words: words(1, () => ({ startedOn: D0, live: deaf })), starts: starts([id(0)], 0.5) });
     expect(only(d, 0)).toMatchObject({ cardsLeft: 2, owed: [W, SAY], practised: [{ dimension: W, chance: 0.5 }, { dimension: SAY, chance: 0.5 }] });
-    // Its readiness still counts spelling, which its typed answers grade.
-    expect(only(d, 0).readinessPct).toBe(12);
+    // Its readiness still counts spelling, which its typed answers grade: the weakest, 50.
+    expect(only(d, 0).readinessPct).toBe(50);
   });
 
   it('checks a ready word once on the eve, on its weakest skill', () => {
@@ -241,8 +242,8 @@ describe('targetDay: the day (spec D4)', () => {
   it('reads readiness and its ready words at the start of today', () => {
     const list = words(2, () => ({ startedOn: D0 }));
     const d = day(5, 2, { words: list, starts: [...starts([id(0)], 0.97), ...starts([id(1)], 0.5)] });
-    // (0.9127 + 0.125) / 2.
-    expect(d.readinessPct).toBe(51);
+    // The plan's own reading, each word at its weakest skill: (0.97 + 0.5) / 2.
+    expect(d.readinessPct).toBe(73);
     expect(d.readyCount).toBe(1);
   });
 

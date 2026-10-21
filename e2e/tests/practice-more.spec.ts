@@ -7,7 +7,7 @@ import { BOARD_WORDS } from './support/lexemes';
 import { clearGemini } from './support/mockServer';
 import { enrollmentIdOf, readyPathSession, skipSeed } from './support/sessions';
 import {
-  DONE_TODAY,
+  MET_DONE,
   addDays,
   createTarget,
   expectLabel,
@@ -26,7 +26,8 @@ import { withVoices } from './support/voices';
 // Phase 65 (spec D7, D9), phase 65b (spec D1). Practising once today reads done. A homework of one
 // word, on a device with no voice and no microphone, so its readiness counts writing and spelling:
 // its first session, entered at once, does the day's work and meets the budget, the day itself
-// (phase 67, spec D5); from then on "לתרגל עוד" asks first. "אחזור מחר" closes the sheet, "לתרגל
+// (phase 67, spec D5). Phase 67b (spec D6, D8): its one word met and both its skills answered
+// today, 40 days before the date, no session today can raise the card, so "לתרגל עוד" asks first. "אחזור מחר" closes the sheet, "לתרגל
 // בכל זאת" starts a bonus session past the budget, the tick box stops the asking (the next is a
 // second bonus), and the switch in הגדרות, which reads the choice each time it is shown, brings it
 // back.
@@ -108,9 +109,9 @@ test('past the day’s budget, practice more asks first; the tick box stops the 
   await playAndReturn(page, request, enrollmentId, target.id);
   const early = await readTarget(page.request, target.id);
   expect(early.today, report()).toMatchObject({ state: 'done', sessions_budget: budget, sessions_done: 1, ended_early: false });
-  // A homework asks before practice more on any day (phase 65b D1).
+  // Phase 67b (spec D6): before the eve only the day's first answers count, and they are in.
   expect(early.practice_more_little, report()).toBe(true);
-  await expectSessions(card, target.id, { line: DONE_TODAY, side: null, dots: ['done'] });
+  await expectSessions(card, target.id, { ...MET_DONE, side: null, dots: ['done'] });
   await expectReadiness(card, early);
   await expectLabel(practice, 'לתרגל עוד');
 
@@ -118,8 +119,8 @@ test('past the day’s budget, practice more asks first; the tick box stops the 
   // sheet and starts nothing.
   let creates = createsSent(diagnostics);
   await tapCardUntil(page, target.id, 'practice-more-sheet');
-  await expect(sheet).toContainText('סיימת את התרגול של היום');
-  await expect(sheet).toContainText('עוד תרגול היום יעלה את המוכנות רק מעט');
+  await expect(sheet).toContainText('עשית עבודה מצוינת להיום');
+  await expect(sheet).toContainText('עוד תרגול היום לא יתרום הרבה');
   await expect(sheet).not.toContainText(/\d/);
   await expect(tick).toHaveAttribute('aria-checked', 'false');
   await page.getByTestId('practice-more-later').click();
@@ -135,7 +136,7 @@ test('past the day’s budget, practice more asks first; the tick box stops the 
 
   /** The side and dots once `more` sessions past the budget are done. */
   const past = (more: number) => ({
-    line: DONE_TODAY,
+    ...MET_DONE,
     side: `+${more} בונוס`,
     dots: [...Array<string>(budget).fill('done'), ...Array<string>(more).fill('bonus')],
   });

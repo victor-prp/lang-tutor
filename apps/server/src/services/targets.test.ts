@@ -468,7 +468,8 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
       readiness_pct: 0,
       readiness_start_pct: 0,
       // Phase 65b D1: an exam five days out asks before practice more (the app asks once today is done).
-      practice_more_little: true,
+      // Phase 67b (spec D6): its words are not met yet, so another session can raise the card.
+      practice_more_little: false,
       today: {
         state: 'owed',
         done: 0,
@@ -959,7 +960,8 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
       gloss_id: 'g_casa',
       form: 'casa',
       meaning: WORDS.g_casa.key,
-      readiness_pct: 99,
+      // 99, past the homework bar: counted 100 (phase 67b D2).
+      readiness_pct: 100,
       today: 'done',
       owed: [],
       starts_in: null,
@@ -989,17 +991,18 @@ describe('list and getTarget (spec D4, D11, rulings R-D4, R-D11)', () => {
 
     const read = await service.getTarget(OWNER, 't1');
 
-    // casa, lupo and gatto at 0.9985 (write and spell, from memory), sole at 0.846² = 0.7155,
-    // cane never met: three ready, and the mean of the five is 74.
+    // casa, lupo and gatto at 0.9985 (write and spell, from memory), each counted 100 (phase 67b
+    // D2); sole at its weakest skill, 0.846; cane never met: three ready.
     expect(read.words.map((w) => [w.gloss_id, w.readiness_pct])).toEqual([
-      ['g_casa', 99],
-      ['g_lupo', 99],
-      ['g_gatto', 99],
+      ['g_casa', 100],
+      ['g_lupo', 100],
+      ['g_gatto', 100],
       ['g_cane', 0],
-      ['g_sole', 71],
+      ['g_sole', 84],
     ]);
     expect(read.ready_count).toBe(3);
-    expect(read.readiness_pct).toBe(74);
+    // (100 × 3 + 0 + 84) / 5 = 76.8.
+    expect(read.readiness_pct).toBe(76);
   });
 
   it('answers the target path’s session: the started one, else the stock, else a failed newest, else none', async () => {
@@ -1093,11 +1096,12 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
     const read = await service.getTarget(OWNER, 't1');
 
     expect(dimensionsOf(read, 'g_lupo')).toEqual(WRITE_SPELL);
-    expect(read.words.find((w) => w.gloss_id === 'g_lupo')?.readiness_pct).toBe(99);
+    expect(read.words.find((w) => w.gloss_id === 'g_lupo')?.readiness_pct).toBe(100);
     // casa can be said and this device records: its speaking counts, never answered, so 0.
     expect(dimensionsOf(read, 'g_casa')).toEqual(HOMEWORK);
     expect(read.words.find((w) => w.gloss_id === 'g_casa')?.readiness_pct).toBe(0);
-    expect(read.readiness_pct).toBe(49);
+    // lupo counted 100, the other word 0.
+    expect(read.readiness_pct).toBe(50);
   });
 
   it('counts no word on speaking when the newest session did not record', async () => {
@@ -1111,7 +1115,8 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
     const read = await service.getTarget(OWNER, 't1');
 
     expect(dimensionsOf(read, 'g_casa')).toEqual(WRITE_SPELL);
-    expect(read.readiness_pct).toBe(99);
+    // 99, past the homework bar: counted 100 (phase 67b D2).
+    expect(read.readiness_pct).toBe(100);
   });
 
   it('counts ready_count from 90 up, and shows an exam skill held at half', async () => {
@@ -1130,7 +1135,8 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
 
     const read = await service.getTarget(OWNER, 't1');
 
-    expect(read.words.map((w) => w.readiness_pct)).toEqual([99, 93, 49]);
+    // Phase 67b (spec D2): 99 and 96 are past the homework bar, each counted 100.
+    expect(read.words.map((w) => w.readiness_pct)).toEqual([100, 100, 49]);
     expect(read.ready_count).toBe(2);
     expect(read.words[2].skills).toEqual([
       { dimension: 'written_productive', chance: 49, held: true },
@@ -1155,28 +1161,39 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
 
     const read = await service.getTarget(OWNER, 't1');
 
-    expect(read.readiness_pct).toBe(99);
-    expect(read.readiness_start_pct).toBe(25);
+    // Phase 67b (spec D1, D2): 99 now counts 100; at the start of today the weakest, 50.
+    expect(read.readiness_pct).toBe(100);
+    expect(read.readiness_start_pct).toBe(50);
   });
 
-  it("asks before practice more on any day but an exam's eve while a word is not ready (phase 65b D1)", async () => {
+  it('says practice more cannot raise the card only when no word below its bar can move today (phase 67b D6)', async () => {
     /** The day after TODAY. */
     const EVE = '2026-10-16';
-    const asks = async (kind: 'exam' | 'homework', dueOn: string, state: MemoryState) =>
+    const little = async (kind: 'exam' | 'homework', dueOn: string, state: MemoryState, over: Partial<ReadinessRow> = {}) =>
       (
         await world({
           saved: ['g_sole'],
           targets: [target({ kind, dueOn, words: ['g_sole'] })],
-          readiness: readinessRows('g_sole', WRITE_SPELL, state),
+          // Met on an earlier day: practice more cannot meet it again.
+          startedOn: { g_sole: '2026-10-14' },
+          readiness: readinessRows('g_sole', WRITE_SPELL, state, over),
         }).service.getTarget(OWNER, 't1')
       ).practice_more_little;
 
-    // An exam's eve with its word below 90: extra practice helps, so the button starts at once.
-    expect(await asks('exam', EVE, fading)).toBe(false);
-    // The same eve with the word ready, another exam day, and a homework eve all ask.
-    expect(await asks('exam', EVE, solid)).toBe(true);
-    expect(await asks('exam', DUE, fading)).toBe(true);
-    expect(await asks('homework', EVE, fading)).toBe(true);
+    // Below its bar, its skills not yet answered today: another session raises the card.
+    expect(await little('exam', DUE, fading)).toBe(false);
+    // Answered today before the eve: only first answers count, so nothing more today.
+    expect(await little('exam', DUE, fading, { day: TODAY })).toBe(true);
+    // On the eve every right counts.
+    expect(await little('exam', EVE, fading, { day: TODAY })).toBe(false);
+    // At its bar the word already counts 100.
+    expect(await little('homework', EVE, solid)).toBe(true);
+    // A word not met yet: practice more can meet it while the day has room.
+    const unmet = await world({
+      saved: ['g_sole'],
+      targets: [target({ kind: 'homework', words: ['g_sole'] })],
+    }).service.getTarget(OWNER, 't1');
+    expect(unmet.practice_more_little).toBe(false);
   });
 
   it('is owed before the budget is met and done once it is, a word still owed; the budget is the offer', async () => {
