@@ -10,7 +10,7 @@ import type {
   TypedTranslationQuestion,
 } from '@lang-tutor/core/api';
 import { MAX_JUDGED_TEXT, rightAnswer } from '@lang-tutor/core/domain';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 
 import { barButton, barNote } from '@/answerBar';
@@ -141,7 +141,6 @@ export function TypedAnswerView({
   // Phase 63 (spec D3): the grey letters and the marks no longer fit on one line,
   // where the input scrolls and they would not: hidden, not misplaced.
   const [overflow, setOverflow] = useState(false);
-  const input = useRef<TextInput>(null);
   // Phase 55 (spec D7): the retype open, which unlocks the answered card for
   // the word again; once it ends, the card is answered as any other.
   const retyping = retype !== null && retype.outcome === null;
@@ -154,12 +153,6 @@ export function TypedAnswerView({
     setText(retryText(question.type, retry));
     setRefused(null);
   }, [question.id, question.type, retry, attempt]);
-
-  // The keyboard went down with the first answer: the second try brings it
-  // back, as does each attempt of a retype.
-  useEffect(() => {
-    if (retry !== null || attempt > 0) input.current?.focus();
-  }, [retry, attempt]);
 
   const partOfSpeech = 'part_of_speech' in question ? strings.partOfSpeech(question.part_of_speech) : undefined;
   const empty = text.trim() === '';
@@ -227,7 +220,6 @@ export function TypedAnswerView({
           </Text>
         ) : null}
         <TextInput
-          ref={input}
           testID="typed-input"
           value={text}
           onChangeText={(value) => {
@@ -237,8 +229,9 @@ export function TypedAnswerView({
             if (retyping && retype.showing && value !== '') onRetypeTyping?.();
           }}
           editable={!locked && !checking}
-          // Answer bar spec D5: the answer, once judged, moves into the card and takes no focus.
-          autoFocus={!locked}
+          // Answer bar spec D8: no focus of its own. The keyboard opens when the box
+          // is tapped, so the question, a second try's note or a retype's answer
+          // shows whole first.
           autoCapitalize="none"
           autoCorrect={false}
           spellCheck={false}

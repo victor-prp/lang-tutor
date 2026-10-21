@@ -117,6 +117,8 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await page.setViewportSize({ width: 390, height: 844 });
   const typed = await readCard(page, 5, total, 'typed');
   expect(typed.prompt).toBe(WORD.translation);
+  // The keyboard stays down until the box is tapped: the question shows whole first.
+  await expect(page.getByTestId('typed-input')).not.toBeFocused();
   // The answer bar (answer bar spec D1): on a screen as short as a phone's above
   // its keyboard, the question, the input and בדיקה all show, unscrolled.
   await page.setViewportSize({ width: 390, height: 360 });
@@ -156,6 +158,8 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   const before = (await spoken(page)).length;
   await answerTyped(page, WRONG);
   await expect(page.getByTestId('retype')).toBeVisible();
+  // Nor does the retype bring it back: the right answer shows whole first.
+  await expect(input).not.toBeFocused();
   await expect.poll(async () => (await spoken(page)).slice(before)).toEqual([{ text: WORD.form, lang: 'ru-RU' }]);
   await expect(page.getByTestId('retype-title')).toHaveText('התשובה הנכונה:');
   await expect(page.getByTestId('retype-answer')).toHaveText(WORD.form);
