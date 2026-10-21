@@ -175,9 +175,6 @@ export default function WordsTab() {
               <Pressable accessibilityRole="button" onPress={() => router.push('/translate')}>
                 <Text style={styles.link}>{strings.vocabularyGoTranslate}</Text>
               </Pressable>
-              <Pressable accessibilityRole="button" testID="discover-entry-empty" onPress={() => router.push('/discover')}>
-                <Text style={styles.link}>{strings.discoverEntry}</Text>
-              </Pressable>
             </View>
           )
         }
