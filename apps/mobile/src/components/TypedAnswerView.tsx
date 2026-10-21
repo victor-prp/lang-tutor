@@ -23,7 +23,7 @@ import { inputTone, type InputTone, type SentenceLine } from '@/explain';
 import { retryText } from '@/feedback';
 import type { Retype } from '@/retype';
 import { strings, type Instruction } from '@/strings';
-import { helpText, typedHelpDone, typedHint } from '@/typedHelp';
+import { helpReading, helpText, typedHelpDone, typedHint } from '@/typedHelp';
 import { typedSubmit } from '@/typedSubmit';
 import { colors, fontSizes, lineHeights, radii, shadows, spacing } from '@/theme';
 
@@ -138,9 +138,6 @@ export function TypedAnswerView({
   // Phase 39 (spec D8): the last send was in the wrong alphabet, or one word
   // for a whole sentence; the text stays.
   const [refused, setRefused] = useState<'wrong_script' | 'word_only' | null>(null);
-  // Phase 63 (spec D3): the grey letters and the marks no longer fit on one line,
-  // where the input scrolls and they would not: hidden, not misplaced.
-  const [overflow, setOverflow] = useState(false);
   // Phase 55 (spec D7): the retype open, which unlocks the answered card for
   // the word again; once it ends, the card is answered as any other.
   const retyping = retype !== null && retype.outcome === null;
@@ -169,6 +166,8 @@ export function TypedAnswerView({
   const hint = helps && !locked ? typedHint(hinted, text, presses, hebrew) : null;
   const ghost = hint && hint.ghost !== '' ? `${hint.ghost}${hint.more ? '…' : ''}` : '';
   const markFrom = help !== null && helps && !locked && help.marks !== null && help.marks.text === text ? help.marks.from : null;
+  // Help row spec D2: what help's row reads, as text of its own.
+  const reading = helpReading(text, markFrom, ghost);
 
   function submit(value: string) {
     if (locked) return;
@@ -187,38 +186,12 @@ export function TypedAnswerView({
   // Phase 66b (spec D2): orange for a sentence to fix around a word that is not wrong.
   const border = BORDERS[retyping ? 'idle' : inputTone(verdict, sentence)];
 
-  // Phase 63 (spec D1, D2): the box holds the help button at its right edge,
-  // where the keyboard never hides it, and the input; the input's own text
-  // lies over a layer drawn behind it with the grey letters and the marks.
-  // Answer bar spec D2, D5: on the bar while it is typed, in the card once judged.
+  // The box the learner answers in: only the typing, nothing drawn over or behind it
+  // (help row spec D3). Answer bar spec D2, D5: on the bar while it is typed, in the
+  // card once judged.
   const box = (
     <View style={[styles.box, border]} testID="typed-box">
-      {helps && !locked ? (
-        <HelpButton testID="typed-help" disabled={checking || typedHelpDone(hinted, text, presses, hebrew)} onPress={() => help?.onPress(text)} />
-      ) : null}
       <View style={styles.field}>
-        {ghost !== '' || markFrom !== null ? (
-          <Text
-            // No physical textAlign: native RTL swaps left and right on a Text (and
-            // not on a TextInput), web does not; the base direction puts the layer's
-            // text where the input's is on both (phase 1's fix, 1fff73e).
-            style={[styles.input, styles.layer, { writingDirection: direction }, overflow && styles.hidden]}
-            testID="typed-hint"
-            onTextLayout={(event) => setOverflow(event.nativeEvent.lines.length > 1)}
-          >
-            <Text style={styles.under}>{markFrom === null ? text : text.slice(0, markFrom)}</Text>
-            {markFrom !== null ? (
-              <Text style={styles.marked} testID="typed-marks">
-                {text.slice(markFrom)}
-              </Text>
-            ) : null}
-            {ghost !== '' ? (
-              <Text style={styles.ghost} testID="typed-ghost">
-                {ghost}
-              </Text>
-            ) : null}
-          </Text>
-        ) : null}
         <TextInput
           testID="typed-input"
           value={text}
@@ -244,8 +217,7 @@ export function TypedAnswerView({
           onSubmitEditing={() => {
             if (!empty) submit(text);
           }}
-          // Phase 63 (final review): the grey letters stand where the placeholder is.
-          placeholder={ghost !== '' ? undefined : strings.typedPlaceholder}
+          placeholder={strings.typedPlaceholder}
           placeholderTextColor={colors.muted}
           style={[styles.input, question.type === 'sentence_translation' && [styles.sentence, !locked && styles.sentenceGrows], { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }]}
         />
@@ -309,12 +281,13 @@ export function TypedAnswerView({
     </View>
   );
 
-  // Answer bar spec D2: what is being typed, on the keyboard. The note line, the
-  // box, and the big button.
+  // Answer bar spec D2: what is being typed, on the keyboard. Help row spec D1: the
+  // note line, help's row (עזרה and its reading), and the answer row (בדיקה and the
+  // box), both rows there from the start, the buttons one column at the right.
   const note = barNote({ refused, failed, checking, retypeAttempt: retyping ? attempt : null });
   const button = barButton({ empty, checking, failed, retyping });
   const bar = locked ? null : (
-    <View style={[styles.bar, shadows.bar]}>
+    <View style={[styles.bar, shadows.bar]} testID="typed-bar">
       {note === 'wrong_script' && answerLanguage !== null ? (
         <View testID="wrong-script">
           <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} languageTestId="wrong-script-language" style={[styles.note, styles.wrongScript]} />
@@ -335,21 +308,58 @@ export function TypedAnswerView({
           {note === 'retype' ? strings.retypeNotice : strings.tryAgain}
         </Text>
       ) : null}
-      {box}
-      <Pressable
-        accessibilityRole="button"
-        testID={button.testID}
-        disabled={button.disabled}
-        onPress={() => submit(text)}
-        style={[answerStyles.check, button.disabled && answerStyles.checkDisabled]}
-      >
-        <Text style={answerStyles.checkLabel}>{BUTTON_LABELS[button.label]}</Text>
-      </Pressable>
+      {helps ? (
+        // The RTL row's first child, the button, sits at the right.
+        <View style={styles.row}>
+          <HelpButton
+            testID="typed-help"
+            disabled={checking || typedHelpDone(hinted, text, presses, hebrew)}
+            onPress={() => help?.onPress(text)}
+            style={styles.side}
+          />
+          {/* Help row spec D2, D8: a dashed box, empty before any press, its reading in
+              the answer's direction. No physical textAlign: native RTL swaps a Text's
+              sides and web does not (1fff73e); web drops `direction`, hence writingDirection. */}
+          <View style={[styles.reading, { direction }]} testID="typed-help-row">
+            {reading !== null ? (
+              <Text style={[styles.readingText, { writingDirection: direction }]} testID="typed-hint">
+                {reading.typed}
+                {reading.marked !== '' ? (
+                  <Text style={styles.marked} testID="typed-marks">
+                    {reading.marked}
+                  </Text>
+                ) : null}
+                {reading.ghost !== '' ? (
+                  <Text style={styles.ghost} testID="typed-ghost">
+                    {reading.ghost}
+                  </Text>
+                ) : null}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+      {/* Help row spec D3, D4: a sentence's box grows, and בדיקה stays beside its last line. */}
+      <View style={[styles.row, question.type === 'sentence_translation' && styles.rowBottom]}>
+        <Pressable
+          accessibilityRole="button"
+          testID={button.testID}
+          disabled={button.disabled}
+          onPress={() => submit(text)}
+          style={[answerStyles.check, styles.side, question.type === 'sentence_translation' && styles.sideBottom, button.disabled && answerStyles.checkDisabled]}
+        >
+          <Text style={answerStyles.checkLabel}>{BUTTON_LABELS[button.label]}</Text>
+        </Pressable>
+        <View style={styles.boxSlot}>{box}</View>
+      </View>
     </View>
   );
 
   return frame(card, bar);
 }
+
+// Help row spec D1, D3: the width of עזרה and בדיקה beside their rows.
+const SIDE_BUTTON = 104;
 
 const BUTTON_LABELS: Record<ReturnType<typeof barButton>['label'], string> = {
   check: strings.typedCheck,
@@ -428,34 +438,45 @@ const styles = StyleSheet.create({
   instructionLanguage: { fontWeight: '700' },
   // Phase 39 (spec D8): a refusal, in the colour of the app's other errors, not a second instruction.
   wrongScript: { color: colors.wrong },
-  // Phase 63 (spec D2). The box the learner answers in: its border, its colour
-  // once answered, and the help button at its right edge (the RTL row's first child).
+  // Phase 63 (spec D2). The box the learner answers in: its border, and its colour
+  // once answered.
   box: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1.5,
     borderRadius: radii.md,
     backgroundColor: colors.surface,
-    // Start, not right: native RTL swaps a physical side, web does not. Start is the
-    // button's side, the screen's right, on both.
-    paddingStart: 7,
   },
   field: { flex: 1, alignSelf: 'stretch', justifyContent: 'center' },
   // The answer's language decides: a target word left to right, a Hebrew meaning right to left (phase 27 D13).
-  // Transparent, so the layer behind it shows; the layer is laid out exactly as it is.
   input: {
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     fontSize: fontSizes.lg,
     lineHeight: lineHeights.lg,
     color: colors.text,
-    backgroundColor: 'transparent',
   },
-  // Phase 63 (spec D3). Behind the input, its text again: the typed part unseen
-  // (the input draws it), the marked part on red, then the grey letters.
-  layer: { position: 'absolute', top: 0, left: 0, right: 0, pointerEvents: 'none' },
-  hidden: { opacity: 0 },
-  under: { color: 'transparent' },
+  // Help row spec D1. A row of the bar: its button, then what it acts on.
+  row: { flexDirection: 'row', gap: spacing.sm },
+  rowBottom: { alignItems: 'flex-end' },
+  // עזרה and בדיקה, one width, so they stand as one column; it fits בודקים….
+  side: { width: SIDE_BUTTON, justifyContent: 'center', alignSelf: 'stretch' },
+  sideBottom: { alignSelf: 'flex-end' },
+  boxSlot: { flex: 1 },
+  // Help row spec D2. Help's reading in a dashed box, as the spoken card's letters box.
+  reading: {
+    flex: 1,
+    minHeight: 48,
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  readingText: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.text },
+  // Phase 63 (spec D3). The marked part on red, then the grey letters.
   marked: {
     color: colors.wrong,
     backgroundColor: colors.wrongSurface,
