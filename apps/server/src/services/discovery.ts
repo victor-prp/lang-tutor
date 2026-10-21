@@ -7,6 +7,8 @@ import type {
   DiscoveryState,
   Enrollment,
   PhotoImportItem,
+  PhotoImportItemUpdate,
+  SaveVocabularyResponse,
   TranslationRequest,
   TranslationResponse,
   TypedVerdict,
@@ -14,14 +16,25 @@ import type {
 import { wrongScript } from '@lang-tutor/core/domain';
 
 import { MAX_ROUNDS, buildDiscoveryPrompt, firstLevel, levelAfter, parseDiscovery, wordKey } from '../domain/discovery';
-import { LOOK_UP_DISCOVERED_WORD } from '../domain/jobs';
+import { LOOK_UP_DISCOVERED_WORD, LookUpDiscoveredWordPayloadSchema } from '../domain/jobs';
 import { buildMeaningJudgePrompt, meaningRuleVerdict, parseMeaningJudge } from '../domain/judge';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
-import { DiscoveryConflict, DiscoveryNotFound, LlmUnavailable, WrongScript } from '../errors';
+import { entriesToSave, refuseItemUpdate, type ImportItemState } from '../domain/photoImports';
+import { firstPerGloss } from '../domain/vocabulary';
+import {
+  DiscoveryConflict,
+  DiscoveryNotFound,
+  InvalidDiscoveryItem,
+  LlmUnavailable,
+  SenseMatchUnreadable,
+  WrongScript,
+} from '../errors';
 import type { Logger } from '../logger';
 import type { CardRow, CardVerdict, JudgedBy, ProfileRow, RunRow } from '../repo/discovery';
 import { authorizeEnrollment } from './access';
 import type { LlmClient } from './llm';
+import { lookUpRow } from './rowLookup';
+import { saveEntriesInTx } from './vocabulary';
 import type { Repos, Transaction } from './transaction';
 
 function toProfile(row: ProfileRow): DiscoveryProfile {
@@ -41,6 +54,18 @@ function toItem(card: CardRow): PhotoImportItem {
     ticked: card.ticked,
     hebrew_mismatch: card.hebrewMismatch,
     reason: card.reason,
+  };
+}
+
+/** A list row as the photo import's rules read it. */
+function asRowState(card: CardRow): ImportItemState {
+  return {
+    position: card.position,
+    status: card.lookupStatus ?? 'pending',
+    options: card.options,
+    suggestedGlossId: card.suggestedGlossId,
+    chosenGlossId: card.chosenGlossId,
+    ticked: card.ticked,
   };
 }
 
@@ -388,6 +413,117 @@ export function createDiscoveryService({
         logger.info({ event: 'discovery_answered', run_id: runId, position, answer: request.kind, judged_by: judgedBy, known });
       }
       return outcome.answer;
+    },
+
+    /** Spec D8. A tick or a meaning changed on the list, as a photo row's, while the run lists. */
+    updateItem: async (actorUserId: string, runId: string, position: number, update: PhotoImportItemUpdate): Promise<PhotoImportItem> =>
+      transaction(async (repos) => {
+        const { run } = await authorizeRun(repos, actorUserId, runId, true);
+        if (run.status !== 'listing') throw new DiscoveryConflict(runId, 'not listing');
+        const card = (await repos.discovery.listCards(runId)).find((candidate) => candidate.position === position);
+        if (!card || card.known !== false) throw new DiscoveryNotFound(runId, position);
+        const refusal = refuseItemUpdate(asRowState(card), update);
+        if (refusal === 'not_ready') throw new DiscoveryConflict(runId, `row ${position} is not ready`);
+        if (refusal) throw new InvalidDiscoveryItem(runId, position, refusal);
+        const updated = await repos.discovery.updateItem(runId, position, {
+          ...(update.ticked !== undefined ? { ticked: update.ticked } : {}),
+          ...(update.gloss_id !== undefined ? { chosenGlossId: update.gloss_id } : {}),
+        });
+        if (!updated) throw new DiscoveryNotFound(runId, position);
+        return toItem(updated);
+      }),
+
+    /**
+     * Spec D8. Continue: the ticked rows' glosses saved to My words (saveEntriesInTx, as a
+     * typed save checks them) and the run marked saved, in one transaction: dependent
+     * writes. Refused while a row is looked up. A repeated save answers the same ids.
+     */
+    save: async (actorUserId: string, runId: string): Promise<SaveVocabularyResponse> => {
+      const outcome = await transaction(async (repos) => {
+        const { run, enrolled } = await authorizeRun(repos, actorUserId, runId, true);
+        const rows = unknownOf(await repos.discovery.listCards(runId));
+        const entries = firstPerGloss(entriesToSave(rows.map(asRowState)));
+        if (run.status === 'saved') return { entries, rows, repeated: true };
+        if (run.status !== 'listing') throw new DiscoveryConflict(runId, 'not listing');
+        if (rows.some((row) => row.lookupStatus === 'pending')) throw new DiscoveryConflict(runId, 'a row is still looked up');
+        await saveEntriesInTx(repos, logger, { enrolled, actorUserId, entries, stockSaveDelaySeconds });
+        if (!(await repos.discovery.transition(runId, ['listing'], 'saved'))) throw new DiscoveryConflict(runId, 'not listing');
+        return { entries, rows, repeated: false };
+      });
+      if (!outcome.repeated) {
+        logger.info({
+          event: 'discovery_saved',
+          run_id: runId,
+          saved_count: outcome.entries.length,
+          unticked_count: outcome.rows.filter((row) => row.lookupStatus === 'ready' && row.options.length > 0 && !row.ticked).length,
+          row_count: outcome.rows.length,
+        });
+      }
+      return { saved_gloss_ids: outcome.entries.map((entry) => entry.gloss_id) };
+    },
+
+    /** Spec D8. ביטול: the run is discarded; its answers stay. Idempotent; a saved run is refused. */
+    discard: async (actorUserId: string, runId: string): Promise<void> => {
+      const discarded = await transaction(async (repos) => {
+        const { run } = await authorizeRun(repos, actorUserId, runId, true);
+        if (run.status === 'discarded') return false;
+        if (run.status === 'saved') throw new DiscoveryConflict(runId, 'already saved');
+        return repos.discovery.transition(runId, ['asking', 'listing'], 'discarded');
+      });
+      if (discarded) logger.info({ event: 'discovery_discarded', run_id: runId });
+    },
+
+    /**
+     * Spec D7. The look-up-discovered-word job: a card the learner did not know, looked up
+     * as a photo row is (lookUpRow), then one write. A run saved or discarded, or a card no
+     * longer pending, costs no lookup and takes no write.
+     */
+    lookUpWord: async (data: unknown): Promise<void> => {
+      const { run_id: runId, position } = LookUpDiscoveredWordPayloadSchema.parse(data);
+      const read = await transaction(async ({ discovery, enrollment }) => {
+        const run = await discovery.findRun(runId);
+        if (!run || (run.status !== 'asking' && run.status !== 'listing')) return undefined;
+        const card = (await discovery.listCards(runId)).find((candidate) => candidate.position === position);
+        if (!card || card.lookupStatus !== 'pending') return undefined;
+        const enrolled = await enrollment.findById(run.enrollmentId);
+        return enrolled ? { card, enrolled } : undefined;
+      });
+      if (!read) {
+        logger.info({ event: 'discovered_word_dropped', run_id: runId, position, stage: 'read' });
+        return;
+      }
+      const { result, matchedBy } = await lookUpRow(
+        { lookup, llm },
+        {
+          enrolled: read.enrolled,
+          text: read.card.word,
+          hebrew: read.card.hebrew,
+          record: { kind: 'sense_match', enrollmentId: read.enrolled.id, userId: read.enrolled.user_id },
+          onUnreadable: () => new SenseMatchUnreadable(runId, position),
+        },
+      );
+      const written = await transaction(async ({ discovery }) => {
+        const run = await discovery.findRunForUpdate(runId);
+        if (!run || (run.status !== 'asking' && run.status !== 'listing')) return false;
+        return discovery.writeLookup(runId, position, result);
+      });
+      logger.info({
+        event: written ? 'discovered_word_looked_up' : 'discovered_word_dropped',
+        run_id: runId,
+        position,
+        matched_by: matchedBy,
+        corrected: result.correctedForm !== null,
+        option_count: result.options.length,
+        reason: result.reason,
+        ...(written ? {} : { stage: 'write' }),
+      });
+    },
+
+    /** The lookup's dead letter: the row is marked failed, unticked; the rest unaffected. */
+    failWord: async (data: unknown): Promise<void> => {
+      const { run_id: runId, position } = LookUpDiscoveredWordPayloadSchema.parse(data);
+      const marked = await transaction(({ discovery }) => discovery.markLookupFailed(runId, position));
+      logger.info({ event: 'discovered_word_failed', run_id: runId, position, marked });
     },
 
     /** Spec D8. "לרשימה": the run goes to its list now. A listing run answers as it is. */

@@ -11,6 +11,7 @@ import {
   SESSION_GENERATION_BUDGET_MS,
   STOCK_SAVE_DELAY_SECONDS,
 } from '../../src/domain/jobs';
+import { DISCOVERY_BUDGET_MS } from '../../src/domain/discovery';
 import { DEFAULT_SOUND_ALIKE_THRESHOLD } from '../../src/domain/soundAlike';
 import type { Logger } from '../../src/logger';
 import { unstartedBoss } from './jobs';
@@ -56,6 +57,8 @@ export function createTestServerDeps(io: {
   speechTimeoutMs?: number;
   /** Phase 27. The budget of one judged answer; defaults to production's. */
   judgeTimeoutMs?: number;
+  /** Phase 69. The budget of one round of Words for me; defaults to production's. */
+  discoveryTimeoutMs?: number;
   /** Phase 26. A read's budget; defaults to production's. */
   photoReadTimeoutMs?: number;
   /** Phase 43. How long a save's stock waits; defaults to production's. */
@@ -99,6 +102,7 @@ export function createTestServerDeps(io: {
     gapRewriteTimeoutMs: io.gapRewriteTimeoutMs ?? GAP_REWRITE_BUDGET_MS,
     speechTimeoutMs: io.speechTimeoutMs ?? 8_000,
     judgeTimeoutMs: io.judgeTimeoutMs ?? 8_000,
+    discoveryTimeoutMs: io.discoveryTimeoutMs ?? DISCOVERY_BUDGET_MS,
     photoReadTimeoutMs: io.photoReadTimeoutMs ?? PHOTO_READ_BUDGET_MS,
     stockSaveDelaySeconds: io.stockSaveDelaySeconds ?? STOCK_SAVE_DELAY_SECONDS,
     soundAlikeThreshold: io.soundAlikeThreshold ?? DEFAULT_SOUND_ALIKE_THRESHOLD,

@@ -3,6 +3,8 @@ import type { PgBoss } from 'pg-boss';
 import {
   ACCEPT_RENDERING,
   ACCEPT_RENDERING_FAILED,
+  LOOK_UP_DISCOVERED_WORD,
+  LOOK_UP_DISCOVERED_WORD_FAILED,
   LOOK_UP_IMPORT_ITEM,
   LOOK_UP_IMPORT_ITEM_FAILED,
   MERGE_GLOSSES,
@@ -16,6 +18,7 @@ import {
   STOCK_SESSION,
 } from './domain/jobs';
 import type { GlossService } from './services/glosses';
+import type { DiscoveryService } from './services/discovery';
 import type { PhotoImportService } from './services/photoImports';
 import type { ReminderService } from './services/reminders';
 import type { SessionService } from './services/sessions';
@@ -34,13 +37,14 @@ export async function registerWorkers(
   services: {
     sessions: SessionService;
     photoImports: PhotoImportService;
+    discovery: DiscoveryService;
     glosses: GlossService;
     translations: TranslationService;
     reminders: ReminderService;
   },
   options: { pollingIntervalSeconds: number },
 ): Promise<void> {
-  const { sessions, photoImports, glosses, translations, reminders } = services;
+  const { sessions, photoImports, discovery, glosses, translations, reminders } = services;
   await boss.work(
     PREPARE_SESSION,
     // Four at once per process: one model call each, kept under the quota.
@@ -88,6 +92,17 @@ export async function registerWorkers(
   );
   await boss.work(LOOK_UP_IMPORT_ITEM_FAILED, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async (jobs) => {
     for (const job of jobs) await photoImports.failItem(job.data);
+  });
+  // Phase 69 (spec D7). A Words for me card's lookup, four at once, as a photo row's.
+  await boss.work(
+    LOOK_UP_DISCOVERED_WORD,
+    { localConcurrency: 4, pollingIntervalSeconds: options.pollingIntervalSeconds },
+    async (jobs) => {
+      for (const job of jobs) await discovery.lookUpWord(job.data);
+    },
+  );
+  await boss.work(LOOK_UP_DISCOVERED_WORD_FAILED, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async (jobs) => {
+    for (const job of jobs) await discovery.failWord(job.data);
   });
 
   // Phase 31 (spec D7). One merge at a time per process: each locks a lexeme.

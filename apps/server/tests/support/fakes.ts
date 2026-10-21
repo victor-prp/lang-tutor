@@ -18,6 +18,7 @@ import type { TargetRepo } from '../../src/repo/targets';
 import type { CorrectionRow, PersistEntriesInput, DictRepo, GlossCounts, MergePair } from '../../src/repo/dictionary';
 import type { EnrollmentService } from '../../src/services/enrollments';
 import type { PhotoImportService } from '../../src/services/photoImports';
+import type { DiscoveryService } from '../../src/services/discovery';
 import type { ReminderService } from '../../src/services/reminders';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { LlmAudioRequest, SpeechTranscriber } from '../../src/services/speech';
@@ -121,6 +122,20 @@ export function createFakeAppDeps(): AppDeps {
     lookUpItem: unreachable,
     failItem: unreachable,
   };
+  const discovery: DiscoveryService = {
+    state: unreachable,
+    createProfile: unreachable,
+    start: unreachable,
+    getRun: unreachable,
+    nextRound: unreachable,
+    answer: unreachable,
+    end: unreachable,
+    updateItem: unreachable,
+    save: unreachable,
+    discard: unreachable,
+    lookUpWord: unreachable,
+    failWord: unreachable,
+  };
   const targets: TargetService = {
     list: unreachable,
     getTarget: unreachable,
@@ -141,6 +156,7 @@ export function createFakeAppDeps(): AppDeps {
     grants,
     reminders,
     photoImports,
+    discovery,
     targets,
     glosses: { mergeLexeme: unreachable, planMerges: unreachable, applyMerges: unreachable },
     health: { ping: unreachable },

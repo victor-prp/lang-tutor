@@ -1,11 +1,21 @@
 import { describe, expect, it } from '@jest/globals';
-import type { Enrollment, TranslationResponse, User } from '@lang-tutor/core/api';
+import type { Enrollment, TranslationRequest, TranslationResponse, User } from '@lang-tutor/core/api';
 
 import { DISCOVERY_MARKER } from '../domain/discovery';
 import { LOOK_UP_DISCOVERED_WORD } from '../domain/jobs';
 import { JUDGE_MARKER } from '../domain/judge';
-import { AccessDenied, DiscoveryConflict, DiscoveryNotFound, LlmUnavailable, WrongScript } from '../errors';
+import {
+  AccessDenied,
+  DiscoveryConflict,
+  DiscoveryNotFound,
+  InvalidDiscoveryItem,
+  LlmUnavailable,
+  SenseMatchUnreadable,
+  WrongScript,
+} from '../errors';
+import type { DictRepo } from '../repo/dictionary';
 import type { EnrollmentRepo } from '../repo/enrollments';
+import type { GlossRepo } from '../repo/glosses';
 import type { GrantRepo } from '../repo/grants';
 import type { UserRepo } from '../repo/users';
 import type { VocabularyRepo } from '../repo/vocabulary';
@@ -22,6 +32,7 @@ import {
 } from '../../tests/support/fakes';
 import { createDiscoveryService } from './discovery';
 import type { LlmJsonRequest } from './llm';
+import type { Repos } from './transaction';
 
 const NOW = Date.parse('2026-10-21T12:00:00Z');
 const OWNER = 'u_owner';
@@ -33,14 +44,24 @@ const roundOf = (...words: (string | ReturnType<typeof proposal>)[]) =>
   JSON.stringify({ words: words.map((word) => (typeof word === 'string' ? proposal(word) : word)) });
 const TEN = ['uno', 'due', 'tre', 'quattro', 'cinque', 'sei', 'sette', 'otto', 'nove', 'dieci'];
 
-function setup(opts: { profileLevel?: number | null; discover?: Reply[]; judge?: Reply[]; saved?: string[] } = {}) {
+function setup(
+  opts: {
+    profileLevel?: number | null;
+    discover?: Reply[];
+    judge?: Reply[];
+    match?: Reply[];
+    saved?: string[];
+    repos?: Partial<Repos>;
+    lookup?: (actorUserId: string, input: TranslationRequest) => Promise<TranslationResponse>;
+  } = {},
+) {
   const repo = createFakeDiscoveryRepo();
   if (opts.profileLevel !== null) {
     repo.profiles.set('e1', { enrollmentId: 'e1', selfLevel: 'simple', learningContext: 'school', level: opts.profileLevel ?? 5 });
   }
   const discover = createFakeLlmClient(...(opts.discover ?? [roundOf(...TEN)]));
   const judge = createFakeLlmClient(...(opts.judge ?? ['{"verdict":"right"}']));
-  const llm = createFakeLlmClient('{"sense":0}');
+  const llm = createFakeLlmClient(...(opts.match ?? ['{"sense":0}']));
   const jobs = createFakeJobRepo();
   const logger = createFakeLogger();
   const transaction = createFakeTransaction({
@@ -50,20 +71,23 @@ function setup(opts: { profileLevel?: number | null; discover?: Reply[]; judge?:
     grant: stub<GrantRepo>({ findGrantFor: async () => null }),
     user: stub<UserRepo>({ findById: async () => ({ id: OWNER, age: 34 }) as User }),
     vocabulary: stub<VocabularyRepo>({ savedLemmas: async () => opts.saved ?? ['casa'] }),
+    ...opts.repos,
   });
   const service = createDiscoveryService({
     transaction,
     discover,
     judge,
     llm,
-    lookup: async (): Promise<TranslationResponse> => {
-      throw new Error('no lookup in these tests');
-    },
+    lookup:
+      opts.lookup ??
+      (async (): Promise<TranslationResponse> => {
+        throw new Error('no lookup in these tests');
+      }),
     now: createFakeClock(NOW),
     logger,
     stockSaveDelaySeconds: 30,
   });
-  return { service, repo, discover, judge, jobs, logger };
+  return { service, repo, discover, judge, llm, jobs, logger };
 }
 
 /** A run of `rounds` rounds of ten cards each, the last `answered` cards of the last round
@@ -353,5 +377,191 @@ describe('ending a run early (phase 69, spec D8)', () => {
     expect(await service.end(OWNER, listing)).toMatchObject({ status: 'listing' });
     await repo.transition(listing, ['listing'], 'saved');
     await expect(service.end(OWNER, listing)).rejects.toBeInstanceOf(DiscoveryConflict);
+  });
+});
+
+const option = (n: number) => ({ gloss_id: `g${n}`, variant_id: `v${n}`, translation: `t${n}` });
+const looked = (options = [option(1), option(2)]) => ({
+  correctedForm: null,
+  options,
+  chosenGlossId: options[0]?.gloss_id ?? null,
+  ticked: options.length > 0,
+  hebrewMismatch: false,
+  reason: options.length > 0 ? null : ('no_meaning' as const),
+});
+
+/** A listing run whose first `unknown` cards were not known, each looked up unless `pending`. */
+async function listingRun(repo: FakeDiscoveryRepo, unknown: number, pending: number[] = []) {
+  const id = await seedRun(repo, { rounds: 1, knownPerRound: 10 - unknown });
+  // seedRun marks the first cards known: the unknown ones are the last `unknown`.
+  for (const card of repo.cards.get(id)!) {
+    if (card.known === false && !pending.includes(card.position)) await repo.writeLookup(id, card.position, looked());
+  }
+  await repo.transition(id, ['asking'], 'listing');
+  return id;
+}
+
+describe('the list (phase 69, spec D8)', () => {
+  it('changes a row as a photo row is changed', async () => {
+    const { service, repo } = setup();
+    const id = await listingRun(repo, 3);
+    expect(await service.updateItem(OWNER, id, 9, { ticked: false })).toMatchObject({ position: 9, ticked: false, chosen_gloss_id: 'g1' });
+    expect(await service.updateItem(OWNER, id, 9, { gloss_id: 'g2' })).toMatchObject({ chosen_gloss_id: 'g2' });
+    await expect(service.updateItem(OWNER, id, 9, { gloss_id: 'g9' })).rejects.toBeInstanceOf(InvalidDiscoveryItem);
+  });
+
+  it('refuses a change to a row still looked up, a card that is no row, and a run not listing', async () => {
+    const { service, repo } = setup();
+    const id = await listingRun(repo, 3, [8]);
+    await expect(service.updateItem(OWNER, id, 8, { ticked: false })).rejects.toBeInstanceOf(DiscoveryConflict);
+    await expect(service.updateItem(OWNER, id, 0, { ticked: false })).rejects.toBeInstanceOf(DiscoveryNotFound);
+    const other = setup();
+    const askingId = await seedRun(other.repo, { rounds: 1, knownPerRound: 0 });
+    await expect(other.service.updateItem(OWNER, askingId, 0, { ticked: false })).rejects.toBeInstanceOf(DiscoveryConflict);
+  });
+});
+
+describe('saving the list (phase 69, spec D8)', () => {
+  function saving() {
+    const inserted: { glossId: string; variantId: string }[][] = [];
+    const env = setup({
+      repos: {
+        gloss: stub<GlossRepo>({
+          resolveGlosses: async (ids: string[]) => new Map(ids.map((glossId) => [glossId, { id: glossId, userLanguageCode: 'he' }])),
+        } as Partial<GlossRepo>),
+        vocabulary: stub<VocabularyRepo>({
+          savedLemmas: async () => [],
+          findSaveable: async (input) => input.entries.map((entry) => ({ ...entry, lexemeId: `l${entry.glossId}`, lemma: entry.glossId })),
+          insertEntries: async (input) => {
+            inserted.push(input.entries.map((entry) => ({ glossId: entry.glossId, variantId: entry.variantId })));
+          },
+        }),
+        dict: stub<DictRepo>({ claimLemmaRenders: async () => [] }),
+      },
+    });
+    return { ...env, inserted };
+  }
+
+  it("saves the ticked rows' glosses to My words in one go, and the run is saved", async () => {
+    const { service, repo, inserted, jobs, logger } = saving();
+    const id = await listingRun(repo, 3);
+    for (const card of repo.cards.get(id)!.filter((c) => c.known === false)) card.chosenGlossId = `g${card.position}`;
+    for (const card of repo.cards.get(id)!.filter((c) => c.known === false)) card.options = [{ ...option(1), gloss_id: `g${card.position}` }];
+    await service.updateItem(OWNER, id, 8, { ticked: false });
+
+    expect(await service.save(OWNER, id)).toEqual({ saved_gloss_ids: ['g7', 'g9'] });
+    expect(inserted).toEqual([[{ glossId: 'g7', variantId: 'v1' }, { glossId: 'g9', variantId: 'v1' }]]);
+    expect(repo.runs.get(id)?.status).toBe('saved');
+    expect(jobs.enqueued).toContainEqual(expect.objectContaining({ name: 'stock-session' }));
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'discovery_saved', run_id: id, saved_count: 2, unticked_count: 1 }));
+
+    // A repeated save answers the same ids and writes nothing.
+    expect(await service.save(OWNER, id)).toEqual({ saved_gloss_ids: ['g7', 'g9'] });
+    expect(inserted).toHaveLength(1);
+  });
+
+  it('refuses a save while a row is looked up, and one of a run still asking', async () => {
+    const { service, repo, inserted } = saving();
+    const id = await listingRun(repo, 3, [9]);
+    await expect(service.save(OWNER, id)).rejects.toBeInstanceOf(DiscoveryConflict);
+    expect(repo.runs.get(id)?.status).toBe('listing');
+    expect(inserted).toEqual([]);
+    const other = saving();
+    const asking = await seedRun(other.repo, { rounds: 1, knownPerRound: 0 });
+    await expect(other.service.save(OWNER, asking)).rejects.toBeInstanceOf(DiscoveryConflict);
+    expect(other.inserted).toEqual([]);
+  });
+
+  it('saves nothing from a list with no row ticked, and the run is saved', async () => {
+    const { service, repo, inserted } = saving();
+    const id = await listingRun(repo, 2);
+    for (const position of [8, 9]) await service.updateItem(OWNER, id, position, { ticked: false });
+    expect(await service.save(OWNER, id)).toEqual({ saved_gloss_ids: [] });
+    expect(inserted).toEqual([]);
+    expect(repo.runs.get(id)?.status).toBe('saved');
+  });
+});
+
+describe('discarding a run (phase 69, spec D8)', () => {
+  it('discards an asking or listing run, keeps its answers, and repeats quietly', async () => {
+    const { service, repo } = setup();
+    const id = await seedRun(repo, { rounds: 1, answeredInLast: 4 });
+    await service.discard(OWNER, id);
+    expect(repo.runs.get(id)?.status).toBe('discarded');
+    expect(repo.cards.get(id)?.filter((card) => card.answer !== null)).toHaveLength(4);
+    await service.discard(OWNER, id);
+    expect(repo.runs.get(id)?.status).toBe('discarded');
+  });
+
+  it('refuses to discard a saved run', async () => {
+    const { service, repo } = setup();
+    const id = await seedRun(repo, { rounds: 1, status: 'saved' });
+    await expect(service.discard(OWNER, id)).rejects.toBeInstanceOf(DiscoveryConflict);
+  });
+});
+
+describe("a word's lookup (phase 69, spec D7)", () => {
+  const lookupAnswer = (translations: string[]): TranslationResponse =>
+    ({
+      kind: 'word',
+      senses: translations.map((translation, index) => ({ ...option(index + 1), translation, gloss_id: `g${index + 1}`, variant_id: `v${index + 1}` })),
+    }) as unknown as TranslationResponse;
+
+  it("looks the word up as typed, for the list's owner, and picks the gloss its Hebrew names", async () => {
+    const asked: { actor: string; input: TranslationRequest }[] = [];
+    const { service, repo, llm } = setup({
+      lookup: async (actor, input) => {
+        asked.push({ actor, input });
+        return lookupAnswer(['משהו אחר', 'משהו']);
+      },
+    });
+    const id = await seedRun(repo, { rounds: 1, knownPerRound: 9 });
+    await service.lookUpWord({ run_id: id, position: 9 });
+    expect(asked).toEqual([{ actor: OWNER, input: { text: 'dieci1', from: 'it', to: 'he', enrollment_id: 'e1' } }]);
+    expect(repo.cards.get(id)?.[9]).toMatchObject({ lookupStatus: 'ready', chosenGlossId: 'g2', suggestedGlossId: 'g2', ticked: true });
+    expect(llm.calls).toHaveLength(0);
+  });
+
+  it('asks the model which sense when no rule can tell, naming the run when its answer is unreadable', async () => {
+    const { service, repo } = setup({ lookup: async () => lookupAnswer(['א', 'ב']), match: ['not json'] });
+    const id = await seedRun(repo, { rounds: 1, knownPerRound: 9 });
+    await expect(service.lookUpWord({ run_id: id, position: 9 })).rejects.toBeInstanceOf(SenseMatchUnreadable);
+    expect(repo.cards.get(id)?.[9].lookupStatus).toBe('pending');
+  });
+
+  it('makes no lookup for a discarded or saved run, or a card not pending', async () => {
+    let lookups = 0;
+    const { service, repo } = setup({
+      lookup: async () => {
+        lookups += 1;
+        return lookupAnswer(['משהו']);
+      },
+    });
+    const discarded = await seedRun(repo, { rounds: 1, knownPerRound: 9 });
+    await repo.transition(discarded, ['asking'], 'discarded');
+    await service.lookUpWord({ run_id: discarded, position: 9 });
+    await service.lookUpWord({ run_id: discarded, position: 0 });
+    await service.lookUpWord({ run_id: '11111111-1111-1111-1111-111111111111', position: 0 });
+    expect(lookups).toBe(0);
+    expect(repo.cards.get(discarded)?.[9].lookupStatus).toBe('pending');
+  });
+
+  it('writes nothing when the run was discarded during the lookup', async () => {
+    const { service, repo } = setup({
+      lookup: async () => {
+        await repo.transition([...repo.runs.keys()][0], ['asking'], 'discarded');
+        return lookupAnswer(['משהו']);
+      },
+    });
+    const id = await seedRun(repo, { rounds: 1, knownPerRound: 9 });
+    await service.lookUpWord({ run_id: id, position: 9 });
+    expect(repo.cards.get(id)?.[9].lookupStatus).toBe('pending');
+  });
+
+  it('marks the row failed when its retries are spent', async () => {
+    const { service, repo } = setup();
+    const id = await seedRun(repo, { rounds: 1, knownPerRound: 9 });
+    await service.failWord({ run_id: id, position: 9 });
+    expect(repo.cards.get(id)?.[9]).toMatchObject({ lookupStatus: 'failed', ticked: false });
   });
 });

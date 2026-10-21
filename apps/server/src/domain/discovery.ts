@@ -44,6 +44,11 @@ export const MAX_ROUNDS = 8;
 /** Spec D4. The newest words to leave out that the prompt carries; the parser checks all. */
 export const EXCLUDE_IN_PROMPT = 400;
 
+/** Spec D4. One round's call: the learner waits on it, at a spinner. The environment may lower it. */
+export const DISCOVERY_BUDGET_MS = 20_000;
+/** Spec D4. The round's thinking budget, in tokens: measured by the eval group (plan task 7). */
+export const DISCOVERY_THINKING = 0;
+
 /** Spec D6. */
 export const GOAL_CHOICES = [5, 10, 15, 20, 30] as const;
 export const DEFAULT_GOAL = 15;

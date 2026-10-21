@@ -8,6 +8,7 @@ import {
   STOCK_SAVE_DELAY_SECONDS,
 } from './domain/jobs';
 import { isDeliverable, normalizeEmail } from './domain/auth';
+import { DISCOVERY_BUDGET_MS } from './domain/discovery';
 import { soundAlikeThreshold } from './domain/soundAlike';
 
 // A pure function of its argument: it reads no global, so a test hands it a
@@ -25,6 +26,8 @@ export type Config = {
   gapRewriteTimeoutMs: number;
   speechTimeoutMs: number;
   judgeTimeoutMs: number;
+  // Phase 69 (spec D4). One round of Words for me: the learner waits on it.
+  discoveryTimeoutMs: number;
   photoReadTimeoutMs: number;
   // Phase 43 (ruling R3). How long a save's request for a session in stock waits.
   stockSaveDelaySeconds: number;
@@ -98,6 +101,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     gapRewriteTimeoutMs: Math.min(Number(env.GAP_REWRITE_TIMEOUT_MS) || GAP_REWRITE_BUDGET_MS, GAP_REWRITE_BUDGET_MS),
     speechTimeoutMs: Number(env.SPEECH_TIMEOUT_MS) || DEFAULT_SPEECH_TIMEOUT_MS,
     judgeTimeoutMs: Number(env.JUDGE_TIMEOUT_MS) || DEFAULT_JUDGE_TIMEOUT_MS,
+    // Phase 69 (spec D4). A round's budget, capped like the gap check's.
+    discoveryTimeoutMs: Math.min(Number(env.DISCOVERY_TIMEOUT_MS) || DISCOVERY_BUDGET_MS, DISCOVERY_BUDGET_MS),
     // Phase 26 (spec D6). A read's budget, capped like generation's: the
     // read-photo job expires at twice PHOTO_READ_BUDGET_MS.
     photoReadTimeoutMs: Math.min(
