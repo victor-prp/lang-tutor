@@ -369,9 +369,10 @@ export class PhotoUnreadable extends Error {
 }
 
 // Phase 26. The match call's answer was not the schema. A retry, like the above.
+// Phase 69: a Words for me card's lookup throws it too, naming its run.
 export class SenseMatchUnreadable extends Error {
-  constructor(readonly importId: string, readonly position: number) {
-    super(`the sense match for photo import ${importId} row ${position} was unreadable`);
+  constructor(readonly listId: string, readonly position: number) {
+    super(`the sense match for ${listId} row ${position} was unreadable`);
     this.name = 'SenseMatchUnreadable';
   }
 }
