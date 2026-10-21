@@ -563,7 +563,7 @@ export function createSessionService({
     let picks = chooseTargetPicks({ ...input, mode, stepDowns });
     // Ruling T3-m. Owed work all asked by the session in flight: practice more instead. Phase 68
     // (spec D3): step-downs alone are no session.
-    if (mode === 'owed' && picks.every((pick) => pick.relearn)) {
+    if (mode === 'owed' && picks.every((pick) => pick.relearn === 'practice')) {
       mode = 'more';
       picks = chooseTargetPicks({ ...input, mode, stepDowns });
     }
@@ -648,7 +648,7 @@ export function createSessionService({
           // Phase 54 (spec D3, D7). The prepare job asks a ladder pick as its four cards.
           ladder,
           // Phase 68 (spec D2): a step-down, asked as see it, pick it, produce it.
-          ...(choice.relearn ? { relearn: true } : {}),
+          ...(choice.relearn ? { relearn: choice.relearn } : {}),
         },
       ];
     });
@@ -1216,8 +1216,10 @@ export function createSessionService({
 
         // Phase 68 (spec D6). A miss on a target path, or a list word tapped (phase 59), asks for the
         // path's stock again: it was chosen when this session started, before the miss, which can owe
-        // the word a step-down. The stock job compares and replaces it.
-        if (missed || added.some((tap) => tap.kind === 'list')) {
+        // the word a step-down. The stock job compares and replaces it. A miss that ends the session
+        // asks nothing here: its end takes the progress lock and asks for the stock after it (ADR 0014
+        // R4), and the job compares whatever asked it.
+        if (!outcome.justCompleted && (missed || added.some((tap) => tap.kind === 'list'))) {
           const missedOn = path ?? (await pathOf());
           if (missedOn !== null) await requestStock(repos, { enrollment_id: enrolled.id, reason: 'miss', ...pathPayload(missedOn) });
         }
@@ -1778,7 +1780,7 @@ export function createSessionService({
                 // Phase 54 (spec D3, D7): a ladder pick is its four cards; a pick stored without the flag is none.
                 ladder: ladder ?? false,
                 // Phase 68 (spec D2): a step-down is its see, pick and produce cards.
-                relearn: relearn ?? false,
+                relearn,
               };
             }),
             // Phase 57 (ruling T3-l): a target path's session plans its picks with no MAX_PER_TYPE and

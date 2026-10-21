@@ -775,7 +775,10 @@ describe('planCards: phase 68 on a target path', () => {
   /** A target pick: recall at R 1, as the target picker makes one. */
   const owed = (n: number, dimension: Dimension, over: Partial<PlanPick> = {}): PlanPick =>
     pick(n, { dimension, rung: dimension === SP ? 1 : 2, level: 3, r: 1, ...over });
-  const relearn = (n: number, dimension: Dimension, over: Partial<PlanPick> = {}) => owed(n, dimension, { relearn: true, ...over });
+  const relearn = (n: number, dimension: Dimension, over: Partial<PlanPick> = {}) => owed(n, dimension, { relearn: 'practice', ...over });
+  /** A pick's own cards' intro flags in plan order, its place on a board aside. */
+  const introOf = (plan: ReturnType<typeof planCards>, index: number) =>
+    plan.intro.filter((_, position) => plan.order[position] === index && plan.types[position] !== 'matching');
   /** A pick's own cards in plan order, its place on a board aside. */
   const typesOf = (plan: ReturnType<typeof planCards>, index: number) =>
     plan.types.filter((type, position) => plan.order[position] === index && type !== 'matching');
@@ -791,7 +794,16 @@ describe('planCards: phase 68 on a target path', () => {
       const [see, choose, produce] = positionsOf(plan, 0);
       expect(choose - see).toBeGreaterThan(1);
       expect(produce - choose).toBeGreaterThan(1);
-      expect(plan.intro.every((one) => !one)).toBe(true);
+    });
+
+    it("asks its see and pick cards as intro cards, encoding not evidence, and its produce card too unless it is the session's own (final review)", () => {
+      const practiced = planCards([relearn(0, WP), ...fillers(1, 4)], TARGET);
+      expect(introOf(practiced, 0)).toEqual([true, true, true]);
+      const counted = planCards([relearn(0, WP, { relearn: 'counts' }), ...fillers(1, 4)], TARGET);
+      expect(typesOf(counted, 0)).toEqual(['read_aloud', 'reverse_choice', 'typed_translation']);
+      expect(introOf(counted, 0)).toEqual([true, true, false]);
+      // The other picks' cards are evidence as ever.
+      expect([1, 2, 3, 4].flatMap((index) => introOf(counted, index))).toEqual([false, false, false, false]);
     });
 
     it('takes the pick card the session used least: reverse choice, choose-the-gap, letter tiles, ties in that order', () => {

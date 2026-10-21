@@ -244,7 +244,7 @@ describe("a target path's session (phase 57, ruling T3-l)", () => {
 
   it('asks a step-down as see it, pick it, produce it: a read aloud, a reverse choice and its typed translation (phase 68 D2)', async () => {
     const parola = await saved({ lemma: 'parola', translations: ['מילה'] });
-    const types = await preparedTarget([{ ...owed(parola, 'written_productive'), relearn: true }], [null, 'word', 'typed'], {
+    const types = await preparedTarget([{ ...owed(parola, 'written_productive'), relearn: 'practice' }], [null, 'word', 'typed'], {
       listening: false,
       speaking: true,
     });

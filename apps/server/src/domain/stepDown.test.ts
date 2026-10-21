@@ -79,11 +79,19 @@ describe('openStepDowns', () => {
     ).toEqual(['b|written_productive', 'a|written_productive', 'b|spelling']);
   });
 
-  it("closes on an unanswered produce card of the session in flight, credited right; an intro or pick card doesn't", () => {
+  it("closes on an unanswered produce card of the session in flight, credited right, a practice one's too; a pick card doesn't", () => {
     const missed = [typed('a', 'typed_translation', 'wrong')];
     expect(open(missed, [{ glossId: 'a', type: 'cloze_typed', intro: false }])).toEqual([]);
-    expect(open(missed, [{ glossId: 'a', type: 'reverse_choice', intro: false }])).toEqual(['a|written_productive']);
-    expect(open(missed, [{ glossId: 'a', type: 'typed_translation', intro: true }])).toEqual(['a|written_productive']);
+    expect(open(missed, [{ glossId: 'a', type: 'typed_translation', intro: true }])).toEqual([]);
+    expect(open(missed, [{ glossId: 'a', type: 'reverse_choice', intro: true }])).toEqual(['a|written_productive']);
     expect(open(missed, [{ glossId: 'b', type: 'typed_translation', intro: false }])).toEqual(['a|written_productive']);
+  });
+
+  it("closes on a practice step-down's produce card answered right, and stays open when it is missed (final review)", () => {
+    const missed = [typed('a', 'typed_translation', 'wrong')];
+    expect(open([...missed, typed('a', 'cloze_typed', 'exact', { intro: true })])).toEqual([]);
+    expect(open([...missed, typed('a', 'cloze_typed', 'wrong', { intro: true })])).toEqual(['a|written_productive']);
+    // A miss on an intro card opens nothing: a ladder's, or a step-down's pick card.
+    expect(open([{ ...choice('b', 'reverse_choice', false), intro: true }])).toEqual([]);
   });
 });

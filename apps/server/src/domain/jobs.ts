@@ -117,9 +117,9 @@ export const PrepareSessionPayloadSchema = z.object({
         // Phase 54 (spec D3, D7). A new word's first session, asked as four cards,
         // the meet card first. Absent in a stock prepared before the deploy: no ladder.
         ladder: z.boolean().optional(),
-        // Phase 68 (spec D2). A target's step-down, asked as see it, pick it, produce it.
-        // Absent in a stock prepared before the deploy: none.
-        relearn: z.boolean().optional(),
+        // Phase 68 (spec D2). A target's step-down, asked as see it, pick it, produce it: its
+        // produce card counts (`counts`) or nothing does (`practice`). Absent: none.
+        relearn: z.enum(['counts', 'practice']).optional(),
       }),
     )
     .min(1)

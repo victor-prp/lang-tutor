@@ -41,9 +41,11 @@ export type PlanPick = {
   meanings?: readonly string[];
   knownMeanings?: readonly string[];
   ladder?: boolean;
-  /** Phase 68 (spec D2). A target's step-down: the pick is asked as relearnCards, see it, pick it,
-   *  produce it, spread like a ladder's cards. Absent is false. */
-  relearn?: boolean;
+  /** Phase 68 (spec D2, final review). A target's step-down: the pick is asked as relearnCards, see
+   *  it, pick it, produce it, spread like a ladder's cards. Its see and pick cards are intro cards,
+   *  for encoding, not evidence (phase 55); so is its produce card for `practice`, while `counts`
+   *  makes it the card the pick would have been. Absent: none. */
+  relearn?: 'counts' | 'practice';
 };
 
 /** `listening`: the app said its device has a voice for the target (phase 24 D5).
@@ -374,7 +376,9 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
   const relearnStage = (stage: 'see' | 'pick' | 'produce'): Unit[] =>
     relearns.flatMap((index) => {
       const type = relearnOf.get(index)![stage];
-      return type === null ? [] : [{ indices: [index], type, p: 1, step: false }];
+      if (type === null) return [];
+      const evidence = stage === 'produce' && picks[index].relearn === 'counts';
+      return [{ indices: [index], type, ...(evidence ? {} : { intro: true as const }), p: 1, step: false }];
     });
   const stream: Unit[] = [
     ...intro,

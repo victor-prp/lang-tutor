@@ -44,9 +44,9 @@ export function openStepDowns(input: {
   const open = new Map<string, { step: StepDown; at: number }>();
   input.answers.forEach((answer, at) => {
     const dimension = servedSkill(answer.type);
-    if (answer.intro || dimension === null) return;
+    if (dimension === null) return;
     const key = `${answer.glossId}|${dimension}`;
-    if (missed(answer)) {
+    if (!answer.intro && missed(answer)) {
       open.delete(key);
       open.set(key, { step: { glossId: answer.glossId, dimension }, at });
     } else if (right(answer) && produces(answer.type, dimension)) {
@@ -55,7 +55,7 @@ export function openStepDowns(input: {
   });
   for (const card of input.unanswered) {
     const dimension = servedSkill(card.type);
-    if (!card.intro && dimension !== null && produces(card.type, dimension)) open.delete(`${card.glossId}|${dimension}`);
+    if (dimension !== null && produces(card.type, dimension)) open.delete(`${card.glossId}|${dimension}`);
   }
   return [...open.values()].sort((a, b) => a.at - b.at).map((entry) => entry.step);
 }
