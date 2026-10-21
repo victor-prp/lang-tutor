@@ -76,6 +76,9 @@ export type ChosenPick = {
   r: number | null;
   cls: ChoiceClass;
   ladder: boolean;
+  /** Phase 68 (spec D2, D3). A target's step-down: the pick is asked as see it, pick it,
+   *  produce it, outside the session's slots. Absent is false. */
+  relearn?: boolean;
 };
 
 /** Introduction order, easiest first. */

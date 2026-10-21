@@ -41,6 +41,10 @@ export const DAY_NEW_CAP = 15;
  *  plan meets in a day before its eve; practice more can start more. */
 export const NEW_TARGET_WORDS_PER_DAY = 8;
 
+/** Phase 68 (spec D3, my call). Step-downs a target session asks at most, on top of its slots;
+ *  the rest wait for the next session. */
+export const STEP_DOWNS_PER_SESSION = 3;
+
 /** Research's choice. Picks testing one dimension, at most, counted against the
  *  dimension's expansions only (phase 37 D3): a newly live dimension does not flood
  *  a session, and a due word is never held back for it. */
