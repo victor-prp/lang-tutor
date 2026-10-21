@@ -186,6 +186,9 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await input.press('Enter');
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
+  // Answer bar spec D5: the bar goes, and the answer, locked, shows in the card.
+  await expect(input).not.toBeEditable();
+  await expect(input).toHaveValue(WORD.form);
   await expect(page.getByTestId('retype')).toHaveCount(0);
   expect((await spoken(page)).slice(before)).toEqual([{ text: WORD.form, lang: 'ru-RU' }]);
   await page.getByTestId('continue-button').click();
