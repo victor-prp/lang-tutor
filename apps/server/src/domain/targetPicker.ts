@@ -9,6 +9,7 @@ import {
 import type { ChosenPick } from './choose';
 import { LADDER_SLOTS, NEW_PER_SESSION } from './chooseConstants';
 import { RUNGS } from './plan';
+import { rungOf } from './stepDown';
 import { servedSkill, type TargetDay, type WordDay } from './targetDay';
 
 /**
@@ -142,11 +143,6 @@ const PICKS_PER_WORD = 2;
  *  translation for speaking). The prepare job may choose another type of the rung; the budget's
  *  play-forward (phase 65, spec D7.1) answers this one. */
 export const cardOf = (dimension: Dimension, rung: 1 | 2): QuestionType => RUNGS[dimension][rung - 1][0];
-
-/** Phase 67 (spec D2). The rung a practised skill is asked at: writing recalled (translate, gap or
- *  sentence), spelling as a dictation (typed when the device cannot listen, planCards' fallback),
- *  speaking said. */
-const rungOf = (dimension: Dimension): 1 | 2 => (dimension === 'spelling' ? 1 : 2);
 
 type Word = {
   glossId: string;
