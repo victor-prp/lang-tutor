@@ -118,6 +118,7 @@ describe('a path per target (spec D1, D2)', () => {
         wordCount: 3,
         fsrsReadyCount: 0,
         owedGlossIds: [first],
+        stepDowns: [],
         wish: null,
         slots: null,
         picked: null,
@@ -604,7 +605,8 @@ describe("a target's stock chosen beside the session that asks the day's last ca
   };
 
   it.each([
-    ['a miss: it adds no card', 'zzzz'],
+    // Phase 68 (spec D6): the step-down a miss owes is the stock job's to add, not the serve's.
+    ['a miss, before its stock job ran', 'zzzz'],
     ['every answer right', null],
   ])('is played as it is once that session ends with %s: the day is done', async (_, typed) => {
     const { word, exam, s1, stock } = await coveredDay();

@@ -220,7 +220,7 @@ describe("a target path's session (phase 57, ruling T3-l)", () => {
 
   async function preparedTarget(
     picks: PrepareSessionPayload['picks'],
-    tasks: ('typed' | 'meaning')[],
+    tasks: ('typed' | 'meaning' | 'word' | null)[],
     devices: { listening: boolean; speaking: boolean },
   ): Promise<string[]> {
     await clearNamespace(ns);
@@ -240,6 +240,15 @@ describe("a target path's session (phase 57, ruling T3-l)", () => {
   it('asks a session of one speaking pick its say-translation card', async () => {
     const parola = await saved({ lemma: 'parola', translations: ['מילה'] });
     expect(await preparedTarget([owed(parola, 'spoken_productive')], ['typed'], { listening: false, speaking: true })).toEqual(['say_translation']);
+  });
+
+  it('asks a step-down as see it, pick it, produce it: a read aloud, a reverse choice and its typed translation (phase 68 D2)', async () => {
+    const parola = await saved({ lemma: 'parola', translations: ['מילה'] });
+    const types = await preparedTarget([{ ...owed(parola, 'written_productive'), relearn: 'practice' }], [null, 'word', 'typed'], {
+      listening: false,
+      speaking: true,
+    });
+    expect(types).toEqual(['read_aloud', 'reverse_choice', 'typed_translation']);
   });
 
   it('keeps five typed picks typed: no type is held to four', async () => {

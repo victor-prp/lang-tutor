@@ -3,7 +3,7 @@ import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
 
 import { expectedSuccess } from './choose';
 import { CARD_TARGET } from './chooseConstants';
-import { BOARD_MIN_PICKS, MAX_PER_TYPE, RUNGS, ladderCards, planCards, type PlanInput, type PlanPick } from './plan';
+import { BOARD_MIN_PICKS, BOARD_SIZE, MAX_PER_TYPE, RUNGS, ladderCards, planCards, type PlanInput, type PlanPick } from './plan';
 
 const WR: Dimension = 'written_receptive';
 const WP: Dimension = 'written_productive';
@@ -400,7 +400,9 @@ describe("planCards: a target path's session", () => {
   it('holds no type to MAX_PER_TYPE: every pick keeps the card of its rung', () => {
     const list = Array.from({ length: 6 }, (_, i) => owed(i, SP, { speakable: false }));
     expect(count(typesByPick(list), 'typed_translation')).toBe(MAX_PER_TYPE);
-    expect(typesByPick(list, TARGET)).toEqual(Array(6).fill('typed_translation'));
+    // Phase 68 (spec D5): its board is an extra card, outside the picks' own.
+    const plan = planCards(list, TARGET);
+    expect(plan.types.filter((type) => type !== 'matching')).toEqual(Array(6).fill('typed_translation'));
   });
 
   it("asks a session of one word its speaking card: the target's only owed work can be speaking", () => {
@@ -761,6 +763,116 @@ describe('planCards: a ladder', () => {
       expect(flagged(boarded)).toEqual([...INTRO, ...INTRO, ...INTRO]);
       const plain = planCards([at(0, WP, 1), at(1, SR, 1), pick(2), back(3, WR)], ALL);
       expect(plain.intro).toEqual(plain.order.map(() => false));
+    });
+  });
+});
+
+// Phase 68 (spec D2, D4, D5). On a target path a step-down is asked as see it, pick it, produce
+// it; writing's recall types spread; and a session with four met words of distinct meanings gets a
+// matching board as an extra card.
+describe('planCards: phase 68 on a target path', () => {
+  const TARGET: PlanInput = { ...ALL, target: true };
+  /** A target pick: recall at R 1, as the target picker makes one. */
+  const owed = (n: number, dimension: Dimension, over: Partial<PlanPick> = {}): PlanPick =>
+    pick(n, { dimension, rung: dimension === SP ? 1 : 2, level: 3, r: 1, ...over });
+  const relearn = (n: number, dimension: Dimension, over: Partial<PlanPick> = {}) => owed(n, dimension, { relearn: 'practice', ...over });
+  /** A pick's own cards' intro flags in plan order, its place on a board aside. */
+  const introOf = (plan: ReturnType<typeof planCards>, index: number) =>
+    plan.intro.filter((_, position) => plan.order[position] === index && plan.types[position] !== 'matching');
+  /** A pick's own cards in plan order, its place on a board aside. */
+  const typesOf = (plan: ReturnType<typeof planCards>, index: number) =>
+    plan.types.filter((type, position) => plan.order[position] === index && type !== 'matching');
+  const positionsOf = (plan: ReturnType<typeof planCards>, index: number) =>
+    plan.order.flatMap((at, position) => (at === index && plan.types[position] !== 'matching' ? [position] : []));
+  /** Owed dictations, so the step-down's writing types are the session's first. */
+  const fillers = (from: number, n: number) => Array.from({ length: n }, (_, i) => owed(from + i, SP, { speakable: false }));
+
+  describe('a step-down (D2)', () => {
+    it('is read aloud, a pick card, then a recall card of its skill, each with another card between', () => {
+      const plan = planCards([relearn(0, WP), ...fillers(1, 4)], TARGET);
+      expect(typesOf(plan, 0)).toEqual(['read_aloud', 'reverse_choice', 'typed_translation']);
+      const [see, choose, produce] = positionsOf(plan, 0);
+      expect(choose - see).toBeGreaterThan(1);
+      expect(produce - choose).toBeGreaterThan(1);
+    });
+
+    it("asks its see and pick cards as intro cards, encoding not evidence, and its produce card too unless it is the session's own (final review)", () => {
+      const practiced = planCards([relearn(0, WP), ...fillers(1, 4)], TARGET);
+      expect(introOf(practiced, 0)).toEqual([true, true, true]);
+      const counted = planCards([relearn(0, WP, { relearn: 'counts' }), ...fillers(1, 4)], TARGET);
+      expect(typesOf(counted, 0)).toEqual(['read_aloud', 'reverse_choice', 'typed_translation']);
+      expect(introOf(counted, 0)).toEqual([true, true, false]);
+      // The other picks' cards are evidence as ever.
+      expect([1, 2, 3, 4].flatMap((index) => introOf(counted, index))).toEqual([false, false, false, false]);
+    });
+
+    it('takes the pick card the session used least: reverse choice, choose-the-gap, letter tiles, ties in that order', () => {
+      const plan = planCards([relearn(0, WP), relearn(1, WP), relearn(2, WP), relearn(3, WP, { tiles: false, clozeGap: false })], TARGET);
+      expect([0, 1, 2, 3].map((index) => typesOf(plan, index)[1])).toEqual(['reverse_choice', 'cloze_choice', 'letter_tiles', 'reverse_choice']);
+    });
+
+    it('drops the read aloud where the session cannot speak or the word cannot be said', () => {
+      expect(typesOf(planCards([relearn(0, WP), ...fillers(1, 2)], { ...NONE, listening: true, target: true }), 0)).toEqual([
+        'reverse_choice',
+        'typed_translation',
+      ]);
+      expect(typesOf(planCards([relearn(0, WP, { speakable: false }), ...fillers(1, 2)], TARGET), 0)).toEqual(['reverse_choice', 'typed_translation']);
+    });
+
+    it('steps spelling down to letter tiles, else reverse choice, then its dictation', () => {
+      expect(typesOf(planCards([relearn(0, SP), ...fillers(1, 2)], TARGET), 0)).toEqual(['read_aloud', 'letter_tiles', 'dictation']);
+      expect(typesOf(planCards([relearn(0, SP, { tiles: false }), ...fillers(1, 2)], TARGET), 0)).toEqual(['read_aloud', 'reverse_choice', 'dictation']);
+    });
+
+    it('steps speaking down and ends on its say translation', () => {
+      expect(typesOf(planCards([relearn(0, SK), ...fillers(1, 2)], TARGET), 0)).toEqual(['read_aloud', 'reverse_choice', 'say_translation']);
+    });
+
+    it('reads aloud past the level a read aloud stops at (its level is 3 here)', () => {
+      expect(typesOf(planCards([relearn(0, WP, { level: 5 }), ...fillers(1, 2)], TARGET), 0)[0]).toBe('read_aloud');
+    });
+  });
+
+  describe('the type cap (D4)', () => {
+    it("spreads writing over its recall types, and keeps a rung's card when no other type of it is eligible", () => {
+      const types = planCards(Array.from({ length: 6 }, (_, i) => owed(i, WP)), TARGET).types;
+      expect(['typed_translation', 'cloze_typed', 'sentence_translation'].map((type) => count(types, type as QuestionType))).toEqual([2, 2, 2]);
+      const typedOnly = planCards(Array.from({ length: 6 }, (_, i) => owed(i, WP, { speakable: false })), TARGET);
+      expect(typedOnly.types.filter((type) => type !== 'matching')).toEqual(Array(6).fill('typed_translation'));
+    });
+
+    it('asks a speaking pick at rung 1 as a read aloud, whatever its level: the picker sends one past four say cards', () => {
+      expect(typesByPick([owed(0, SK, { rung: 1, level: 5 }), owed(1, WP)], TARGET)[0]).toBe('read_aloud');
+    });
+  });
+
+  describe('the board (D5)', () => {
+    const PURE: PlanInput = { ...TARGET, board: true };
+    const board = (plan: ReturnType<typeof planCards>) =>
+      plan.board ? plan.order.slice(plan.board.start, plan.board.start + BOARD_SIZE) : null;
+
+    it('makes four met words of distinct forms and meanings one board, an extra card: every word keeps its own', () => {
+      const picks = [owed(0, WP), owed(1, SK), owed(2, SP), owed(3, WP)];
+      const plan = planCards(picks, PURE);
+      expect(board(plan)?.sort()).toEqual([0, 1, 2, 3]);
+      expect(plan.types.filter((type) => type === 'matching')).toHaveLength(BOARD_SIZE);
+      expect(plan.order).toHaveLength(4 + BOARD_SIZE);
+      for (const index of [0, 1, 2, 3]) expect(typesOf(plan, index).filter((type) => type !== 'matching')).toHaveLength(1);
+    });
+
+    it('is only in a session the picker says cannot raise the card', () => {
+      expect(planCards([owed(0, WP), owed(1, SK), owed(2, SP), owed(3, WP)], TARGET).board).toBeNull();
+    });
+
+    it('puts the step-down words on it first', () => {
+      const picks = [...fillers(0, 4), relearn(4, WP), relearn(5, SK)];
+      expect(board(planCards(picks, PURE))?.sort()).toEqual([0, 1, 4, 5]);
+    });
+
+    it('has none with three met words, and never puts a ladder word or two words of one meaning on it', () => {
+      expect(planCards([owed(0, WP), owed(1, WP), owed(2, WP)], PURE).board).toBeNull();
+      expect(planCards([owed(0, WP), owed(1, WP), owed(2, WP), pick(3, { ladder: true })], PURE).board).toBeNull();
+      expect(planCards([owed(0, WP), owed(1, WP), owed(2, WP), owed(3, WP, { translation: 'מילה0' })], PURE).board).toBeNull();
     });
   });
 });

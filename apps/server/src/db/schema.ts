@@ -1703,6 +1703,9 @@ export const sessionTargets = pgTable(
     // Phase 65b (spec D2). The stock was chosen past the day's budget: its owed words first, then
     // practice more. At session end only answers about owed_gloss_ids move this target's skills.
     pastBudget: boolean('past_budget').notNull().default(false),
+    // Phase 68 (spec D6). The step-downs the stock asks, `glossId|dimension`, sorted: a miss's
+    // stock job compares them with today's choice. Null on a row from before phase 68: none.
+    stepDowns: text('step_downs').array(),
   },
   (t) => [
     primaryKey({ name: 'session_targets_pkey', columns: [t.sessionId, t.targetId] }),

@@ -41,6 +41,7 @@ export function readSessionTargets(db: Db, sessionId: string) {
       wordCount: sessionTargets.wordCount,
       fsrsReadyCount: sessionTargets.fsrsReadyCount,
       owedGlossIds: sessionTargets.owedGlossIds,
+      stepDowns: sessionTargets.stepDowns,
       wish: sessionTargets.wish,
       slots: sessionTargets.slots,
       picked: sessionTargets.picked,

@@ -41,6 +41,11 @@ export type PlanPick = {
   meanings?: readonly string[];
   knownMeanings?: readonly string[];
   ladder?: boolean;
+  /** Phase 68 (spec D2, final review). A target's step-down: the pick is asked as relearnCards, see
+   *  it, pick it, produce it, spread like a ladder's cards. Its see and pick cards are intro cards,
+   *  for encoding, not evidence (phase 55); so is its produce card for `practice`, while `counts`
+   *  makes it the card the pick would have been. Absent: none. */
+  relearn?: 'counts' | 'practice';
 };
 
 /** `listening`: the app said its device has a voice for the target (phase 24 D5).
@@ -48,7 +53,14 @@ export type PlanPick = {
  *  ruling T3-l), a target path's session, whose picks each serve owed work: no type is held
  *  to MAX_PER_TYPE and a session of one word may still speak, so no pick falls back to a
  *  card that serves none of it. Absent is false. */
-export type PlanInput = { listening: boolean; speaking: boolean; target?: boolean };
+export type PlanInput = {
+  listening: boolean;
+  speaking: boolean;
+  target?: boolean;
+  /** Phase 68 (spec D5, ruling). A target session none of whose cards can raise the card today:
+   *  it gets a matching board. Absent is false. */
+  board?: boolean;
+};
 
 /** `order[i]` is the index into the picks asked at position `i`, `types[i]`
  *  its type. A board takes positions `start` to `start + 3`. Phase 55 (spec D2,
@@ -94,6 +106,34 @@ export function ladderCards(
   };
 }
 
+/** Phase 68 (spec D2). The pick cards of a step-down, in the direction of the miss (from the
+ *  learner's language), in the order a tie falls to. */
+const PICK_CARDS: readonly QuestionType[] = ['reverse_choice', 'cloze_choice', 'letter_tiles'];
+
+/**
+ * Phase 68 (spec D2). A step-down's cards: see it, a read aloud, when the session can speak and the
+ * form can be said; pick it, the least used in the session of reverse choice, choose-the-gap (its
+ * sentence has a gap) and letter tiles (its form takes them), ties in that order, or for spelling
+ * letter tiles, else reverse choice; produce it, its skill's own card at its rung, as cardFor
+ * chooses one on a target. `used` is the session's type count so far.
+ */
+export function relearnCards(
+  pick: PlanPick,
+  input: { listening: boolean; speaking: boolean },
+  used: ReadonlyMap<QuestionType, number>,
+): { see: QuestionType | null; pick: QuestionType; produce: QuestionType } {
+  const see = input.speaking && pick.speakable ? 'read_aloud' : null;
+  const fits = (type: QuestionType) => eligible(type, pick, input.listening, input.speaking, true);
+  const chosen =
+    pick.dimension === 'spelling'
+      ? fits('letter_tiles')
+        ? 'letter_tiles'
+        : 'reverse_choice'
+      : PICK_CARDS.filter(fits).reduce((best, type) => ((used.get(type) ?? 0) < (used.get(best) ?? 0) ? type : best));
+  const produce = cardFor({ ...pick, rung: pick.dimension === 'spelling' ? 1 : 2 }, used, input.listening, input.speaking, true).type;
+  return { see, pick: chosen, produce };
+}
+
 /** Spec D6: no type is chosen more than this many times in one session. A new
  *  word's multiple choice, and the last resort's, are not chosen and do not
  *  count: four new words would otherwise send every recognised word to recall,
@@ -111,8 +151,9 @@ const FOUR_OPTION: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'new_
 
 const SPEAKING: ReadonlySet<QuestionType> = new Set(['read_aloud', 'say_translation']);
 
-/** `speaking` is the session's: on, and more than one word (phase 25). */
-function eligible(type: QuestionType, pick: PlanPick, listening: boolean, speaking: boolean): boolean {
+/** `speaking` is the session's: on, and more than one word (phase 25). `target`: a target path's
+ *  session (phase 68, spec D2, D4), whose read aloud is the word seen and said at any level. */
+function eligible(type: QuestionType, pick: PlanPick, listening: boolean, speaking: boolean, target = false): boolean {
   if (SPEAKING.has(type) && !speaking) return false;
   switch (type) {
     case 'multiple_choice':
@@ -130,7 +171,7 @@ function eligible(type: QuestionType, pick: PlanPick, listening: boolean, speaki
       // Spec D6: once, while SK is below the level a read aloud can reach. A
       // read aloud said right raises SK to that level and writes no memory, so
       // "unintroduced" alone would read it aloud every time.
-      return pick.speakable && pick.level < READ_ALOUD_MAX_LEVEL;
+      return pick.speakable && (target || pick.level < READ_ALOUD_MAX_LEVEL);
     case 'say_translation':
     case 'cloze_typed':
     case 'sentence_translation':
@@ -193,7 +234,7 @@ function bestIn(
   let best: (Card & { distance: number; uses: number }) | null = null;
   for (const type of RUNGS[pick.dimension][rung - 1]) {
     const uses = used.get(type) ?? 0;
-    if ((uses >= MAX_PER_TYPE && !pick.step && !free) || !eligible(type, pick, listening, speaking)) continue;
+    if ((uses >= MAX_PER_TYPE && !pick.step && !free) || !eligible(type, pick, listening, speaking, free)) continue;
     // The exponent is the rung the type sits in, also when it is the fallback rung.
     const p = expectedSuccess(pick.r, FOUR_OPTION.has(type), rung);
     const distance = Math.abs(p - CARD_TARGET);
@@ -274,11 +315,21 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
   // fixed, and it touches no type's count.
   const used = new Map<QuestionType, number>();
   const cards = picks.map((pick): Card | null => {
-    if (pick.ladder) return null;
+    if (pick.ladder || pick.relearn) return null;
     const { chosen, ...card } = cardFor(pick, used, input.listening, speaking, target);
     if (chosen) used.set(card.type, (used.get(card.type) ?? 0) + 1);
     return card;
   });
+  // Phase 68 (spec D2). Each step-down's cards, after the other picks', so its pick card is the one
+  // the session used least.
+  const relearns = picks.flatMap((pick, index) => (pick.relearn ? [index] : []));
+  const relearnOf = new Map(
+    relearns.map((index) => {
+      const cardsOf = relearnCards(picks[index], { listening: input.listening, speaking: input.speaking }, used);
+      for (const type of [cardsOf.pick, cardsOf.produce]) used.set(type, (used.get(type) ?? 0) + 1);
+      return [index, cardsOf] as const;
+    }),
+  );
 
   // Spec D6, D10: in a session of at least BOARD_MIN_PICKS, four
   // multiple-choice picks whose forms and meanings all differ become one
@@ -287,13 +338,24 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
   // (spec D5, as ruled) a ladder's cards can go between the returns. A ladder's
   // multiple choice is never on it (phase 54, spec D3).
   const multipleChoice = cards.flatMap((card, index) => (card?.type === 'multiple_choice' && !picks[index].step ? [index] : []));
-  const board = picks.length >= BOARD_MIN_PICKS ? boardPicks(picks, multipleChoice) : null;
-  const onBoard = new Set(board ?? []);
+  // Phase 68 (spec D5, ruling). A target's board is an extra card over four met words its session
+  // asks anyway, the step-down words first, in a session the picker says cannot raise the card; a
+  // ladder's word and a new meaning are never on it.
+  const met = picks.flatMap((pick, index) => (!pick.ladder && !pick.knownMeanings?.length ? [index] : []));
+  const stepFirst = [...met.filter((index) => picks[index].relearn), ...met.filter((index) => !picks[index].relearn)];
+  const board = target
+    ? input.board
+      ? boardPicks(picks, stepFirst)
+      : null
+    : picks.length >= BOARD_MIN_PICKS
+      ? boardPicks(picks, multipleChoice)
+      : null;
+  const onBoard = new Set(target ? [] : (board ?? []));
 
   const units: Unit[] = cards.flatMap((card, index) =>
     card === null || onBoard.has(index) ? [] : [{ indices: [index], ...card, step: picks[index].step }],
   );
-  if (board) units.push({ indices: board, type: 'matching', p: Math.max(...board.map((index) => cards[index]!.p)), step: false });
+  if (board) units.push({ indices: board, type: 'matching', p: Math.max(...board.map((index) => cards[index]?.p ?? 1)), step: false });
 
   // Phase 55 (spec D3). A word's intro stage is one unit, so nothing is merged inside it;
   // then every ladder's first practice card, its second, its third, each stage in pick order.
@@ -308,10 +370,25 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
     p: 1,
     step: false,
   }));
-  const practice: Unit[] = [0, 1, 2].flatMap((stage) =>
-    ladders.map((index, k) => ({ indices: [index], type: cardsOf[k].practice[stage], p: 1, step: false })),
-  );
-  const stream: Unit[] = [...intro, ...practice];
+  const practice = (stage: number): Unit[] =>
+    ladders.map((index, k) => ({ indices: [index], type: cardsOf[k].practice[stage], p: 1, step: false }));
+  // Phase 68 (spec D2). A step-down's see, pick and produce cards, each stage between the ladders'.
+  const relearnStage = (stage: 'see' | 'pick' | 'produce'): Unit[] =>
+    relearns.flatMap((index) => {
+      const type = relearnOf.get(index)![stage];
+      if (type === null) return [];
+      const evidence = stage === 'produce' && picks[index].relearn === 'counts';
+      return [{ indices: [index], type, ...(evidence ? {} : { intro: true as const }), p: 1, step: false }];
+    });
+  const stream: Unit[] = [
+    ...intro,
+    ...relearnStage('see'),
+    ...practice(0),
+    ...relearnStage('pick'),
+    ...practice(1),
+    ...relearnStage('produce'),
+    ...practice(2),
+  ];
 
   // Phase 37 (spec D6): the returns after every other card, so each is at least
   // the rest of the session away from the answer that owed it. Phase 54 (spec D5,

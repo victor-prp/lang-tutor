@@ -513,8 +513,22 @@ export function dropNulls(value: unknown): unknown {
   );
 }
 
+/**
+ * A sense code as snake_case: lowercase, each run of anything but a letter or a digit one
+ * underscore, none at either end. The prompt asks for snake_case and the model mostly obliges; once
+ * it wrote `anatomy.body_part` (CI run 39636083579). A code is matched exactly against the stored
+ * ones, which are snake_case, and read in psql. One with no Latin letter or digit stays as it came.
+ */
+export function snakeCode(code: string): string {
+  const snake = code
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return snake.length > 0 ? snake : code;
+}
+
 /** `null` means unreadable. The caller decides what that costs — see
- *  services/translations.ts, which raises TranslationUnreadable. */
+ *  services/translations.ts, which raises TranslationUnreadable. Every sense code is snakeCode's. */
 export function parseLlmTranslation(raw: string): LlmTranslation | null {
   let json: unknown;
   try {
@@ -523,7 +537,14 @@ export function parseLlmTranslation(raw: string): LlmTranslation | null {
     return null;
   }
   const result = LlmTranslationSchema.safeParse(dropNulls(json));
-  return result.success ? result.data : null;
+  if (!result.success) return null;
+  return {
+    ...result.data,
+    entries: result.data.entries.map((entry) => ({
+      ...entry,
+      senses: entry.senses.map((sense) => ({ ...sense, sense_code: snakeCode(sense.sense_code) })),
+    })),
+  };
 }
 
 /**
@@ -663,5 +684,7 @@ export function parseLlmReconciliation(raw: string): LlmReconciliation | null {
     return null;
   }
   const result = LlmReconciliationSchema.safeParse(json);
-  return result.success ? result.data : null;
+  if (!result.success) return null;
+  // A stored sense's code is snake_case already, so it still matches; a new one becomes it.
+  return { ...result.data, senses: result.data.senses.map((sense) => ({ ...sense, sense_code: snakeCode(sense.sense_code) })) };
 }

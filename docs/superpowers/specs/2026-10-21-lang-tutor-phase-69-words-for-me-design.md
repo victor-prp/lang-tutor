@@ -155,7 +155,7 @@ enrollment, a partial unique index. Starting while one is open answers the open 
   "{n} מילים נשמרו".
 - **Discard** ("ביטול", behind a confirm): `discarded`; the answers stay.
 
-### D9. Storage (my call; migration `0048_discovery` or the next free number)
+### D9. Storage (my call; migration `0049_discovery`: phase 68 took 0048)
 
 - `discovery_profiles`: `enrollment_id` (PK, FK), `self_level`, `learning_context` (checks),
   `level` smallint 1–12, `created_at`, `updated_at`.

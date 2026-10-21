@@ -76,6 +76,10 @@ export type ChosenPick = {
   r: number | null;
   cls: ChoiceClass;
   ladder: boolean;
+  /** Phase 68 (spec D2, D3, final review). A target's step-down, asked as see it, pick it, produce
+   *  it: `counts`, the session's own card on that skill made its last, which counts as it would
+   *  have; `practice`, one asked on top, outside the slots, whose cards count nothing. Absent: none. */
+  relearn?: 'counts' | 'practice';
 };
 
 /** Introduction order, easiest first. */

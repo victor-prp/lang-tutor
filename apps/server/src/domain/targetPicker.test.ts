@@ -3,9 +3,24 @@ import { describe, expect, it } from '@jest/globals';
 import { SESSION_LENGTH, type Dimension, type QuestionType } from '@lang-tutor/core/domain';
 
 import type { ChosenPick } from './choose';
-import { LADDER_SLOTS, NEW_PER_SESSION } from './chooseConstants';
+import { LADDER_SLOTS, NEW_PER_SESSION, STEP_DOWNS_PER_SESSION } from './chooseConstants';
+import { MAX_PER_TYPE } from './plan';
 import type { TargetDay, WordDay } from './targetDay';
-import { cardOf, chooseTargetPicks, owedWords, picksOfCards, raisesCard, stockServes, stockToCheck, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
+import {
+  boardsSession,
+  cardOf,
+  chooseTargetPicks,
+  owedWords,
+  picksOfCards,
+  raisesCard,
+  sameStepDowns,
+  stepDownKeys,
+  stockServes,
+  stockToCheck,
+  targetMode,
+  type TargetMode,
+  type TargetPickInput,
+} from './targetPicker';
 
 // Phase 67 (spec D6). The target picker reads each word's cards of the day: the words to meet
 // first, then each owed word's first card, then its second, the word with the lowest readiness
@@ -117,10 +132,9 @@ describe('chooseTargetPicks, owed (spec D6)', () => {
     expect(slotsOf(pick(day))).toBe(SESSION_LENGTH);
   });
 
-  it('has no speaking limit: fifteen words owing a say card take two sessions', () => {
+  it('holds no owed card to the type cap (phase 68 D4): each is a first answer, which can raise the card', () => {
     const day = dayOf(Array.from({ length: 15 }, (_, i) => sayOwed(`g${String(i).padStart(2, '0')}`)));
-    const first = pick(day);
-    expect(first.map((p) => p.dimension)).toEqual(Array(SESSION_LENGTH).fill(SK));
+    expect(pick(day).map((p) => p.dimension)).toEqual(Array(SESSION_LENGTH).fill(SK));
   });
 
   it('meets owed words to start first, as ladders, each with its say card (phase 67b D4), then asks the owed words', () => {
@@ -355,6 +369,138 @@ describe('chooseTargetPicks, practice more', () => {
     const day = dayOf([{ id: 'g0', state: 'done' }, { id: 'g1', state: 'done' }], 'done');
     expect(pick(day, { inFlight: [{ glossId: 'g0', type: 'typed_translation' }] }).map((p) => p.glossId)).toEqual(['g1', 'g0']);
   });
+
+  /** Six done words whose weakest counted skill is speaking, then spelling. `open`: whether that
+   *  weakest skill is still unanswered today. */
+  const sixDone = (open: boolean) => {
+    const day = dayOf(
+      Array.from({ length: 6 }, (_, i): WordSpec => ({ id: `g${i}`, state: 'done', chances: { [WP]: 0.9, [SP]: 0.8, [SK]: 0.5 }, asked: open ? [] : [SK, WP] })),
+      'done',
+    );
+    const now = new Map(day.words.map((word) => [word.glossId, { pct: 50, counted: [SK, SP, WP] as Dimension[], weakestOpen: open }]));
+    return { day, now };
+  };
+
+  it(`holds say cards to ${MAX_PER_TYPE} a session where the card cannot rise: past it, a read aloud (phase 68 D4)`, () => {
+    const { day, now } = sixDone(false);
+    expect(short(pick(day, { now }))).toEqual([
+      ['g0', SK, 2],
+      ['g1', SK, 2],
+      ['g2', SK, 2],
+      ['g3', SK, 2],
+      ['g4', SK, 1],
+      ['g5', SK, 1],
+    ]);
+  });
+
+  it(`passes a say card past ${MAX_PER_TYPE} read alouds too to its next skill answered today`, () => {
+    const day = dayOf(Array.from({ length: 10 }, (_, i): WordSpec => ({ id: `g${i}`, state: 'done', asked: [SK, WP] })), 'done');
+    const now = new Map(day.words.map((word) => [word.glossId, { pct: 50, counted: [SK, SP, WP] as Dimension[], weakestOpen: false }]));
+    expect(short(pick(day, { now })).map(([, d, r]) => `${d}:${r}`)).toEqual([...Array(4).fill(`${SK}:2`), ...Array(4).fill(`${SK}:1`), `${WP}:2`, `${WP}:2`]);
+  });
+
+  it('never moves a card onto a skill still open today, whose first answer would count: with none answered, it keeps its card', () => {
+    const day = dayOf(Array.from({ length: 6 }, (_, i): WordSpec => ({ id: `g${i}`, state: 'done', chances: { [WP]: 0.9, [SP]: 0.5, [SK]: 0.8 }, asked: [SP] })), 'done');
+    const now = new Map(day.words.map((word) => [word.glossId, { pct: 50, counted: [SP, SK, WP] as Dimension[], weakestOpen: false }]));
+    expect(pick(day, { now }).map((p) => p.dimension)).toEqual(Array(6).fill(SP));
+  });
+
+  it('never moves a card that can raise the card: a weakest skill still open today, or any card on the eve', () => {
+    const open = sixDone(true);
+    expect(pick(open.day, { now: open.now }).map((p) => p.dimension)).toEqual(Array(6).fill(SK));
+    const eve = sixDone(false);
+    expect(pick({ ...eve.day, daysLeft: 1 }, { now: eve.now }).map((p) => p.dimension)).toEqual(Array(6).fill(SK));
+  });
+
+  it(`holds spelling to ${MAX_PER_TYPE} too, and writing not at all: it has three recall cards`, () => {
+    const day = dayOf(Array.from({ length: 6 }, (_, i): WordSpec => ({ id: `g${i}`, state: 'done', asked: [SP, WP] })), 'done');
+    const shut = (counted: Dimension[]) => new Map(day.words.map((word) => [word.glossId, { pct: 50, counted, weakestOpen: false }]));
+    expect(pick(day, { now: shut([SP, WP, SK]) }).map((p) => p.dimension)).toEqual([SP, SP, SP, SP, WP, WP]);
+    expect(pick(day, { now: shut([WP, SP, SK]) }).map((p) => p.dimension)).toEqual(Array(6).fill(WP));
+  });
+
+  it(`holds the due date's last review to ${MAX_PER_TYPE} a type: its card is frozen, nothing raises it`, () => {
+    const { day, now } = sixDone(true);
+    expect(short(pick({ ...day, state: 'due_today', daysLeft: 0 }, { now })).map(([, d, r]) => `${d}:${r}`)).toEqual([...Array(4).fill(`${SK}:2`), `${SK}:1`, `${SK}:1`]);
+  });
+});
+
+// Phase 68 (spec D3). The open step-downs come first in every mode, each a relearn pick on its
+// skill at that skill's rung, outside the session's slots, at most STEP_DOWNS_PER_SESSION.
+describe('chooseTargetPicks, step-downs (phase 68)', () => {
+  /** A step-down asked on top of the session: practice, whose cards count nothing. */
+  const practice = (glossId: string, dimension: Dimension): ChosenPick => ({
+    glossId,
+    dimension,
+    rung: dimension === SP ? 1 : 2,
+    level: 1,
+    r: 1,
+    cls: 'TARGET',
+    ladder: false,
+    relearn: 'practice',
+  });
+  const steps = (...keys: string[]) => keys.map((key) => ({ glossId: key.split('|')[0], dimension: key.split('|')[1] as Dimension }));
+
+  it("asks one on top, outside the slots, when the session asks its word nothing on that skill: a full owed session keeps every card", () => {
+    const owed = Array.from({ length: 8 }, (_, i): WordSpec => ({ id: `g${i}`, chances: { [WP]: 0.5, [SP]: 0.6, [SK]: 0.7 } }));
+    const day = dayOf([{ id: 'A', state: 'done' }, ...owed]);
+    const without = pick(day);
+    const picks = pick(day, { stepDowns: steps(`A|${WP}`) });
+    expect(picks).toEqual([...without, practice('A', WP)]);
+    expect(slotsOf(without)).toBe(SESSION_LENGTH);
+  });
+
+  it("makes the session's own card of its word on that skill its last, which counts as it would have (final review)", () => {
+    const day = dayOf([{ id: 'A', chances: { [WP]: 0.5, [SP]: 0.99, [SK]: 0.6 } }]);
+    const without = pick(day);
+    expect(short(without)).toEqual([
+      ['A', WP, 2],
+      ['A', SK, 2],
+    ]);
+    expect(pick(day, { stepDowns: steps(`A|${WP}`) })).toEqual([{ ...without[0], relearn: 'counts' }, without[1]]);
+  });
+
+  it('leaves every other card of the session as it was, in practice more and on the last review too', () => {
+    const words: WordSpec[] = [
+      { id: 'A', state: 'done', chances: { [WP]: 0.5, [SP]: 0.9, [SK]: 0.9 } },
+      { id: 'B', state: 'done', chances: { [WP]: 0.6, [SP]: 0.9, [SK]: 0.9 } },
+    ];
+    for (const state of ['done', 'due_today'] as const) {
+      expect(short(pick(dayOf(words, state), { stepDowns: steps(`A|${SK}`) }))).toEqual([
+        ['A', WP, 2],
+        ['B', WP, 2],
+        ['A', SK, 2],
+      ]);
+    }
+  });
+
+  it(`asks at most ${STEP_DOWNS_PER_SESSION} a session, in the order given`, () => {
+    // An owed day whose words are all done: the session asks nothing of its own.
+    const day = dayOf(['A', 'B', 'C', 'D', 'E'].map((id): WordSpec => ({ id, state: 'done' })));
+    const picks = pick(day, { stepDowns: steps(`D|${WP}`, `B|${SK}`, `E|${SP}`, `A|${WP}`, `C|${WP}`) });
+    expect(picks.filter((p) => p.relearn)).toEqual([practice('D', WP), practice('B', SK), practice('E', SP)]);
+  });
+
+  it('asks a word one step-down a session: its other waits for the next, so no card is seen or picked twice', () => {
+    const day = dayOf([{ id: 'A', state: 'done' }, { id: 'B', state: 'done' }]);
+    const picks = pick(day, { stepDowns: steps(`A|${WP}`, `A|${SK}`, `B|${WP}`) });
+    expect(picks.filter((p) => p.relearn)).toEqual([practice('A', WP), practice('B', WP)]);
+  });
+
+  it('drops one whose word is not in the day, or whose skill the word does not practise', () => {
+    const silent = DIMS.filter((d) => d !== SK);
+    const day = dayOf([{ id: 'A', state: 'done', live: silent }], 'done');
+    expect(pick(day, { stepDowns: steps(`gone|${WP}`, `A|${SK}`) }).filter((p) => p.relearn)).toEqual([]);
+  });
+
+  it("drops one whose word's key another word of the session holds", () => {
+    const day = dayOf([{ id: 'A', state: 'done' }, { id: 'B', cardsLeft: 1 }]);
+    const keys = new Map([
+      ['A', 'לדעת'],
+      ['B', 'לדעת'],
+    ]);
+    expect(pick(day, { keys, stepDowns: steps(`A|${WP}`) }).filter((p) => p.relearn)).toEqual([]);
+  });
 });
 
 // Phase 65b (spec D2). Past the day's budget a session asks the owed work first, then fills with
@@ -465,6 +611,57 @@ describe('stockServes', () => {
 
   it('keeps a practice-more stock while practice more is still the choice', () => {
     expect(stockServes({ capHalves: 10, owedGlossIds: [] }, { capHalves: 10, owedGlossIds: [] })).toBe(true);
+  });
+
+  it('serves only while it asks the step-downs today asks (phase 68 D6); none recorded reads as none', () => {
+    const owed = { capHalves: 10, owedGlossIds: ['g0', 'g1'] };
+    expect(stockServes({ ...owed, stepDowns: ['g0|written_productive'] }, { ...owed, stepDowns: ['g0|written_productive'] })).toBe(true);
+    expect(stockServes({ ...owed, stepDowns: [] }, { ...owed, stepDowns: ['g0|written_productive'] })).toBe(false);
+    expect(stockServes(owed, { ...owed, stepDowns: [] })).toBe(true);
+    expect(sameStepDowns(undefined, { stepDowns: ['g0|spelling'] })).toBe(false);
+    expect(stepDownKeys([
+      { glossId: 'g1', dimension: SK, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false, relearn: 'practice' },
+      { glossId: 'g0', dimension: WP, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false },
+      { glossId: 'g0', dimension: SP, rung: 1, level: 1, r: 1, cls: 'TARGET', ladder: false, relearn: 'counts' },
+    ])).toEqual([`g0|${SP}`, `g1|${SK}`]);
+  });
+});
+
+// Phase 68 (spec D5, ruling). A target session gets a matching board when none of its cards can
+// raise the card today.
+describe('boardsSession', () => {
+  const card = (glossId: string, dimension: Dimension, cls: ChosenPick['cls'] = 'TARGET'): ChosenPick => ({
+    glossId,
+    dimension,
+    rung: 2,
+    level: 1,
+    r: cls === 'NEW' ? null : 1,
+    cls,
+    ladder: cls === 'NEW',
+  });
+  const now = new Map([
+    ['g0', { pct: 50, counted: [SK, WP] as Dimension[], weakestOpen: false }],
+    ['g1', { pct: 50, counted: [WP, SK] as Dimension[], weakestOpen: true }],
+  ]);
+
+  it('boards a session none of whose cards can raise the card: a weakest skill answered today, before the eve', () => {
+    expect(boardsSession([card('g0', SK), card('g1', SK)], { daysLeft: 3, now })).toBe(true);
+  });
+
+  it('does not board one with a card that can: a weakest skill still open, the eve, or a meeting', () => {
+    expect(boardsSession([card('g0', SK), card('g1', WP)], { daysLeft: 3, now })).toBe(false);
+    expect(boardsSession([card('g0', SK)], { daysLeft: 1, now })).toBe(false);
+    expect(boardsSession([card('g0', SK), card('g2', WR, 'NEW')], { daysLeft: 3, now })).toBe(false);
+  });
+
+  it('boards one whose only card that could raise it is a practice step-down, which counts nothing (final review)', () => {
+    expect(boardsSession([card('g0', SK), { ...card('g1', WP), relearn: 'practice' }], { daysLeft: 3, now })).toBe(true);
+    expect(boardsSession([card('g0', SK), { ...card('g1', WP), relearn: 'counts' }], { daysLeft: 3, now })).toBe(false);
+  });
+
+  it('boards the due date, whose card is frozen, and never without readiness now', () => {
+    expect(boardsSession([card('g1', WP)], { daysLeft: 0, now })).toBe(true);
+    expect(boardsSession([card('g0', SK)], { daysLeft: 3, now: undefined })).toBe(false);
   });
 });
 

@@ -1,0 +1,1 @@
+ALTER TABLE "session_targets" ADD COLUMN "step_downs" text[];
