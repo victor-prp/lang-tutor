@@ -204,8 +204,8 @@ unanswered cards, in order), items: PhotoImportItem[] }`. Additive only: `API_LE
   the save refused while a row is looked up; the job's write; discard. The auth matrix's fixtures and
   `written()` gain the new tables.
 - **Eval:** group `discover ` (it, en, ru; A1 to B2; a child and an adult; with an exclude list):
-  tier 1 parses with at least 10 words; tier 2 none excluded, none repeated, words in the target's
-  script, `hebrew` in Hebrew.
+  tier 1 parses with at least 10 words; tier 2 at most one excluded word in the raw answer (the parser
+  drops it, R5), none repeated, words in the target's script, `hebrew` in Hebrew.
 - **e2e:** `discover.spec.ts`: questions, a goal of 5, "אין לי מושג", a typed right answer and a
   typed wrong one, the list, one untick, Continue, the words in the vocabulary.
 
@@ -216,3 +216,22 @@ job's queue options (copy the photo row's). The builder check named more it coul
 these are settled so (my call): an empty list shows only ביטול; `POST runs` before a profile is a
 409; the entry shows for the owner only (a tutor never sees מילים of another's list); the run polls its
 items every 2 s while a row is looked up, as `ImportsReview` does.
+
+## Rulings (the build, 2026-10-21)
+
+Made while building, with Victor's "go till PR"; each says what it costs if wrong.
+
+- **R1.** A model that cannot propose words answers 502 `words unavailable`, as every other model
+  failure in `routes/` does, not D4's 503. Cost: one status code; the app treats any failure alike.
+- **R2.** An empty model answer (a refusal) is unavailable too, never "no word left": the learner
+  gets נסו שוב, not a run ended with an empty list (final review). Cost: none.
+- **R3.** A round's thinking budget is 0, measured on the `discover ` eval group: 1.8–3.1 s a round,
+  every check passed in two runs of five cases. Cost: a re-measure if a model update degrades it.
+- **R4.** A tick or meaning change is allowed only while the run lists. Cost: none; the app shows the
+  list only then.
+- **R5.** The eval allows one excluded word in the raw answer, where Testing said none: the parser drops
+  it, so a learner never sees it. Cost: an eval that misses a prompt drifting toward excluded words.
+- **R6.** The list is its own small review (`DiscoverList`), reusing `PhotoImportRow`, not
+  `ImportsReview`, which reads photo imports by id. Cost: a second review to keep in step.
+- **R7.** Two races are pinned on Postgres, not only a fake: two rounds at once write one, and two
+  answers at once that reach the goal list the run and settle its round once (final review).
