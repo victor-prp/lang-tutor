@@ -80,36 +80,58 @@ spread through the session like a new word's ladder (other cards between them):
 3. **Produce it.** S's own card: writing, a recall card as `planCards` chooses (D4's cap);
    spelling, dictation; speaking, say translation.
 
-Grades and readiness are the existing rules: read aloud grades nothing, a pick card grades writing
-Hard when right, the produce card as usual; before the eve only a skill's first answer of the day
-counts.
+**Grades (ruling R1, built).** The see and pick cards are intro cards, as a new word's first
+cards are (phase 55): encoding, not evidence, so they grade nothing (no memory, no readiness, no
+level). The produce card is evidence only when it is the session's own card (D3, `counts`);
+otherwise the whole step-down is practice and grades nothing (`practice`). An intro miss opens no
+step-down; a right produce card, intro or not, closes it. Why: graded by the existing rules, as
+first drafted, the simulation's card overstated what the learner knew. The exam missed cold on its
+last days read 91 on its date (master 79; phase 65's anti-goal says below 90). The FSRS ready share
+on the date fell (0.66 → 0.54, 0.41 → 0.36) while the card rose. Two reasons: the easy pick card
+became a skill's counted first answer of the day, and on the eve every right earned the bonus.
 
 ### D3. Where step-downs go
 
 Every target session (owed, practice more, past the budget, the last review) asks the open
-step-downs first, oldest miss first, **at most 3 a session** (`STEP_DOWNS_PER_SESSION`, *my call*).
-They are on top of `SESSION_LENGTH`: the session grows. A step-down is one of the word's two picks a
-session and asks S, so S leaves the word's owed skills. Ruling T3-m reads owed work only: a session
-whose owed work the session in flight covers, holding nothing but step-downs, is filled with
-practice more. The budget's play-forward has no answers, so the day's count of sessions does not
-change.
+step-downs, oldest miss first, **at most 3 a session** (`STEP_DOWNS_PER_SESSION`, *my call*) and
+**one a word** (two would see and pick it twice; final review). They are chosen **after** the
+session's own cards, which they leave as they are (ruling R2, built):
+
+- When the session asks the word on that skill at its rung, that card becomes the step-down's last,
+  after the easier ones, and counts as it would have (`counts`).
+- Otherwise the step-down is asked on top, outside `SESSION_LENGTH`, as practice (`practice`): the
+  session grows.
+
+Ruling T3-m reads owed work only: a session whose owed work the session in flight covers, holding
+nothing but practice step-downs, is filled with practice more. The budget's play-forward has no
+answers, so the day's count of sessions does not change. (First drafted, a step-down took one of
+the word's two picks; in the simulation that displaced the word's counting card and the eve-only
+homework took 12 sessions instead of 11.)
 
 ### D4. At most 4 of a type a session
 
-`MAX_PER_TYPE` (4) applies to target sessions too.
+`MAX_PER_TYPE` (4) holds a target session **none of whose cards can raise the card today**
+(ruling R3, built): practice more and past-budget fill on words whose weakest counted skill is
+already answered today, before the eve, and the due date's last review. Victor's 8–9-say sessions
+on 2026-10-21 were exactly these (11 sessions, one readiness event).
 
-- **The picker** gives speaking and spelling at most 4 picks a session each (step-downs included),
-  since each has one card at its rung. A word whose chosen skill is full takes its next skill in its
-  own order (owed, then the counted or open order), else waits for the next session.
-- **`planCards`** spreads writing over its recall types under the cap. When every eligible type of
-  the pick's rung is full it keeps the best of them rather than falling to the other rung or to
-  multiple choice (T3-l).
+- **Past 4 say cards**, a word's card is a read aloud (the word seen and said, which grades
+  nothing). Any other full card passes to the word's next skill whose answer counts nothing today
+  either; with none, it keeps its card.
+- **Owed cards and cards that can raise the card are never capped.** Every wider cap tried moved the
+  day simulation's "can raise" mark below master's: the fixed learner's misses land on other cards,
+  and a read aloud is a free card there.
+- **`planCards`** needs no cap: a target pick's R is 1, so writing's three recall types have equal
+  chances and its least-used tie-break already spreads them.
 
 ### D5. A matching board in homework
 
-A target session with at least 4 met words whose forms and meanings differ (`boardPicks`) gets one
-matching board of 4 of them, as an **extra card** *(my call)*: step-down words first, then the
-session's other words in the order picked. A word on the board keeps its other cards; a ladder's
+A target session **none of whose cards can raise the card today** (ruling R4, built: the picker's
+`boardsSession`, carried to `planCards` as `board`) with at least 4 met words whose forms and
+meanings differ (`boardPicks`) gets one matching board of 4 of them, as an **extra card** *(my
+call)*: step-down words first, then the session's other words in the order picked. On every target
+session it broke phase 57's anti-goal 1 (a card serving no owed work while work is owed) and lowered
+the 14-day exam's FSRS share 0.57 → 0.52. A word on the board keeps its other cards; a ladder's
 word is never on it (phase 54 D3). It counts nothing toward readiness (matching grades written
 receptive, which no kind counts) and opens no step-down (it serves no practised skill).
 
@@ -123,6 +145,15 @@ A stock is chosen when its session in flight starts, before that session's misse
   replaces an unstarted list stock whose recorded step-downs differ from today's choice (retired as
   `stale_target`, as phase 53's replacement); one that matches is kept.
 - `stockServes` (the serve-time check) compares step-downs too.
+
+## What the simulation says (one-off, uncommitted)
+
+`day.test.ts` does not simulate step-downs. Fed step-downs, the session-end restock, relearn picks
+and the board for one run, the built design holds every learner-outcome mark: FSRS share on the date
+0.66 / 0.95 / 0.93 / 0.64 / 0.40 (master 0.66 / 0.93 / 0.93 / 0.68 / 0.41); the cold-missed exam 83
+(< 90); the crammed second day 75.2 (≤ 77); sessions at most master's. One 67b measure dips: of
+homework practice-more sessions flagged "can raise", 91/101 rose (pass 0.91, master 103/113); over
+learners missing every 4th to 8th card, 0.911 against master's 0.927.
 
 ## Left to the builder
 
