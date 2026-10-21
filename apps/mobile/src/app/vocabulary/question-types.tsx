@@ -117,11 +117,7 @@ export default function QuestionTypesScreen() {
       if (!alive.current) return;
       setStage({ kind: 'choose' });
       setNotice(
-        error instanceof ApiError && error.code === 'session_open'
-          ? strings.questionTypesSessionOpen
-          : error instanceof ApiError && error.code === 'seed_pending'
-            ? strings.questionTypesSeedPending
-            : strings.questionTypesStartFailed,
+        error instanceof ApiError && error.code === 'seed_pending' ? strings.questionTypesSeedPending : strings.questionTypesStartFailed,
       );
     } finally {
       inFlight.current = false;
