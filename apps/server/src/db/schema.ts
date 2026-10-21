@@ -1360,6 +1360,104 @@ export const photoImportItems = pgTable(
   ],
 );
 
+/**
+ * Phase 69 (spec D2, D3, D9). The learner's two answers about their level, asked once per
+ * enrollment, and the level their next run of Words for me starts at: 1–12, two per CEFR
+ * band. The answers are kept for later use (Victor).
+ */
+export const discoveryProfiles = pgTable(
+  'discovery_profiles',
+  {
+    enrollmentId: text('enrollment_id').primaryKey(),
+    selfLevel: text('self_level').notNull(),
+    learningContext: text('learning_context').notNull(),
+    level: smallint('level').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'discovery_profiles_enrollment_fk', columns: [t.enrollmentId], foreignColumns: [enrollments.id] }),
+    check('discovery_profiles_self_level_known', sql`${t.selfLevel} in ('none', 'basic', 'simple', 'everyday', 'fluent')`),
+    check('discovery_profiles_learning_context_known', sql`${t.learningContext} in ('school', 'course', 'self', 'family')`),
+    check('discovery_profiles_level_known', sql`${t.level} between 1 and 12`),
+  ],
+);
+
+/**
+ * Phase 69 (spec D8, D9). One run of Words for me: rounds of cards until the learner holds
+ * `goal` words they did not know, then their list. `settled_round` is the last round that
+ * moved the profile's level (spec D3), so a round moves it once.
+ */
+export const discoveryRuns = pgTable(
+  'discovery_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    enrollmentId: text('enrollment_id').notNull(),
+    goal: smallint('goal').notNull(),
+    status: text('status').notNull(),
+    settledRound: smallint('settled_round').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+  },
+  (t) => [
+    foreignKey({ name: 'discovery_runs_enrollment_fk', columns: [t.enrollmentId], foreignColumns: [enrollments.id] }),
+    check('discovery_runs_status_known', sql`${t.status} in ('asking', 'listing', 'saved', 'discarded')`),
+    check('discovery_runs_goal_known', sql`${t.goal} between 1 and 30`),
+    // One open run per enrollment: starting again resumes it (spec D8).
+    uniqueIndex('discovery_runs_one_open_per_enrollment')
+      .on(t.enrollmentId)
+      .where(sql`${t.status} in ('asking', 'listing')`),
+    index('discovery_runs_enrollment_created_idx').on(t.enrollmentId, t.createdAt),
+  ],
+);
+
+/**
+ * Phase 69 (spec D5, D7, D9). One card of a run: the word the model proposed and its Hebrew,
+ * the learner's answer and who judged it, and, once the learner did not know it, the photo
+ * row's lookup fields, which the list is reviewed by. The cards are the log of every answer.
+ * Gloss ids are snapshots, without keys (ADR 0011 R1).
+ */
+export const discoveryCards = pgTable(
+  'discovery_cards',
+  {
+    runId: uuid('run_id').notNull(),
+    position: integer('position').notNull(),
+    round: smallint('round').notNull(),
+    level: smallint('level').notNull(),
+    word: text('word').notNull(),
+    partOfSpeech: text('part_of_speech').notNull(),
+    hebrew: text('hebrew').notNull(),
+    alternatives: jsonb('alternatives').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    answer: text('answer'),
+    typedText: text('typed_text'),
+    verdict: text('verdict'),
+    known: boolean('known'),
+    judgedBy: text('judged_by'),
+    answeredAt: timestamp('answered_at', { withTimezone: true }),
+    lookupStatus: text('lookup_status'),
+    correctedForm: text('corrected_form'),
+    options: jsonb('options').$type<PhotoImportOption[]>().notNull().default(sql`'[]'::jsonb`),
+    suggestedGlossId: text('suggested_gloss_id'),
+    chosenGlossId: text('chosen_gloss_id'),
+    ticked: boolean('ticked').notNull().default(false),
+    hebrewMismatch: boolean('hebrew_mismatch').notNull().default(false),
+    reason: text('reason'),
+  },
+  (t) => [
+    primaryKey({ name: 'discovery_cards_pkey', columns: [t.runId, t.position] }),
+    foreignKey({ name: 'discovery_cards_run_fk', columns: [t.runId], foreignColumns: [discoveryRuns.id] }).onDelete('cascade'),
+    check('discovery_cards_answer_known', sql`${t.answer} is null or ${t.answer} in ('unknown', 'typed')`),
+    check('discovery_cards_verdict_known', sql`${t.verdict} is null or ${t.verdict} in ('exact', 'alternative', 'wrong')`),
+    check('discovery_cards_judged_by_known', sql`${t.judgedBy} is null or ${t.judgedBy} in ('rule', 'model', 'unavailable')`),
+    check('discovery_cards_lookup_status_known', sql`${t.lookupStatus} is null or ${t.lookupStatus} in ('pending', 'ready', 'failed')`),
+    check(
+      'discovery_cards_reason_known',
+      sql`${t.reason} is null or ${t.reason} in ('sentence', 'no_meaning', 'not_in_language')`,
+    ),
+    check('discovery_cards_tick_needs_gloss', sql`not ${t.ticked} or ${t.chosenGlossId} is not null`),
+  ],
+);
+
 // Phase 47 (spec D2). One row per request to a model, whatever its outcome:
 // what was sent, what came back and how long it took, so a prompt can be
 // read, replayed and measured afterwards. A log, not part of the data model:

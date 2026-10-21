@@ -17,6 +17,7 @@ import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createMemoryRepo } from './repo/memory';
 import { createJobRepo, type JobRepo } from './repo/jobs';
 import { createPhotoImportRepo } from './repo/photoImports';
+import { createDiscoveryRepo } from './repo/discovery';
 import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
@@ -142,6 +143,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     targetSkills: createTargetSkillRepo(tx),
     targetReadiness: createTargetReadinessRepo(tx),
     targetBudgets: createTargetBudgetRepo(tx),
+    discovery: createDiscoveryRepo(tx),
   };
 }
 
