@@ -1,7 +1,7 @@
 import type { ClozeChoiceQuestion, ClozeTypedQuestion, LanguageCode, Question, SentenceTranslationQuestion } from '@lang-tutor/core/api';
 import { Redirect, router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MarkedText, type SentenceTaps } from '@/components/ContextLine';
@@ -460,6 +460,14 @@ export default function SessionScreen() {
   useEffect(() => {
     if (explainOpen) requestAnimationFrame(() => scroll.current?.scrollToEnd({ animated: true }));
   }, [explainOpen]);
+  // The keyboard covers the lower half of the screen, where a tall card's input
+  // and its בדיקה sit: once it is up, the card shows its end, and its prompt is a
+  // scroll away. iOS makes room before this event; Android makes it after, which
+  // the ScrollView's onLayout below catches.
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', () => scroll.current?.scrollToEnd({ animated: true }));
+    return () => shown.remove();
+  }, []);
   // A session is always entered from home, which needs an active enrollment;
   // an empty language only drops the name from the instruction.
   const language = active?.target_language ?? '';
@@ -513,11 +521,14 @@ export default function SessionScreen() {
   // Phase 39 (spec D9): a typed meaning is answered in the learner's language.
   const learner = active?.source_language ?? 'he';
   const line = sentenceLine(session.explanation);
+  const banner = session.answer !== null && hasBanner(session.answer, session.retype);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      {/* The keyboard must not cover the typed card's input and its button. */}
-      <KeyboardAvoidingView style={styles.avoid} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* The keyboard must not cover the typed card's input and its button. Padding
+          on Android too: it draws edge to edge (target SDK 35+, mandatory from
+          Android 16), where the system no longer shrinks the screen for the keyboard. */}
+      <KeyboardAvoidingView style={styles.avoid} behavior="padding">
         <View style={styles.header}>
           <Pressable accessibilityRole="button" testID="session-back" hitSlop={12} onPress={() => router.back()}>
             <Text style={styles.back}>{'→'}</Text>
@@ -538,9 +549,12 @@ export default function SessionScreen() {
             not merely dismiss the keyboard. */}
         <ScrollView
           ref={scroll}
-          contentContainerStyle={styles.body}
+          contentContainerStyle={[styles.body, banner && styles.bodyUnderBanner]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          onLayout={() => {
+            if (Keyboard.isVisible()) scroll.current?.scrollToEnd({ animated: true });
+          }}
         >
           {/* Spec D7: a refused microphone says so once, above whatever card is
               current, for the rest of the session. */}
@@ -602,5 +616,8 @@ const styles = StyleSheet.create({
   // Bottom padding keeps the last option clear of the overlaid banner.
   typedForm: { gap: spacing.md },
   noMic: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, textAlign: 'center', paddingBottom: spacing.md },
-  body: { paddingTop: spacing.xl, paddingBottom: spacing.xxl * 4 },
+  body: { paddingTop: spacing.xl, paddingBottom: spacing.xl },
+  // Room under the last option for the banner laid over it. Not while it is
+  // away: the card's end, the end the keyboard scrolls to, is its button.
+  bodyUnderBanner: { paddingBottom: spacing.xxl * 4 },
 });
