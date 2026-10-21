@@ -17,7 +17,7 @@ import {
 import { testRng } from '../../tests/support/testRng';
 import { PREPARE_SESSION, STOCK_SESSION } from '../domain/jobs';
 import type { SessionSummary } from '../domain/session';
-import type { QuestionType } from '@lang-tutor/core/domain';
+import { FSRS6_DEFAULT, type QuestionType } from '@lang-tutor/core/domain';
 import { NoSavedWords, SessionNotFound, SessionNotReady, SessionOpen, TargetClosed } from '../errors';
 import type { DictRepo } from '../repo/dictionary';
 import type { EnrollmentRepo } from '../repo/enrollments';
@@ -719,7 +719,12 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
   });
 
   it('keeps a practice-more stock chosen today while practice more is still the choice: no churn', async () => {
-    const { service, retired, inserted, paths } = examWorld(stockChosenOn(TODAY), PRACTICE_MORE, {
+    // Phase 67b fix: a ready stock whose card can still raise the card (g_a has no answer today).
+    const ready: Partial<SessionRepo> = {
+      ...stockChosenOn(TODAY),
+      findSessionCards: async () => [{ glossId: 'g_a', type: 'typed_translation', intro: false }],
+    };
+    const { service, retired, inserted, paths } = examWorld(ready, PRACTICE_MORE, {
       startedOn: '2026-10-10',
       targetReadiness: allReady,
     });
@@ -733,6 +738,49 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
     expect(paths).toEqual(['t_exam', 't_exam']);
     expect(retired).toEqual([]);
     expect(inserted).toEqual([]);
+  });
+
+  /** Phase 67b fix (Victor's test, 2026-10-21). Both words ready at the start of today, so the
+   *  choice is practice more; since then g_a has had both skills answered today and g_b only its
+   *  writing: g_b's spelling, its weakest, is the one card that can still raise the card. */
+  const answered = (day: string) => ({
+    state: { stability: 3, difficulty: 5, lastDay: day, reps: 1, lapses: 0, params: FSRS6_DEFAULT.id },
+    day,
+    missedToday: false,
+    bonusUsed: 0,
+    held: false,
+  });
+  const lateInTheDay = stub<TargetReadinessRepo>({
+    findRows: async () => [
+      { targetId: 't_exam', glossId: 'g_a', dimension: 'written_productive', row: answered(TODAY), sessionId: null },
+      { targetId: 't_exam', glossId: 'g_a', dimension: 'spelling', row: answered(TODAY), sessionId: null },
+      { targetId: 't_exam', glossId: 'g_b', dimension: 'written_productive', row: answered(TODAY), sessionId: null },
+    ],
+    findFirstEventsOn: allReady.findFirstEventsOn,
+  });
+  const stockOf = (cards: { glossId: string; type: QuestionType; intro: boolean }[]): Partial<SessionRepo> => ({
+    ...stockChosenOn(TODAY),
+    findSessionCards: async (sessionId) => (sessionId === 's_stock' ? cards : []),
+  });
+
+  it("replaces a practice-more stock that cannot raise the card when today's choice can (phase 67b, Victor's test)", async () => {
+    // Chosen while g_b was being met in the session in flight: it asks only g_a again.
+    const { service, retired, inserted } = examWorld(stockOf([{ glossId: 'g_a', type: 'typed_translation', intro: false }]), PRACTICE_MORE, {
+      startedOn: '2026-10-10',
+      targetReadiness: lateInTheDay,
+    });
+    expect(await service.createNextSession('u1', E, NO_DEVICES, 't_exam')).toMatchObject({ sessionId: 's_new', created: true });
+    expect(retired).toEqual(['s_stock']);
+    expect(inserted).toHaveLength(1);
+  });
+
+  it('keeps a practice-more stock that can still raise the card: no churn', async () => {
+    const { service, retired } = examWorld(stockOf([{ glossId: 'g_b', type: 'dictation', intro: false }]), PRACTICE_MORE, {
+      startedOn: '2026-10-10',
+      targetReadiness: lateInTheDay,
+    });
+    expect(await service.createNextSession('u1', E, NO_DEVICES, 't_exam')).toMatchObject({ sessionId: 's_stock', created: false });
+    expect(retired).toEqual([]);
   });
 
   it("is replaced on the home read when it was chosen on an earlier day and today's cap is another", async () => {

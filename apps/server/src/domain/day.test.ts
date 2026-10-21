@@ -22,6 +22,7 @@ import { servedSkill, targetDay, type TargetDay, type TargetDayInput } from './t
 import {
   chooseTargetPicks,
   owedWords,
+  raisesCard,
   stockServes,
   stockToCheck,
   targetMode,
@@ -1187,7 +1188,16 @@ function runPaths(
       if (!stock) return chooseFor(target, []);
       if (!stockToCheck({ chosenOn: stock.chosenOn, owedGlossIds: stock.recorded.owedGlossIds }, date)) return stock;
       const fresh = chooseFor(target, []);
-      return stockServes(stock.recorded, fresh.recorded) || fresh.picks.length === 0 ? stock : fresh;
+      // Phase 67b fix (services/sessions.ts outrun): a practice-more stock that cannot raise the
+      // card is replaced when today's choice can.
+      const asked = (picks: readonly ChosenPick[]) => picks.map((pick) => ({ glossId: pick.glossId, dimension: pick.dimension, meets: pick.cls === 'NEW' }));
+      const judged = { daysLeft: daysBetween(date, target.dueOn), now: pickInputOf(target, []).now };
+      const outrun =
+        stock.recorded.owedGlossIds.length === 0 &&
+        fresh.recorded.owedGlossIds.length === 0 &&
+        !raisesCard(asked(stock.picks), judged) &&
+        raisesCard(asked(fresh.picks), judged);
+      return (stockServes(stock.recorded, fresh.recorded) && !outrun) || fresh.picks.length === 0 ? stock : fresh;
     };
     /** Phase 65 (spec D7.1, ruling T3-a), phase 67 (spec D5): services/targetDayRead.ts
      *  readTodayBudget before the path's first session of the day, so none of its sessions is done

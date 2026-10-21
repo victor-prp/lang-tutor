@@ -112,7 +112,7 @@ import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
 import { pastBudget } from '../domain/targetBudget';
-import { chooseTargetPicks, owedWords, stockServes, stockToCheck, type StockChoice } from '../domain/targetPicker';
+import { chooseTargetPicks, owedWords, picksOfCards, raisesCard, stockServes, stockToCheck, type StockChoice } from '../domain/targetPicker';
 import { activeOn, readinessOf, recallOnDue } from '../domain/targets';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
@@ -565,7 +565,7 @@ export function createSessionService({
       owedGlossIds: owedWords(day, mode),
       pastBudget: mode === 'past_budget',
     };
-    return { path: target.id, at, today, saved: saved.filter((gloss) => glossIds.includes(gloss.glossId)), families, picks, row };
+    return { path: target.id, at, today, saved: saved.filter((gloss) => glossIds.includes(gloss.glossId)), families, picks, row, now: input.now };
   }
   type MainRead = NonNullable<Awaited<ReturnType<typeof readMain>>>;
   type TargetRead = NonNullable<Awaited<ReturnType<typeof readTarget>>>;
@@ -742,10 +742,25 @@ export function createSessionService({
     if (!stale || path === null) return null;
     const read = await readChoice(repos, enrolled, stale.devices, path);
     if (!read || read.path === null) return null;
-    if (stockServes(stale.recorded, read.row)) return null;
+    if (stockServes(stale.recorded, read.row) && !(await outrun(repos, stock, read))) return null;
     const picks = await choosePicks(repos, enrolled, read);
     if (!picks || !(await repos.session.retireStock(stock.id))) return null;
     return { retired: stock.id, ...(await writeStock(repos, enrolled, stale.devices, read, picks)) };
+  }
+
+  /**
+   * Phase 67b fix (Victor's test, 2026-10-21). Whether a practice-more stock that still serves by
+   * stockServes is outrun by today's choice: its cards cannot raise the card today and today's
+   * choice can (raisesCard). It was chosen beside the session in flight, so it misses a word that
+   * session was meeting. A stock not yet prepared (no cards) is kept.
+   */
+  async function outrun(repos: Repos, stock: SessionSummary, read: ChoiceRead): Promise<boolean> {
+    if (read.path === null || read.row.owedGlossIds.length > 0) return false;
+    const cards = await repos.session.findSessionCards(stock.id);
+    if (cards.length === 0) return false;
+    const judged = { daysLeft: read.row.daysLeft, now: read.now };
+    const fresh = read.picks.map((pick) => ({ glossId: pick.glossId, dimension: pick.dimension, meets: pick.cls === 'NEW' }));
+    return !raisesCard(picksOfCards(cards), judged) && raisesCard(fresh, judged);
   }
 
   /** Phase 43 (spec D3). A stock made, once its transaction committed. Phase 53 (spec D8):
