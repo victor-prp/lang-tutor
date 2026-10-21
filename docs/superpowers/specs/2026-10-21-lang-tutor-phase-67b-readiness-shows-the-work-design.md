@@ -164,7 +164,8 @@ The server says whether one more session today can raise the card. It can when s
 its bar and:
 
 - it has not been met yet (practice more meets it); or
-- before the eve, it has a counted skill not answered today; or
+- before the eve, its weakest counted skill has had no answer today (only the first answer counts,
+  and only the weakest moves the word: Ruling R10); or
 - it is the eve.
 
 It cannot otherwise, and not at 100%. The wire's `practice_more_little` keeps its name and becomes
@@ -299,7 +300,9 @@ Made while building, each with what it costs if wrong.
   counted 100, so their extra first answers could only lose. With the rule: 91.4, 93.0, 94.0, one
   single-phase dip of a point, and a test reaches 100% on the eve in all five phases within 11–12
   eve sessions (no phase pinned any more). Cost: a word at its bar is not practised past the
-  budget while another is below; the plan's eve check still asks it.
+  budget while another is below; the plan's eve check still asks it. And (final review I2) a
+  practice-more session is as long as the words below their bar, one card each: near 100% on the
+  eve a session can be one to three cards, each prepared on its own (for Victor to judge).
 - **R2 (D3).** Ruling: a row read from the main memory that moved today counts as answered today:
   before the eve a later target answer that day is ignored, on the eve it is a bonus. That memory's
   answer was the day's first. Cost: a word answered on My words earlier today moves on its target
@@ -323,3 +326,14 @@ Made while building, each with what it costs if wrong.
 - **R9 (Testing).** Ruling: the eve's 100% gate keeps an automatic exclusion for a phase whose
   rhythm pins one word (its weakest word asked in 20 eve cards or more, 90% missed), though none is
   pinned after R1. Cost: a real stuck word excused as the rhythm.
+- **R10 (D6, final review C1).** Ruling: "can raise" before the eve asks whether a word's weakest
+  counted skill (each skill at its lowest chance) has had no answer today, not any skill: a word is
+  as ready as its weakest, so answering another skill cannot move it. Practice more takes those
+  words first before the eve. In the day simulation (2026-10-21), no practice-more session flagged
+  "cannot raise" raised the card (0 of 292 for a test, 0 of 291 for homework); flagged "can", 70%
+  and 91% did (a miss, and a test's hold, keep the rest). Cost: none found; the first draft kept
+  the blue line all day once practice stopped helping, and the sheet almost never showed.
+- **R11 (D5, final review I1).** Ruling: the bar filter applies to practice more and the fill past
+  the budget, not to the due date's last review, whose card is frozen: it asks every word, as phase
+  57 D2 has it. Cost: none.
+
