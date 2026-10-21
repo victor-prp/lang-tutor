@@ -6,7 +6,21 @@ import type { ChosenPick } from './choose';
 import { LADDER_SLOTS, NEW_PER_SESSION, STEP_DOWNS_PER_SESSION } from './chooseConstants';
 import { MAX_PER_TYPE } from './plan';
 import type { TargetDay, WordDay } from './targetDay';
-import { cardOf, chooseTargetPicks, owedWords, picksOfCards, raisesCard, stockServes, stockToCheck, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
+import {
+  boardsSession,
+  cardOf,
+  chooseTargetPicks,
+  owedWords,
+  picksOfCards,
+  raisesCard,
+  sameStepDowns,
+  stepDownKeys,
+  stockServes,
+  stockToCheck,
+  targetMode,
+  type TargetMode,
+  type TargetPickInput,
+} from './targetPicker';
 
 // Phase 67 (spec D6). The target picker reads each word's cards of the day: the words to meet
 // first, then each owed word's first card, then its second, the word with the lowest readiness
@@ -582,6 +596,52 @@ describe('stockServes', () => {
 
   it('keeps a practice-more stock while practice more is still the choice', () => {
     expect(stockServes({ capHalves: 10, owedGlossIds: [] }, { capHalves: 10, owedGlossIds: [] })).toBe(true);
+  });
+
+  it('serves only while it asks the step-downs today asks (phase 68 D6); none recorded reads as none', () => {
+    const owed = { capHalves: 10, owedGlossIds: ['g0', 'g1'] };
+    expect(stockServes({ ...owed, stepDowns: ['g0|written_productive'] }, { ...owed, stepDowns: ['g0|written_productive'] })).toBe(true);
+    expect(stockServes({ ...owed, stepDowns: [] }, { ...owed, stepDowns: ['g0|written_productive'] })).toBe(false);
+    expect(stockServes(owed, { ...owed, stepDowns: [] })).toBe(true);
+    expect(sameStepDowns(undefined, { stepDowns: ['g0|spelling'] })).toBe(false);
+    expect(stepDownKeys([
+      { glossId: 'g1', dimension: SK, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false, relearn: true },
+      { glossId: 'g0', dimension: WP, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false },
+      { glossId: 'g0', dimension: SP, rung: 1, level: 1, r: 1, cls: 'TARGET', ladder: false, relearn: true },
+    ])).toEqual([`g0|${SP}`, `g1|${SK}`]);
+  });
+});
+
+// Phase 68 (spec D5, ruling). A target session gets a matching board when none of its cards can
+// raise the card today.
+describe('boardsSession', () => {
+  const card = (glossId: string, dimension: Dimension, cls: ChosenPick['cls'] = 'TARGET'): ChosenPick => ({
+    glossId,
+    dimension,
+    rung: 2,
+    level: 1,
+    r: cls === 'NEW' ? null : 1,
+    cls,
+    ladder: cls === 'NEW',
+  });
+  const now = new Map([
+    ['g0', { pct: 50, counted: [SK, WP] as Dimension[], weakestOpen: false }],
+    ['g1', { pct: 50, counted: [WP, SK] as Dimension[], weakestOpen: true }],
+  ]);
+
+  it('boards a session none of whose cards can raise the card: a weakest skill answered today, before the eve', () => {
+    expect(boardsSession([card('g0', SK), card('g1', SK)], { daysLeft: 3, now })).toBe(true);
+  });
+
+  it('does not board one with a card that can: a weakest skill still open, the eve, or a meeting', () => {
+    expect(boardsSession([card('g0', SK), card('g1', WP)], { daysLeft: 3, now })).toBe(false);
+    expect(boardsSession([card('g0', SK)], { daysLeft: 1, now })).toBe(false);
+    expect(boardsSession([card('g0', SK), card('g2', WR, 'NEW')], { daysLeft: 3, now })).toBe(false);
+  });
+
+  it('boards the due date, whose card is frozen, and never without readiness now', () => {
+    expect(boardsSession([card('g1', WP)], { daysLeft: 0, now })).toBe(true);
+    expect(boardsSession([card('g0', SK)], { daysLeft: 3, now: undefined })).toBe(false);
   });
 });
 

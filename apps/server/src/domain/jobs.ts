@@ -117,6 +117,9 @@ export const PrepareSessionPayloadSchema = z.object({
         // Phase 54 (spec D3, D7). A new word's first session, asked as four cards,
         // the meet card first. Absent in a stock prepared before the deploy: no ladder.
         ladder: z.boolean().optional(),
+        // Phase 68 (spec D2). A target's step-down, asked as see it, pick it, produce it.
+        // Absent in a stock prepared before the deploy: none.
+        relearn: z.boolean().optional(),
       }),
     )
     .min(1)
@@ -136,6 +139,9 @@ export const PrepareSessionPayloadSchema = z.object({
   // type held to MAX_PER_TYPE and with no one-word speaking rule, so a card never falls back
   // to one that serves no owed work. Absent in a job enqueued before the deploy: the main path.
   target: z.boolean().optional(),
+  // Phase 68 (spec D5, ruling). A target session none of whose cards can raise the card today:
+  // it gets a matching board. Absent: none.
+  board: z.boolean().optional(),
 });
 export type PrepareSessionPayload = z.infer<typeof PrepareSessionPayloadSchema>;
 
@@ -226,7 +232,7 @@ export const STOCK_SAVE_DELAY_SECONDS = 30;
 /** What asked for the stock: logged with it, so a stock can be traced to its cause.
  *  Phase 53 (ruling R-D12b): `target`, a change to a target, which retired the stock.
  *  Phase 58 (final review I1): `words_removed`, a level's words removed, which did too. */
-export const STOCK_REASONS = ['start', 'answer', 'complete', 'skip', 'save', 'target', 'words_removed'] as const;
+export const STOCK_REASONS = ['start', 'answer', 'complete', 'skip', 'save', 'target', 'words_removed', 'miss'] as const;
 
 export const StockSessionPayloadSchema = z.object({
   enrollment_id: z.string().min(1),

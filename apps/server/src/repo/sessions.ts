@@ -243,15 +243,17 @@ export function createSessionRepo(tx: Tx) {
       return row?.ms === null || row?.ms === undefined ? null : new Date(Number(row.ms));
     },
 
-    findSessionCards: async (sessionId: string): Promise<{ glossId: string; type: QuestionType; intro: boolean }[]> => {
+    findSessionCards: async (sessionId: string): Promise<{ glossId: string; type: QuestionType; intro: boolean; answered: boolean }[]> => {
       if (!UUID_RE.test(sessionId)) return [];
       const rows = await tx
-        .select({ glossId: questions.glossId, type: questions.type, intro: questions.intro })
+        .select({ glossId: questions.glossId, type: questions.type, intro: questions.intro, answered: sql<boolean>`${answers.sessionId} IS NOT NULL` })
         .from(sessionQuestions)
         .innerJoin(questions, eq(questions.id, sessionQuestions.questionId))
+        // Phase 68 (spec D1): whether the card is answered, which the open step-downs read.
+        .leftJoin(answers, and(eq(answers.sessionId, sessionQuestions.sessionId), eq(answers.position, sessionQuestions.position)))
         .where(eq(sessionQuestions.sessionId, sessionId))
         .orderBy(asc(sessionQuestions.position));
-      return rows.map((row) => ({ glossId: row.glossId, type: row.type as QuestionType, intro: row.intro }));
+      return rows.map((row) => ({ glossId: row.glossId, type: row.type as QuestionType, intro: row.intro, answered: row.answered }));
     },
 
     /** Phase 43 (spec D3). What the enrollment's newest session was built for:
@@ -313,6 +315,11 @@ export function createSessionRepo(tx: Tx) {
      *  its positions' order. Phase 57 (spec D1): each with the path of its session.
      *  Sessions of two paths can be answered at once, so "answer order" is now creation
      *  order across paths, which dayState's returns read, as before. */
+    /** Phase 68 (spec D1). Every answer on a target's path, every day's and its open session's, as
+     *  findAnswersOn reads one, in answer order: what its open step-downs are read from. */
+    findPathAnswers: (enrollmentId: string, targetId: string): Promise<(DayAnswer & { targetId: Path })[]> =>
+      UUID_RE.test(targetId) ? findAnswersWhere(enrollmentId, onPath(targetId)) : Promise.resolve([]),
+
     findAnswersOn: (enrollmentId: string, day: string): Promise<(DayAnswer & { targetId: Path })[]> =>
       findAnswersWhere(enrollmentId, sql`(s.practice_day = ${day}::date OR s.status IN ('preparing', 'ready'))`),
 

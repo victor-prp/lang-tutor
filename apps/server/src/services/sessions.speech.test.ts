@@ -58,6 +58,8 @@ function setup(
     findEnrollmentId: async () => 'e1',
     // Phase 43 (spec D2). Started by its start call before any of these answers.
     markStarted: async () => false,
+    // Phase 68 (spec D6): a miss reads the session's path, here the main path's, which asks no stock.
+    findState: async () => ({ id: 's1', userId: 'u1', enrollmentId: 'e1', status: 'ready', source: 'list', targetId: null }),
     insertAnswer: async (...args) => {
       inserted.push(args);
     },
@@ -207,6 +209,8 @@ describe('answerBySpeech (spec D5)', () => {
       findEnrollmentId: async () => 'e1',
       // Phase 43 (spec D2). Started by its start call before any of these answers.
       markStarted: async () => false,
+      // Phase 68 (spec D6): a miss reads the session's path, here the main path's, which asks no stock.
+      findState: async () => ({ id: 's1', userId: 'u1', enrollmentId: 'e1', status: 'ready', source: 'list', targetId: null }),
       insertAnswer: async () => {},
     });
     const service = createSessionService({

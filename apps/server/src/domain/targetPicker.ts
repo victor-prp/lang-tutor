@@ -74,8 +74,9 @@ export function owedWords(day: TargetDay, mode: TargetMode): string[] {
 }
 
 /** What a target path's stock recorded of its day (session_targets), as its stale check reads it;
- *  `pastBudget`, whether it was chosen past the day's budget (phase 65b). */
-export type StockChoice = { capHalves: number; owedGlossIds: readonly string[]; pastBudget?: boolean };
+ *  `pastBudget`, whether it was chosen past the day's budget (phase 65b); `stepDowns`, the
+ *  step-downs it asks, `glossId|dimension`, sorted (phase 68; absent: none). */
+export type StockChoice = { capHalves: number; owedGlossIds: readonly string[]; pastBudget?: boolean; stepDowns?: readonly string[] };
 
 /**
  * Phase 53 (ruling R-D12), per path since phase 57 (spec D2, final review C1). Whether a target
@@ -100,7 +101,29 @@ export function stockServes(recorded: StockChoice | undefined, today: StockChoic
     recorded !== undefined &&
     recorded.pastBudget !== true &&
     recorded.capHalves === today.capHalves &&
-    recorded.owedGlossIds.join(' ') === today.owedGlossIds.join(' ')
+    recorded.owedGlossIds.join(' ') === today.owedGlossIds.join(' ') &&
+    sameStepDowns(recorded, today)
+  );
+}
+
+/** Phase 68 (spec D6). Whether a stock asks the step-downs today's choice asks. */
+export const sameStepDowns = (recorded: Pick<StockChoice, 'stepDowns'> | undefined, today: Pick<StockChoice, 'stepDowns'>): boolean =>
+  (recorded?.stepDowns ?? []).join(' ') === (today.stepDowns ?? []).join(' ');
+
+/** Phase 68 (spec D6). The step-downs a session's picks ask, as session_targets records them. */
+export const stepDownKeys = (picks: readonly ChosenPick[]): string[] =>
+  picks
+    .filter((pick) => pick.relearn)
+    .map((pick) => `${pick.glossId}|${pick.dimension}`)
+    .sort();
+
+/** Phase 68 (spec D5, ruling). Whether a target session gets a matching board: none of its picks can
+ *  raise the card today (raisesCard; a meeting raises it), and on the due date none can. */
+export function boardsSession(picks: readonly ChosenPick[], input: { daysLeft: number; now: TargetPickInput['now'] }): boolean {
+  const judged = { daysLeft: input.daysLeft, now: input.daysLeft > 0 ? input.now : new Map() };
+  return !raisesCard(
+    picks.map((pick) => ({ glossId: pick.glossId, dimension: pick.dimension, meets: pick.cls === 'NEW' })),
+    judged,
   );
 }
 

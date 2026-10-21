@@ -58,6 +58,8 @@ export type SessionTargetRow = {
   owedGlossIds: string[];
   /** Phase 65b (spec D2): chosen past the day's budget. */
   pastBudget: boolean;
+  /** Phase 68 (spec D6): the step-downs the stock asks, `glossId|dimension`, sorted. */
+  stepDowns: string[];
 };
 
 /** Phase 57 (spec D6). A target's word as its plan reads it: when it joined, and the
@@ -332,14 +334,20 @@ export function createTargetRepo(tx: Tx) {
     findSessionTarget: async (
       sessionId: string,
       targetId: string,
-    ): Promise<{ capHalves: number; owedGlossIds: string[]; pastBudget: boolean } | undefined> => {
+    ): Promise<{ capHalves: number; owedGlossIds: string[]; pastBudget: boolean; stepDowns: string[] } | undefined> => {
       if (!UUID_RE.test(sessionId) || !UUID_RE.test(targetId)) return undefined;
       const [row] = await tx
-        .select({ capHalves: sessionTargets.capHalves, owedGlossIds: sessionTargets.owedGlossIds, pastBudget: sessionTargets.pastBudget })
+        .select({
+          capHalves: sessionTargets.capHalves,
+          owedGlossIds: sessionTargets.owedGlossIds,
+          pastBudget: sessionTargets.pastBudget,
+          stepDowns: sessionTargets.stepDowns,
+        })
         .from(sessionTargets)
         .where(and(eq(sessionTargets.sessionId, sessionId), eq(sessionTargets.targetId, targetId)));
+      // Phase 68 (spec D6): a row from before phase 68 records no step-down.
       return row && row.capHalves !== null
-        ? { capHalves: row.capHalves, owedGlossIds: row.owedGlossIds ?? [], pastBudget: row.pastBudget }
+        ? { capHalves: row.capHalves, owedGlossIds: row.owedGlossIds ?? [], pastBudget: row.pastBudget, stepDowns: row.stepDowns ?? [] }
         : undefined;
     },
 
