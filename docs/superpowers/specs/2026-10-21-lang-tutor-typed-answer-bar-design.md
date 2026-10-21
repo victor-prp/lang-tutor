@@ -91,6 +91,12 @@ banner shows.
 `retype-title`, `retype-answer`, `retype-notice`, and the card roots `meaning-card`, `cloze-card` and
 `translate-card`.
 
+**D8. The keyboard opens on a tap (Victor, after PR #228).** A typed card opens with the keyboard
+down, so the whole question shows before typing starts. The keyboard comes up when the learner taps
+the input. **(my call)** The same goes for a second try and a retype: their note or right answer
+shows whole first. Before, both brought the keyboard back by themselves. The input has no
+`autoFocus` and no focus call.
+
 ## Left to the builder
 
 - How the bar leaves the scroll view. The session owns the scroll view and the
