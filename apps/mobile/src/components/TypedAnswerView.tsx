@@ -13,6 +13,7 @@ import { MAX_JUDGED_TEXT, rightAnswer } from '@lang-tutor/core/domain';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 
+import { barButton, barNote } from '@/answerBar';
 import { ContextLine, type SentenceTaps } from '@/components/ContextLine';
 import { HelpButton } from '@/components/HelpButton';
 import { ListenPrompt } from '@/components/ListenPrompt';
@@ -24,7 +25,14 @@ import type { Retype } from '@/retype';
 import { strings, type Instruction } from '@/strings';
 import { helpText, typedHelpDone, typedHint } from '@/typedHelp';
 import { typedSubmit } from '@/typedSubmit';
-import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { colors, fontSizes, lineHeights, radii, shadows, spacing } from '@/theme';
+
+/**
+ * Answer bar spec D1. The session's screen around a card: `card` in its scroll
+ * view, and under it `bar`, a typed card's answer bar, on the keyboard while it
+ * is up. A card with nothing typed passes no bar.
+ */
+export type CardFrame = (card: ReactNode, bar?: ReactNode) => ReactNode;
 
 // The card roots the e2e flows find a card by (phase 27: the two sentence cards).
 const ROOT_TEST_IDS: Record<Props['question']['type'], string | undefined> = {
@@ -93,6 +101,8 @@ type Props = {
   sentence?: SentenceLine | null;
   /** Phase 66b (spec D2). What shows under the input once answered: the corrected sentence. */
   below?: ReactNode;
+  /** Answer bar spec D1: where the card and its answer bar are drawn. */
+  frame: CardFrame;
 };
 
 /**
@@ -122,6 +132,7 @@ export function TypedAnswerView({
   taps,
   sentence = null,
   below,
+  frame,
 }: Props) {
   const [text, setText] = useState('');
   // Phase 39 (spec D8): the last send was in the wrong alphabet, or one word
@@ -183,7 +194,73 @@ export function TypedAnswerView({
   // Phase 66b (spec D2): orange for a sentence to fix around a word that is not wrong.
   const border = BORDERS[retyping ? 'idle' : inputTone(verdict, sentence)];
 
-  return (
+  // Phase 63 (spec D1, D2): the box holds the help button at its right edge,
+  // where the keyboard never hides it, and the input; the input's own text
+  // lies over a layer drawn behind it with the grey letters and the marks.
+  // Answer bar spec D2, D5: on the bar while it is typed, in the card once judged.
+  const box = (
+    <View style={[styles.box, border]} testID="typed-box">
+      {helps && !locked ? (
+        <HelpButton testID="typed-help" disabled={checking || typedHelpDone(hinted, text, presses, hebrew)} onPress={() => help?.onPress(text)} />
+      ) : null}
+      <View style={styles.field}>
+        {ghost !== '' || markFrom !== null ? (
+          <Text
+            // No physical textAlign: native RTL swaps left and right on a Text (and
+            // not on a TextInput), web does not; the base direction puts the layer's
+            // text where the input's is on both (phase 1's fix, 1fff73e).
+            style={[styles.input, styles.layer, { writingDirection: direction }, overflow && styles.hidden]}
+            testID="typed-hint"
+            onTextLayout={(event) => setOverflow(event.nativeEvent.lines.length > 1)}
+          >
+            <Text style={styles.under}>{markFrom === null ? text : text.slice(0, markFrom)}</Text>
+            {markFrom !== null ? (
+              <Text style={styles.marked} testID="typed-marks">
+                {text.slice(markFrom)}
+              </Text>
+            ) : null}
+            {ghost !== '' ? (
+              <Text style={styles.ghost} testID="typed-ghost">
+                {ghost}
+              </Text>
+            ) : null}
+          </Text>
+        ) : null}
+        <TextInput
+          ref={input}
+          testID="typed-input"
+          value={text}
+          onChangeText={(value) => {
+            setText(value);
+            setRefused(null);
+            // Phase 55 (spec D7): the right answer hides at the first character.
+            if (retyping && retype.showing && value !== '') onRetypeTyping?.();
+          }}
+          editable={!locked && !checking}
+          // Answer bar spec D5: the answer, once judged, moves into the card and takes no focus.
+          autoFocus={!locked}
+          autoCapitalize="none"
+          autoCorrect={false}
+          spellCheck={false}
+          autoComplete="off"
+          // A sentence is longer than a word (spec D6); Return still submits.
+          multiline={question.type === 'sentence_translation'}
+          maxLength={question.type === 'sentence_translation' ? MAX_JUDGED_TEXT : 100}
+          returnKeyType="done"
+          submitBehavior="submit"
+          onSubmitEditing={() => {
+            if (!empty) submit(text);
+          }}
+          // Phase 63 (final review): the grey letters stand where the placeholder is.
+          placeholder={ghost !== '' ? undefined : strings.typedPlaceholder}
+          placeholderTextColor={colors.muted}
+          style={[styles.input, question.type === 'sentence_translation' && [styles.sentence, !locked && styles.sentenceGrows], { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }]}
+        />
+      </View>
+    </View>
+  );
+
+  const card = (
     <View style={styles.container} testID={ROOT_TEST_IDS[question.type]}>
       <InstructionText instruction={instruction} />
       {prompt !== undefined ? (
@@ -213,128 +290,79 @@ export function TypedAnswerView({
         </>
       ) : null}
       {retry !== null && !answered ? <RetryNotice retry={retry} type={question.type} /> : null}
-      {retype !== null && retyping ? (
+      {/* Answer bar spec D3: the retype's right answer is about the question; its
+          notice is on the bar. */}
+      {retype !== null && retyping && retype.showing ? (
         <View style={styles.retype} testID="retype">
-          {retype.showing ? (
-            <>
-              <Text style={styles.retypeTitle} testID="retype-title">
-                {retypeTitle}
-              </Text>
-              {/* Phase 56 (spec D7): the card's own answer, in its direction (a meaning right to left). */}
-              <Text style={[styles.retypeAnswer, { writingDirection: direction }]} testID="retype-answer">
-                {rightAnswer(question)}
-              </Text>
-            </>
-          ) : null}
-          <Text style={styles.retypeNotice} testID="retype-notice">
-            {retype.attempt === 1 ? strings.retypeNotice : strings.tryAgain}
+          <Text style={styles.retypeTitle} testID="retype-title">
+            {retypeTitle}
+          </Text>
+          {/* Phase 56 (spec D7): the card's own answer, in its direction (a meaning right to left). */}
+          <Text style={[styles.retypeAnswer, { writingDirection: direction }]} testID="retype-answer">
+            {rightAnswer(question)}
           </Text>
         </View>
       ) : null}
-      {/* Phase 63 (spec D1, D2): the box holds the help button at its right edge,
-          where the keyboard never hides it, and the input; the input's own text
-          lies over a layer drawn behind it with the grey letters and the marks. */}
-      <View style={[styles.box, question.type === 'sentence_translation' && styles.inputMultiline, border]} testID="typed-box">
-        {helps && !locked ? (
-          <HelpButton testID="typed-help" disabled={checking || typedHelpDone(hinted, text, presses, hebrew)} onPress={() => help?.onPress(text)} />
-        ) : null}
-        <View style={styles.field}>
-          {ghost !== '' || markFrom !== null ? (
-            <Text
-              // No physical textAlign: native RTL swaps left and right on a Text (and
-              // not on a TextInput), web does not; the base direction puts the layer's
-              // text where the input's is on both (phase 1's fix, 1fff73e).
-              style={[styles.input, styles.layer, { writingDirection: direction }, overflow && styles.hidden]}
-              testID="typed-hint"
-              onTextLayout={(event) => setOverflow(event.nativeEvent.lines.length > 1)}
-            >
-              <Text style={styles.under}>{markFrom === null ? text : text.slice(0, markFrom)}</Text>
-              {markFrom !== null ? (
-                <Text style={styles.marked} testID="typed-marks">
-                  {text.slice(markFrom)}
-                </Text>
-              ) : null}
-              {ghost !== '' ? (
-                <Text style={styles.ghost} testID="typed-ghost">
-                  {ghost}
-                </Text>
-              ) : null}
-            </Text>
-          ) : null}
-          <TextInput
-            ref={input}
-            testID="typed-input"
-            value={text}
-            onChangeText={(value) => {
-              setText(value);
-              setRefused(null);
-              // Phase 55 (spec D7): the right answer hides at the first character.
-              if (retyping && retype.showing && value !== '') onRetypeTyping?.();
-            }}
-            editable={!locked && !checking}
-            autoFocus
-            autoCapitalize="none"
-            autoCorrect={false}
-            spellCheck={false}
-            autoComplete="off"
-            // A sentence is longer than a word (spec D6); Return still submits.
-            multiline={question.type === 'sentence_translation'}
-            maxLength={question.type === 'sentence_translation' ? MAX_JUDGED_TEXT : 100}
-            returnKeyType="done"
-            submitBehavior="submit"
-            onSubmitEditing={() => {
-              if (!empty) submit(text);
-            }}
-            // Phase 63 (final review): the grey letters stand where the placeholder is.
-            placeholder={ghost !== '' ? undefined : strings.typedPlaceholder}
-            placeholderTextColor={colors.muted}
-            style={[styles.input, question.type === 'sentence_translation' && styles.inputMultiline, { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }]}
-          />
-        </View>
-      </View>
-      {below}
-      {refused === 'wrong_script' && answerLanguage !== null && !locked ? (
-        <View testID="wrong-script">
-          <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} languageTestId="wrong-script-language" style={styles.wrongScript} />
-        </View>
-      ) : null}
-      {refused === 'word_only' && !locked ? (
-        <Text style={styles.wrongScript} testID="word-only">
-          {strings.wordOnlyNotice}
-        </Text>
-      ) : null}
-      {locked ? null : (
-        <View style={answerStyles.actions}>
-          <Pressable
-            accessibilityRole="button"
-            testID="typed-submit"
-            disabled={empty || checking}
-            onPress={() => submit(text)}
-            style={[answerStyles.check, (empty || checking) && answerStyles.checkDisabled]}
-          >
-            <Text style={answerStyles.checkLabel}>{checking ? strings.checking : strings.typedCheck}</Text>
-          </Pressable>
-          {failed && !checking && !retyping ? (
-            <>
-              <Text style={answerStyles.showAnswer} testID="judge-failed">
-                {strings.couldNotCheck}
-              </Text>
-              <Pressable accessibilityRole="button" testID="judge-try-again" disabled={empty} hitSlop={8} onPress={() => submit(text)}>
-                <Text style={answerStyles.showAnswer}>{strings.tryAgain}</Text>
-              </Pressable>
-            </>
-          ) : null}
-          {/* Phase 55 (spec D7): the retype has no way round it. */}
-          {checking || retyping ? null : (
-            <Pressable accessibilityRole="button" testID="typed-show-answer" hitSlop={8} onPress={() => submit('')}>
-              <Text style={answerStyles.showAnswer}>{strings.typedShowAnswer}</Text>
-            </Pressable>
-          )}
-        </View>
+      {/* Answer bar spec D5: once judged, the answer in its colour, under the question. */}
+      {locked ? box : null}
+      {locked ? below : null}
+      {/* Answer bar spec D3: last, a short scroll down on a tall card. Phase 55
+          (spec D7): the retype has no way round it. */}
+      {locked || checking || retyping ? null : (
+        <Pressable accessibilityRole="button" testID="typed-show-answer" hitSlop={8} onPress={() => submit('')} style={styles.showAnswer}>
+          <Text style={answerStyles.showAnswer}>{strings.typedShowAnswer}</Text>
+        </Pressable>
       )}
     </View>
   );
+
+  // Answer bar spec D2: what is being typed, on the keyboard. The note line, the
+  // box, and the big button.
+  const note = barNote({ refused, failed, checking, retypeAttempt: retyping ? attempt : null });
+  const button = barButton({ empty, checking, failed, retyping });
+  const bar = locked ? null : (
+    <View style={[styles.bar, shadows.bar]}>
+      {note === 'wrong_script' && answerLanguage !== null ? (
+        <View testID="wrong-script">
+          <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} languageTestId="wrong-script-language" style={[styles.note, styles.wrongScript]} />
+        </View>
+      ) : null}
+      {note === 'word_only' ? (
+        <Text style={[styles.note, styles.wrongScript]} testID="word-only">
+          {strings.wordOnlyNotice}
+        </Text>
+      ) : null}
+      {note === 'failed' ? (
+        <Text style={[styles.note, styles.wrongScript]} testID="judge-failed">
+          {strings.couldNotCheck}
+        </Text>
+      ) : null}
+      {note === 'retype' || note === 'retype_again' ? (
+        <Text style={styles.note} testID="retype-notice">
+          {note === 'retype' ? strings.retypeNotice : strings.tryAgain}
+        </Text>
+      ) : null}
+      {box}
+      <Pressable
+        accessibilityRole="button"
+        testID={button.testID}
+        disabled={button.disabled}
+        onPress={() => submit(text)}
+        style={[answerStyles.check, button.disabled && answerStyles.checkDisabled]}
+      >
+        <Text style={answerStyles.checkLabel}>{BUTTON_LABELS[button.label]}</Text>
+      </Pressable>
+    </View>
+  );
+
+  return frame(card, bar);
 }
+
+const BUTTON_LABELS: Record<ReturnType<typeof barButton>['label'], string> = {
+  check: strings.typedCheck,
+  checking: strings.checking,
+  try_again: strings.tryAgain,
+};
 
 /** Phase 39 (spec D9). An instruction with the language it names in bold. */
 function InstructionText({
@@ -444,8 +472,23 @@ const styles = StyleSheet.create({
   ghost: { color: colors.faint },
   // The meaning card asks with a target-language form, which reads left to right.
   promptLtr: { writingDirection: 'ltr' },
-  // A sentence needs room, and Android centres a multiline box's text by default.
-  inputMultiline: { minHeight: 96, textAlignVertical: 'top' },
+  // Answer bar spec D4. A sentence's text is smaller, so three lines fit beside the
+  // big button; Android centres a multiline box's text by default.
+  sentence: { fontSize: fontSizes.md, lineHeight: lineHeights.md, textAlignVertical: 'top' },
+  // While typed it grows from one line to three, then scrolls inside itself.
+  sentenceGrows: { maxHeight: 3 * lineHeights.md + 2 * spacing.md },
+  // Answer bar spec D2. White and full width on the keyboard: the screen's side
+  // padding undone.
+  bar: {
+    marginHorizontal: -spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+  },
+  // The one line above the input.
+  note: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.text, writingDirection: 'rtl' },
+  showAnswer: { alignSelf: 'center' },
   inputIdle: { borderColor: colors.border },
   inputCorrect: { borderColor: colors.correct, backgroundColor: colors.correctSurface },
   inputWrong: { borderColor: colors.wrong, backgroundColor: colors.wrongSurface },
@@ -454,7 +497,6 @@ const styles = StyleSheet.create({
   retype: { gap: spacing.xs, alignItems: 'center' },
   retypeTitle: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, fontWeight: '700', textAlign: 'center', writingDirection: 'rtl' },
   retypeAnswer: { fontSize: fontSizes.xl, lineHeight: lineHeights.xl, color: colors.text, fontWeight: '700', textAlign: 'center', writingDirection: 'ltr' },
-  retypeNotice: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.text, textAlign: 'center', writingDirection: 'rtl' },
 });
 
 // Phase 66b (spec D2). The input's border by its tone.

@@ -1,7 +1,7 @@
 import type { ClozeChoiceQuestion, ClozeTypedQuestion, LanguageCode, Question, SentenceTranslationQuestion } from '@lang-tutor/core/api';
 import { Redirect, router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MarkedText, type SentenceTaps } from '@/components/ContextLine';
@@ -17,7 +17,7 @@ import { SentenceGap } from '@/components/SentenceGap';
 import { SpeakButton } from '@/components/SpeakButton';
 import { TappableSentence } from '@/components/TappableSentence';
 import { SpeakingCardView } from '@/components/SpeakingCardView';
-import { TypedAnswerView } from '@/components/TypedAnswerView';
+import { TypedAnswerView, type CardFrame } from '@/components/TypedAnswerView';
 import { confirm } from '@/confirm';
 import { sentenceFeedback, sentenceLine } from '@/explain';
 import { feedbackFor } from '@/feedback';
@@ -161,7 +161,7 @@ function retypeOf(question: Question, session: SessionValue) {
 // Phase 38 (spec D1, D4). The typed gap card holds whether its hint is open, and
 // sends it with the first answer. Keyed by question id, so a new card starts closed.
 // Phase 56 (spec D1): letter help beside the hint, which stays recorded and ungraded.
-function ClozeTypedCard({ question, session, language, learner, answerLanguage }: { question: ClozeTypedQuestion; session: SessionValue; language: string; learner: string; answerLanguage: LanguageCode | null }) {
+function ClozeTypedCard({ question, session, language, learner, answerLanguage, frame }: { question: ClozeTypedQuestion; session: SessionValue; language: string; learner: string; answerLanguage: LanguageCode | null; frame: CardFrame }) {
   const [hintOpen, setHintOpen] = useState(false);
   return (
     <TypedAnswerView
@@ -183,6 +183,7 @@ function ClozeTypedCard({ question, session, language, learner, answerLanguage }
       })}
       help={helpOf(session)}
       {...retypeOf(question, session)}
+      frame={frame}
     />
   );
 }
@@ -191,12 +192,14 @@ function ClozeTypedCard({ question, session, language, learner, answerLanguage }
 // means a new case here plus a view component; the header, progress bar,
 // feedback banner and scoring are untouched, and the `never` below fails the
 // build for a type with no case.
-function renderQuestion(question: Question, session: SessionValue, language: string, learner: string, explainOpen: boolean) {
+// Answer bar spec D1: every card draws in `frame`, the session's scroll view; a
+// typed card adds its answer bar, which `frame` puts under it, on the keyboard.
+function renderQuestion(question: Question, session: SessionValue, language: string, learner: string, explainOpen: boolean, frame: CardFrame) {
   // Phase 39 (spec D7, D8): the language a typed card's answer is checked in, by the server's rule.
   const answerLanguage = scriptGate(question, language, learner);
   switch (question.type) {
     case 'multiple_choice':
-      return (
+      return frame(
         <MultipleChoiceView
           question={question}
           instruction={strings.questionInstruction}
@@ -209,7 +212,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       );
     case 'new_meaning':
       // Phase 39 (spec D6): a choice of meanings, under a prompt that names the ones already known.
-      return (
+      return frame(
         <MultipleChoiceView
           question={question}
           instruction={strings.questionInstructionNewMeaning}
@@ -220,7 +223,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         />
       );
     case 'reverse_choice':
-      return (
+      return frame(
         <MultipleChoiceView
           question={question}
           instruction={strings.questionInstructionReverse(language)}
@@ -252,10 +255,11 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           retry={session.retry}
           help={helpOf(session)}
           {...retypeOf(question, session)}
+          frame={frame}
         />
       );
     case 'cloze_choice':
-      return (
+      return frame(
         <MultipleChoiceView
           question={question}
           instruction={strings.questionInstructionCloze}
@@ -268,7 +272,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       );
     case 'cloze_typed':
       // Judged on the phone against the gap's word, as a typed translation is.
-      return <ClozeTypedCard key={question.id} question={question} session={session} language={language} learner={learner} answerLanguage={answerLanguage} />;
+      return <ClozeTypedCard key={question.id} question={question} session={session} language={language} learner={learner} answerLanguage={answerLanguage} frame={frame} />;
     case 'sentence_translation':
       // Phase 56 (spec D1): no retype. Phase 63 (spec D9): no help button either:
       // its words are tapped, and a tap on the practised word is the help.
@@ -294,6 +298,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
               <SentenceCorrection text={session.answer.text} explanation={session.explanation} open={explainOpen} />
             ) : null
           }
+          frame={frame}
         />
       );
     case 'typed_meaning':
@@ -316,10 +321,11 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           help={helpOf(session)}
           {...retypeOf(question, session)}
           taps={tapsOf(session, learner)}
+          frame={frame}
         />
       );
     case 'listen_choice':
-      return (
+      return frame(
         <MultipleChoiceView
           question={question}
           instruction={strings.questionInstructionListen}
@@ -347,11 +353,12 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           retry={null}
           help={helpOf(session)}
           {...retypeOf(question, session)}
+          frame={frame}
         />
       );
     case 'letter_tiles':
       // Phase 55 (spec D7): each tile checked as placed; the card answers itself, saying whether it was helped.
-      return (
+      return frame(
         <LetterTilesView
           key={question.id}
           question={question}
@@ -362,7 +369,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         />
       );
     case 'matching':
-      return (
+      return frame(
         <MatchingBoardView
           key={question.id}
           question={question}
@@ -374,8 +381,8 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       );
     case 'read_aloud':
       // Spec D8: with speaking off, the card is passed unseen.
-      if (session.speakingOff !== null) return null;
-      return (
+      if (session.speakingOff !== null) return frame(null);
+      return frame(
         <SpeakingCardView
           key={question.id}
           question={question}
@@ -394,34 +401,33 @@ function renderQuestion(question: Question, session: SessionValue, language: str
     case 'meet':
       // Phase 54 (spec D1): a new word, met before it is asked. Ungraded, and
       // independent of speaking. Phase 55 (spec D1): saying it is the read-aloud card's.
-      return <MeetCardView key={question.id} question={question} language={language} answered={session.answered} onSeen={session.seen} />;
+      return frame(<MeetCardView key={question.id} question={question} language={language} answered={session.answered} onSeen={session.seen} />);
     case 'say_translation':
       // Spec D8: with speaking off, the same card is typed.
       // Phase 56 (spec D5): one help count for the card, so letters shown while
       // speaking stay shown once it is typed.
       if (session.speakingOff !== null) {
         return (
-          <View style={styles.typedForm}>
-            <TypedAnswerView
-              key={question.id}
-              question={question}
-              instruction={strings.questionInstructionTyped(language)}
-              answerLanguage={answerLanguage}
-              language={language}
-              answered={session.answered}
-              verdict={verdictOf(question, session)}
-              onSubmit={(text) => session.submitText(text)}
-              direction="ltr"
-              checking={session.judging === 'checking'}
-              failed={session.judging === 'failed'}
-              retry={session.retry}
-              help={helpOf(session)}
-              {...retypeOf(question, session)}
-            />
-          </View>
+          <TypedAnswerView
+            key={question.id}
+            question={question}
+            instruction={strings.questionInstructionTyped(language)}
+            answerLanguage={answerLanguage}
+            language={language}
+            answered={session.answered}
+            verdict={verdictOf(question, session)}
+            onSubmit={(text) => session.submitText(text)}
+            direction="ltr"
+            checking={session.judging === 'checking'}
+            failed={session.judging === 'failed'}
+            retry={session.retry}
+            help={helpOf(session)}
+            {...retypeOf(question, session)}
+            frame={frame}
+          />
         );
       }
-      return (
+      return frame(
         <SpeakingCardView
           key={question.id}
           question={question}
@@ -460,14 +466,6 @@ export default function SessionScreen() {
   useEffect(() => {
     if (explainOpen) requestAnimationFrame(() => scroll.current?.scrollToEnd({ animated: true }));
   }, [explainOpen]);
-  // The keyboard covers the lower half of the screen, where a tall card's input
-  // and its בדיקה sit: once it is up, the card shows its end, and its prompt is a
-  // scroll away. iOS makes room before this event; Android makes it after, which
-  // the ScrollView's onLayout below catches.
-  useEffect(() => {
-    const shown = Keyboard.addListener('keyboardDidShow', () => scroll.current?.scrollToEnd({ animated: true }));
-    return () => shown.remove();
-  }, []);
   // A session is always entered from home, which needs an active enrollment;
   // an empty language only drops the name from the instruction.
   const language = active?.target_language ?? '';
@@ -523,6 +521,31 @@ export default function SessionScreen() {
   const line = sentenceLine(session.explanation);
   const banner = session.answer !== null && hasBanner(session.answer, session.retype);
 
+  // Answer bar spec D1. The card scrolls on its own and opens at its top; a typed
+  // card's answer bar sits under it, on the keyboard while it is up.
+  const frame: CardFrame = (card, bar = null) => (
+    <>
+      {/* "handled": with the keyboard up, a tap on a sentence's word shows its
+          translation, and the keyboard stays. */}
+      <ScrollView
+        ref={scroll}
+        contentContainerStyle={[styles.body, banner && styles.bodyUnderBanner]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Spec D7: a refused microphone says so once, above whatever card is
+            current, for the rest of the session. */}
+        {session.speakingOff === 'no_mic' ? (
+          <Text style={styles.noMic} testID="speak-no-mic">
+            {strings.noMicrophone}
+          </Text>
+        ) : null}
+        {card}
+      </ScrollView>
+      {bar}
+    </>
+  );
+
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       {/* The keyboard must not cover the typed card's input and its button. Padding
@@ -545,26 +568,7 @@ export default function SessionScreen() {
 
         <ProgressBar position={session.position} total={session.total} />
 
-        {/* "handled": with the keyboard up, the first tap on בדיקה must submit,
-            not merely dismiss the keyboard. */}
-        <ScrollView
-          ref={scroll}
-          contentContainerStyle={[styles.body, banner && styles.bodyUnderBanner]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          onLayout={() => {
-            if (Keyboard.isVisible()) scroll.current?.scrollToEnd({ animated: true });
-          }}
-        >
-          {/* Spec D7: a refused microphone says so once, above whatever card is
-              current, for the rest of the session. */}
-          {session.speakingOff === 'no_mic' ? (
-            <Text style={styles.noMic} testID="speak-no-mic">
-              {strings.noMicrophone}
-            </Text>
-          ) : null}
-          {renderQuestion(question, session, language, learner, explainOpen)}
-        </ScrollView>
+        {renderQuestion(question, session, language, learner, explainOpen, frame)}
       </KeyboardAvoidingView>
 
       {/* Phase 55 (spec D7): none while a retype is open; then how it ended. */}
@@ -613,11 +617,9 @@ const styles = StyleSheet.create({
   },
   headerEnd: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   skip: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, fontWeight: '700' },
-  // Bottom padding keeps the last option clear of the overlaid banner.
-  typedForm: { gap: spacing.md },
   noMic: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, textAlign: 'center', paddingBottom: spacing.md },
   body: { paddingTop: spacing.xl, paddingBottom: spacing.xl },
-  // Room under the last option for the banner laid over it. Not while it is
-  // away: the card's end, the end the keyboard scrolls to, is its button.
+  // Bottom padding keeps the last option clear of the overlaid banner, only
+  // while it is there.
   bodyUnderBanner: { paddingBottom: spacing.xxl * 4 },
 });
