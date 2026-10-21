@@ -111,9 +111,9 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await page.getByTestId('continue-button').click();
 
-  // 3. The typed card, on a phone-sized screen (phase 63, spec D2): help sits
-  // inside the answer box, in view. עזרה twice gives two letters, in grey where
-  // the typing goes; the input itself stays empty.
+  // 3. The typed card, on a phone-sized screen (help row spec D1): help's row,
+  // עזרה and its dashed box, sits in the answer bar above the input, in view.
+  // עזרה twice gives two letters, in grey in that box; the input stays empty.
   await page.setViewportSize({ width: 390, height: 844 });
   const typed = await readCard(page, 5, total, 'typed');
   expect(typed.prompt).toBe(WORD.translation);
@@ -126,8 +126,13 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await expect(page.getByTestId('typed-input')).toBeInViewport({ ratio: 1 });
   await expect(page.getByTestId('typed-submit')).toBeInViewport({ ratio: 1 });
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByTestId('typed-box').getByTestId('typed-help')).toBeInViewport();
+  await expect(page.getByTestId('typed-bar').getByTestId('typed-help')).toBeInViewport();
+  // Before any press the dashed box is there, empty.
+  await expect(page.getByTestId('typed-help-row')).toBeVisible();
   await expect(page.getByTestId('typed-hint')).toHaveCount(0);
+  const helpBox = (await page.getByTestId('typed-help').boundingBox())!;
+  const inputBox = (await page.getByTestId('typed-input').boundingBox())!;
+  expect(helpBox.y + helpBox.height).toBeLessThanOrEqual(inputBox.y);
   await expect(page.getByTestId('typed-help')).toContainText('עזרה');
   await page.getByTestId('typed-help').click();
   await expect(page.getByTestId('typed-hint')).toHaveText(`${letters[0]}…`);
@@ -135,8 +140,8 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await expect(page.getByTestId('typed-hint')).toHaveText(`${letters[0]}${letters[1]}…`);
   const input = page.getByTestId('typed-input');
   await expect(input).toHaveValue('');
-  // The grey letters stand where the placeholder was: it goes while they show.
-  await expect(input).not.toHaveAttribute('placeholder', /התשובה/);
+  // The grey letters are in help's row, so the placeholder stays.
+  await expect(input).toHaveAttribute('placeholder', /התשובה/);
 
   // Phase 63 (spec D3). Help reads the typing: after a wrong letter the grey goes,
   // nothing is marked until help is pressed, which marks it and gives nothing;
@@ -150,6 +155,14 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await input.fill(letters[0]);
   await expect(page.getByTestId('typed-marks')).toHaveCount(0);
   await expect(page.getByTestId('typed-ghost')).toHaveText(`${letters[1]}…`);
+  // Help row spec (Victor's screenshot): a long wrong word is marked whole, in
+  // view, with עזרה beside it, wrapping if it must.
+  const long = wrongLetter.repeat(20);
+  await input.fill(`${letters[0]}${long}`);
+  await page.getByTestId('typed-help').click();
+  await expect(page.getByTestId('typed-marks')).toHaveText(long);
+  await expect(page.getByTestId('typed-hint')).toBeInViewport({ ratio: 1 });
+  await expect(page.getByTestId('typed-help')).toBeInViewport();
   await input.fill('');
 
   // A wrong word opens the retype, not the banner: the right answer and the
