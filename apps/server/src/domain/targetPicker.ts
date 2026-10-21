@@ -271,9 +271,15 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
   const hardest = (pool: readonly Word[]) => {
     // Phase 67b (spec D5): readiness now when the caller reads it, else at the start of today.
     const pctOf = (word: Word) => input.now?.get(word.glossId)?.pct ?? word.readinessPct;
-    const order = pool
-      .filter((word) => !word.toStart && word.picked.length === 0 && (word.state === 'done' || word.state === 'owed' || (word.state === 'extra' && !word.inFlight)))
-      .sort((a, b) => Number(a.inFlight) - Number(b.inFlight) || pctOf(a) - pctOf(b) || byId(a, b));
+    const eligible = pool.filter(
+      (word) => !word.toStart && word.picked.length === 0 && (word.state === 'done' || word.state === 'owed' || (word.state === 'extra' && !word.inFlight)),
+    );
+    // Phase 67b (spec D5): a word at its bar counts 100 on the card, so a right adds nothing to it and
+    // a miss lowers it: while any word is below its bar, only those are asked.
+    const below = input.now ? eligible.filter((word) => pctOf(word) < 100) : eligible;
+    const order = (below.length > 0 ? below : eligible).sort(
+      (a, b) => Number(a.inFlight) - Number(b.inFlight) || pctOf(a) - pctOf(b) || byId(a, b),
+    );
     for (const word of order) {
       if (!open(word, 1)) continue;
       // Phase 67b (spec D5): the counted skill weakest now. Without it, final review 3: a skill

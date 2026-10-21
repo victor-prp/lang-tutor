@@ -140,7 +140,8 @@ This holds in every mode: owed, past the budget and practice more.
 Practice more and the fill past the budget (phase 65b), on every day the eve included, read
 readiness **now**, not at the start of the day:
 
-- the words with the lowest card value now first (a word at its bar counts 100, so it comes last);
+- only the words below their bar while any is, the lowest card value now first: a word at its bar
+  counts 100, so a right adds nothing to the card and a miss lowers it (Ruling R1);
 - per word, its counted skill with the lowest chance now;
 - for a test, counted skills only (the spike's test sessions asked 1–3 say cards each, which a
   test does not count).
@@ -152,9 +153,10 @@ Practice more still starts the next words early first (phase 57 D7.3), with D4's
 this decision an open eve stalls: in the simulation a learner who misses stuck at 93% on the eve,
 because a word that dropped that evening was never asked again.
 
-Two narrower rules were simulated and dropped, as no better: before the eve, keeping words at their
-bar out of practice more, and asking a counted skill not yet answered today first. The five-phase
-means came out the same or up to 2 points lower (`spike-volume2.json`).
+Asking a counted skill not yet answered today first, before the eve, was simulated and dropped as
+no better (`spike-volume2.json`). Keeping words at their bar out was dropped there too, measured on
+the forecast; measured on the card while building, it is what keeps more sessions from ending a
+day lower (Ruling R1).
 
 ### D6. "Another session can raise the card", computed (my call, from Victor's finding 3)
 
@@ -290,3 +292,11 @@ simulated learner causes it, not the picker: a learner who misses a word 78 time
 ## Rulings
 
 Made while building, each with what it costs if wrong.
+
+- **R1 (D5).** Ruling: practice more asks only words below their bar while any is. Measured on the
+  card in the day simulation (2026-10-21), a homework of 18 words ended day 4 at 91.0, 89.8, 90.0
+  with 5, 10, 15 sessions a day (four of five phases lower at 10 than at 5): words at the bar
+  counted 100, so their extra first answers could only lose. With the rule: 91.4, 93.0, 94.0, one
+  single-phase dip of a point, and a test reaches 100% on the eve in all five phases within 11–12
+  eve sessions (no phase pinned any more). Cost: a word at its bar is not practised past the
+  budget while another is below; the plan's eve check still asks it.

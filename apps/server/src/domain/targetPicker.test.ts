@@ -284,6 +284,24 @@ describe('chooseTargetPicks, practice more', () => {
     ]);
   });
 
+  it('asks only words below their bar while any is: a word at its bar counts 100, so a right adds nothing and a miss lowers it (phase 67b D5)', () => {
+    const day = dayOf(
+      [
+        { id: 'g0', state: 'done', chances: { [WP]: 0.95, [SP]: 0.95, [SK]: 0.95 } },
+        { id: 'g1', state: 'done', chances: { [WP]: 0.6, [SP]: 0.6, [SK]: 0.6 } },
+      ],
+      'done',
+    );
+    const now = new Map([
+      ['g0', { pct: 100, counted: [WP, SP, SK] as Dimension[] }],
+      ['g1', { pct: 60, counted: [SP, WP, SK] as Dimension[] }],
+    ]);
+    expect(short(pick(day, { now }))).toEqual([['g1', SP, 1]]);
+    // Every word at its bar: practice more still asks them.
+    const all = new Map([...now].map(([glossId, value]) => [glossId, { ...value, pct: 100 }]));
+    expect(pick(day, { now: all }).map((p) => p.glossId)).toEqual(['g0', 'g1']);
+  });
+
   it("asks a test's word only its counted skills now: no speaking (phase 67b D5)", () => {
     const day = dayOf([{ id: 'g0', state: 'done', chances: { [WP]: 0.9, [SP]: 0.9, [SK]: 0.1 } }], 'done');
     const now = new Map([['g0', { pct: 80, counted: [SP, WP] as Dimension[] }]]);
