@@ -31,7 +31,9 @@ import { POINT_REWRITE_ROUNDS, judgePoint, pointItem, readPoint, type PointFindi
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import type { SentenceContent } from '../../src/domain/sentences';
 import { TRANSLATION_JUDGE_THINKING } from '../../src/domain/judge';
+import { DISCOVERY_THINKING, wordKey } from '../../src/domain/discovery';
 import { EXPLAIN_THINKING } from '../../src/domain/explain';
+import { LANGUAGES } from '../../src/domain/languages';
 import { DEFAULT_SOUND_ALIKE_THRESHOLD } from '../../src/domain/soundAlike';
 import { POINT_CHECK_THINKING, SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
 import type { ReadItem } from '../../src/domain/photoReading';
@@ -39,7 +41,7 @@ import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient }
 import { judgeSpoken, judgeTyped, normaliseGloss } from '@lang-tutor/core/domain';
 import type { LlmAccept, LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askAccept, askCheck, askContext, askDistractors, askExplain, askFitJudge, askGapGuesses, askJudge, askModel, askPoint, askRendering, askSoundAlike, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
+import { askAccept, askCheck, askContext, askDiscovery, askDistractors, askExplain, askFitJudge, askGapGuesses, askJudge, askModel, askPoint, askRendering, askSoundAlike, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
 import {
   ACCEPT_CASES,
   CASES,
@@ -56,8 +58,10 @@ import {
   TRANSCRIPTION_CASES,
   TRANSLATE_CASES,
   TRANSLATION_JUDGE_CASES,
+  DISCOVERY_CASES,
   EXPLAIN_CASES,
   type AcceptCase,
+  type DiscoveryCase,
   type ExplainCase,
   type CheckCase,
   type ContextCase,
@@ -914,6 +918,8 @@ async function main(): Promise<void> {
   const tjudgeCases = TRANSLATION_JUDGE_CASES.filter((kase) => matches(kase.label));
   // Phase 66. Every label starts "explain ", so that filter selects the group.
   const explainCases = EXPLAIN_CASES.filter((kase) => matches(kase.label));
+  // Phase 69. Every label starts "discover ", so that filter selects the group.
+  const discoveryCases = DISCOVERY_CASES.filter((kase) => matches(kase.label));
   const fitCases = FIT_JUDGE_CASES.filter((kase) => matches(kase.label));
   const contextCases = CONTEXT_CASES.filter((kase) => matches(kase.label));
   const checkCases = CHECK_CASES.filter((kase) => matches(kase.label));
@@ -926,7 +932,7 @@ async function main(): Promise<void> {
     cases.length + renderingCases.length + acceptCases.length + distractorCases.length + transcriptionCases.length +
       photoCases.length + matchCases.length + judgeCases.length +
       gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length + fitCases.length + contextCases.length +
-      checkCases.length + soundCases.length + pointCases.length + explainCases.length === 0
+      checkCases.length + soundCases.length + pointCases.length + explainCases.length + discoveryCases.length === 0
   ) {
     throw new Error(`filter "${filter}" matched no case`);
   }
@@ -996,6 +1002,17 @@ async function main(): Promise<void> {
     now: Date.now,
     timeoutMs: TIMEOUT_MS,
     thinkingBudget: EXPLAIN_THINKING,
+  });
+  // Phase 69 (spec D4). A round's own client, as composition.ts builds it.
+  const discoveryLlm = createGeminiClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
+    timeoutMs: TIMEOUT_MS,
+    thinkingBudget: DISCOVERY_THINKING,
   });
   const transcriber = createGeminiTranscriber({
     fetch: evalFetch,
@@ -1630,6 +1647,53 @@ async function main(): Promise<void> {
     }
   };
 
+  // Phase 69 (spec D4). Shape only: whether the words fit the level is not scored (Victor).
+  const scoreDiscovery = async (kase: DiscoveryCase): Promise<Row> => {
+    const text = `${kase.input.target} level ${kase.input.level}, age ${kase.input.age}, ${kase.input.learningContext}`;
+    const started = Date.now();
+    try {
+      const { raw, parsed } = await askDiscovery(discoveryLlm, kase);
+      const seconds = ((Date.now() - started) / 1000).toFixed(1);
+      let proposed: string[] = [];
+      try {
+        proposed = (JSON.parse(raw) as { words?: { word?: string }[] }).words?.map((word) => word.word ?? '') ?? [];
+      } catch {
+        proposed = [];
+      }
+      const excluded = new Set(kase.input.exclude.map(wordKey));
+      const leftOut = proposed.filter((word) => excluded.has(wordKey(word)));
+      const keys = proposed.map(wordKey);
+      const repeated = keys.filter((key, index) => keys.indexOf(key) !== index);
+      const letters = LANGUAGES[kase.input.target].letters;
+      const words = parsed?.words ?? [];
+      const offScript = words.filter((word) => [...word.word].some((char) => /\p{L}/u.test(char) && !letters.test(char)));
+      const notHebrew = words.filter((word) => !/[\u0590-\u05FF]/.test(word.hebrew) || /[A-Za-z\u0400-\u04FF]/.test(word.hebrew));
+      return {
+        label: kase.label,
+        text,
+        tier1: [
+          { name: 'the answer parses', ok: parsed !== null, detail: parsed === null ? 'unreadable' : undefined },
+          { name: 'at least a round of words kept', ok: words.length >= 10, detail: `${words.length} kept of ${proposed.length}` },
+        ],
+        tier2: [
+          { name: 'at most one word it was told to leave out', ok: leftOut.length <= 1, detail: leftOut.join(', ') || undefined },
+          { name: 'no word repeated', ok: repeated.length === 0, detail: repeated.join(', ') || undefined },
+          { name: "every word in its language's script", ok: offScript.length === 0, detail: offScript.map((word) => word.word).join(', ') || undefined },
+          { name: 'every meaning in Hebrew', ok: notHebrew.length === 0, detail: notHebrew.map((word) => `${word.word}=${word.hebrew}`).join(', ') || undefined },
+        ],
+        verdict: `${seconds} s: ${words.map((word) => `${word.word}=${word.hebrew}`).join(', ')}`,
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
   const scoreExplain = async (kase: ExplainCase): Promise<Row> => {
     try {
       const explained = await askExplain(explainLlm, kase);
@@ -1703,7 +1767,7 @@ async function main(): Promise<void> {
   const started = Date.now();
   const [
     translationRows, renderingRows, acceptRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows,
-    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows, fitRows, soundRows, pointRows, explainRows,
+    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows, fitRows, soundRows, pointRows, explainRows, discoveryRows,
   ] = await Promise.all([
     mapWithConcurrency(cases, CONCURRENCY, scoreCase),
     mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
@@ -1724,10 +1788,11 @@ async function main(): Promise<void> {
     mapWithConcurrency(soundCases, CONCURRENCY, scoreSoundAlike),
     mapWithConcurrency(pointCases, CONCURRENCY, scorePoint),
     mapWithConcurrency(explainCases, CONCURRENCY, scoreExplain),
+    mapWithConcurrency(discoveryCases, CONCURRENCY, scoreDiscovery),
   ]);
   const rows = [
     ...translationRows, ...renderingRows, ...acceptRows, ...distractorRows, ...transcriptionRows, ...photoRows, ...matchRows,
-    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows, ...fitRows, ...soundRows, ...pointRows, ...explainRows,
+    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows, ...fitRows, ...soundRows, ...pointRows, ...explainRows, ...discoveryRows,
   ];
   const elapsedMs = Date.now() - started;
 
@@ -1771,6 +1836,9 @@ async function main(): Promise<void> {
     // Phase 66 (spec D2). The explainer, a line of its own: one that finds a
     // mistake in every sentence, or in none, must fail here.
     { name: 'explain', rows: explainRows, passed: 0, total: 0 },
+    // Phase 69 (spec D4). A round of Words for me, a line of its own: a model that hands back
+    // the words it was told to leave out must fail here.
+    { name: 'discover', rows: discoveryRows, passed: 0, total: 0 },
   ];
 
   for (const row of rows) {
@@ -1876,7 +1944,7 @@ async function main(): Promise<void> {
       `${photoCases.length} photo + ${matchCases.length} match + ${judgeCases.length} judge + ` +
       `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge + ` +
       `${contextCases.length} context + ${checkCases.length} checker + ${fitCases.length} fit judge + ${soundCases.length} sound alike + ` +
-      `${pointCases.length} pointing check + ${explainCases.length} explain cases in ` +
+      `${pointCases.length} pointing check + ${explainCases.length} explain + ${discoveryCases.length} discover cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
@@ -1903,6 +1971,8 @@ async function main(): Promise<void> {
         fitJudgeScore: groupScore(groups[5]),
         soundAlikeScore: groupScore(groups[6]),
         pointingScore: groupScore(groups[7]),
+        explainScore: groupScore(groups[8]),
+        discoverScore: groupScore(groups[9]),
         rows,
       },
       null,

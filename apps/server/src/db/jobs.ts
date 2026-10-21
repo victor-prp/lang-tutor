@@ -5,6 +5,9 @@ import {
   ACCEPT_RENDERING,
   ACCEPT_RENDERING_EXPIRY_SECONDS,
   ACCEPT_RENDERING_FAILED,
+  LOOK_UP_DISCOVERED_WORD,
+  LOOK_UP_DISCOVERED_WORD_EXPIRY_SECONDS,
+  LOOK_UP_DISCOVERED_WORD_FAILED,
   LOOK_UP_IMPORT_ITEM,
   LOOK_UP_IMPORT_ITEM_EXPIRY_SECONDS,
   LOOK_UP_IMPORT_ITEM_FAILED,
@@ -90,6 +93,18 @@ export const JOB_QUEUES: QueueDefinition[] = [
       expireInSeconds: LOOK_UP_IMPORT_ITEM_EXPIRY_SECONDS,
       deleteAfterSeconds: 86_400,
       deadLetter: LOOK_UP_IMPORT_ITEM_FAILED,
+    },
+  },
+  // Phase 69 (spec D7). A Words for me card's lookup, with a photo row's options.
+  { name: LOOK_UP_DISCOVERED_WORD_FAILED, options: { retryLimit: 2, deleteAfterSeconds: 86_400 } },
+  {
+    name: LOOK_UP_DISCOVERED_WORD,
+    options: {
+      retryLimit: 2,
+      retryBackoff: true,
+      expireInSeconds: LOOK_UP_DISCOVERED_WORD_EXPIRY_SECONDS,
+      deleteAfterSeconds: 86_400,
+      deadLetter: LOOK_UP_DISCOVERED_WORD_FAILED,
     },
   },
   // Phase 31 (spec D7). No dead letter: a merge that keeps failing leaves two

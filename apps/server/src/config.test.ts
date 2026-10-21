@@ -38,6 +38,7 @@ describe('loadConfig', () => {
       gapRewriteTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
+      discoveryTimeoutMs: 20_000,
       photoReadTimeoutMs: 120_000,
       stockSaveDelaySeconds: 30,
       soundAlikeThreshold: 0.95,
@@ -88,6 +89,12 @@ describe('loadConfig', () => {
     expect(loadConfig({ JUDGE_TIMEOUT_MS: '2500' }).judgeTimeoutMs).toBe(2_500);
   });
 
+  it('reads the Words for me round budget, at most 20 s (phase 69)', () => {
+    expect(loadConfig({}).discoveryTimeoutMs).toBe(20_000);
+    expect(loadConfig({ DISCOVERY_TIMEOUT_MS: '9000' }).discoveryTimeoutMs).toBe(9_000);
+    expect(loadConfig({ DISCOVERY_TIMEOUT_MS: '60000' }).discoveryTimeoutMs).toBe(20_000);
+  });
+
   it('takes every value from the environment when it is set', () => {
     expect(
       loadConfig({
@@ -110,6 +117,7 @@ describe('loadConfig', () => {
       gapRewriteTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
+      discoveryTimeoutMs: 20_000,
       photoReadTimeoutMs: 120_000,
       stockSaveDelaySeconds: 30,
       soundAlikeThreshold: 0.95,

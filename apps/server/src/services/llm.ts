@@ -58,7 +58,9 @@ export type ModelCallKind =
   // Phase 50 (spec D2). On the judge's client.
   | 'sound_alike'
   // Phase 66 (spec D2). The explanation of a translation card's answer, on its own client.
-  | 'sentence_explain';
+  | 'sentence_explain'
+  // Phase 69 (spec D4). A round of Words for me, on its own client.
+  | 'discovery';
 
 /** Phase 47 (spec D3). A handle the call site does not have is left out. */
 export type ModelCallRecord = {

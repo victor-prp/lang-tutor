@@ -23,6 +23,8 @@ export const PERMISSIONS = [
   'photo_import.manage',
   // Phase 53 (spec D2). Creating, changing, ending and reading targets: in no role.
   'targets.manage',
+  // Phase 69 (spec D10). Words for me: the profile, its runs and their lists. In no role.
+  'discovery.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 

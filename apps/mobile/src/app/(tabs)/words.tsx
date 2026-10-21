@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { cardButton } from '@/components/BandCard';
 import { LevelBadge } from '@/components/LevelBadge';
 import { confirm } from '@/confirm';
 import { SpeakButton } from '@/components/SpeakButton';
@@ -95,6 +96,10 @@ export default function WordsTab() {
       <Text testID="vocabulary-title" style={styles.title}>
         {strings.myWords}
       </Text>
+      {/* Phase 69 (spec D1). Words for me: the app finds new words at the learner's level. */}
+      <Pressable accessibilityRole="button" testID="discover-entry" onPress={() => router.push('/discover')} style={cardButton.pale}>
+        <Text style={cardButton.paleLabel}>{strings.discoverEntry}</Text>
+      </Pressable>
 
       {v.status === 'error' ? (
         <Text style={styles.notice}>{strings.vocabularyLoadFailed}</Text>

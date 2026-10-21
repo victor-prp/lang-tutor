@@ -1698,6 +1698,67 @@ export const LlmPhotoReadingSchema = z.object({
 // (spec D7).
 export const LlmSenseMatchSchema = z.object({ sense: z.number().int() });
 
+// Phase 69 (spec D2). The two answers about the learner's level, asked once per enrollment.
+export const DiscoverySelfLevelSchema = z.enum(['none', 'basic', 'simple', 'everyday', 'fluent']);
+export const DiscoveryLearningContextSchema = z.enum(['school', 'course', 'self', 'family']);
+
+export const DiscoveryProfileCreateSchema = z.object({
+  self_level: DiscoverySelfLevelSchema,
+  learning_context: DiscoveryLearningContextSchema,
+});
+
+// `level` is 1–12, two per CEFR band (spec D3): where the next run starts.
+export const DiscoveryProfileSchema = DiscoveryProfileCreateSchema.extend({
+  level: z.number().int().min(1).max(12),
+});
+
+export const DiscoveryRunStatusSchema = z.enum(['asking', 'listing', 'saved', 'discarded']);
+
+// Phase 69 (spec D10). A run: its unanswered cards, in order, and its list, the cards the
+// learner did not know, in a photo row's shape so the app reviews them the same way.
+export const DiscoveryRunSchema = z.object({
+  id: z.string(),
+  goal: z.number().int().min(1).max(30),
+  status: DiscoveryRunStatusSchema,
+  unknown_count: z.number().int().nonnegative(),
+  round: z.number().int().nonnegative(),
+  cards: z.array(z.object({ position: z.number().int().nonnegative(), word: z.string() })),
+  items: z.array(PhotoImportItemSchema),
+});
+
+export const DiscoveryStateSchema = z.object({
+  profile: DiscoveryProfileSchema.nullable(),
+  run: DiscoveryRunSchema.nullable(),
+});
+
+export const DiscoveryRunCreateSchema = z.object({ goal: z.number().int().min(1).max(30) });
+
+// Phase 69 (spec D5). "אין לי מושג", or the meaning typed in Hebrew.
+export const DiscoveryAnswerRequestSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('unknown') }),
+  z.object({ kind: z.literal('typed'), text: z.string().min(1).max(300) }),
+]);
+
+// `meaning` is the word's Hebrew, shown after a typed answer.
+export const DiscoveryAnswerResultSchema = z.object({
+  known: z.boolean(),
+  meaning: z.string(),
+  run: DiscoveryRunSchema,
+});
+
+// Phase 69 (spec D4). The model's proposals. Every field required: optional strings
+// can hang a call (phase 34); an empty `alternatives` is none.
+export const LlmDiscoverySchema = z.object({
+  words: z.array(
+    z.object({
+      word: z.string(),
+      part_of_speech: PartOfSpeechSchema,
+      hebrew: z.string(),
+      alternatives: z.array(z.string()),
+    }),
+  ),
+});
+
 // Phase 29 (spec D14). The four Better Auth paths the server mounts, described
 // as Better Auth 1.7 answers them. The server registers them for the document
 // only; Better Auth parses its own requests.

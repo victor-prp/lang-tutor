@@ -17,6 +17,7 @@ import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createMemoryRepo } from './repo/memory';
 import { createJobRepo, type JobRepo } from './repo/jobs';
 import { createPhotoImportRepo } from './repo/photoImports';
+import { createDiscoveryRepo } from './repo/discovery';
 import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
@@ -38,6 +39,7 @@ import { createGlossService, type GlossService } from './services/glosses';
 import type { LlmClient, ModelCallRecorder, VisionClient } from './services/llm';
 import { createModelCallService } from './services/modelCalls';
 import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
+import { createDiscoveryService, type DiscoveryService } from './services/discovery';
 import { createReminderService, type PushSender, type ReminderService } from './services/reminders';
 import { createQuestionTypesService, type QuestionTypesService } from './services/questionTypes';
 import { createSessionService, type SessionService } from './services/sessions';
@@ -45,6 +47,7 @@ import { createTargetService, type TargetService } from './services/targets';
 import type { SpeechTranscriber } from './services/speech';
 import type { Repos } from './services/transaction';
 import { EXPLAIN_THINKING } from './domain/explain';
+import { DISCOVERY_THINKING } from './domain/discovery';
 import { TRANSLATION_JUDGE_THINKING } from './domain/judge';
 import { POINT_CHECK_THINKING, SESSION_GENERATION_THINKING } from './domain/jobs';
 import { createTranslationService, type TranslationService } from './services/translations';
@@ -79,6 +82,8 @@ export type AppDeps = {
   // Phase 52 (spec D2, D4, D6). A learner's reminder schedule, their phones, and the tap.
   reminders: ReminderService;
   photoImports: PhotoImportService;
+  // Phase 69 (spec D10). Words for me: a learner's profile, runs, lists and their lookups.
+  discovery: DiscoveryService;
   // Phase 53 (spec D1, D2, D10, D11). A learner's targets: made, changed, ended and read.
   targets: TargetService;
   // Phase 31 (spec D7). The merge job's use case; no route reaches it. The
@@ -142,6 +147,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     targetSkills: createTargetSkillRepo(tx),
     targetReadiness: createTargetReadinessRepo(tx),
     targetBudgets: createTargetBudgetRepo(tx),
+    discovery: createDiscoveryRepo(tx),
   };
 }
 
@@ -185,6 +191,8 @@ export function createServerDeps(io: {
   photoReadTimeoutMs: number;
   // Phase 27 (spec D4). One judged answer's budget: a learner is waiting on it.
   judgeTimeoutMs: number;
+  // Phase 69 (spec D4). One round of Words for me: a learner is waiting on it.
+  discoveryTimeoutMs: number;
   // Phase 43 (ruling R3). How long a save's request for a session in stock waits.
   stockSaveDelaySeconds: number;
   // Phase 50 (spec D4). The pronunciation score at which an unheard transcript is the word.
@@ -339,6 +347,18 @@ export function createServerDeps(io: {
     timeoutMs: io.judgeTimeoutMs,
     thinkingBudget: 0,
   });
+  // Phase 69 (spec D4). A round of Words for me, on its own client: the learner waits on
+  // it at a spinner, so its budget is short and its thinking measured (DISCOVERY_THINKING).
+  const discover: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    onCall,
+    now: io.now,
+    timeoutMs: io.discoveryTimeoutMs,
+    thinkingBudget: DISCOVERY_THINKING,
+  });
   // Phase 45 (spec D3). The translation judge thinks before it answers: with thinking
   // off it took "talk with everyone" for "communicate clearly with everyone". 512
   // tokens measured about 2.4 s a call, inside the judge's own budget.
@@ -432,6 +452,18 @@ export function createServerDeps(io: {
     photoImports: createPhotoImportService({
       transaction,
       vision,
+      llm,
+      lookup: translations.translate,
+      now: io.now,
+      logger: io.logger,
+      stockSaveDelaySeconds: io.stockSaveDelaySeconds,
+    }),
+    // Phase 69 (spec D4, D5, D7). Rounds on their own client; answers on the session's
+    // judge; a word's lookup and its match exactly as a photo row's.
+    discovery: createDiscoveryService({
+      transaction,
+      discover,
+      judge,
       llm,
       lookup: translations.translate,
       now: io.now,

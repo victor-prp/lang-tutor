@@ -25,13 +25,10 @@ import {
   deriveStatus,
   entriesToSave,
   isOpen,
-  optionsFrom,
-  reasonFor,
   refuseItemUpdate,
   reviewCounts,
   type ItemUpdate,
 } from '../domain/photoImports';
-import { buildSenseMatchPrompt, choiceFromModel, firstChoice, parseSenseMatch, type MatchedBy } from '../domain/senseMatching';
 import { firstPerGloss } from '../domain/vocabulary';
 import {
   GlossLanguageMismatch,
@@ -43,8 +40,9 @@ import {
   SenseMatchUnreadable,
 } from '../errors';
 import type { Logger } from '../logger';
-import type { ItemResult, PhotoImportItemRow, PhotoImportRow } from '../repo/photoImports';
+import type { PhotoImportItemRow, PhotoImportRow } from '../repo/photoImports';
 import { authorizeEnrollment } from './access';
+import { lookUpRow } from './rowLookup';
 import { requestStockAfterSave } from './stock';
 import type { LlmClient, VisionClient } from './llm';
 import type { Repos, Transaction } from './transaction';
@@ -531,53 +529,24 @@ export function createPhotoImportService({
         return;
       }
       const { item, enrolled } = read;
-      const target = enrolled.target_language as LanguageCode;
-
-      // The job has no actor of its own. It looks up for the list's owner, the
-      // only one who could have made this import (photo_import.manage).
-      const response = await lookup(enrolled.user_id, {
-        text: item.text,
-        from: target,
-        to: enrolled.source_language as LanguageCode,
-        enrollment_id: enrolled.id,
-      });
-      const correctedForm = response.correction?.corrected_form ?? null;
-      const options = optionsFrom(response.senses);
-
-      let result: ItemResult;
-      let matchedBy: MatchedBy | null = null;
-      if (options.length === 0) {
-        result = { correctedForm, options, chosenGlossId: null, ticked: false, hebrewMismatch: false, reason: reasonFor(response) };
-      } else {
-        let choice = firstChoice(item.hebrew, options);
-        if (choice === 'ask_model') {
-          const raw = await llm({
-            ...buildSenseMatchPrompt({ word: correctedForm ?? item.text, target, hebrew: item.hebrew ?? '', options }),
-            record: { kind: 'sense_match', enrollmentId: enrolled.id, userId: enrolled.user_id },
-          });
-          const answer = parseSenseMatch(raw, options.length);
-          if (answer === null) throw new SenseMatchUnreadable(importId, position);
-          choice = choiceFromModel(answer);
-        }
-        matchedBy = choice.matchedBy;
-        result = {
-          correctedForm,
-          options,
-          chosenGlossId: options[choice.index].gloss_id,
-          ticked: true,
-          hebrewMismatch: choice.mismatch,
-          reason: null,
-        };
-      }
-
+      const { result, matchedBy } = await lookUpRow(
+        { lookup, llm },
+        {
+          enrolled,
+          text: item.text,
+          hebrew: item.hebrew,
+          record: { kind: 'sense_match', enrollmentId: enrolled.id, userId: enrolled.user_id },
+          onUnreadable: () => new SenseMatchUnreadable(importId, position),
+        },
+      );
       const written = await transaction(({ photoImport }) => photoImport.writeItem(importId, position, result));
       logger.info({
         event: written ? 'import_item_looked_up' : 'import_item_dropped',
         import_id: importId,
         position,
         matched_by: matchedBy,
-        corrected: correctedForm !== null,
-        option_count: options.length,
+        corrected: result.correctedForm !== null,
+        option_count: result.options.length,
         reason: result.reason,
         ...(written ? {} : { stage: 'write' }),
       });

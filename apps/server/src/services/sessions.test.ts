@@ -13,6 +13,7 @@ import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { TargetRepo } from '../repo/targets';
+import type { DiscoveryRepo } from '../repo/discovery';
 import type { TargetBudgetRepo } from '../repo/targetBudgets';
 import type { TargetReadinessRepo } from '../repo/targetReadiness';
 import type { TargetSkillRepo } from '../repo/targetSkills';
@@ -280,6 +281,7 @@ describe('repos', () => {
     listSavedGlosses: forbidden,
     findSavedWords: forbidden,
     countEntries: forbidden,
+    savedLemmas: forbidden,
   };
 
   // Phase 20. The one case here never completes or skips a session, so it never
@@ -346,6 +348,7 @@ describe('repos', () => {
         targetSkills: stub<TargetSkillRepo>({}),
         targetReadiness: stub<TargetReadinessRepo>({}),
         targetBudgets: stub<TargetBudgetRepo>({}),
+        discovery: stub<DiscoveryRepo>({}),
         // Phase 43 (spec D3). The one job an answer may ask for: the next session in stock.
         jobs,
       });

@@ -60,6 +60,7 @@ export async function main(): Promise<void> {
     gapRewriteTimeoutMs: config.gapRewriteTimeoutMs,
     speechTimeoutMs: config.speechTimeoutMs,
     judgeTimeoutMs: config.judgeTimeoutMs,
+    discoveryTimeoutMs: config.discoveryTimeoutMs,
     photoReadTimeoutMs: config.photoReadTimeoutMs,
     stockSaveDelaySeconds: config.stockSaveDelaySeconds,
     soundAlikeThreshold: config.soundAlikeThreshold,

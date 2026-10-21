@@ -55,6 +55,7 @@ describe('createServerDeps', () => {
       gapRewriteTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
+      discoveryTimeoutMs: 20_000,
       photoReadTimeoutMs: 120_000,
       stockSaveDelaySeconds: 30,
       soundAlikeThreshold: 0.95,

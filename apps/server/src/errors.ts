@@ -359,6 +359,31 @@ export class InvalidPhotoImportItem extends Error {
   }
 }
 
+// Phase 69 (spec D10). No Words for me run has this id, or it has no such card (404).
+export class DiscoveryNotFound extends Error {
+  constructor(readonly runId: string, readonly position?: number) {
+    super(position === undefined ? `no discovery run ${runId}` : `no card ${position} in discovery run ${runId}`);
+    this.name = 'DiscoveryNotFound';
+  }
+}
+
+// Phase 69. A profile asked twice, a run started without one, or a run in the wrong
+// state for the request: an answer once it lists, a save while a row is looked up (409).
+export class DiscoveryConflict extends Error {
+  constructor(readonly id: string, readonly reason: string) {
+    super(`discovery ${id}: ${reason}`);
+    this.name = 'DiscoveryConflict';
+  }
+}
+
+// Phase 69. A change a list row cannot take, as a photo row's (400).
+export class InvalidDiscoveryItem extends Error {
+  constructor(readonly runId: string, readonly position: number, readonly reason: string) {
+    super(`discovery run ${runId} row ${position}: ${reason}`);
+    this.name = 'InvalidDiscoveryItem';
+  }
+}
+
 // Phase 26. The reader's answer was not the schema. Thrown inside a job, so
 // pg-boss retries it.
 export class PhotoUnreadable extends Error {
@@ -369,9 +394,10 @@ export class PhotoUnreadable extends Error {
 }
 
 // Phase 26. The match call's answer was not the schema. A retry, like the above.
+// Phase 69: a Words for me card's lookup throws it too, naming its run.
 export class SenseMatchUnreadable extends Error {
-  constructor(readonly importId: string, readonly position: number) {
-    super(`the sense match for photo import ${importId} row ${position} was unreadable`);
+  constructor(readonly listId: string, readonly position: number) {
+    super(`the sense match for ${listId} row ${position} was unreadable`);
     this.name = 'SenseMatchUnreadable';
   }
 }

@@ -17,6 +17,7 @@ import type { TargetReadinessRepo } from '../repo/targetReadiness';
 import type { TargetSkillRepo } from '../repo/targetSkills';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
+import type { DiscoveryRepo } from '../repo/discovery';
 import type { VocabularyRepo } from '../repo/vocabulary';
 
 // The repositories composition.ts binds to one transaction. This module holds
@@ -50,6 +51,8 @@ export type Repos = {
   targetReadiness: TargetReadinessRepo;
   // Phase 65 (spec D7). Today's budget per target, set at its path's first session of the day.
   targetBudgets: TargetBudgetRepo;
+  // Phase 69 (spec D9). Words for me: a learner's profile, runs and cards.
+  discovery: DiscoveryRepo;
 };
 
 /**

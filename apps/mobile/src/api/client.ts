@@ -10,6 +10,12 @@ import type {
   CreateTargetRequest,
   CreateUserRequest,
   CurrentSessionResponse,
+  DiscoveryAnswerRequest,
+  DiscoveryAnswerResult,
+  DiscoveryProfile,
+  DiscoveryProfileCreate,
+  DiscoveryRun,
+  DiscoveryState,
   Enrollment,
   Grant,
   GrantList,
@@ -181,6 +187,8 @@ export function createApiClient({
     `/api/enrollments/${encodeURIComponent(enrollmentId)}/vocabulary`;
   const targetsPath = (enrollmentId: string) => `/api/enrollments/${encodeURIComponent(enrollmentId)}/targets`;
   const targetPath = (targetId: string) => `/api/targets/${encodeURIComponent(targetId)}`;
+  const discoveryPath = (enrollmentId: string) => `/api/enrollments/${encodeURIComponent(enrollmentId)}/discovery`;
+  const runPath = (runId: string) => `/api/discovery/runs/${encodeURIComponent(runId)}`;
 
   return {
     /** Phase 49 (spec D1). The server's own release, for the About screen. */
@@ -321,6 +329,21 @@ export function createApiClient({
         photo_import_ids: importIds,
       }),
     discardPhotoImport: (id: string) => postNoContent(`/api/photo-imports/${encodeURIComponent(id)}/discard`, {}),
+    // Phase 69 (spec D10). Words for me: the profile and open run, the two answers, a run's
+    // rounds and cards, and its list.
+    discoveryState: (enrollmentId: string) => getJson<DiscoveryState>(discoveryPath(enrollmentId)),
+    createDiscoveryProfile: (enrollmentId: string, request: DiscoveryProfileCreate) =>
+      postJson<DiscoveryProfile>(`${discoveryPath(enrollmentId)}/profile`, request),
+    startDiscovery: (enrollmentId: string, goal: number) => postJson<DiscoveryRun>(`${discoveryPath(enrollmentId)}/runs`, { goal }),
+    getDiscoveryRun: (runId: string) => getJson<DiscoveryRun>(runPath(runId)),
+    nextDiscoveryRound: (runId: string) => postJson<DiscoveryRun>(`${runPath(runId)}/rounds`, {}),
+    answerDiscoveryCard: (runId: string, position: number, request: DiscoveryAnswerRequest) =>
+      postJson<DiscoveryAnswerResult>(`${runPath(runId)}/cards/${position}/answer`, request),
+    endDiscovery: (runId: string) => postJson<DiscoveryRun>(`${runPath(runId)}/end`, {}),
+    updateDiscoveryItem: (runId: string, position: number, update: PhotoImportItemUpdate) =>
+      patchJson<PhotoImportItem>(`${runPath(runId)}/items/${position}`, update),
+    saveDiscovery: (runId: string) => postJson<SaveVocabularyResponse>(`${runPath(runId)}/save`, {}),
+    discardDiscovery: (runId: string) => postNoContent(`${runPath(runId)}/discard`, {}),
 
     // Phase 52 (spec D1, D2, D4, D6). Practice reminders: the schedule, the zone its
     // hours are read in, this phone's push token, and a tapped reminder.

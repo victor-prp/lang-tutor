@@ -69,6 +69,14 @@ export const vocabularyQueries = {
       sql`, `,
     )}) AS d(dimension)`,
 
+  /** Phase 69 (spec D4). Every lemma the enrollment saved, newest save first: words a
+   *  round of Words for me never proposes. Served by the primary key's enrollment prefix. */
+  savedLemmas: (enrollmentId: string): SQL => sql`
+    SELECT lemma FROM vocabulary_entries
+    WHERE enrollment_id = ${enrollmentId}
+    GROUP BY lemma
+    ORDER BY max(created_at) DESC, lemma`,
+
   /** Unsave: a primary-key delete. */
   /**
    * Phase 58 (spec D1, D2). Every saved gloss of every lemma whose badge is `level`,
@@ -519,6 +527,11 @@ export function createVocabularyRepo(tx: Tx) {
         exampleSource: row.example_source,
         exampleTarget: row.example_target,
       }));
+    },
+
+    savedLemmas: async (enrollmentId: string): Promise<string[]> => {
+      const rows = await tx.execute<{ lemma: string }>(vocabularyQueries.savedLemmas(enrollmentId));
+      return rows.rows.map((row) => row.lemma);
     },
 
     findSavedInLemma: async (input: {

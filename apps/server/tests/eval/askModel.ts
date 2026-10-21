@@ -23,6 +23,7 @@ import type {
 import { buildAcceptPrompt, parseAccept, validateAccept, type AcceptInput } from '../../src/domain/accept';
 import { buildCheckPrompt, parseCheck, type CheckItem } from '../../src/domain/check';
 import { buildContextPrompt, parseLlmContext, type ContextItem } from '../../src/domain/context';
+import { buildDiscoveryPrompt, parseDiscovery, wordKey, type DiscoveryPromptInput } from '../../src/domain/discovery';
 import { buildExplainPrompt, parseExplain, type Explanation } from '../../src/domain/explain';
 import {
   buildDistractorPrompt,
@@ -203,6 +204,16 @@ export async function askExplain(
   kase: { question: SentenceTranslationQuestion; context: JudgeContext; answer: string },
 ): Promise<Explanation | null> {
   return parseExplain(await llm({ ...buildExplainPrompt(kase.question, kase.context, kase.answer), record: { kind: 'sentence_explain' } }));
+}
+
+/** Phase 69 (spec D4). The real round prompt and parser, as nextRound calls them: the raw
+ *  answer too, so a case can see what the parser dropped. */
+export async function askDiscovery(
+  llm: LlmClient,
+  kase: { input: DiscoveryPromptInput },
+): Promise<{ raw: string; parsed: ReturnType<typeof parseDiscovery> }> {
+  const raw = await llm({ ...buildDiscoveryPrompt(kase.input), record: { kind: 'discovery' } });
+  return { raw, parsed: parseDiscovery(raw, new Set(kase.input.exclude.map(wordKey))) };
 }
 
 /** Phase 50 (spec D2). The real sound-alike prompt and parser, as answerBySpeech
