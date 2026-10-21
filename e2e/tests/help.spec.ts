@@ -156,13 +156,20 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await expect(page.getByTestId('typed-marks')).toHaveCount(0);
   await expect(page.getByTestId('typed-ghost')).toHaveText(`${letters[1]}…`);
   // Help row spec (Victor's screenshot): a long wrong word is marked whole, in
-  // view, with עזרה beside it, wrapping if it must.
-  const long = wrongLetter.repeat(20);
+  // view, with עזרה beside it: wrapped onto more lines inside its box, not clipped.
+  const long = wrongLetter.repeat(40);
   await input.fill(`${letters[0]}${long}`);
   await page.getByTestId('typed-help').click();
+  const reading = page.getByTestId('typed-hint');
   await expect(page.getByTestId('typed-marks')).toHaveText(long);
-  await expect(page.getByTestId('typed-hint')).toBeInViewport({ ratio: 1 });
+  await expect(reading).toBeInViewport({ ratio: 1 });
   await expect(page.getByTestId('typed-help')).toBeInViewport();
+  const readingBox = (await reading.boundingBox())!;
+  const rowBox = (await page.getByTestId('typed-help-row').boundingBox())!;
+  expect(readingBox.height).toBeGreaterThan(40);
+  expect(readingBox.x + readingBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
+  expect(readingBox.y + readingBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height);
+  expect(await reading.evaluate((el) => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight)).toBe(true);
   await input.fill('');
 
   // A wrong word opens the retype, not the banner: the right answer and the
