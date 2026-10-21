@@ -204,9 +204,13 @@ Shown only when the day is done, another session cannot raise the card (D6), the
 Everywhere else "לתרגל עוד" starts the session at once. On 20 and 21 Oct words were still unmet
 when the budget was met, so Victor's first extra session each day would have started with no sheet.
 
-### D9. Other words (my calls)
+### D9. Other words
 
-- The target screen's word group "סיימת להיום" becomes "תורגלו היום".
+- The amber strip of the last two days **(Victor)**: "שיעורי הבית מחר ו-3 מילים צריכות חיזוק", in
+  place of "…עוד לא מוכנות. עוד תרגול אחד יעזור.". My calls: one word reads "ומילה אחת צריכה
+  חיזוק"; a test reads "הבוחן מחר …"; the due date reads "…היום ו-3 מילים צריכות חיזוק" with no
+  second sentence either; the count is the words below the kind's bar (D2).
+- The target screen's word group "סיימת להיום" becomes "תורגלו היום" (my call).
 - The header's "כל המילים מוכנות …" switches on at the kind's bar (D2), so a test does not say "all
   ready" beside 97%.
 
