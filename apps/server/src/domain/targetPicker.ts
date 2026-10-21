@@ -47,7 +47,7 @@ export type TargetPickInput = {
   /** Phase 67b (spec D5). Each word's readiness now, not at the start of today: its card value and
    *  its counted skills, the lowest chance now first (targetSummary pickNow). Absent, practice
    *  more reads the start of today. */
-  now?: ReadonlyMap<string, { pct: number; counted: readonly Dimension[] }>;
+  now?: ReadonlyMap<string, { pct: number; counted: readonly Dimension[]; weakestOpen?: boolean }>;
 };
 
 /** Spec D7, D10. A day with work owed asks it; the due date gives the last review; a done or
@@ -268,17 +268,21 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
    *  yet asked this session, on a skill not asked today, else its weakest: the lowest readiness first, a word
    *  the session in flight asks last, then by gloss id. A word met early today is asked too, but
    *  not while the session in flight is meeting it. */
-  const hardest = (pool: readonly Word[]) => {
+  const hardest = (pool: readonly Word[], belowBarOnly: boolean) => {
     // Phase 67b (spec D5): readiness now when the caller reads it, else at the start of today.
     const pctOf = (word: Word) => input.now?.get(word.glossId)?.pct ?? word.readinessPct;
+    // Review C1: before the eve only a skill's first answer counts and only the weakest moves a
+    // word, so the words whose weakest is still open today come first.
+    const shut = (word: Word) => Number(day.daysLeft > 1 && input.now?.get(word.glossId)?.weakestOpen === false);
     const eligible = pool.filter(
       (word) => !word.toStart && word.picked.length === 0 && (word.state === 'done' || word.state === 'owed' || (word.state === 'extra' && !word.inFlight)),
     );
     // Phase 67b (spec D5): a word at its bar counts 100 on the card, so a right adds nothing to it and
-    // a miss lowers it: while any word is below its bar, only those are asked.
-    const below = input.now ? eligible.filter((word) => pctOf(word) < 100) : eligible;
+    // a miss lowers it: while any word is below its bar, practice more asks only those. Not on the
+    // due date, whose card is frozen (review I1).
+    const below = input.now && belowBarOnly ? eligible.filter((word) => pctOf(word) < 100) : eligible;
     const order = (below.length > 0 ? below : eligible).sort(
-      (a, b) => Number(a.inFlight) - Number(b.inFlight) || pctOf(a) - pctOf(b) || byId(a, b),
+      (a, b) => Number(a.inFlight) - Number(b.inFlight) || shut(a) - shut(b) || pctOf(a) - pctOf(b) || byId(a, b),
     );
     for (const word of order) {
       if (!open(word, 1)) continue;
@@ -297,7 +301,7 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
       true,
     );
     firstSay();
-    hardest(words);
+    hardest(words, true);
   };
 
   if (mode === 'more') {
@@ -309,7 +313,7 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
       words.filter((word) => word.state === 'later'),
       false,
     );
-    hardest(words);
+    hardest(words, false);
   } else {
     const owed = words.filter((word) => word.state === 'owed');
     start(

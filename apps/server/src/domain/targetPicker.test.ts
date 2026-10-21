@@ -302,6 +302,37 @@ describe('chooseTargetPicks, practice more', () => {
     expect(pick(day, { now: all }).map((p) => p.glossId)).toEqual(['g0', 'g1']);
   });
 
+  it("before the eve asks first the words whose weakest skill is still open today: only those can move (review C1)", () => {
+    const day = dayOf(
+      [
+        { id: 'g0', state: 'done', chances: { [WP]: 0.3, [SP]: 0.9, [SK]: 0.9 } },
+        { id: 'g1', state: 'done', chances: { [WP]: 0.6, [SP]: 0.9, [SK]: 0.9 } },
+      ],
+      'done',
+    );
+    // g0 is the lower, but its weakest skill was answered today; g1's is still open.
+    const now = new Map([
+      ['g0', { pct: 30, counted: [WP, SP, SK] as Dimension[], weakestOpen: false }],
+      ['g1', { pct: 60, counted: [WP, SP, SK] as Dimension[], weakestOpen: true }],
+    ]);
+    expect(pick(day, { now }).map((p) => p.glossId)).toEqual(['g1', 'g0']);
+  });
+
+  it('asks every word on the due date, at its bar too: the card is frozen, so the bar filter does not apply (review I1)', () => {
+    const day = dayOf(
+      [
+        { id: 'g0', state: 'done', chances: { [WP]: 0.99, [SP]: 0.99, [SK]: 0.99 } },
+        { id: 'g1', state: 'done', chances: { [WP]: 0.5, [SP]: 0.5, [SK]: 0.5 } },
+      ],
+      'due_today',
+    );
+    const now = new Map([
+      ['g0', { pct: 100, counted: [WP, SP, SK] as Dimension[], weakestOpen: true }],
+      ['g1', { pct: 50, counted: [WP, SP, SK] as Dimension[], weakestOpen: true }],
+    ]);
+    expect(pick(day, { now }).map((p) => p.glossId).sort()).toEqual(['g0', 'g1']);
+  });
+
   it("asks a test's word only its counted skills now: no speaking (phase 67b D5)", () => {
     const day = dayOf([{ id: 'g0', state: 'done', chances: { [WP]: 0.9, [SP]: 0.9, [SK]: 0.1 } }], 'done');
     const now = new Map([['g0', { pct: 80, counted: [SP, WP] as Dimension[] }]]);

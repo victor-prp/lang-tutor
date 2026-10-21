@@ -31,7 +31,7 @@ import {
 } from './targetPicker';
 import { activeOn, readinessOf, recallOnDue, type TargetKind } from './targets';
 import { capHalves, targetSessionWrite, type HoldingTarget, type TargetSkillEvent, type TargetSkillRow } from './targetSkills';
-import { pickNow, readinessSummary, skillStarts } from './targetSummary';
+import { canRaiseToday, pickNow, readinessSummary, skillStarts } from './targetSummary';
 import { dayState, type DayAnswer } from './today';
 
 /**
@@ -899,6 +899,9 @@ type PathSession = {
   budget: number | null;
   /** Phase 65 (spec D1): each active target's readiness before the session and after it. */
   readiness: { before: ReadonlyMap<string, TargetReadiness>; after: ReadonlyMap<string, TargetReadiness> };
+  /** Phase 67b (spec D6): for a target session, whether the summary at its start said one more
+   *  session could raise the card (the wire's practice_more_little, negated). */
+  canRaise?: boolean;
 };
 
 /** Phase 65 (spec D1, R1). A target's readiness as its summary reads it (targetSummary.ts
@@ -1256,7 +1259,31 @@ function runPaths(
       }
       const path = target?.id ?? null;
       const readinessBefore = readinessNow();
-      const entry: PathSession = { at, day, date, path, home, mode, picks, input, families, budget, readiness: { before: readinessBefore, after: readinessBefore } };
+      // Phase 67b (spec D6): the flag as services/targets.ts computes it at this session's start.
+      let canRaise: boolean | undefined;
+      if (target) {
+        const own = wordsOf(target).map(({ glossId }) => glossId);
+        const summary = readinessSummary({
+          kind: target.kind,
+          dueOn: target.dueOn,
+          today: date,
+          words: own.map((glossId) => ({ glossId, live: LIVE })),
+          rows: [...readinessRows.values()].filter((row) => row.targetId === target.id),
+          memory: [...memory.values()].filter((row) => own.includes(row.glossId)),
+          firstToday: [],
+        });
+        const plan = new Map(home.get(target.id)!.words.map((word) => [word.glossId, word]));
+        canRaise = canRaiseToday({
+          daysLeft: daysBetween(date, target.dueOn),
+          newRoom: Math.max(0, DAY_NEW_CAP - introduced.size),
+          words: summary.words.map((word) => ({
+            readinessPct: word.readinessPct,
+            met: plan.get(word.glossId)?.state !== 'later' && !plan.get(word.glossId)?.toStart,
+            weakestOpenToday: word.weakestOpenToday,
+          })),
+        });
+      }
+      const entry: PathSession = { at, day, date, path, home, mode, picks, input, families, budget, readiness: { before: readinessBefore, after: readinessBefore }, canRaise };
       sessions.push(entry);
       const planned = picks.map((pick, i) => ({
         form: `w${i}`,
@@ -2006,6 +2033,10 @@ const VOLUME = [5, 10, 15] as const;
  *  2026-10-21: 76.2, the five-phase mean. */
 const CRAMMED_TEST_DAY_TWO_PASS = 77;
 const BEFORE_THE_EVE = [0, 1, 2, 3] as const;
+/** Review C1. The share of practice-more sessions before the eve, flagged "can raise", that raised
+ *  the card, over 5, 10 and 15 sessions a day and the five phases; measured 2026-10-21 (exam
+ *  95/136, homework 106/116; a miss, and an exam's hold, keep the rest from rising). */
+const CAN_RAISE_ROSE_PASS: Record<TargetKind, number> = { exam: 0.69, homework: 0.91 };
 
 describe('phase 67b: a fresh homework of eighteen words due in 5 days, its budget each day (spec D1, D4)', () => {
   const homework = targetOf('homework', 5, listIds(1, 18));
@@ -2021,7 +2052,7 @@ describe('phase 67b: a fresh homework of eighteen words due in 5 days, its budge
 
 describe.each<[TargetKind]>([['exam'], ['homework']])('phase 67b: eighteen words of a %s due in 5 days at 5, 10 and 15 sessions a day (spec D3)', (kind) => {
   const target = targetOf(kind, 5, listIds(1, 18));
-  const runs = new Map(
+  const runs = new Map<number, PathRun[]>(
     VOLUME.map((n) => [
       n,
       EVERY_PHASE.map((learner) => runPaths(withList(18), 6, (day) => (day === 5 ? 0 : n), [target], learner, { stockLag: true, moreWhenDone: true })),
@@ -2046,6 +2077,22 @@ describe.each<[TargetKind]>([['exam'], ['homework']])('phase 67b: eighteen words
         expect({ day: day + 1, sessions: VOLUME[i], ok: means[i][day] >= means[i - 1][day] - VOLUME_TOLERANCE }).toEqual({ day: day + 1, sessions: VOLUME[i], ok: true });
       }
     }
+  });
+
+  // Review C1. The flag against what practice more did: before the eve, a practice-more session the
+  // summary said cannot raise the card never raises it; how often one it said can, does.
+  const practice = [...runs.values()].flat().flatMap((run) =>
+    run.sessions.filter(
+      (one) => one.path === target.id && (one.mode === 'more' || one.mode === 'past_budget') && daysBetween(one.date, target.dueOn) > 1,
+    ),
+  );
+  const rose = (one: PathSession) => one.readiness.after.get(target.id)!.pct > one.readiness.before.get(target.id)!.pct;
+  const said = (can: boolean) => practice.filter((one) => one.canRaise === can);
+  const rate = (sessions: PathSession[]) => (sessions.length ? `${sessions.filter(rose).length}/${sessions.length}` : '0/0');
+  it(`before the eve, a practice-more session flagged "cannot raise" never raises the card (${rate(said(false))}); flagged "can", it rises in ${rate(said(true))} (pass ≥ ${CAN_RAISE_ROSE_PASS[kind]})`, () => {
+    expect(said(false).length + said(true).length).toBe(practice.length);
+    expect(said(false).filter(rose)).toEqual([]);
+    expect(said(true).filter(rose).length / said(true).length).toBeGreaterThanOrEqual(CAN_RAISE_ROSE_PASS[kind]);
   });
 
   if (kind === 'exam') {

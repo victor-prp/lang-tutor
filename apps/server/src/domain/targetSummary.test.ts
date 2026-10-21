@@ -43,8 +43,8 @@ describe('readinessSummary (spec D1, D4)', () => {
         glossId: 'g1',
         // The weakest, 0.846; the product would read 79.
         readinessPct: 84,
-        // AT_96's rows last moved today; speaking's on 30 Sep.
-        unansweredToday: 1,
+        // Its weakest, speaking, last moved on 30 Sep: open today.
+        weakestOpenToday: true,
         skills: [
           { dimension: 'written_productive', chance: 96, held: false },
           { dimension: 'spelling', chance: 96, held: false },
@@ -128,15 +128,25 @@ describe('readinessSummary (spec D1, D4)', () => {
     expect(summary.readyCount).toBe(1);
   });
 
-  it('counts the counted skills not yet answered today: a row moved today is answered (phase 67b D6)', () => {
-    const summary = read({
-      words: [{ glossId: 'g1', live: HOMEWORK_LIVE }],
-      rows: [
-        { glossId: 'g1', dimension: 'written_productive', row: row(AT_96, { day: TODAY }) },
+  it("says whether a word's weakest skill is still open today: only it can move the word (phase 67b D1, D6)", () => {
+    const open = (rows: { glossId: string; dimension: Dimension; row: ReadinessRow }[]) =>
+      read({ words: [{ glossId: 'g1', live: SILENT }], rows }).words[0].weakestOpenToday;
+    // The weakest, writing, answered today; spelling still open: answering spelling cannot raise the word.
+    expect(
+      open([
+        { glossId: 'g1', dimension: 'written_productive', row: row(AT_84, { day: TODAY }) },
         { glossId: 'g1', dimension: 'spelling', row: row(AT_96, { day: '2026-10-14' }) },
-      ],
-    });
-    expect(summary.words[0].unansweredToday).toBe(2);
+      ]),
+    ).toBe(false);
+    // The weakest, writing, not answered today.
+    expect(
+      open([
+        { glossId: 'g1', dimension: 'written_productive', row: row(AT_84, { day: '2026-10-14' }) },
+        { glossId: 'g1', dimension: 'spelling', row: row(AT_96, { day: TODAY }) },
+      ]),
+    ).toBe(true);
+    // Never answered: every skill at 0, none answered today.
+    expect(open([])).toBe(true);
   });
 
   it('counts a word ready at 90 and above, and not below (spec D4)', () => {
@@ -182,10 +192,10 @@ describe('readinessSummary: the start of today (spec D5, D10)', () => {
 });
 
 describe('canRaiseToday (phase 67b D6)', () => {
-  const word = (over: Partial<{ readinessPct: number; met: boolean; unansweredToday: number }> = {}) => ({
+  const word = (over: Partial<{ readinessPct: number; met: boolean; weakestOpenToday: boolean }> = {}) => ({
     readinessPct: 60,
     met: true,
-    unansweredToday: 0,
+    weakestOpenToday: false,
     ...over,
   });
   const can = (words: ReturnType<typeof word>[], over: Partial<{ daysLeft: number; newRoom: number }> = {}) =>
@@ -200,12 +210,12 @@ describe('canRaiseToday (phase 67b D6)', () => {
     expect(can([word({ met: false })], { daysLeft: 1, newRoom: 0 })).toBe(false);
   });
 
-  it('can before the eve while a met word below its bar has a counted skill not answered today', () => {
-    expect(can([word({ unansweredToday: 1 })])).toBe(true);
+  it("can before the eve while a met word below its bar has its weakest skill still open today", () => {
+    expect(can([word({ weakestOpenToday: true })])).toBe(true);
   });
 
-  it('cannot before the eve once every skill of every word below its bar is answered today', () => {
-    expect(can([word(), word({ readinessPct: 100, unansweredToday: 2 })])).toBe(false);
+  it('cannot before the eve once the weakest skill of every word below its bar is answered today, another skill open or not (review C1)', () => {
+    expect(can([word(), word({ readinessPct: 100, weakestOpenToday: true })])).toBe(false);
   });
 
   it('can on the eve while any met word is below its bar', () => {
@@ -213,8 +223,8 @@ describe('canRaiseToday (phase 67b D6)', () => {
   });
 
   it('cannot once every word is at its bar, on the eve too, nor on or after the date', () => {
-    expect(can([word({ readinessPct: 100, unansweredToday: 3 })], { daysLeft: 1 })).toBe(false);
-    expect(can([word({ unansweredToday: 3 })], { daysLeft: 0 })).toBe(false);
+    expect(can([word({ readinessPct: 100, weakestOpenToday: true })], { daysLeft: 1 })).toBe(false);
+    expect(can([word({ weakestOpenToday: true })], { daysLeft: 0 })).toBe(false);
     expect(can([])).toBe(false);
   });
 });
@@ -334,6 +344,6 @@ describe('pickNow (phase 67b D5)', () => {
         { glossId: 'g1', dimension: 'spoken_productive', row: row(state(1, '2026-09-01')) },
       ],
     });
-    expect(pickNow(summary.words)).toEqual(new Map([['g1', { pct: 84, counted: ['spelling', 'written_productive'] }]]));
+    expect(pickNow(summary.words)).toEqual(new Map([['g1', { pct: 84, counted: ['spelling', 'written_productive'], weakestOpen: true }]]));
   });
 });

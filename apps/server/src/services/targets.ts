@@ -221,7 +221,7 @@ export function createTargetService({
             return {
               readinessPct: readiness.words[i].readinessPct,
               met: word.state !== 'later' && !word.toStart,
-              unansweredToday: readiness.words[i].unansweredToday,
+              weakestOpenToday: readiness.words[i].weakestOpenToday,
             };
           }),
         }),
