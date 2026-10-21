@@ -300,3 +300,26 @@ Made while building, each with what it costs if wrong.
   single-phase dip of a point, and a test reaches 100% on the eve in all five phases within 11–12
   eve sessions (no phase pinned any more). Cost: a word at its bar is not practised past the
   budget while another is below; the plan's eve check still asks it.
+- **R2 (D3).** Ruling: a row read from the main memory that moved today counts as answered today:
+  before the eve a later target answer that day is ignored, on the eve it is a bonus. That memory's
+  answer was the day's first. Cost: a word answered on My words earlier today moves on its target
+  only from tomorrow.
+- **R3 (D3).** Ruling: no migration: `bonus_used` stops counting at 2 (`READINESS_BONUS_RECORDED`)
+  and the eve's bonuses past it still apply. Cost: the stored count under-reports a long eve.
+- **R4 (D2).** Ruling: the plan's own readiness (`TargetDay.readinessPct`, recorded in
+  `session_targets`) stays the weakest-skill forecast, not the card value. Cost: that record reads
+  lower than the card for words at their bar.
+- **R5 (D6).** Ruling: a word never started on its target is unmet even with readiness rows; it
+  raises the card only while the day has room for new words. Cost: none found.
+- **R6 (D5).** Ruling: readiness now is read in `readTargetDay` from the rows and memory it
+  already reads, and leaves out the session in flight's answers (written at its end). Cost: a
+  stock built beside a session may order one word by its value before that session.
+- **R7 (D7).** Ruling: an owed day with one session left or none (a budget not set reads owed
+  until done) reads "כמעט שם · עוד תרגול אחד"; the screen reader says each line without its ✓ or ↑,
+  then its second part, then the count. Cost: "one more" on a day that may take two.
+- **R8 (Testing).** Ruling: `HOMEWORK_PASS` sessions marks tightened to the new measures (20, 11,
+  9); its readiness and FSRS marks unchanged. The one-day homework's share ready by FSRS reads
+  0.41 against phase 67's 0.45 (gate 0.40). Cost: none; no mark lowered.
+- **R9 (Testing).** Ruling: the eve's 100% gate keeps an automatic exclusion for a phase whose
+  rhythm pins one word (its weakest word asked in 20 eve cards or more, 90% missed), though none is
+  pinned after R1. Cost: a real stuck word excused as the rhythm.
