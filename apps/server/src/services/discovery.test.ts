@@ -9,14 +9,16 @@ import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
 import type { UserRepo } from '../repo/users';
 import type { VocabularyRepo } from '../repo/vocabulary';
-import { createFakeDiscoveryRepo, newCardRow, type FakeDiscoveryRepo } from '../../tests/support/fakeDiscovery';
 import {
   createFakeClock,
+  createFakeDiscoveryRepo,
   createFakeJobRepo,
   createFakeLlmClient,
   createFakeLogger,
   createFakeTransaction,
+  newCardRow,
   stub,
+  type FakeDiscoveryRepo,
 } from '../../tests/support/fakes';
 import { createDiscoveryService } from './discovery';
 import type { LlmJsonRequest } from './llm';
