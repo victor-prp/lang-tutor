@@ -2,6 +2,7 @@ import type { ClozeTypedQuestion, LanguageCode, PartOfSpeech, SentenceTranslatio
 import type { QuestionType, TypedTarget } from '@lang-tutor/core/domain';
 
 import type { CheckItem } from '../../src/domain/check';
+import type { DiscoveryPromptInput } from '../../src/domain/discovery';
 import type { Task } from '../../src/domain/distractors';
 import type { JudgeContext, MeaningJudgeContext } from '../../src/domain/judge';
 import type { StoredSense } from '../../src/domain/translation';
@@ -2199,4 +2200,34 @@ export const SOUND_ALIKE_CASES: SoundAlikeCase[] = [
       { a: 'hole', b: 'whole', expect: 'same' },
     ],
   },
+];
+
+/**
+ * Phase 69 (spec D4). One round of Words for me: the learner's language, level, age and how
+ * they learn, and the words to leave out. Scored on shape only (Victor: whether the words fit
+ * the level "we can't know now"): enough words, none left out returned, none repeated, each in
+ * its language's script with a Hebrew meaning. Every label starts "discover ", so that filter
+ * selects the group.
+ */
+export type DiscoveryCase = { label: string; input: DiscoveryPromptInput };
+
+/** Sixty everyday Italian words a learner past A1 has met: a round must not bring them back. */
+const COMMON_ITALIAN = [
+  'casa', 'cane', 'gatto', 'acqua', 'pane', 'libro', 'scuola', 'amico', 'famiglia', 'madre',
+  'padre', 'fratello', 'sorella', 'giorno', 'notte', 'mattina', 'sera', 'anno', 'mese', 'settimana',
+  'tempo', 'lavoro', 'città', 'strada', 'macchina', 'treno', 'mangiare', 'bere', 'dormire', 'parlare',
+  'andare', 'venire', 'fare', 'avere', 'essere', 'vedere', 'sapere', 'volere', 'potere', 'dovere',
+  'grande', 'piccolo', 'bello', 'buono', 'nuovo', 'vecchio', 'caldo', 'freddo', 'rosso', 'bianco',
+  'nero', 'mare', 'sole', 'luna', 'cibo', 'tavolo', 'sedia', 'porta', 'finestra', 'letto',
+];
+
+export const DISCOVERY_CASES: DiscoveryCase[] = [
+  { label: 'discover it A1 lower, an adult on their own', input: { target: 'it', level: 1, age: 34, learningContext: 'self', exclude: [] } },
+  {
+    label: 'discover it B1 upper, an adult in a course, sixty common words left out',
+    input: { target: 'it', level: 6, age: 40, learningContext: 'course', exclude: COMMON_ITALIAN },
+  },
+  { label: 'discover en A2 lower, a child at school', input: { target: 'en', level: 3, age: 10, learningContext: 'school', exclude: ['dog', 'cat', 'apple', 'school', 'book'] } },
+  { label: 'discover en B2 lower, an adult with family', input: { target: 'en', level: 7, age: 45, learningContext: 'family', exclude: [] } },
+  { label: 'discover ru A1 upper, a teen at school', input: { target: 'ru', level: 2, age: 15, learningContext: 'school', exclude: ['дом', 'мама', 'папа'] } },
 ];

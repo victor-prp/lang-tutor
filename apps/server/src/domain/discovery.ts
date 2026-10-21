@@ -46,7 +46,9 @@ export const EXCLUDE_IN_PROMPT = 400;
 
 /** Spec D4. One round's call: the learner waits on it, at a spinner. The environment may lower it. */
 export const DISCOVERY_BUDGET_MS = 20_000;
-/** Spec D4. The round's thinking budget, in tokens: measured by the eval group (plan task 7). */
+/** Spec D4. The round's thinking budget, in tokens. Measured on the `discover ` eval group
+ *  (2026-10-21): off, a round took 1.8–3.1 s and passed every check in two runs of five cases,
+ *  so the smaller budget stands. */
 export const DISCOVERY_THINKING = 0;
 
 /** Spec D6. */
