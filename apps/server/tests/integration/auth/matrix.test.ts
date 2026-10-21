@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { createApp } from '../../../src/app';
 import { signUpWithProfile } from '../../support/auth';
 import { insertLexeme } from '../../support/dictRows';
+import { seedDiscoveryProfile, seedDiscoveryRun } from '../../support/discoveryRows';
 import { createFakeLogger } from '../../support/fakes';
 import { addedByOf, seedGrant } from '../../support/grantRows';
 import { clearNamespace, expectEmails, mailBaseUrlFor, mockNamespace } from '../../support/mockServer';
@@ -36,6 +37,7 @@ let ids: {
   enrollment: string;
   session: string;
   photoImport: string;
+  discoveryRun: string;
   target: string;
   grant: string;
   saved: { gloss_id: string; variant_id: string };
@@ -142,6 +144,28 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
     body: { photo_import_ids: [ids.photoImport] },
   }),
   'post /api/photo-imports/{id}/discard': () => ({ url: `/api/photo-imports/${ids.photoImport}/discard` }),
+  // Phase 69 (spec D10). Words for me is its list owner's alone, a tutor of the list included. A
+  // call that got through would show in the counts of discovery_profiles, discovery_runs or
+  // discovery_cards, or in the run's status, its first card's answer or its second card's tick.
+  'get /api/enrollments/{id}/discovery': () => ({ url: `/api/enrollments/${ids.enrollment}/discovery` }),
+  'post /api/enrollments/{id}/discovery/profile': () => ({
+    url: `/api/enrollments/${ids.enrollment}/discovery/profile`,
+    body: { self_level: 'none', learning_context: 'self' },
+  }),
+  'post /api/enrollments/{id}/discovery/runs': () => ({ url: `/api/enrollments/${ids.enrollment}/discovery/runs`, body: { goal: 5 } }),
+  'get /api/discovery/runs/{id}': () => ({ url: `/api/discovery/runs/${ids.discoveryRun}` }),
+  'post /api/discovery/runs/{id}/rounds': () => ({ url: `/api/discovery/runs/${ids.discoveryRun}/rounds` }),
+  'post /api/discovery/runs/{id}/cards/{position}/answer': () => ({
+    url: `/api/discovery/runs/${ids.discoveryRun}/cards/0/answer`,
+    body: { kind: 'unknown' },
+  }),
+  'post /api/discovery/runs/{id}/end': () => ({ url: `/api/discovery/runs/${ids.discoveryRun}/end` }),
+  'patch /api/discovery/runs/{id}/items/{position}': () => ({
+    url: `/api/discovery/runs/${ids.discoveryRun}/items/1`,
+    body: { ticked: false },
+  }),
+  'post /api/discovery/runs/{id}/save': () => ({ url: `/api/discovery/runs/${ids.discoveryRun}/save` }),
+  'post /api/discovery/runs/{id}/discard': () => ({ url: `/api/discovery/runs/${ids.discoveryRun}/discard` }),
   // Phase 53 (spec D2). A target is its list owner's alone, a tutor of the list included: the
   // tutor loop below is refused on all seven too. A call that got through would show in the
   // counts of targets, target_words, target_events or vocabulary_entries (the add aims at a gloss
@@ -210,6 +234,9 @@ async function written() {
     'vocabulary_entries',
     'photo_imports',
     'photo_import_items',
+    'discovery_profiles',
+    'discovery_runs',
+    'discovery_cards',
     'enrollment_grants',
     'targets',
     'target_words',
@@ -219,6 +246,10 @@ async function written() {
     (select status from sessions where id = ${ids.session}) as session,
     (select status from photo_imports where id = ${ids.photoImport}) as photo_import,
     (select ticked from photo_import_items where import_id = ${ids.photoImport} and position = 0) as item_ticked,
+    (select status from discovery_runs where id = ${ids.discoveryRun}) as discovery_run,
+    (select answer from discovery_cards where run_id = ${ids.discoveryRun} and position = 0) as discovery_answer,
+    (select ticked from discovery_cards where run_id = ${ids.discoveryRun} and position = 1) as discovery_ticked,
+    (select level from discovery_profiles where enrollment_id = ${ids.enrollment}) as discovery_level,
     (select accepted_at::text from enrollment_grants where id = ${ids.grant}) as grant_accepted_at,
     (select ended_at::text from targets where id = ${ids.target}) as target_ended_at,
     (select due_on::text from targets where id = ${ids.target}) as target_due_on`);
@@ -277,6 +308,17 @@ beforeAll(async () => {
   // Every photo-import use case authorizes right after loading the import, so
   // one pending row is enough to aim at.
   const photoImport = await seedPhotoImport(t.db, { enrollmentId: enrollment, status: 'read', items: [{ text: LEMMA }] });
+  // Phase 69. A profile and an asking run: its first card unanswered, its second one not known
+  // and looked up, ticked. Every discovery use case authorizes before it reads a card.
+  await seedDiscoveryProfile(t.db, { enrollmentId: enrollment });
+  const discoveryRun = await seedDiscoveryRun(t.db, {
+    enrollmentId: enrollment,
+    status: 'asking',
+    cards: [
+      { word: LEMMA, answer: null },
+      { word: 'grid', answer: 'unknown', options: [{ ...saved, translation: 'מטריצה' }] },
+    ],
+  });
   // Through the repository, with none of the targets service's rules: it holds the gloss the owner
   // saved, and its date is far enough away that it is active for as long as this file runs.
   const target = await seedTarget(t.db, {
@@ -292,7 +334,7 @@ beforeAll(async () => {
     accepted: true,
   });
 
-  ids = { enrollment, session, photoImport, target, grant, saved, unsaved };
+  ids = { enrollment, session, photoImport, discoveryRun, target, grant, saved, unsaved };
 }, 120_000);
 
 afterAll(async () => {

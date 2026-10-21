@@ -15,6 +15,7 @@ import { createGrantsRouter } from './routes/grants';
 import { createInternalRemindersRouter } from './routes/internalReminders';
 import { createMeRouter } from './routes/me';
 import { createPhotoImportsRouter } from './routes/photoImports';
+import { createDiscoveryRouter } from './routes/discovery';
 import { createRemindersRouter } from './routes/reminders';
 import { createQuestionTypesRouter } from './routes/questionTypes';
 import { createSessionsRouter } from './routes/sessions';
@@ -122,6 +123,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api', createGrantsRouter(deps.grants));
   app.route('/api', createVocabularyRouter(deps.vocabulary));
   app.route('/api', createPhotoImportsRouter(deps.photoImports));
+  app.route('/api', createDiscoveryRouter(deps.discovery));
   app.route('/api', createTargetsRouter(deps.targets));
   app.route('/api', createTranslationsRouter(deps.translations, deps.logger));
   app.route('/api', createSessionsRouter(deps.sessions));

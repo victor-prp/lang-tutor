@@ -115,14 +115,24 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all forty-two paths and nothing else', async () => {
+  it('contains all fifty-two paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/auth/email-otp/send-verification-otp',
       '/api/auth/get-session',
       '/api/auth/sign-in/email-otp',
       '/api/auth/sign-out',
+      '/api/discovery/runs/{id}',
+      '/api/discovery/runs/{id}/cards/{position}/answer',
+      '/api/discovery/runs/{id}/discard',
+      '/api/discovery/runs/{id}/end',
+      '/api/discovery/runs/{id}/items/{position}',
+      '/api/discovery/runs/{id}/rounds',
+      '/api/discovery/runs/{id}/save',
       '/api/enrollments',
+      '/api/enrollments/{id}/discovery',
+      '/api/enrollments/{id}/discovery/profile',
+      '/api/enrollments/{id}/discovery/runs',
       '/api/enrollments/{id}/photo-imports',
       '/api/enrollments/{id}/photo-imports/save',
       '/api/enrollments/{id}/question-type-sessions',
@@ -744,6 +754,17 @@ describe('the 403 of an owner-only or granted route in the published document', 
     ['/api/photo-imports/{id}/items/{position}', 'patch', /another learner's/],
     ['/api/photo-imports/{id}/save', 'post', /another learner's/],
     ['/api/photo-imports/{id}/discard', 'post', /another learner's/],
+    // Phase 69 (spec D10).
+    ['/api/enrollments/{id}/discovery', 'get', /another learner's/],
+    ['/api/enrollments/{id}/discovery/profile', 'post', /another learner's/],
+    ['/api/enrollments/{id}/discovery/runs', 'post', /another learner's/],
+    ['/api/discovery/runs/{id}', 'get', /another learner's/],
+    ['/api/discovery/runs/{id}/rounds', 'post', /another learner's/],
+    ['/api/discovery/runs/{id}/cards/{position}/answer', 'post', /another learner's/],
+    ['/api/discovery/runs/{id}/end', 'post', /another learner's/],
+    ['/api/discovery/runs/{id}/items/{position}', 'patch', /another learner's/],
+    ['/api/discovery/runs/{id}/save', 'post', /another learner's/],
+    ['/api/discovery/runs/{id}/discard', 'post', /another learner's/],
     ['/api/enrollments/{id}/targets', 'get', OWNER_ONLY],
     ['/api/enrollments/{id}/targets', 'post', OWNER_ONLY],
     ['/api/targets/{id}', 'get', OWNER_ONLY],

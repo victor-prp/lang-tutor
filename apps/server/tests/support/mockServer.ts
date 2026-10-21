@@ -5,6 +5,7 @@ import type { LlmContext, LlmEntry, LlmRendering, TranslationKind } from '@lang-
 import { ACCEPT_MARKER } from '../../src/domain/accept';
 import { CHECK_MARKER } from '../../src/domain/check';
 import { CONTEXT_MARKER } from '../../src/domain/context';
+import { DISCOVERY_MARKER } from '../../src/domain/discovery';
 import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
 import { EXPLAIN_MARKER, type Explanation } from '../../src/domain/explain';
 import { JUDGE_MARKER } from '../../src/domain/judge';
@@ -485,6 +486,32 @@ export async function expectSoundAlike(ns: string, ...scores: number[]): Promise
         statusCode: 200,
         headers: { 'content-type': ['application/json'] },
         body: JSON.stringify(geminiResponse({ scores: scores.map((score, index) => ({ key: `p${index + 1}`, score })) })),
+      },
+      times: { remainingTimes: 1, unlimited: false },
+      priority: 10,
+    },
+  });
+}
+
+/**
+ * Phase 69. One round of Words for me: the model's proposals, matched on DISCOVERY_MARKER,
+ * consumed once in registration order, and prioritised over a broader stub.
+ */
+export async function expectDiscovery(
+  ns: string,
+  words: { word: string; hebrew: string; alternatives?: string[]; part_of_speech?: string }[],
+): Promise<void> {
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${DISCOVERY_MARKER}[\\s\\S]*` } },
+    action: {
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(
+          geminiResponse({
+            words: words.map((word) => ({ part_of_speech: 'noun', alternatives: [], ...word })),
+          }),
+        ),
       },
       times: { remainingTimes: 1, unlimited: false },
       priority: 10,
