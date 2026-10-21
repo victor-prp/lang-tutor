@@ -180,3 +180,17 @@ export function todaySummary(input: {
     minutes: Math.round(((shown?.cards ?? 0) * CARD_SECONDS) / 60),
   };
 }
+
+/** Phase 67b (spec D5). What the target picker reads as readiness now (TargetPickInput.now): each
+ *  word's card value and its counted skills, the lowest chance first. */
+export function pickNow(words: readonly WordReadiness[]): Map<string, { pct: number; counted: Dimension[] }> {
+  return new Map(
+    words.map((word) => [
+      word.glossId,
+      {
+        pct: word.readinessPct,
+        counted: [...word.skills].sort((a, b) => a.chance - b.chance).map((skill) => skill.dimension),
+      },
+    ]),
+  );
+}

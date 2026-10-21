@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { FSRS6_DEFAULT, readinessFromMemory, type Dimension, type MemoryState, type ReadinessRow } from '@lang-tutor/core/domain';
 
-import { canRaiseToday, readinessSummary, skillStarts, todaySummary } from './targetSummary';
+import { canRaiseToday, pickNow, readinessSummary, skillStarts, todaySummary } from './targetSummary';
 
 // Phase 65 (spec D1, D3.7, D4, D7, D9, D10). The numbers a target's summary carries: its
 // readiness, where today started and its ready words; whether "practice more" asks first (phase
@@ -320,5 +320,20 @@ describe('skillStarts (phase 67, spec D1)', () => {
     expect(starts.map((start) => start.dimension)).toEqual(['written_productive', 'spelling', 'spoken_productive']);
     const silent = skillStarts({ kind: 'exam', dueOn: DUE, words: [{ glossId: 'g1', live: SILENT }], rows: [], memory: [], firstToday: [] });
     expect(silent.map((start) => start.dimension)).toEqual(['written_productive', 'spelling']);
+  });
+});
+
+describe('pickNow (phase 67b D5)', () => {
+  it("gives each word its card value now and its counted skills, the lowest chance first: a test's has no speaking", () => {
+    const summary = read({
+      kind: 'exam',
+      words: [{ glossId: 'g1', live: HOMEWORK_LIVE }],
+      rows: [
+        { glossId: 'g1', dimension: 'written_productive', row: row(AT_96) },
+        { glossId: 'g1', dimension: 'spelling', row: row(AT_84) },
+        { glossId: 'g1', dimension: 'spoken_productive', row: row(state(1, '2026-09-01')) },
+      ],
+    });
+    expect(pickNow(summary.words)).toEqual(new Map([['g1', { pct: 84, counted: ['spelling', 'written_productive'] }]]));
   });
 });

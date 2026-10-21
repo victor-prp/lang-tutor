@@ -1525,26 +1525,32 @@ function itKeepsTheTargetPaths(run: PathRun, targets: readonly SimTarget[], ever
     expect(run.sessions.some((session) => session.path !== null)).toBe(true);
   });
 
-  it('asks each new word of a target as a ladder, another word two cards at most, and two ladders and ten graded cards a session at most, with no speaking limit (spec D7, phase 67 D6)', () => {
+  it('asks each new word of a target as a ladder and its say card, another word two cards at most, and two ladders and ten graded cards a session at most, with no speaking limit (spec D7, phase 67 D6, phase 67b D4)', () => {
     let ladders = 0;
     for (const session of run.sessions.filter((one) => one.path !== null)) {
       const cards = run.log.filter((card) => card.at === session.at);
       const ladderIds = new Set(session.picks.filter((pick) => pick.ladder).map((pick) => pick.glossId));
-      // Spec D7: a ladder is its word's only pick; another word takes a card a pick, two at most.
+      // Spec D7: a ladder takes its word's first pick; phase 67b D4: its second, when there is room,
+      // is its say card. Another word takes a card a pick, two at most.
       for (const glossId of new Set(session.picks.map((pick) => pick.glossId))) {
-        const own = session.picks.filter((pick) => pick.glossId === glossId).length;
+        const mine = session.picks.filter((pick) => pick.glossId === glossId);
+        const own = mine.length;
         const asked = cards.filter((card) => card.glossId === glossId);
         const types = asked.map((card) => card.type);
         expect({
           at: session.at,
           glossId,
           asked: ladderIds.has(glossId)
-            ? { own, types }
+            ? {
+                own: own === 1 || (own === 2 && mine[1].dimension === 'spoken_productive'),
+                types: types.filter((type) => type !== 'say_translation'),
+                says: types.filter((type) => type === 'say_translation').length,
+              }
             : { own: own <= 2, cards: types.length, intro: asked.some((card) => card.intro || card.type === 'meet') },
         }).toEqual({
           at: session.at,
           glossId,
-          asked: ladderIds.has(glossId) ? { own: 1, types: LADDER } : { own: true, cards: own, intro: false },
+          asked: ladderIds.has(glossId) ? { own: true, types: LADDER, says: own - 1 } : { own: true, cards: own, intro: false },
         });
       }
       ladders += ladderIds.size;
