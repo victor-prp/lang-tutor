@@ -117,6 +117,13 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await page.setViewportSize({ width: 390, height: 844 });
   const typed = await readCard(page, 5, total, 'typed');
   expect(typed.prompt).toBe(WORD.translation);
+  // The answer bar (answer bar spec D1): on a screen as short as a phone's above
+  // its keyboard, the question, the input and בדיקה all show, unscrolled.
+  await page.setViewportSize({ width: 390, height: 360 });
+  await expect(page.getByTestId('question-prompt')).toBeInViewport({ ratio: 1 });
+  await expect(page.getByTestId('typed-input')).toBeInViewport({ ratio: 1 });
+  await expect(page.getByTestId('typed-submit')).toBeInViewport({ ratio: 1 });
+  await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId('typed-box').getByTestId('typed-help')).toBeInViewport();
   await expect(page.getByTestId('typed-hint')).toHaveCount(0);
   await expect(page.getByTestId('typed-help')).toContainText('עזרה');
@@ -174,7 +181,9 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await expect(banner).toHaveCount(0);
 
   // The right word ends it: נכון! and המשך, and the word is not said again.
-  await answerTyped(page, WORD.form);
+  // Sent by Return from the answer bar, as בדיקה would send it.
+  await input.fill(WORD.form);
+  await input.press('Enter');
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
   await expect(page.getByTestId('retype')).toHaveCount(0);
