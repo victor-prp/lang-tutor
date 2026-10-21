@@ -165,6 +165,19 @@ export const LookUpImportItemPayloadSchema = z.object({
 });
 export type LookUpImportItemPayload = z.infer<typeof LookUpImportItemPayloadSchema>;
 
+/** Phase 69 (spec D7). Looks up one Words for me card the learner did not know, as a
+ *  photo row is looked up, so its list is ready when the run ends. */
+export const LOOK_UP_DISCOVERED_WORD = 'look-up-discovered-word';
+export const LOOK_UP_DISCOVERED_WORD_FAILED = 'look-up-discovered-word-failed';
+/** The photo row's chain, and the photo row's reason. */
+export const LOOK_UP_DISCOVERED_WORD_EXPIRY_SECONDS = LOOK_UP_IMPORT_ITEM_EXPIRY_SECONDS;
+
+export const LookUpDiscoveredWordPayloadSchema = z.object({
+  run_id: z.string().min(1),
+  position: z.number().int().nonnegative(),
+});
+export type LookUpDiscoveredWordPayload = z.infer<typeof LookUpDiscoveredWordPayloadSchema>;
+
 /** Phase 31 (spec D7). Merges the glosses of one lexeme and language whose
  *  lemma-form rendering names another live gloss's key. */
 export const MERGE_GLOSSES = 'merge-glosses';
@@ -261,6 +274,8 @@ export type JobPayloads = {
   [READ_PHOTO_FAILED]: ReadPhotoPayload;
   [LOOK_UP_IMPORT_ITEM]: LookUpImportItemPayload;
   [LOOK_UP_IMPORT_ITEM_FAILED]: LookUpImportItemPayload;
+  [LOOK_UP_DISCOVERED_WORD]: LookUpDiscoveredWordPayload;
+  [LOOK_UP_DISCOVERED_WORD_FAILED]: LookUpDiscoveredWordPayload;
   [MERGE_GLOSSES]: MergeGlossesPayload;
   [RENDER_LEMMA]: RenderLemmaPayload;
   [RENDER_LEMMA_FAILED]: RenderLemmaPayload;
