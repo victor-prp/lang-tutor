@@ -73,10 +73,16 @@ A level is an integer 1–12, two per CEFR band: 1–2 A1, 3–4 A2, 5–6 B1, 7
 odd one "the lower half of" the band and the even one "the upper half". The first level comes from
 `self_level`: none 1, basic 2, simple 3, everyday 5, fluent 7.
 
-After each round, from the share of its answered cards the learner knew: ≥ 0.8 → +2, ≥ 0.6 → +1,
-> 0.2 → 0, > 0 → −1, 0 → −2, clamped to 1–12. Aim: about half known, the edge of what they know. The
-new level is written to the profile with the next round, so the next run starts there and skips the
-questions **(Victor: the level is remembered)**. Pure, in `domain/discovery.ts`.
+When a round closes, from the share of its answered cards the learner knew: ≥ 0.8 → +2, ≥ 0.6 → +1,
+> 0.2 → 0, > 0 → −1, 0 → −2, clamped to 1–12. Aim: about half known, the edge of what they know.
+Fewer than **4** answered cards keep the level: a round cut short after two cards says too little.
+Pure, in `domain/discovery.ts`.
+
+A round closes when the next round is written, or when the run moves to its list (the goal reached
+mid-round, לרשימה, or the round cap), whichever comes first (builder check). The new level is written to
+the profile in that transaction, and the run records the round it settled (`settled_round`), so a
+round moves the level once. The next run starts there and skips the questions **(Victor: the level
+is remembered)**.
 
 ### D4. A round: what the model is asked (my call)
 
@@ -87,8 +93,10 @@ fit for the age and the context, none in `exclude`, each with:
 `{ word, part_of_speech (enum, the dictionary's), hebrew (the main meaning), alternatives (other right
 Hebrew meanings, possibly empty) }`. Every field required, no optional strings (memory: they hang).
 
-`exclude` is every word the enrollment's runs ever proposed **(assumed: a later run never proposes a
-word already answered)** plus the lemmas of its saved words, newest first, at most 400 in the prompt.
+`exclude` is every word the enrollment's learner answered in any run **(assumed: a later run never
+proposes a word already answered)**, every word of this run, and the lemmas of its saved words, newest
+first, at most 400 in the prompt. A word a run proposed but never showed (it ended mid-round) may come
+again (builder check, my call).
 `parseDiscovery` drops a word in Hebrew script, an empty or over-long one (`MAX_ITEM_LENGTH`), a
 duplicate, and any match of the whole exclude set (lower-cased `normalizeForm`), then keeps the first
 **10**. Fewer than 10 is a shorter round; none ends the run (D8).
@@ -152,11 +160,12 @@ enrollment, a partial unique index. Starting while one is open answers the open 
 - `discovery_profiles`: `enrollment_id` (PK, FK), `self_level`, `learning_context` (checks),
   `level` smallint 1–12, `created_at`, `updated_at`.
 - `discovery_runs`: `id`, `enrollment_id` (FK), `goal` smallint 1–30, `status` (check),
-  `created_at`, `ended_at`; partial unique index on `enrollment_id` where status in (`asking`,
-  `listing`).
+  `settled_round` smallint (0 until a round moves the level, D3), `created_at`, `ended_at`; partial
+  unique index on `enrollment_id` where status in (`asking`, `listing`).
 - `discovery_cards`: PK (`run_id`, `position`), FK cascade; `round`, `level`, `word`,
   `part_of_speech`, `hebrew`, `alternatives` jsonb; `answer` (`unknown` | `typed` | null),
-  `typed_text`, `known`, `judged_by`, `answered_at`; the photo row's lookup fields: `lookup_status`
+  `typed_text`, `verdict` (`exact` | `alternative` | `wrong` | null), `known`, `judged_by`,
+  `answered_at`; the photo row's lookup fields: `lookup_status`
   (null until unknown, then `pending` | `ready` | `failed`), `corrected_form`, `options`,
   `suggested_gloss_id`, `chosen_gloss_id`, `ticked`, `hebrew_mismatch`, `reason`, with the photo
   row's checks. Gloss ids are snapshots, no keys (ADR 0011 R1 holds).
@@ -203,4 +212,7 @@ unanswered cards, in order), items: PhotoImportItem[] }`. Additive only: `API_LE
 ## Left to the builder
 
 The exact prompt wording, measured by the eval; the thinking budget; the app's component split; the
-job's queue options (copy the photo row's).
+job's queue options (copy the photo row's). The builder check named more it could settle alone, and
+these are settled so (my call): an empty list shows only ביטול; `POST runs` before a profile is a
+409; the entry shows for the owner only (a tutor never sees מילים of another's list); the run polls its
+items every 2 s while a row is looked up, as `ImportsReview` does.
