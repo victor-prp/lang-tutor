@@ -37,6 +37,17 @@ import type {
   LlmEntrySchema,
   LlmGlossMergeSchema,
   LlmPhotoReadingSchema,
+  DiscoverySelfLevelSchema,
+  DiscoveryLearningContextSchema,
+  DiscoveryProfileCreateSchema,
+  DiscoveryProfileSchema,
+  DiscoveryRunStatusSchema,
+  DiscoveryRunSchema,
+  DiscoveryStateSchema,
+  DiscoveryRunCreateSchema,
+  DiscoveryAnswerRequestSchema,
+  DiscoveryAnswerResultSchema,
+  LlmDiscoverySchema,
   LlmPointSchema,
   LlmReconciliationSchema,
   LlmRenderingSchema,
@@ -278,6 +289,17 @@ export type PhotoImport = z.infer<typeof PhotoImportSchema>;
 export type PhotoImportItemUpdate = z.infer<typeof PhotoImportItemUpdateSchema>;
 export type LlmPhotoReading = z.infer<typeof LlmPhotoReadingSchema>;
 export type LlmSenseMatch = z.infer<typeof LlmSenseMatchSchema>;
+export type DiscoverySelfLevel = z.infer<typeof DiscoverySelfLevelSchema>;
+export type DiscoveryLearningContext = z.infer<typeof DiscoveryLearningContextSchema>;
+export type DiscoveryProfileCreate = z.infer<typeof DiscoveryProfileCreateSchema>;
+export type DiscoveryProfile = z.infer<typeof DiscoveryProfileSchema>;
+export type DiscoveryRunStatus = z.infer<typeof DiscoveryRunStatusSchema>;
+export type DiscoveryRun = z.infer<typeof DiscoveryRunSchema>;
+export type DiscoveryState = z.infer<typeof DiscoveryStateSchema>;
+export type DiscoveryRunCreate = z.infer<typeof DiscoveryRunCreateSchema>;
+export type DiscoveryAnswerRequest = z.infer<typeof DiscoveryAnswerRequestSchema>;
+export type DiscoveryAnswerResult = z.infer<typeof DiscoveryAnswerResultSchema>;
+export type LlmDiscovery = z.infer<typeof LlmDiscoverySchema>;
 
 export type SendCodeRequest = z.infer<typeof SendCodeRequestSchema>;
 export type SendCodeResponse = z.infer<typeof SendCodeResponseSchema>;
