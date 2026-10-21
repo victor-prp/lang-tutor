@@ -202,6 +202,28 @@ describe('buildPrompt (phase 31)', () => {
 describe('parseLlmTranslation', () => {
   const sense = { translation: 'ספר', sense_code: 'printed_book' };
 
+  // CI run 39636083579 (2026-10-21): the model named thruot's sense anatomy.body_part, where the
+  // prompt asks for snake_case; a stored code is matched exactly, and read in psql.
+  it('makes every sense code snake_case, whatever the model wrote', () => {
+    const codes = ['anatomy.body_part', 'Body Part', ' river-bank ', 'printed_book', 'tool2'];
+    const raw = JSON.stringify({
+      kind: 'word',
+      entries: [{ lemma: 'throat', part_of_speech: 'noun', senses: codes.map((sense_code, i) => ({ translation: `ת${i}`, sense_code })) }],
+    });
+    expect(parseLlmTranslation(raw)?.entries[0].senses.map((one) => one.sense_code)).toEqual([
+      'anatomy_body_part',
+      'body_part',
+      'river_bank',
+      'printed_book',
+      'tool2',
+    ]);
+  });
+
+  it('keeps a code with nothing to make snake_case of as it came, rather than empty', () => {
+    const raw = JSON.stringify({ kind: 'word', entries: [{ lemma: 'gola', part_of_speech: 'noun', senses: [{ translation: 'גרון', sense_code: 'גרון' }] }] });
+    expect(parseLlmTranslation(raw)?.entries[0].senses[0].sense_code).toBe('גרון');
+  });
+
   it('parses a well-formed response', () => {
     const entry = { lemma: 'book', part_of_speech: 'noun', senses: [sense] };
     const raw = JSON.stringify({ kind: 'word', entries: [entry] });
@@ -476,6 +498,11 @@ describe('the example-disambiguation rule', () => {
 });
 
 describe('parseLlmReconciliation', () => {
+  it('makes a new sense code snake_case, and leaves a stored one, already snake_case, as it is', () => {
+    const parsed = parseLlmReconciliation('{"senses":[{"sense_code":"reserve","translation":null},{"sense_code":"Record.Charge","translation":"רשם"}]}');
+    expect(parsed?.senses.map((one) => one.sense_code)).toEqual(['reserve', 'record_charge']);
+  });
+
   it('keeps a null translation through the parse', () => {
     const parsed = parseLlmReconciliation(
       '{"senses":[{"sense_code":"reserve","translation":null}]}',
