@@ -48,6 +48,8 @@ describe('repos', () => {
       transition: notStubbed,
       findLatest: notStubbed,
       findAnswersOn: notStubbed,
+      // Phase 68 (spec D1).
+      findPathAnswers: notStubbed,
       findRecentAnswers: notStubbed,
       countCompletedOn: notStubbed,
       findIntroducedOn: notStubbed,

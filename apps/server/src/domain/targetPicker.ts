@@ -7,8 +7,9 @@ import {
 } from '@lang-tutor/core/domain';
 
 import type { ChosenPick } from './choose';
-import { LADDER_SLOTS, NEW_PER_SESSION } from './chooseConstants';
-import { RUNGS } from './plan';
+import { LADDER_SLOTS, NEW_PER_SESSION, STEP_DOWNS_PER_SESSION } from './chooseConstants';
+import { MAX_PER_TYPE, RUNGS } from './plan';
+import { rungOf, type StepDown } from './stepDown';
 import { servedSkill, type TargetDay, type WordDay } from './targetDay';
 
 /**
@@ -48,6 +49,9 @@ export type TargetPickInput = {
    *  its counted skills, the lowest chance now first (targetSummary pickNow). Absent, practice
    *  more reads the start of today. */
   now?: ReadonlyMap<string, { pct: number; counted: readonly Dimension[]; weakestOpen?: boolean }>;
+  /** Phase 68 (spec D1, D3). The path's open step-downs, oldest miss first (openStepDowns), with
+   *  the session in flight credited. Absent: none. */
+  stepDowns?: readonly StepDown[];
 };
 
 /** Spec D7, D10. A day with work owed asks it; the due date gives the last review; a done or
@@ -70,8 +74,9 @@ export function owedWords(day: TargetDay, mode: TargetMode): string[] {
 }
 
 /** What a target path's stock recorded of its day (session_targets), as its stale check reads it;
- *  `pastBudget`, whether it was chosen past the day's budget (phase 65b). */
-export type StockChoice = { capHalves: number; owedGlossIds: readonly string[]; pastBudget?: boolean };
+ *  `pastBudget`, whether it was chosen past the day's budget (phase 65b); `stepDowns`, the
+ *  step-downs it asks, `glossId|dimension`, sorted (phase 68; absent: none). */
+export type StockChoice = { capHalves: number; owedGlossIds: readonly string[]; pastBudget?: boolean; stepDowns?: readonly string[] };
 
 /**
  * Phase 53 (ruling R-D12), per path since phase 57 (spec D2, final review C1). Whether a target
@@ -96,7 +101,32 @@ export function stockServes(recorded: StockChoice | undefined, today: StockChoic
     recorded !== undefined &&
     recorded.pastBudget !== true &&
     recorded.capHalves === today.capHalves &&
-    recorded.owedGlossIds.join(' ') === today.owedGlossIds.join(' ')
+    recorded.owedGlossIds.join(' ') === today.owedGlossIds.join(' ') &&
+    sameStepDowns(recorded, today)
+  );
+}
+
+/** Phase 68 (spec D6). Whether a stock asks the step-downs today's choice asks. */
+export const sameStepDowns = (recorded: Pick<StockChoice, 'stepDowns'> | undefined, today: Pick<StockChoice, 'stepDowns'>): boolean =>
+  (recorded?.stepDowns ?? []).join(' ') === (today.stepDowns ?? []).join(' ');
+
+/** Phase 68 (spec D6). The step-downs a session's picks ask, as session_targets records them. */
+export const stepDownKeys = (picks: readonly ChosenPick[]): string[] =>
+  picks
+    .filter((pick) => pick.relearn)
+    .map((pick) => `${pick.glossId}|${pick.dimension}`)
+    .sort();
+
+/** Phase 68 (spec D5, ruling). Whether a target session gets a matching board: none of its picks can
+ *  raise the card today (raisesCard; a meeting raises it), and on the due date none can. */
+export function boardsSession(picks: readonly ChosenPick[], input: { daysLeft: number; now: TargetPickInput['now'] }): boolean {
+  const judged = { daysLeft: input.daysLeft, now: input.daysLeft > 0 ? input.now : new Map() };
+  // A practice step-down counts nothing, so it raises nothing.
+  return !raisesCard(
+    picks
+      .filter((pick) => pick.relearn !== 'practice')
+      .map((pick) => ({ glossId: pick.glossId, dimension: pick.dimension, meets: pick.cls === 'NEW' })),
+    judged,
   );
 }
 
@@ -137,16 +167,16 @@ export function raisesCard(cards: readonly AskedCard[], input: { daysLeft: numbe
  *  different skill. */
 const PICKS_PER_WORD = 2;
 
+/** Phase 68 (spec D4). The cards the picker knows the type of, one type at their rung: the say
+ *  translation, the dictation and the read aloud. MAX_PER_TYPE holds them; writing's recall rung
+ *  has three types, which planCards spreads under the same cap. */
+const ONE_TYPE: ReadonlySet<QuestionType> = new Set(['say_translation', 'dictation', 'read_aloud']);
+
 /** The card a skill is asked at a rung as the picker reads it: the rung's first type in RUNGS
  *  (typed translation for written productive at rung 2, dictation for spelling at rung 1, say
  *  translation for speaking). The prepare job may choose another type of the rung; the budget's
  *  play-forward (phase 65, spec D7.1) answers this one. */
 export const cardOf = (dimension: Dimension, rung: 1 | 2): QuestionType => RUNGS[dimension][rung - 1][0];
-
-/** Phase 67 (spec D2). The rung a practised skill is asked at: writing recalled (translate, gap or
- *  sentence), spelling as a dictation (typed when the device cannot listen, planCards' fallback),
- *  speaking said. */
-const rungOf = (dimension: Dimension): 1 | 2 => (dimension === 'spelling' ? 1 : 2);
 
 type Word = {
   glossId: string;
@@ -222,6 +252,19 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
   const keys = new Map<string, string>();
   let slots = 0;
   let ladders = 0;
+  /** Phase 68 (spec D4). This session's picks per ONE_TYPE card. */
+  const perType = new Map<QuestionType, number>();
+  const full = (dimension: Dimension, rung: 1 | 2 = rungOf(dimension)) => {
+    const type = cardOf(dimension, rung);
+    return ONE_TYPE.has(type) && (perType.get(type) ?? 0) >= MAX_PER_TYPE;
+  };
+  /** Phase 68 (spec D4, ruling). Whether a card on `dimension` can raise the card today
+   *  (raisesCard): the cap never moves one. On the due date the card is frozen. */
+  const judged = { daysLeft: day.daysLeft, now: day.daysLeft > 0 ? input.now : new Map() };
+  const raises = (word: Word, dimension: Dimension) => raisesCard([{ glossId: word.glossId, dimension, meets: false }], judged);
+  /** Whether an answer on `dimension` would count toward readiness today: before the eve only a
+   *  skill's first answer of the day (one still open), on the eve every right, on the due date none. */
+  const counts = (word: Word, dimension: Dimension) => day.daysLeft === 1 || (day.daysLeft > 1 && word.open.includes(dimension));
   let newRoom = input.newRoom ?? Number.POSITIVE_INFINITY;
 
   const levelOf = (glossId: string, dimension: Dimension) => input.levels.get(`${glossId}|${dimension}`) ?? MIN_LEVEL;
@@ -240,6 +283,7 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
         : { glossId: word.glossId, dimension, rung, level, r: 1, cls: 'TARGET', ladder: false },
     );
     slots += start === 'ladder' ? LADDER_SLOTS : 1;
+    if (!start) perType.set(cardOf(dimension, rung), (perType.get(cardOf(dimension, rung)) ?? 0) + 1);
     keys.set(word.key, word.glossId);
     word.picked.push(dimension);
     // Spec D2: a ladder asks writing; any other card its own skill.
@@ -285,8 +329,9 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
    *  before any word's second, the lowest readiness first. A word met this session waits for
    *  the next for its other cards. */
   const owedWork = (pool: readonly Word[]) => {
+    // Phase 68 (spec D3): a word with a step-down takes its owed card as its second.
     const order = pool
-      .filter((word) => !word.toStart && word.picked.length === 0 && word.owed.length > 0)
+      .filter((word) => !word.toStart && word.picked.length < PICKS_PER_WORD && word.owed.length > 0)
       .sort((a, b) => a.readinessPct - b.readinessPct || a.index - b.index);
     for (let round = 0; round < PICKS_PER_WORD; round++) {
       for (const word of order) {
@@ -317,12 +362,54 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
     const order = (below.length > 0 ? below : eligible).sort(
       (a, b) => Number(a.inFlight) - Number(b.inFlight) || shut(a) - shut(b) || pctOf(a) - pctOf(b) || byId(a, b),
     );
+    // Phase 67b (spec D5): the counted skill weakest now. Without it, final review 3: a skill not
+    // asked today first, so practice more varies its cards.
+    const skillsOf = (word: Word) => input.now?.get(word.glossId)?.counted ?? [...word.open, ...word.weakest];
+    // Phase 68 (spec D4, rulings). MAX_PER_TYPE holds a session none of whose cards can raise the
+    // card today: practice more on words whose weakest skill is answered, and the due date's review.
+    const pure =
+      !picks.some((one) => raisesCard([{ glossId: one.glossId, dimension: one.dimension, meets: one.cls === 'NEW' }], judged)) &&
+      !order.some((word) => skillsOf(word).length > 0 && raises(word, skillsOf(word)[0]));
     for (const word of order) {
       if (!open(word, 1)) continue;
-      // Phase 67b (spec D5): the counted skill weakest now. Without it, final review 3: a skill
-      // not asked today first, so practice more varies its cards.
-      const dimension = input.now?.get(word.glossId)?.counted[0] ?? word.open[0] ?? word.weakest[0];
-      if (dimension) add(word, dimension, rungOf(dimension));
+      const skills = skillsOf(word);
+      const first = skills[0];
+      if (first === undefined) continue;
+      // Past MAX_PER_TYPE, a say card becomes a read aloud (the word seen and said, which grades
+      // nothing), any other passes to the next skill in the same order whose card would count
+      // nothing today either; with none, it keeps its card.
+      if (!pure || !full(first)) add(word, first, rungOf(first));
+      else if (first === 'spoken_productive' && !full(first, 1)) add(word, first, 1);
+      else {
+        const next = skills.find((skill) => !full(skill) && !counts(word, skill)) ?? first;
+        add(word, next, rungOf(next));
+      }
+    }
+  };
+
+  /**
+   * Phase 68 (spec D2, D3, final review). The open step-downs, oldest miss first, at most
+   * STEP_DOWNS_PER_SESSION and one a word (two would see and pick it twice), each on a word of the
+   * day and a skill it practises, once the session's own cards are chosen, which they leave as they
+   * are. A card this session asks the word on that skill at its rung becomes the step-down's last,
+   * after the easier ones, and counts as it would have (`counts`); with none, the step-down is asked
+   * on top, outside the slots, as practice that counts nothing (`practice`).
+   */
+  const stepDowns = () => {
+    const relearned = new Set<string>();
+    for (const step of input.stepDowns ?? []) {
+      if (relearned.size === STEP_DOWNS_PER_SESSION) break;
+      const word = words.find((one) => one.glossId === step.glossId);
+      if (!word || !word.weakest.includes(step.dimension) || relearned.has(word.glossId)) continue;
+      const rung = rungOf(step.dimension);
+      const own = picks.findIndex((one) => one.glossId === word.glossId && one.cls === 'TARGET' && one.dimension === step.dimension && one.rung === rung);
+      if (own >= 0) picks[own] = { ...picks[own], relearn: 'counts' };
+      else if ((keys.get(word.key) ?? word.glossId) !== word.glossId) continue;
+      else {
+        keys.set(word.key, word.glossId);
+        picks.push({ glossId: word.glossId, dimension: step.dimension, rung, level: levelOf(word.glossId, step.dimension), r: 1, cls: 'TARGET', ladder: false, relearn: 'practice' });
+      }
+      relearned.add(word.glossId);
     }
   };
 
@@ -358,5 +445,6 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
     // Phase 65b (spec D2): past the budget, the rest of the session is practice more.
     if (mode === 'past_budget') practiceMore();
   }
+  stepDowns();
   return picks;
 }

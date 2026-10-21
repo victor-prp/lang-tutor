@@ -420,7 +420,7 @@ describe('phase 43: a started session and one in stock', () => {
       lemma,
       translation,
     });
-    const { sessionId } = await insertListSession(t.db, {
+    const { sessionId, questions } = await insertListSession(t.db, {
       userId: 'u_1',
       enrollmentId: E,
       asked: [word(apple, 'apple', 'תפוח'), word(bread, 'bread', 'לחם'), word(apple, 'apple', 'תפוח')],
@@ -429,10 +429,13 @@ describe('phase 43: a started session and one in stock', () => {
     expect((await repo((r) => r.findSessionGlosses(sessionId))).sort()).toEqual([apple.glossIds[0], bread.glossIds[0]].sort());
     // Phase 57 (ruling T3-j): its cards, in order, each with whether it is a ladder's intro card.
     expect(await repo((r) => r.findSessionCards(sessionId))).toEqual([
-      { glossId: apple.glossIds[0], type: 'multiple_choice', intro: false },
-      { glossId: bread.glossIds[0], type: 'multiple_choice', intro: false },
-      { glossId: apple.glossIds[0], type: 'typed_translation', intro: false },
+      { glossId: apple.glossIds[0], type: 'multiple_choice', intro: false, answered: false },
+      { glossId: bread.glossIds[0], type: 'multiple_choice', intro: false, answered: false },
+      { glossId: apple.glossIds[0], type: 'typed_translation', intro: false, answered: false },
     ]);
+    // Phase 68 (spec D1): an answered card says so, which the open step-downs read.
+    await repo((r) => r.insertAnswer(sessionId, 0, questions[0].id, { displayIndex: 0 }));
+    expect((await repo((r) => r.findSessionCards(sessionId))).map((card) => card.answered)).toEqual([true, false, false]);
     expect(await repo((r) => r.findSessionCards('nope'))).toEqual([]);
   });
 });

@@ -67,6 +67,7 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
       user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }) }),
       session: stub<SessionRepo>({
         findAnswersOn: async () => [],
+        findPathAnswers: async () => [],
         findIntroducedOn: async () => [],
         lockNextSession: async (enrollmentId) => {
           locked.push(enrollmentId);
@@ -658,7 +659,7 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
       findTarget: async () => exam,
       listWordIds: async () => [...exam.glossIds],
       listWords: async () => exam.glossIds.map((glossId) => ({ glossId, addedAt: exam.createdAt, startedOn })),
-      findSessionTarget: async (sessionId) => (sessionId === 's_stock' && recorded ? { ...recorded, pastBudget: false } : undefined),
+      findSessionTarget: async (sessionId) => (sessionId === 's_stock' && recorded ? { ...recorded, pastBudget: false, stepDowns: [] } : undefined),
     });
     const made = world(
       {
@@ -722,7 +723,7 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
     // Phase 67b fix: a ready stock whose card can still raise the card (g_a has no answer today).
     const ready: Partial<SessionRepo> = {
       ...stockChosenOn(TODAY),
-      findSessionCards: async () => [{ glossId: 'g_a', type: 'typed_translation', intro: false }],
+      findSessionCards: async () => [{ glossId: 'g_a', type: 'typed_translation', intro: false, answered: false }],
     };
     const { service, retired, inserted, paths } = examWorld(ready, PRACTICE_MORE, {
       startedOn: '2026-10-10',
@@ -760,7 +761,7 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
   });
   const stockOf = (cards: { glossId: string; type: QuestionType; intro: boolean }[]): Partial<SessionRepo> => ({
     ...stockChosenOn(TODAY),
-    findSessionCards: async (sessionId) => (sessionId === 's_stock' ? cards : []),
+    findSessionCards: async (sessionId) => (sessionId === 's_stock' ? cards.map((card) => ({ ...card, answered: false })) : []),
   });
 
   it("replaces a practice-more stock that cannot raise the card when today's choice can (phase 67b, Victor's test)", async () => {
@@ -890,7 +891,7 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
       {
         ...nothingOpen,
         findOpen: async () => ({ started: summary('s_started', 'ready') }),
-        findSessionCards: async (sessionId) => (sessionId === 's_started' ? input.cards : []),
+        findSessionCards: async (sessionId) => (sessionId === 's_started' ? input.cards.map((card) => ({ ...card, answered: false })) : []),
         findIntroducedOn: async () => input.introduced ?? [],
         countCompletedOn: async () => input.done ?? 0,
       },

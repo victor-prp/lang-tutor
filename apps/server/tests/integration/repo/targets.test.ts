@@ -66,6 +66,7 @@ const pathRow = (targetId: string, over: Partial<SessionTargetRow> = {}): Sessio
   fsrsReadyCount: 2,
   owedGlossIds: ['g_a', 'g_b'],
   pastBudget: false,
+  stepDowns: [],
   ...over,
 });
 
@@ -398,10 +399,11 @@ describe("a target path's session row", () => {
     const second = await stock('u_1', b.id);
 
     await repo((r) => r.insertSessionTarget(first, pathRow(a.id)));
-    await repo((r) => r.insertSessionTarget(second, pathRow(b.id, { capHalves: 20, owedGlossIds: [] })));
+    await repo((r) => r.insertSessionTarget(second, pathRow(b.id, { capHalves: 20, owedGlossIds: [], stepDowns: ['g_b|spelling'] })));
 
-    expect(await repo((r) => r.findSessionTarget(first, a.id))).toEqual({ capHalves: 7, owedGlossIds: ['g_a', 'g_b'], pastBudget: false });
-    expect(await repo((r) => r.findSessionTarget(second, b.id))).toEqual({ capHalves: 20, owedGlossIds: [], pastBudget: false });
+    expect(await repo((r) => r.findSessionTarget(first, a.id))).toEqual({ capHalves: 7, owedGlossIds: ['g_a', 'g_b'], pastBudget: false, stepDowns: [] });
+    // Phase 68 (spec D6): the step-downs the stock asks.
+    expect(await repo((r) => r.findSessionTarget(second, b.id))).toEqual({ capHalves: 20, owedGlossIds: [], pastBudget: false, stepDowns: ['g_b|spelling'] });
     expect(await repo((r) => r.findSessionTarget(first, b.id))).toBeUndefined();
     const stored = await t.db.execute(sql`
       select days_left, cap_halves, readiness_pct, ready_count, word_count, fsrs_ready_count, wish, slots, picked, reason
@@ -422,7 +424,7 @@ describe("a target path's session row", () => {
     await repo((r) => r.insertSessionTarget(owedOnly, pathRow(b.id)));
 
     expect(await repo((r) => r.findPastBudget(past, [b.id, a.id]))).toEqual({ targetId: a.id, owedGlossIds: ['g_a'] });
-    expect(await repo((r) => r.findSessionTarget(past, a.id))).toEqual({ capHalves: 7, owedGlossIds: ['g_a'], pastBudget: true });
+    expect(await repo((r) => r.findSessionTarget(past, a.id))).toEqual({ capHalves: 7, owedGlossIds: ['g_a'], pastBudget: true, stepDowns: [] });
     expect(await repo((r) => r.findPastBudget(owedOnly, [b.id]))).toBeUndefined();
     expect(await repo((r) => r.findPastBudget(past, [b.id]))).toBeUndefined();
     expect(await repo((r) => r.findPastBudget(past, []))).toBeUndefined();
