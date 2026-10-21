@@ -271,8 +271,9 @@ export function createDiscoveryService({
           record: { kind: 'discovery', enrollmentId: read.enrolled.id, userId: read.enrolled.user_id },
         });
         ms = now() - started;
-        // An empty string is the provider's "no content": no word, not a failure.
-        const parsed = raw === '' ? { words: [], dropped: 0 } : parseDiscovery(raw, new Set(read.exclude.map(wordKey)));
+        // An empty string is the provider's "no content", a refusal of the app's own prompt:
+        // unavailable, so the learner can try again, never a run ended with nothing on its list.
+        const parsed = raw === '' ? null : parseDiscovery(raw, new Set(read.exclude.map(wordKey)));
         if (!parsed) {
           logger.info({ event: 'discovery_round_unreadable', run_id: runId, ms });
           throw new LlmUnavailable('the proposed words were unreadable');

@@ -158,7 +158,7 @@ describe('Words for me over HTTP (phase 69, spec D2–D10)', () => {
 
     expect(await ok(send('PATCH', `/discovery/runs/${run.id}/items/5`, { ticked: false }))).toMatchObject({ position: 5, ticked: false });
     const saved = await ok<{ saved_gloss_ids: string[] }>(send('POST', `/discovery/runs/${run.id}/save`));
-    expect(saved.saved_gloss_ids.sort()).toEqual([gloss.cane, gloss.casa].sort());
+    expect([...saved.saved_gloss_ids].sort()).toEqual([gloss.cane, gloss.casa].sort());
     expect(await readSavedGlossIds(t.db, IT)).toEqual([gloss.cane, gloss.casa].sort());
     expect(await ok(send('POST', `/discovery/runs/${run.id}/save`))).toEqual(saved);
 
@@ -167,6 +167,43 @@ describe('Words for me over HTTP (phase 69, spec D2–D10)', () => {
       profile: { self_level: 'simple', learning_context: 'self', level: 4 },
       run: null,
     });
+  });
+
+  // Review Focus 1, against Postgres: the run's row lock, not a fake's.
+  it('writes one round when two are asked at once', async () => {
+    await seedDiscoveryProfile(t.db, { enrollmentId: IT });
+    const run = await ok<DiscoveryRun>(send('POST', `/enrollments/${IT}/discovery/runs`, { goal: 5 }), 201);
+    const words = ['uno', 'due', 'tre'].map((word) => ({ word, hebrew: 'משהו' }));
+    await expectDiscovery(ns, words);
+    await expectDiscovery(ns, words);
+    const both = await Promise.all([send('POST', `/discovery/runs/${run.id}/rounds`), send('POST', `/discovery/runs/${run.id}/rounds`)]);
+    expect(both.map((res) => res.status)).toEqual([200, 200]);
+    const after = await ok<DiscoveryRun>(send('GET', `/discovery/runs/${run.id}`));
+    expect(after).toMatchObject({ round: 1, cards: [{ position: 0 }, { position: 1 }, { position: 2 }] });
+  });
+
+  // The goal is the one rule no constraint backs: two answers at once must still see each other.
+  it('lists the run when two answers at once reach the goal, settling the round once', async () => {
+    await seedDiscoveryProfile(t.db, { enrollmentId: IT, level: 5 });
+    const id = await seedDiscoveryRun(t.db, {
+      enrollmentId: IT,
+      status: 'asking',
+      goal: 4,
+      cards: [
+        { word: 'uno', answer: 'unknown' },
+        { word: 'due', answer: 'unknown', options: [] },
+        { word: 'tre', answer: null },
+        { word: 'quattro', answer: null },
+      ],
+    });
+    const both = await Promise.all([
+      send('POST', `/discovery/runs/${id}/cards/2/answer`, { kind: 'unknown' }),
+      send('POST', `/discovery/runs/${id}/cards/3/answer`, { kind: 'unknown' }),
+    ]);
+    expect(both.map((res) => res.status)).toEqual([200, 200]);
+    expect(await ok<DiscoveryRun>(send('GET', `/discovery/runs/${id}`))).toMatchObject({ status: 'listing', unknown_count: 4 });
+    // Four answered, none known: down two, once.
+    expect(await ok<DiscoveryState>(send('GET', `/enrollments/${IT}/discovery`))).toMatchObject({ profile: { level: 3 }, run: { status: 'listing' } });
   });
 
   it('answers 502 when the model cannot propose words, and the run asks on', async () => {

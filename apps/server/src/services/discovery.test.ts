@@ -248,6 +248,14 @@ describe('a round (phase 69, spec D3, D4, D8)', () => {
     expect(await service.nextRound(OWNER, id)).toMatchObject({ status: 'listing', round: 1 });
   });
 
+  it('throws LlmUnavailable on an empty answer, a refusal, and the run asks on', async () => {
+    const { service, repo } = setup({ discover: [''] });
+    const id = await seedRun(repo, { rounds: 1 });
+    await expect(service.nextRound(OWNER, id)).rejects.toBeInstanceOf(LlmUnavailable);
+    expect(repo.runs.get(id)?.status).toBe('asking');
+    expect(repo.cards.get(id)).toHaveLength(10);
+  });
+
   it('throws LlmUnavailable on an answer that is not the schema, writing nothing', async () => {
     const { service, repo } = setup({ discover: ['{"items":[]}'] });
     const { run } = await service.start(OWNER, 'e1', 15);
