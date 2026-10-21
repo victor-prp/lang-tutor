@@ -38,11 +38,14 @@ export type { Grade, MemoryState } from './memory';
 export { dimensionsTested, gradesFor } from './memoryGrades';
 export type { GradableAnswer, GradedPiece } from './memoryGrades';
 export {
-  READINESS_BONUS_PER_DAY,
+  READINESS_BONUS_RECORDED,
   READINESS_BONUS_SHARE,
+  READINESS_CARD_BAR,
   READINESS_EXAM_HOLD,
   READINESS_WORD_READY,
   applyReadiness,
+  cardPct,
+  cardWordPct,
   countedSkills,
   readinessFromMemory,
   readinessPct,
