@@ -31,7 +31,7 @@ import {
 } from './targetPicker';
 import { activeOn, readinessOf, recallOnDue, type TargetKind } from './targets';
 import { capHalves, targetSessionWrite, type HoldingTarget, type TargetSkillEvent, type TargetSkillRow } from './targetSkills';
-import { readinessSummary, skillStarts } from './targetSummary';
+import { pickNow, readinessSummary, skillStarts } from './targetSummary';
 import { dayState, type DayAnswer } from './today';
 
 /**
@@ -981,7 +981,18 @@ function runPaths(
   sessionsADay: SessionsOn | ((day: number) => SessionsOn),
   targets: readonly SimTarget[] | ((day: number) => readonly SimTarget[]),
   learner: PathLearner = PHASE_37_LEARNER,
-  { stockLag = false }: { stockLag?: boolean } = {},
+  {
+    stockLag = false,
+    moreWhenDone = false,
+    extraAfterDone = 0,
+  }: {
+    stockLag?: boolean;
+    /** Phase 67b: on a day of a fixed number of sessions, a session with no target owing work is
+     *  the first active target's practice more, not My words. */
+    moreWhenDone?: boolean;
+    /** Phase 67b: on a day played until done, that many more sessions of practice more after it. */
+    extraAfterDone?: number;
+  } = {},
 ): PathRun {
   const targetsOn = typeof targets === 'function' ? targets : () => targets;
   const sessionsOn = typeof sessionsADay === 'function' ? sessionsADay : () => sessionsADay;
@@ -1124,6 +1135,18 @@ function runPaths(
         keys: new Map(saved.map((gloss) => [gloss.glossId, gloss.key])),
         inFlight: inFlight.filter((card) => !card.intro),
         newRoom: Math.max(0, DAY_NEW_CAP - introduced.size - meeting.size),
+        // Phase 67b (spec D5): readiness now, as readTargetDay reads it (no session in flight's answers).
+        now: pickNow(
+          readinessSummary({
+            kind: target.kind,
+            dueOn: target.dueOn,
+            today: date,
+            words: [...own].map((glossId) => ({ glossId, live: LIVE })),
+            rows: [...readinessRows.values()].filter((row) => row.targetId === target.id),
+            memory: [...memory.values()].filter((row) => own.has(row.glossId)),
+            firstToday: [],
+          }).words,
+        ),
       };
     };
     /** services/sessions.ts readTarget: the target's choice beside its path's session in flight,
@@ -1176,6 +1199,7 @@ function runPaths(
     const plan = sessionsOn(day);
     const max = typeof plan === 'number' ? plan : plan.untilDone;
     let played = 0;
+    let extraPlayed = 0;
 
     for (let session = 0; session < max; session++) {
       const at = sessions.length;
@@ -1184,8 +1208,11 @@ function runPaths(
       const owed = active
         .filter((target) => home.get(target.id)!.state === 'owed')
         .sort((a, b) => compare(a.dueOn, b.dueOn) || compare(a.id, b.id));
-      if (typeof plan !== 'number' && owed.length === 0) break;
-      const target: SimTarget | undefined = owed[0];
+      if (typeof plan !== 'number' && owed.length === 0) {
+        if (extraPlayed >= extraAfterDone) break;
+        extraPlayed++;
+      }
+      const target: SimTarget | undefined = owed[0] ?? (moreWhenDone || extraAfterDone > 0 ? active[0] : undefined);
       const rows = [...memory.values()];
       let picks: ChosenPick[];
       let mode: TargetMode | null = null;
@@ -1907,11 +1934,13 @@ describe("the anti-goal: an exam in 5 days, ten words, the same two skills misse
 /** Phase 67 (spec Done 2, 3). Measured 2026-10-20 over the rhythm's five phases: the most sessions
  *  any phase played, and the means on the date of readiness and of the share ready by FSRS (5 days:
  *  21, 88, 0.87; 2 days: 12, 79, 0.60; 1 day: 10, 74, 0.45). Never raised for sessions, nor lowered
- *  for the date, to let a change pass. */
+ *  for the date, to let a change pass. Phase 67b, measured 2026-10-21 (readiness is now the card,
+ *  a word at its bar counted 100): 5 days 20, 95.2, 0.93; 2 days 11, 89.4, 0.68; 1 day 9, 85.8,
+ *  0.41; the sessions marks tightened to them. */
 const HOMEWORK_PASS: Record<number, { sessions: number; readiness: number; fsrs: number }> = {
-  5: { sessions: 21, readiness: 85, fsrs: 0.85 },
-  2: { sessions: 12, readiness: 75, fsrs: 0.55 },
-  1: { sessions: 10, readiness: 70, fsrs: 0.4 },
+  5: { sessions: 20, readiness: 85, fsrs: 0.85 },
+  2: { sessions: 11, readiness: 75, fsrs: 0.55 },
+  1: { sessions: 9, readiness: 70, fsrs: 0.4 },
 };
 
 describe.each<[number]>([[5], [2], [1]])('a homework of fifteen words given %i day(s) ahead, two cards a day (phase 67, spec D2, D3, D5)', (days) => {
@@ -1963,5 +1992,94 @@ describe("a homework of three words due in 10 days, each day's stock chosen besi
         });
       }
     }
+  });
+});
+
+/** Phase 67b (spec Testing). Measured 2026-10-21 over the rhythm's five phases: the first session
+ *  reads 7 7 4 4 6, day 1 ends at 19 18 16 18 18 (phase 67 read 0 all day). The lowest phase. */
+const FRESH_DAY_ONE_PASS = 16;
+/** Phase 67b (spec D3's note): before the eve, more sessions may end a day lower on one phase, as
+ *  first answers that would have waited for tomorrow come today; never more than this on the mean. */
+const VOLUME_TOLERANCE = 1;
+const VOLUME = [5, 10, 15] as const;
+/** Phase 67b (spec anti-goals, Victor: 87–88% on a crammed second day "is too high"). Measured
+ *  2026-10-21: 76.2, the five-phase mean. */
+const CRAMMED_TEST_DAY_TWO_PASS = 77;
+const BEFORE_THE_EVE = [0, 1, 2, 3] as const;
+
+describe('phase 67b: a fresh homework of eighteen words due in 5 days, its budget each day (spec D1, D4)', () => {
+  const homework = targetOf('homework', 5, listIds(1, 18));
+  const runs = EVERY_PHASE.map((learner) => runPaths(withList(18), 6, { untilDone: 25 }, [homework], learner, { stockLag: true }));
+  const firsts = runs.map((run) => run.sessions.find((one) => one.path === homework.id)!.readiness.after.get(homework.id)!.pct);
+  const dayOneEnds = runs.map((run) => run.days[0].readiness.end.get(homework.id)!.pct);
+
+  it(`moves the card from the first session (${firsts.join(' ')}) and ends day 1 at ${dayOneEnds.join(' ')} (pass > 0, ≥ ${FRESH_DAY_ONE_PASS})`, () => {
+    for (const pct of firsts) expect(pct).toBeGreaterThan(0);
+    for (const pct of dayOneEnds) expect(pct).toBeGreaterThanOrEqual(FRESH_DAY_ONE_PASS);
+  });
+});
+
+describe.each<[TargetKind]>([['exam'], ['homework']])('phase 67b: eighteen words of a %s due in 5 days at 5, 10 and 15 sessions a day (spec D3)', (kind) => {
+  const target = targetOf(kind, 5, listIds(1, 18));
+  const runs = new Map(
+    VOLUME.map((n) => [
+      n,
+      EVERY_PHASE.map((learner) => runPaths(withList(18), 6, (day) => (day === 5 ? 0 : n), [target], learner, { stockLag: true, moreWhenDone: true })),
+    ]),
+  );
+  const ends = (n: number, day: number) => runs.get(n)!.map((run) => run.days[day].readiness.end.get(target.id)!.pct);
+  const means = VOLUME.map((n) => BEFORE_THE_EVE.map((day) => mean(ends(n, day))));
+  const drops: string[] = [];
+  for (let i = 1; i < VOLUME.length; i++) {
+    for (const day of BEFORE_THE_EVE) {
+      const lower = ends(VOLUME[i - 1], day);
+      ends(VOLUME[i], day).forEach((pct, phase) => {
+        if (pct < lower[phase]) drops.push(`p${phase} d${day + 1} ${lower[phase]}→${pct}`);
+      });
+    }
+  }
+  const shown = BEFORE_THE_EVE.map((day) => VOLUME.map((_, i) => means[i][day].toFixed(1)).join('/')).join(' ');
+
+  it(`before the eve never ends a day more than ${VOLUME_TOLERANCE} point lower with more sessions, on the five-phase mean (days 1–4 at 5/10/15: ${shown}); single phases reported, ungated: ${drops.length ? drops.join(', ') : 'none'}`, () => {
+    for (let i = 1; i < VOLUME.length; i++) {
+      for (const day of BEFORE_THE_EVE) {
+        expect({ day: day + 1, sessions: VOLUME[i], ok: means[i][day] >= means[i - 1][day] - VOLUME_TOLERANCE }).toEqual({ day: day + 1, sessions: VOLUME[i], ok: true });
+      }
+    }
+  });
+
+  if (kind === 'exam') {
+    const second = mean(ends(15, 1));
+    it(`reads ${second.toFixed(1)} at the end of a crammed second day, 15 sessions a day (pass ≤ ${CRAMMED_TEST_DAY_TWO_PASS})`, () => {
+      expect(second).toBeLessThanOrEqual(CRAMMED_TEST_DAY_TWO_PASS);
+    });
+  }
+});
+
+describe.each<[TargetKind]>([['exam'], ['homework']])('phase 67b: eighteen words of a %s, 10 sessions a day, then up to 40 on the eve (spec D3, D5)', (kind) => {
+  const target = targetOf(kind, 5, listIds(1, 18));
+  const eve = dueIn(4);
+  const learners: PathLearner[] = [...EVERY_PHASE, { missEvery: NEVER_MISSES }];
+  const outcome = learners.map((learner, phase) => {
+    const run = runPaths(withList(18), 6, (day) => (day === 5 ? 0 : day === 4 ? 40 : 10), [target], learner, { stockLag: true, moreWhenDone: true });
+    const values = run.sessions.filter((one) => one.path === target.id && one.date === eve).map((one) => one.readiness.after.get(target.id)!.pct);
+    const reached = values.findIndex((pct) => pct >= 100);
+    // A phase whose fixed rhythm pins one word: the weakest word on the date, asked nearly every
+    // eve session and missed nearly every time (spec The evidence, root-caused 2026-10-21).
+    const due = run.days[dayIndex(target.dueOn)].readiness.start.get(target.id)!;
+    const weakest = [...due.words.entries()].sort((a, b) => a[1] - b[1])[0][0];
+    const cards = run.log.filter((card) => card.glossId === weakest && card.date === eve && !card.intro);
+    const missed = cards.filter((card) => card.verdict !== 'right').length;
+    const pinned = reached < 0 && cards.length >= 20 && missed >= 0.9 * cards.length;
+    return { phase, never: learner.missEvery === NEVER_MISSES, reached: reached < 0 ? null : reached + 1, pinned, missed, asked: cards.length };
+  });
+  const summary = outcome
+    .map((o) => `${o.never ? 'never misses' : `p${o.phase}`}: ${o.reached ?? (o.pinned ? `pinned (${o.missed}/${o.asked} missed)` : 'never')}`)
+    .join(', ');
+
+  it(`reaches 100% on the eve in every phase its rhythm does not pin (eve sessions to 100%: ${summary})`, () => {
+    for (const o of outcome) expect({ phase: o.phase, ok: o.reached !== null || o.pinned }).toEqual({ phase: o.phase, ok: true });
+    expect(outcome.filter((o) => !o.never && o.reached !== null).length).toBeGreaterThanOrEqual(3);
+    expect(outcome.find((o) => o.never)!.reached).not.toBeNull();
   });
 });
