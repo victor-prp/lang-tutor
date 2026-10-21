@@ -168,3 +168,17 @@ export function typedHelpDone(answer: string, typed: string, given: number, hebr
   const ends = stepEnds(answer);
   return Math.max(given, stepsCovered(ends, result.covered)) >= ends.length;
 }
+
+/**
+ * Help row spec D2. What help's row reads, in three parts: the typing up to
+ * the marks, the marked rest of it, and the grey letters after a right start.
+ * Null when the last press marked nothing still typed and there are no grey letters.
+ */
+export function helpReading(typed: string, markFrom: number | null, ghost: string): { typed: string; marked: string; ghost: string } | null {
+  if (markFrom === null && ghost === '') return null;
+  return {
+    typed: markFrom === null ? typed : typed.slice(0, markFrom),
+    marked: markFrom === null ? '' : typed.slice(markFrom),
+    ghost,
+  };
+}

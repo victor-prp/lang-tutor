@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import type { Question } from '@lang-tutor/core/api';
 
-import { allRevealed, helpText, pressTyped, revealed, typedHelpDone, typedHint } from './typedHelp';
+import { allRevealed, helpReading, helpText, pressTyped, revealed, typedHelpDone, typedHint } from './typedHelp';
 
 // Phase 55 (spec D7). The typed card's help: one more character a press.
 describe('typed help (phase 55 D7)', () => {
@@ -166,5 +166,24 @@ describe('help reads the typing (phase 63 D3)', () => {
     expect(typedHelpDone('ארוחת בוקר', 'ארוחת-בוקר', 0, true)).toBe(true);
     expect(pressTyped('ארוחה', 'ארב', 0, true)).toEqual({ given: 0, markFrom: 2 });
     expect(typedHint('ארוחה', 'אר', 3, true)).toEqual({ ghost: 'ו', more: true });
+  });
+});
+
+// Help row spec D2. What help's row reads: phase 63's layer, as text of its own.
+describe("help's reading (help row D2)", () => {
+  it('reads nothing with no mark and no grey letters', () => {
+    expect(helpReading('fred', null, '')).toBeNull();
+  });
+
+  it('marks the typing from its first wrong character', () => {
+    expect(helpReading('freddghgfhhhff', 5, '')).toEqual({ typed: 'fredd', marked: 'ghgfhhhff', ghost: '' });
+  });
+
+  it('follows a right start with the grey letters', () => {
+    expect(helpReading('fred', null, 'd…')).toEqual({ typed: 'fred', marked: '', ghost: 'd…' });
+  });
+
+  it('reads the grey letters alone before anything is typed', () => {
+    expect(helpReading('', null, 'f…')).toEqual({ typed: '', marked: '', ghost: 'f…' });
   });
 });
