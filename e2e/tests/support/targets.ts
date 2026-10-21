@@ -204,21 +204,28 @@ export async function expectReadiness(
   await expectLabel(scope.getByTestId('target-readiness-gain'), gain === 0 ? '' : `${gain > 0 ? '+' : '−'}${Math.abs(gain)}% היום`);
 }
 
-/** Today's sessions as `expectSessions` reads them: the line, the words beside it (none: null), and
- *  each dot's kind (done, todo, faded, bonus). */
-export type SessionsView = { line: string; side: string | null; dots: string[] };
+/** Today's sessions as `expectSessions` reads them: the line, the line under it (none: null or
+ *  absent), the words beside it (none: null), and each dot's kind (done, todo, faded, bonus). */
+export type SessionsView = { line: string; sub?: string | null; side: string | null; dots: string[] };
 
-/** Phase 65 (spec D5, D7). The budget before the day's first session: the offer, about how long it
- *  takes, and a dot to do per session. */
+/** Phase 65 (spec D5, D7), phase 67b (spec D7). The day's goal before its first session, about how
+ *  long it takes, and a dot to do per session. */
 export const offerOf = (today: Target['today']): SessionsView => ({
-  line: `היום: ${today.sessions_offer} תרגולים`,
+  line: today.sessions_offer === 1 ? 'היעד של היום: תרגול אחד' : `היעד של היום: ${today.sessions_offer} תרגולים`,
   side: `כ-${today.minutes} דקות`,
   dots: Array<string>(today.sessions_offer).fill('todo'),
 });
 
-/** The day done (spec D7.6): the budget met, or the work done before it ("4 במקום 5", a faded dot
- *  for each session left unused). */
-export const DONE_TODAY = 'סיימת להיום ✓';
+/** Phase 67b (spec D7, Victor). The day's line once its goal is met (or its work done before it,
+ *  "4 במקום 5" beside it): blue while another session can raise the card, green once nothing can
+ *  today, and "you did it" at 100%. */
+export const MET_MORE = { line: 'עשית עבודה טובה להיום ↑', sub: 'עוד כמה תרגולים יחזקו עוד יותר' } as const;
+export const MET_DONE = { line: 'עשית עבודה מצוינת להיום ✓', sub: 'מחר נחזק עוד' } as const;
+export const ALL_READY = { line: 'עשית את זה! ✓', sub: null } as const;
+/** The met line a target's summary calls for. */
+export const metOf = (target: Pick<Target, 'practice_more_little' | 'readiness_pct'>) =>
+  target.readiness_pct >= 100 ? ALL_READY : target.practice_more_little ? MET_DONE : MET_MORE;
+const PRAISE: ReadonlySet<string> = new Set([MET_MORE.line, MET_DONE.line, ALL_READY.line]);
 
 /** The dots' testID prefix: each dot's kind follows it (`target-session-dot-done`). The dots are
  *  hidden from a screen reader, which reads the row's own label instead. */
@@ -230,8 +237,11 @@ const DOT = 'target-session-dot-';
  * dots are hidden from a screen reader while the row has a label of its own.
  */
 export async function expectSessions(scope: Locator, targetId: string, view: SessionsView): Promise<void> {
-  const line = scope.getByTestId(view.line === DONE_TODAY ? `target-praise-${targetId}` : `target-today-${targetId}`);
+  const line = scope.getByTestId(PRAISE.has(view.line) ? `target-praise-${targetId}` : `target-today-${targetId}`);
   await expectLabel(line, view.line);
+  const sub = scope.getByTestId(`target-sessions-${targetId}-sub`);
+  if (view.sub == null) await expect(sub).toHaveCount(0);
+  else await expectLabel(sub, view.sub);
   const side = scope.getByTestId(`target-sessions-${targetId}-side`);
   if (view.side === null) await expect(side).toHaveCount(0);
   else await expectLabel(side, view.side);
@@ -244,7 +254,9 @@ export async function expectSessions(scope: Locator, targetId: string, view: Ses
     )
     .toEqual(view.dots);
   await expect(row.getByTestId('target-sessions')).toHaveAttribute('aria-hidden', 'true');
-  await expect(row).toHaveAttribute('aria-label', /תרגולים|בונוס/);
+  // "תרגול" covers one session ("תרגול אחד", phase 67b) and many ("תרגולים"); a row with no dots
+  // (a rest day at 100%) says its line alone.
+  await expect(row).toHaveAttribute('aria-label', view.dots.length > 0 ? /תרגול|בונוס/ : /\S/);
 }
 
 /** The target screen's header (phase 65, spec D6): the countdown and what sits beside it. Home stays
