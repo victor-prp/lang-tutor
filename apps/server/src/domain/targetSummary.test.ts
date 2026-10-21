@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { FSRS6_DEFAULT, readinessFromMemory, type Dimension, type MemoryState, type ReadinessRow } from '@lang-tutor/core/domain';
 
-import { asksBeforePracticeMore, readinessSummary, skillStarts, todaySummary } from './targetSummary';
+import { canRaiseToday, readinessSummary, skillStarts, todaySummary } from './targetSummary';
 
 // Phase 65 (spec D1, D3.7, D4, D7, D9, D10). The numbers a target's summary carries: its
 // readiness, where today started and its ready words; whether "practice more" asks first (phase
@@ -27,11 +27,11 @@ const read = (over: Partial<Parameters<typeof readinessSummary>[0]> = {}) =>
   readinessSummary({ kind: 'homework', dueOn: DUE, today: TODAY, words: [], rows: [], memory: [], firstToday: [], ...over });
 
 describe('readinessSummary (spec D1, D4)', () => {
-  it("counts a homework word on write, spell and say, in the check's order, each from its row", () => {
+  it("counts a homework word on write, spell and say, in the check's order, each from its row, as ready as its weakest (phase 67b D1)", () => {
     const summary = read({
       words: [{ glossId: 'g1', live: HOMEWORK_LIVE }],
       rows: [
-        { glossId: 'g1', dimension: 'spoken_productive', row: row(AT_90) },
+        { glossId: 'g1', dimension: 'spoken_productive', row: row(AT_84) },
         { glossId: 'g1', dimension: 'written_productive', row: row(AT_96) },
         { glossId: 'g1', dimension: 'spelling', row: row(AT_96) },
         // Not counted: reading a word is not what the check asks.
@@ -41,12 +41,14 @@ describe('readinessSummary (spec D1, D4)', () => {
     expect(summary.words).toEqual([
       {
         glossId: 'g1',
-        // 0.967 × 0.967 × 0.9 = 0.841.
+        // The weakest, 0.846; the product would read 79.
         readinessPct: 84,
+        // AT_96's rows last moved today; speaking's on 30 Sep.
+        unansweredToday: 1,
         skills: [
           { dimension: 'written_productive', chance: 96, held: false },
           { dimension: 'spelling', chance: 96, held: false },
-          { dimension: 'spoken_productive', chance: 90, held: false },
+          { dimension: 'spoken_productive', chance: 84, held: false },
         ],
       },
     ]);
@@ -56,8 +58,9 @@ describe('readinessSummary (spec D1, D4)', () => {
   it('drops speaking for a word that cannot be said: write and spell only, and not 0 (Review Focus 1)', () => {
     const summary = read({ words: [{ glossId: 'g1', live: SILENT }], rows: rowsOf('g1', ['written_productive', 'spelling'], row(AT_96)) });
     expect(summary.words[0].skills.map((skill) => skill.dimension)).toEqual(['written_productive', 'spelling']);
-    expect(summary.words[0].readinessPct).toBe(93);
-    expect(summary.readinessPct).toBe(93);
+    // 96 is past the homework bar: the card counts it as 100 (phase 67b D2).
+    expect(summary.words[0].readinessPct).toBe(100);
+    expect(summary.readinessPct).toBe(100);
   });
 
   it('counts an exam on write and spell only', () => {
@@ -97,17 +100,43 @@ describe('readinessSummary (spec D1, D4)', () => {
     ]);
   });
 
-  it('takes the mean of the words, rounded down: an unpractised word pulls it down', () => {
+  it('takes the mean of the words, a word at its bar as 100, rounded down: an unpractised word pulls it down', () => {
     const summary = read({
       words: [
         { glossId: 'g1', live: SILENT },
         { glossId: 'g2', live: SILENT },
         { glossId: 'g3', live: SILENT },
       ],
+      rows: [...rowsOf('g1', SILENT, row(AT_96)), ...rowsOf('g2', SILENT, row(AT_84))],
+    });
+    // (100 + 84 + 0) / 3 = 61.3.
+    expect(summary.readinessPct).toBe(61);
+    expect(summary.words.map((word) => word.readinessPct)).toEqual([100, 84, 0]);
+  });
+
+  it("a test's bar is 95: a word at 90 reads its own percent and is not ready (phase 67b D2)", () => {
+    const summary = read({
+      kind: 'exam',
+      words: [
+        { glossId: 'g1', live: SILENT },
+        { glossId: 'g2', live: SILENT },
+      ],
       rows: [...rowsOf('g1', SILENT, row(AT_96)), ...rowsOf('g2', SILENT, row(AT_90))],
     });
-    // (0.9346 + 0.81 + 0) / 3 = 0.5815.
-    expect(summary.readinessPct).toBe(58);
+    expect(summary.words.map((word) => word.readinessPct)).toEqual([100, 90]);
+    expect(summary.readinessPct).toBe(95);
+    expect(summary.readyCount).toBe(1);
+  });
+
+  it('counts the counted skills not yet answered today: a row moved today is answered (phase 67b D6)', () => {
+    const summary = read({
+      words: [{ glossId: 'g1', live: HOMEWORK_LIVE }],
+      rows: [
+        { glossId: 'g1', dimension: 'written_productive', row: row(AT_96, { day: TODAY }) },
+        { glossId: 'g1', dimension: 'spelling', row: row(AT_96, { day: '2026-10-14' }) },
+      ],
+    });
+    expect(summary.words[0].unansweredToday).toBe(2);
   });
 
   it('counts a word ready at 90 and above, and not below (spec D4)', () => {
@@ -141,9 +170,9 @@ describe('readinessSummary: the start of today (spec D5, D10)', () => {
         { glossId: 'g1', dimension: 'spelling', before: 0.5 },
       ],
     });
-    // Now (0.9346 + 0.9346) / 2; at the start of today (0.25 + 0.9346) / 2.
-    expect(summary.readinessPct).toBe(93);
-    expect(summary.readinessStartPct).toBe(59);
+    // Now both words at 96, each counted 100; at the start of today g1 read 50.
+    expect(summary.readinessPct).toBe(100);
+    expect(summary.readinessStartPct).toBe(75);
   });
 
   it('is readiness itself on a day with no answer yet', () => {
@@ -152,26 +181,41 @@ describe('readinessSummary: the start of today (spec D5, D10)', () => {
   });
 });
 
-describe('asksBeforePracticeMore (phase 65b D1)', () => {
-  const asks = (over: Partial<Parameters<typeof asksBeforePracticeMore>[0]> = {}) =>
-    asksBeforePracticeMore({ kind: 'homework', daysLeft: 3, readyCount: 2, wordCount: 15, ...over });
+describe('canRaiseToday (phase 67b D6)', () => {
+  const word = (over: Partial<{ readinessPct: number; met: boolean; unansweredToday: number }> = {}) => ({
+    readinessPct: 60,
+    met: true,
+    unansweredToday: 0,
+    ...over,
+  });
+  const can = (words: ReturnType<typeof word>[], over: Partial<{ daysLeft: number; newRoom: number }> = {}) =>
+    canRaiseToday({ daysLeft: 3, newRoom: 5, words, ...over });
 
-  it('asks on any homework day, ready or not: the app asks only once today reads done', () => {
-    expect(asks()).toBe(true);
-    expect(asks({ daysLeft: 1 })).toBe(true);
-    expect(asks({ readyCount: 15 })).toBe(true);
+  it('can while a word below its bar is not met yet and the day has room for new words', () => {
+    expect(can([word({ met: false })])).toBe(true);
   });
 
-  it('asks on an exam day that is not its eve', () => {
-    expect(asks({ kind: 'exam', daysLeft: 2 })).toBe(true);
+  it('cannot when the only words below their bar are unmet and the day has no room left (Review focus 3)', () => {
+    expect(can([word({ met: false })], { newRoom: 0 })).toBe(false);
+    expect(can([word({ met: false })], { daysLeft: 1, newRoom: 0 })).toBe(false);
   });
 
-  it("does not ask on an exam's eve while a word is not ready: extra practice really helps then", () => {
-    expect(asks({ kind: 'exam', daysLeft: 1, readyCount: 14 })).toBe(false);
+  it('can before the eve while a met word below its bar has a counted skill not answered today', () => {
+    expect(can([word({ unansweredToday: 1 })])).toBe(true);
   });
 
-  it("asks on an exam's eve once every word is ready", () => {
-    expect(asks({ kind: 'exam', daysLeft: 1, readyCount: 15 })).toBe(true);
+  it('cannot before the eve once every skill of every word below its bar is answered today', () => {
+    expect(can([word(), word({ readinessPct: 100, unansweredToday: 2 })])).toBe(false);
+  });
+
+  it('can on the eve while any met word is below its bar', () => {
+    expect(can([word()], { daysLeft: 1 })).toBe(true);
+  });
+
+  it('cannot once every word is at its bar, on the eve too, nor on or after the date', () => {
+    expect(can([word({ readinessPct: 100, unansweredToday: 3 })], { daysLeft: 1 })).toBe(false);
+    expect(can([word({ unansweredToday: 3 })], { daysLeft: 0 })).toBe(false);
+    expect(can([])).toBe(false);
   });
 });
 
@@ -196,8 +240,9 @@ describe('readinessSummary on and after the due date (spec D3.7)', () => {
       words: [{ glossId: 'g1', live: ['spelling'] }],
       memory: [{ glossId: 'g1', dimension: 'spelling', state: AT_90 }],
     });
-    expect(summary.readinessPct).toBe(90);
-    expect(summary.readinessStartPct).toBe(90);
+    // 90, at the homework bar: the card counts it as 100.
+    expect(summary.readinessPct).toBe(100);
+    expect(summary.readinessStartPct).toBe(100);
   });
 });
 

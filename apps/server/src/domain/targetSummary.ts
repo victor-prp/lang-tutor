@@ -1,8 +1,9 @@
 import {
-  READINESS_WORD_READY,
+  READINESS_CARD_BAR,
+  cardPct,
+  cardWordPct,
   countedSkills,
   readinessFromMemory,
-  readinessPct,
   skillChance,
   wordChance,
   type Dimension,
@@ -24,7 +25,9 @@ import type { SkillStart, TargetDay } from './targetDay';
 export const CARD_SECONDS = 30;
 
 export type SkillReadiness = { dimension: Dimension; chance: number; held: boolean };
-export type WordReadiness = { glossId: string; readinessPct: number; skills: SkillReadiness[] };
+/** `readinessPct` is the word as the card counts it (100 at its kind's bar, phase 67b D2);
+ *  `unansweredToday`, its counted skills no answer has moved today (phase 67b D6). */
+export type WordReadiness = { glossId: string; readinessPct: number; unansweredToday: number; skills: SkillReadiness[] };
 
 const keyOf = (glossId: string, dimension: Dimension) => `${glossId}\u0000${dimension}`;
 const percent = (chance: number) => Math.floor(100 * chance);
@@ -106,27 +109,42 @@ export function readinessSummary(input: {
     });
     return { glossId: word.glossId, skills, chance: wordChance(skills.map((skill) => skill.chance)) };
   });
+  const pcts = counted.map((word) => percent(word.chance));
 
   return {
-    readinessPct: readinessPct(counted.map((word) => word.chance)),
-    readinessStartPct: readinessPct(counted.map((word) => wordChance(word.skills.map((skill) => skill.start)))),
-    readyCount: counted.filter((word) => percent(word.chance) >= READINESS_WORD_READY).length,
-    words: counted.map((word) => ({
+    readinessPct: cardPct(pcts, kind),
+    readinessStartPct: cardPct(
+      counted.map((word) => percent(wordChance(word.skills.map((skill) => skill.start)))),
+      kind,
+    ),
+    readyCount: pcts.filter((pct) => pct >= READINESS_CARD_BAR[kind]).length,
+    words: counted.map((word, i) => ({
       glossId: word.glossId,
-      readinessPct: percent(word.chance),
+      readinessPct: cardWordPct(pcts[i], kind),
+      unansweredToday: word.skills.filter((skill) => skill.row?.day !== today).length,
       skills: word.skills.map((skill) => ({ dimension: skill.dimension, chance: percent(skill.chance), held: skill.row?.held ?? false })),
     })),
   };
 }
 
 /**
- * Phase 65b (spec D1, Victor). Whether "practice more" asks first ("are you sure?") once today
- * reads done: always, except on an exam's eve while a word is not ready, when extra practice
- * really helps. The wire calls it practice_more_little; the app asks when it is true, today is
- * done and the learner has not opted out.
+ * Phase 67b (spec D6). Whether one more session today can raise the card: some word below its
+ * bar (card value under 100) that practice more can still move. An unmet word, while the day has
+ * room for new words (practice more meets it); a met one, on the eve (every right counts), or
+ * before it while a counted skill has had no answer today (only the first counts). Never on or
+ * after the date. The wire says the opposite, practice_more_little: the app asks first only when
+ * it is true.
  */
-export function asksBeforePracticeMore(input: { kind: ReadinessKind; daysLeft: number; readyCount: number; wordCount: number }): boolean {
-  return !(input.kind === 'exam' && input.daysLeft === 1 && input.readyCount < input.wordCount);
+export function canRaiseToday(input: {
+  daysLeft: number;
+  newRoom: number;
+  words: readonly { readinessPct: number; met: boolean; unansweredToday: number }[];
+}): boolean {
+  const { daysLeft, newRoom } = input;
+  if (daysLeft < 1) return false;
+  return input.words.some(
+    (word) => word.readinessPct < 100 && (word.met ? daysLeft === 1 || word.unansweredToday > 0 : newRoom > 0),
+  );
 }
 
 /**

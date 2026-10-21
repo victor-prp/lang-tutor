@@ -69,12 +69,19 @@ describe('readinessSessionWrite', () => {
     expect(held('hw')).toEqual([false]);
   });
 
-  it('writes one event per applied answer and none for an ignored one', () => {
+  it('writes one event per applied answer and none for an ignored one: before the eve only the first (phase 67b D3)', () => {
     const answers = [typed('g1', 5), typed('g1', 6, { verdict: 'wrong' }), typed('g1', 7, { verdict: 'wrong' }), typed('g1', 8), typed('g1', 9), typed('g1', 10)];
     const { rows, events } = write([target('t1', 'homework', [['g1', 0]])], answers);
     const wp = events.filter((event) => event.dimension === 'written_productive').map((event) => event.why);
-    // right, miss, (second miss ignored), bonus, bonus, (third bonus ignored)
-    expect(wp).toEqual(['first_right', 'miss', 'bonus', 'bonus']);
+    expect(wp).toEqual(['first_right']);
     expect(rows.filter((row) => row.dimension === 'written_productive')).toHaveLength(1);
+  });
+
+  it('on the eve writes every right after the first, and a miss once (phase 67b D3)', () => {
+    const answers = [typed('g1', 5), typed('g1', 6, { verdict: 'wrong' }), typed('g1', 7, { verdict: 'wrong' }), typed('g1', 8), typed('g1', 9), typed('g1', 10)];
+    const { events } = write([target('t1', 'homework', [['g1', 0]], '2026-10-18')], answers);
+    const wp = events.filter((event) => event.dimension === 'written_productive').map((event) => event.why);
+    // right, miss, (second miss ignored), bonus, bonus, bonus
+    expect(wp).toEqual(['first_right', 'miss', 'bonus', 'bonus', 'bonus']);
   });
 });

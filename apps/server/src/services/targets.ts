@@ -7,10 +7,11 @@ import type {
   TargetList,
 } from '@lang-tutor/core/api';
 
+import { DAY_NEW_CAP } from '../domain/chooseConstants';
 import { daysBetween } from '../domain/progress';
 import { targetDay } from '../domain/targetDay';
 import { activeOn, openOn } from '../domain/targets';
-import { asksBeforePracticeMore, readinessSummary, todaySummary } from '../domain/targetSummary';
+import { canRaiseToday, readinessSummary, todaySummary } from '../domain/targetSummary';
 import { InvalidTarget, TargetClosed, TargetNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { TargetRow } from '../repo/targets';
@@ -210,11 +211,19 @@ export function createTargetService({
         ready_count: readiness.readyCount,
         readiness_pct: readiness.readinessPct,
         readiness_start_pct: readiness.readinessStartPct,
-        practice_more_little: asksBeforePracticeMore({
-          kind: target.kind,
+        // Phase 67b (spec D6): the app asks before practice more only when one more session today
+        // cannot raise the card; an unmet word needs the day's room for new words.
+        practice_more_little: !canRaiseToday({
           daysLeft: daysBetween(today, target.dueOn),
-          readyCount: readiness.readyCount,
-          wordCount: words.length,
+          newRoom: Math.max(0, DAY_NEW_CAP - (await shared.introduced()).length),
+          words: shown.map((glossId, i) => {
+            const word = dayOf.get(glossId)!;
+            return {
+              readinessPct: readiness.words[i].readinessPct,
+              met: word.state !== 'later' && !word.toStart,
+              unansweredToday: readiness.words[i].unansweredToday,
+            };
+          }),
         }),
         today: {
           state: todays.state,
