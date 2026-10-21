@@ -139,7 +139,7 @@ describe('POST /api/enrollments/{id}/targets', () => {
         ready_count: 0,
         readiness_pct: 0,
         readiness_start_pct: 0,
-        practice_more_little: true,
+        practice_more_little: false,
         today: expect.objectContaining({ state: 'owed' }),
         session: null,
         words: [
@@ -270,7 +270,7 @@ describe('GET /api/enrollments/{id}/targets', () => {
             ready_count: 0,
             readiness_pct: 0,
             readiness_start_pct: 0,
-            practice_more_little: true,
+            practice_more_little: false,
             today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1, ...UNSET },
             session: null,
           },
@@ -284,7 +284,7 @@ describe('GET /api/enrollments/{id}/targets', () => {
             ready_count: 0,
             readiness_pct: 0,
             readiness_start_pct: 0,
-            practice_more_little: true,
+            practice_more_little: false,
             // Phase 67 (spec D4): its word below 90, it practises again tomorrow.
             today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1, ...UNSET },
             session: null,
@@ -317,13 +317,13 @@ describe('GET /api/enrollments/{id}/targets', () => {
 });
 
 describe('GET /api/targets/{id}', () => {
-  // Phase 65b (spec D1). On an exam's eve, while a word is not ready, extra practice really helps:
-  // the button starts the session without asking. A homework's eve asks.
-  it("does not ask before practice more on an exam's eve while a word is not ready", async () => {
+  // Phase 67b (spec D6). While a word can still raise the card (here one not met yet, the day with
+  // room for new words) the button starts the session without asking, an exam or a homework.
+  it('does not ask before practice more while another session can raise the card', async () => {
     const apple = await word('apple', 'תפוח');
     const eve = '2030-01-09';
     expect((await read((await made('exam', eve, apple)).id)).practice_more_little).toBe(false);
-    expect((await read((await made('homework', eve, apple)).id)).practice_more_little).toBe(true);
+    expect((await read((await made('homework', eve, apple)).id)).practice_more_little).toBe(false);
   });
 
   // Phase 65 (spec D1, D7, D10), phase 67 (spec D2, D5). A new exam: no word answered, so readiness
@@ -338,7 +338,7 @@ describe('GET /api/targets/{id}', () => {
     const body = await read(exam.id);
 
     // Phase 65b (spec D1): an exam five days out asks before practice more (the app, once today is done).
-    expect(body).toMatchObject({ readiness_pct: 0, readiness_start_pct: 0, ready_count: 0, practice_more_little: true });
+    expect(body).toMatchObject({ readiness_pct: 0, readiness_start_pct: 0, ready_count: 0, practice_more_little: false });
     expect(body.today).toEqual({
       state: 'owed',
       done: 0,
