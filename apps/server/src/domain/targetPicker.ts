@@ -100,6 +100,39 @@ export function stockServes(recorded: StockChoice | undefined, today: StockChoic
   );
 }
 
+/** Phase 67b fix (Victor's test, 2026-10-21). A card a session asks, as raisesCard reads it: the
+ *  word, the skill it asks (none for a read aloud), and whether it meets the word. */
+export type AskedCard = { glossId: string; dimension: Dimension | null; meets: boolean };
+
+/** A session's cards as AskedCards: a meet card or a new meaning meets its word; any other card
+ *  asks the skill its type serves. */
+export function picksOfCards(cards: readonly { glossId: string; type: QuestionType; intro: boolean }[]): AskedCard[] {
+  return cards.map((card) =>
+    card.type === 'meet' || card.type === 'new_meaning'
+      ? { glossId: card.glossId, dimension: null, meets: true }
+      : { glossId: card.glossId, dimension: servedSkill(card.type), meets: false },
+  );
+}
+
+/**
+ * Phase 67b fix (Victor's test, 2026-10-21). Whether a session's cards can raise the card today: one
+ * meets a word, or one asks a word below its bar its weakest skill now, on the eve or, before it,
+ * while that skill has had no answer today (spec D1, D3). Without readiness now nothing can be
+ * judged, so it can. A practice-more stock is chosen beside the session in flight, which can be
+ * meeting the one word that, once met, is the only card left to raise the card (the picker never
+ * asks a word in flight): such a stock is replaced when it is served.
+ */
+export function raisesCard(cards: readonly AskedCard[], input: { daysLeft: number; now: TargetPickInput['now'] }): boolean {
+  const { now, daysLeft } = input;
+  if (!now) return true;
+  return cards.some((card) => {
+    if (card.meets) return true;
+    const word = now.get(card.glossId);
+    if (!word || card.dimension === null || word.pct >= 100 || card.dimension !== word.counted[0]) return false;
+    return daysLeft === 1 || word.weakestOpen !== false;
+  });
+}
+
 /** Spec D7 (my call there). A word takes this many picks a session at most, each for a
  *  different skill. */
 const PICKS_PER_WORD = 2;

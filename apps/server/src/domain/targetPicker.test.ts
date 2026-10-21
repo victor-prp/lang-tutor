@@ -5,7 +5,7 @@ import { SESSION_LENGTH, type Dimension, type QuestionType } from '@lang-tutor/c
 import type { ChosenPick } from './choose';
 import { LADDER_SLOTS, NEW_PER_SESSION } from './chooseConstants';
 import type { TargetDay, WordDay } from './targetDay';
-import { cardOf, chooseTargetPicks, owedWords, stockServes, stockToCheck, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
+import { cardOf, chooseTargetPicks, owedWords, picksOfCards, raisesCard, stockServes, stockToCheck, targetMode, type TargetMode, type TargetPickInput } from './targetPicker';
 
 // Phase 67 (spec D6). The target picker reads each word's cards of the day: the words to meet
 // first, then each owed word's first card, then its second, the word with the lowest readiness
@@ -465,5 +465,56 @@ describe('stockServes', () => {
 
   it('keeps a practice-more stock while practice more is still the choice', () => {
     expect(stockServes({ capHalves: 10, owedGlossIds: [] }, { capHalves: 10, owedGlossIds: [] })).toBe(true);
+  });
+});
+
+// Phase 67b fix (Victor's test, 2026-10-21). A practice-more stock is chosen beside the session in
+// flight, so it can miss the one card that can still raise the card once that session ends.
+describe('raisesCard and picksOfCards: can a session still raise the card today', () => {
+  const now = new Map([
+    // Below its bar, its weakest skill (spelling) not answered today.
+    ['g0', { pct: 60, counted: [SP, WP] as Dimension[], weakestOpen: true }],
+    // Below its bar, its weakest skill (writing) answered today already.
+    ['g1', { pct: 83, counted: [WP, SP] as Dimension[], weakestOpen: false }],
+    // At its bar.
+    ['g2', { pct: 100, counted: [WP, SP] as Dimension[], weakestOpen: true }],
+  ]);
+  const raises = (picks: Parameters<typeof raisesCard>[0], daysLeft = 3) => raisesCard(picks, { daysLeft, now });
+
+  it('a card that meets a word can raise the card', () => {
+    expect(raises([{ glossId: 'g9', dimension: null, meets: true }])).toBe(true);
+  });
+
+  it("before the eve only a card on a word's weakest skill, still open today, below its bar, can", () => {
+    expect(raises([{ glossId: 'g0', dimension: SP, meets: false }])).toBe(true);
+    expect(raises([{ glossId: 'g0', dimension: WP, meets: false }])).toBe(false);
+    expect(raises([{ glossId: 'g1', dimension: WP, meets: false }])).toBe(false);
+    expect(raises([{ glossId: 'g2', dimension: WP, meets: false }])).toBe(false);
+    expect(raises([{ glossId: 'g1', dimension: WP, meets: false }, { glossId: 'g0', dimension: SP, meets: false }])).toBe(true);
+  });
+
+  it("on the eve a card on a word's weakest skill can, answered today or not", () => {
+    expect(raises([{ glossId: 'g1', dimension: WP, meets: false }], 1)).toBe(true);
+    expect(raises([{ glossId: 'g1', dimension: SP, meets: false }], 1)).toBe(false);
+  });
+
+  it('assumes a card can when readiness now is not read', () => {
+    expect(raisesCard([{ glossId: 'g1', dimension: WP, meets: false }], { daysLeft: 3, now: undefined })).toBe(true);
+  });
+
+  it("reads a session's cards: a meet card meets its word, a card asks the skill its type serves, a read aloud none", () => {
+    expect(
+      picksOfCards([
+        { glossId: 'g0', type: 'meet', intro: true },
+        { glossId: 'g0', type: 'dictation', intro: false },
+        { glossId: 'g1', type: 'read_aloud', intro: true },
+        { glossId: 'g2', type: 'new_meaning', intro: false },
+      ]),
+    ).toEqual([
+      { glossId: 'g0', dimension: null, meets: true },
+      { glossId: 'g0', dimension: SP, meets: false },
+      { glossId: 'g1', dimension: null, meets: false },
+      { glossId: 'g2', dimension: null, meets: true },
+    ]);
   });
 });
