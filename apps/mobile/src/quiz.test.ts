@@ -51,6 +51,7 @@ const BASE: QuizState = {
   helpMarks: null,
   tapped: [],
   explanation: null,
+  heldNewWords: null,
 };
 
 describe('applyQueued (spec D9, Review Focus 3)', () => {
@@ -141,6 +142,22 @@ describe('the second try (phase 34 D9)', () => {
     };
     expect(resumed({ ...BASE, answer: null }, view)).toMatchObject({ question: TYPED, position: 4, total: 10, retry: PENDING, answer: null });
     expect(resumed({ ...BASE, answer: null }, { ...view, pending_retry: null }).retry).toBeNull();
+  });
+
+  // Phase 70 (spec D6). What the view says the day's cap held back, while it is news.
+  it('a resumed session carries the new words the cap held back, and none when the view has none', () => {
+    const view: SessionView = {
+      session_id: 's',
+      status: 'ready',
+      source: 'list',
+      position: { position: 1, total: 10 },
+      question: TYPED,
+      pending_retry: null,
+      progress: [],
+    };
+    expect(resumed(BASE, { ...view, held_new_words: { count: 2, day_cap: 15 } }).heldNewWords).toEqual({ count: 2, dayCap: 15 });
+    expect(resumed(BASE, view).heldNewWords).toBeNull();
+    expect(enteredState('s').heldNewWords).toBeNull();
   });
 
   it('the first answer goes without retry, the second with retry: true', () => {
