@@ -211,13 +211,30 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
 export const countNew = (picks: readonly ChosenPick[]): number => picks.filter((pick) => pick.cls === 'NEW').length;
 
 /**
- * Phase 70 (spec D4). How many new words the day's cap held back from `picks`, chosen from
- * `input`: what the same choice with no cap picks beyond them. On a constant rng, so the real
- * choice's draws are untouched; the rng only breaks ties between new words saved together.
+ * Phase 70 (spec D4, final review I1). The main path's choice, and how many new words the day's
+ * cap held back from it: what the same choice with no cap meets beyond it. The second run replays
+ * the first's own draws: the rng orders new words saved together (a batch save gives them one
+ * time), and a ladder takes four slots where a family's new meaning takes one, so another order
+ * can fit another number of them. The shuffle is the picker's one draw and the cap moves no word
+ * out of NEW, so both runs see the same order, and the real choice's draws are its own.
  */
-export function heldByCap(input: ChoiceInput, picks: readonly ChosenPick[]): number {
-  const uncapped = chooseWords({ ...input, limits: { ...input.limits, dayCap: Number.POSITIVE_INFINITY }, rng: () => 0 });
-  return Math.max(0, countNew(uncapped) - countNew(picks));
+export function chooseWordsWithHeld(input: ChoiceInput): { picks: ChosenPick[]; held: number } {
+  const draws: number[] = [];
+  const picks = chooseWords({
+    ...input,
+    rng: () => {
+      const draw = input.rng();
+      draws.push(draw);
+      return draw;
+    },
+  });
+  let next = 0;
+  const uncapped = chooseWords({
+    ...input,
+    limits: { ...input.limits, dayCap: Number.POSITIVE_INFINITY },
+    rng: () => draws[next++] ?? 0,
+  });
+  return { picks, held: Math.max(0, countNew(uncapped) - countNew(picks)) };
 }
 
 /**

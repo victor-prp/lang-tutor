@@ -36,7 +36,7 @@ import {
   type CheckFinding,
   type CheckItem,
 } from '../domain/check';
-import { chooseWords, dueGlosses, heldByCap, liveDimensions, type ChoiceInput } from '../domain/choose';
+import { chooseWordsWithHeld, dueGlosses, liveDimensions, type ChoiceInput } from '../domain/choose';
 import { NEW_PER_SESSION } from '../domain/chooseConstants';
 import {
   buildContextPrompt,
@@ -552,9 +552,10 @@ export function createSessionService({
       families: { familyOf: families.familyOf, waiting, newMeanings: families.newMeanings },
       limits,
     };
-    const picks = chooseWords(choice);
     // Phase 70 (spec D4). What the cap held back, recorded with the stock.
-    const capHeld: StockHeld = { count: heldByCap(choice, picks), dayCap: limits.dayCap };
+    const chosen = chooseWordsWithHeld(choice);
+    const { picks } = chosen;
+    const capHeld: StockHeld = { count: chosen.held, dayCap: limits.dayCap };
     return { path: null, at, today, saved, families, stored, picks, capHeld };
   }
 

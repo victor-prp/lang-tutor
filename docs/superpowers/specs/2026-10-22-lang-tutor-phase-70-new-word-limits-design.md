@@ -144,8 +144,10 @@ tree; how the e2e fixture reaches a session with words held back.
 ## Rulings (the build, 2026-10-22)
 
 - **B1.** Per session's ceiling stays `NEW_PER_SESSION`; the setting replaces the `NEW_FLOOR`
-  backoff with the learner's number, and its rng-free second run (`heldByCap`, `heldByRoom`)
-  counts what the cap held back without drawing from the real choice's rng.
+  backoff with the learner's number. The held count's second run (`chooseWordsWithHeld`,
+  `heldByRoom`) replays the real choice's own draws (final review I1: a constant rng ordered words
+  saved together differently, so a session the cap never touched could report words held back);
+  the target picker draws nothing.
 - **B2.** One migration, `0050_new_word_limits`, for both tables: `users` gains the two limits
   (checked 1–100 and 1–2), `sessions` the held count (default 0) and the cap it read.
 - **B3.** `insertPreparingSession` takes the held record as an optional last argument; absent, the
@@ -156,4 +158,12 @@ tree; how the e2e fixture reaches a session with words held back.
   screen), so leaving before the first answer and coming back shows it again until it is ticked off.
 - **B6.** The reminders screen's chip moved, unchanged, to `components/Chip.tsx`, which the new
   screen shares.
+
+## Final review (2026-10-22)
+
+One Important finding, fixed: the held count on a constant rng mis-counted ties between words
+saved together (B1). Deferred minors: per session 1 limits ladders, not a family's new meanings
+(as automatic always did); no test runs a non-default cap through a target's room or
+practice_more_little; the message can open again on card 1 after it was answered and the screen
+remounted (a pending second try); `insertPreparingSession`'s held could be required.
 

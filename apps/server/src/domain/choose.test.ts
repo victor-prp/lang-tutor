@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { FSRS6_DEFAULT, SESSION_LENGTH, retrievability, type Dimension, type MemoryState } from '@lang-tutor/core/domain';
 
-import { choosePools, chooseWords, expectedSuccess, heldByCap, liveDimensions, rungFor, type ChoiceInput, type ChosenPick } from './choose';
+import { choosePools, chooseWords, chooseWordsWithHeld, expectedSuccess, liveDimensions, rungFor, type ChoiceInput, type ChosenPick } from './choose';
 import { DAY_NEW_CAP, HARD_CAP, LADDER_SLOTS, NEW_FLOOR, NEW_PER_SESSION, PER_DIMENSION_CAP, RUNG_R, R_TARGET } from './chooseConstants';
 import { DEFAULT_LIMITS } from './newWordLimits';
 import { withSessionInFlight, type Step } from './today';
@@ -804,23 +804,47 @@ describe("the learner's new-word limits (phase 70, spec D2, D3, D4)", () => {
     expect(news(picks)).toBe(1);
   });
 
-  it('heldByCap counts the new words the cap held back from the session', () => {
+  it('chooseWordsWithHeld counts the new words the cap held back from the session', () => {
     const spent = input([...backlog, ...waiting], { newToday: DAY_NEW_CAP });
     expect(news(chooseWords(spent))).toBe(0);
-    expect(heldByCap(spent, chooseWords(spent))).toBe(NEW_FLOOR);
+    expect(chooseWordsWithHeld(spent).held).toBe(NEW_FLOOR);
     const spentTwo = { ...spent, limits: { dayCap: DAY_NEW_CAP, perSession: 2 as const } };
-    expect(heldByCap(spentTwo, chooseWords(spentTwo))).toBe(2);
-    const fresh = input([...backlog, ...waiting]);
-    expect(heldByCap(fresh, chooseWords(fresh))).toBe(0);
+    expect(chooseWordsWithHeld(spentTwo).held).toBe(2);
+    expect(chooseWordsWithHeld(input([...backlog, ...waiting])).held).toBe(0);
   });
 
-  it('heldByCap leaves the real choice as it was: the rng is not drawn from', () => {
-    // Equal save times, so the rng breaks every tie between the new words.
-    const tied = [...range(5, (i) => fresh(`n${i}`, { savedAt: savedAt(0) })), ...others];
-    const withHeld = input(tied, { newToday: DAY_NEW_CAP - 1, rng: testRng(7) });
-    const without = input(tied, { newToday: DAY_NEW_CAP - 1, rng: testRng(7) });
-    heldByCap(withHeld, chooseWords(withHeld));
-    chooseWords(without);
-    expect(chooseWords(withHeld)).toEqual(chooseWords(without));
+  // Final review I1. A batch save gives its words one save time, and a family's new meaning costs
+  // one slot where a ladder costs four, so the order the rng breaks the ties in decides how many
+  // new words fit beside a backlog. The count replays the choice's own draws.
+  describe('ties between new words saved together', () => {
+    const tiedNew = range(4, (i) => fresh(`n${i}`, { savedAt: savedAt(0) }));
+    const tiedMeanings = range(3, (i) => fresh(`m${i}`, { savedAt: savedAt(0) }));
+    const families = {
+      families: {
+        familyOf: new Map(tiedMeanings.map((word, i) => [word.id, i])),
+        waiting: new Set<string>(),
+        newMeanings: new Set(tiedMeanings.map((word) => word.id)),
+      },
+    };
+    const words = [...range(6, (i) => known(`d${i}`, { [WP]: 0.5 })), ...range(10, (i) => known(`k${i}`)), ...tiedMeanings, ...tiedNew];
+    const seeds = range(60, (i) => ({ id: String(i + 1) })).map((word) => Number(word.id));
+
+    it('holds none back from a session the cap never touched, whatever the draws', () => {
+      for (const seed of seeds) {
+        expect(chooseWordsWithHeld(input(words, { ...families, rng: testRng(seed) })).held).toBe(0);
+      }
+    });
+
+    it('answers the choice the same draws make, and what those draws with no cap meet beyond it', () => {
+      for (const seed of seeds) {
+        for (const newToday of [0, 10, 13, DAY_NEW_CAP]) {
+          const at = (rngSeed: number) => input(words, { ...families, newToday, rng: testRng(rngSeed) });
+          const { picks, held } = chooseWordsWithHeld(at(seed));
+          expect(picks).toEqual(chooseWords(at(seed)));
+          const uncapped = chooseWords({ ...at(seed), limits: { dayCap: Number.POSITIVE_INFINITY, perSession: null } });
+          expect(held).toBe(Math.max(0, news(uncapped) - news(picks)));
+        }
+      }
+    });
   });
 });
