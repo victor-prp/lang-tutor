@@ -523,6 +523,8 @@ export function sessionsSpoken(target: TargetSummary): string {
     case 'met_done':
       return `${SPOKEN[line.kind]}, ${line.sub}, ${count}`;
     case 'all_ready':
+      // Phase 71 (final review I-2): the eve draws no session dots, so it reads no count of them.
+      if (isEve(target)) return strings.targetSessionsAllReadySpoken;
       return target.today.state === 'rest' ? [SPOKEN.all_ready, line.side].filter(Boolean).join(', ') : `${SPOKEN.all_ready}, ${count}`;
     case 'rest':
     case 'none':

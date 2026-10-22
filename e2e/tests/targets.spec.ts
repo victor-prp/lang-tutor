@@ -14,7 +14,7 @@ import { API_URL } from '../urls';
 import { expectGeneration } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapUntil } from './support/interactions';
-import { BOARD_WORDS } from './support/lexemes';
+import { BOARD_WORDS, SINGLE_WORDS } from './support/lexemes';
 import { clearGemini, expectGeminiMatching, userText } from './support/mockServer';
 import { answerSessionRight, enrollmentIdOf, readCurrent, readyPathSession, skipSeed } from './support/sessions';
 import {
@@ -768,5 +768,33 @@ test('home orders its paths: the exam due today first with good luck, then work 
   await expect(page.getByTestId(`target-word-today-${examOnly.gloss_id}`)).toHaveCount(0);
   await expect(page.getByTestId('target-change-date')).toHaveCount(0);
   await expect(page.getByTestId('target-end')).toHaveCount(0);
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 71 (spec D4, final review I-1). The eve draws a bar a word: at a phone's width a fourteen-word
+// homework keeps every bar inside its card, none clipped off its end (the weakest words are last).
+test("the eve's word bars stay inside the card at a phone's width, fourteen words", async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  await withVoices(page, []);
+  await signUpLearner(page, 'e2e_eve_bars', 'ru');
+  const enrollmentId = await enrollmentIdOf(page.request);
+  await skipSeed(page.request, enrollmentId);
+  const entries = (await lookUpEntries(page.request, enrollmentId, [...BOARD_WORDS, ...Object.values(SINGLE_WORDS)])).flat();
+  await expectGeneration(request);
+  const { today } = await readTargets(page.request, enrollmentId);
+  const target = await createTarget(page.request, enrollmentId, { kind: 'homework', due_on: addDays(today, 1), entries });
+  expect(target.word_count, report()).toBe(14);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await openApp(page, `target-card-${target.id}`);
+
+  const card = page.getByTestId(`target-card-${target.id}`);
+  const bars = card.locator('[data-testid^="target-word-bar-"]');
+  await expect(bars, report()).toHaveCount(14);
+  const box = (await card.boundingBox())!;
+  for (const bar of await bars.all()) {
+    const at = (await bar.boundingBox())!;
+    expect({ left: at.x >= box.x, right: at.x + at.width <= box.x + box.width, width: at.width > 0 }).toEqual({ left: true, right: true, width: true });
+  }
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

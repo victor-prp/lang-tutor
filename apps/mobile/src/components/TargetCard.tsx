@@ -190,7 +190,7 @@ export function Sessions({ target }: { target: TargetSummary }) {
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
         aria-hidden
-        style={styles.dots}
+        style={bars.length > 0 ? styles.bars : styles.dots}
       >
         {dots.map((dot, at) => (
           <View key={at} testID={`target-session-dot-${dot}`} style={[styles.dot, DOT_STYLES[dot]]} />
@@ -306,7 +306,21 @@ const styles = StyleSheet.create({
   dots: { flexDirection: 'row', gap: 5, alignItems: 'center' },
   dot: { width: 22, height: 7, borderRadius: radii.pill },
   // Phase 71 (spec D4): a word's bar on the eve, filled to its readiness; green and full once ready.
-  wordBar: { flexDirection: 'row', width: 30, height: 8, borderRadius: radii.pill, backgroundColor: '#EAECF0', overflow: 'hidden' },
+  // Final review I-1: the bars share the row, 30 wide at most, so any count of words fits the card;
+  // past what even the narrowest fit, they wrap rather than run off its end (the weakest words).
+  bars: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center' },
+  wordBar: {
+    flexDirection: 'row',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    maxWidth: 30,
+    minWidth: 3,
+    height: 8,
+    borderRadius: radii.pill,
+    backgroundColor: '#EAECF0',
+    overflow: 'hidden',
+  },
   wordBarReady: { backgroundColor: colors.progress },
   wordBarFill: { backgroundColor: '#84ADFF' },
   ready: { fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '600', color: colors.correct, writingDirection: 'rtl' },

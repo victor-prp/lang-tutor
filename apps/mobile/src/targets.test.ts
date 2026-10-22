@@ -958,6 +958,12 @@ describe('the eve: the words still short (phase 71, spec D4)', () => {
     expect(wordBars(t)).toEqual([]);
   });
 
+  // Final review I-2: the eve draws no session dots, so "you did it" reads no count of them.
+  it('reads "you did it" alone at 100%, no session count', () => {
+    const t = eve('done', { word_count: 3, ready_count: 3, readiness_pct: 100, word_readiness: [100, 100, 100] }, { sessions_budget: 5, sessions_done: 7 });
+    expect(sessionsSpoken(t)).toBe('עשית את זה!');
+  });
+
   it('reads the line and its side to a screen reader', () => {
     expect(sessionsSpoken(eve('owed', VICTOR))).toBe(`עוד ${ltr('7')} מילים לחזק, ${ltr('2')} מתוך ${ltr('9')} מוכנות`);
     expect(sessionsSpoken(eve('owed', { word_count: 3, ready_count: 3, readiness_pct: 100, word_readiness: [100, 100, 100] }))).toBe(
