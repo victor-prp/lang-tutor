@@ -75,7 +75,8 @@ export function owedWords(day: TargetDay, mode: TargetMode): string[] {
 
 /** What a target path's stock recorded of its day (session_targets), as its stale check reads it;
  *  `pastBudget`, whether it was chosen past the day's budget (phase 65b); `stepDowns`, the
- *  step-downs it asks, `glossId|dimension`, sorted (phase 68; absent: none). */
+ *  step-downs it asks, `glossId|dimension`, sorted (phase 68; absent: none), which the stale check
+ *  does not read (ruling 2026-10-22). */
 export type StockChoice = { capHalves: number; owedGlossIds: readonly string[]; pastBudget?: boolean; stepDowns?: readonly string[] };
 
 /**

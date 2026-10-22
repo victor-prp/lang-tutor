@@ -2648,7 +2648,7 @@ export function createSessionService({
       const payload = StockSessionPayloadSchema.parse(data);
       const enrollmentId = payload.enrollment_id;
       const path = payload.target_id ?? null;
-      type Outcome = Stocked | Replaced | { why: 'no_enrollment' | 'stocked' | 'seed_next' | 'no_saved_words' | 'target_closed' };
+      type Outcome = Stocked | { why: 'no_enrollment' | 'stocked' | 'seed_next' | 'no_saved_words' | 'target_closed' };
       let outcome: Outcome;
       try {
         outcome = await transaction(async (repos): Promise<Outcome> => {
@@ -2676,8 +2676,7 @@ export function createSessionService({
         else if (error instanceof NoSavedWords) outcome = { why: 'no_saved_words' };
         else throw error;
       }
-      if ('retired' in outcome) logReplaced(enrollmentId, outcome);
-      else if ('sessionId' in outcome) logStocked(enrollmentId, outcome, payload.reason);
+      if ('sessionId' in outcome) logStocked(enrollmentId, outcome, payload.reason);
       else {
         logger.info({
           event: 'session_stock_skipped',
