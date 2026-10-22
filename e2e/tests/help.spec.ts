@@ -111,9 +111,9 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await page.getByTestId('continue-button').click();
 
-  // 3. The typed card, on a phone-sized screen (help row spec D1): help's row,
-  // עזרה and its dashed box, sits in the answer bar above the input, in view.
-  // עזרה twice gives two letters, in grey in that box; the input stays empty.
+  // 3. The typed card, on a phone-sized screen (answer field spec D1): help's shelf,
+  // עזרה and its reading, sits in the answer bar's field above the input, in view.
+  // עזרה twice gives two letters, in grey on that shelf; the input stays empty.
   await page.setViewportSize({ width: 390, height: 844 });
   const typed = await readCard(page, 5, total, 'typed');
   expect(typed.prompt).toBe(WORD.translation);
@@ -127,7 +127,7 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   await expect(page.getByTestId('typed-submit')).toBeInViewport({ ratio: 1 });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId('typed-bar').getByTestId('typed-help')).toBeInViewport();
-  // Before any press the dashed box is there, empty.
+  // Before any press help's reading is there, empty.
   await expect(page.getByTestId('typed-help-row')).toBeVisible();
   await expect(page.getByTestId('typed-hint')).toHaveCount(0);
   const helpBox = (await page.getByTestId('typed-help').boundingBox())!;

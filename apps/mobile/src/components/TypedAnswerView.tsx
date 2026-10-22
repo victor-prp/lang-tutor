@@ -460,8 +460,8 @@ const styles = StyleSheet.create({
   instructionLanguage: { fontWeight: '700' },
   // Phase 39 (spec D8): a refusal, in the colour of the app's other errors, not a second instruction.
   wrongScript: { color: colors.wrong },
-  // Phase 63 (spec D2). The box the learner answers in: its border, and its colour
-  // once answered.
+  // Phase 63 (spec D2). The answer once judged, in the card: its border, and its colour
+  // (answer field spec D5; while typed, the input is in the bar's field).
   box: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -518,8 +518,8 @@ const styles = StyleSheet.create({
   ghost: { color: colors.faint },
   // The meaning card asks with a target-language form, which reads left to right.
   promptLtr: { writingDirection: 'ltr' },
-  // Answer bar spec D4. A sentence's text is smaller, so three lines fit beside the
-  // big button; Android centres a multiline box's text by default.
+  // Answer bar spec D4. A sentence's text is smaller, so three lines fit in the bar
+  // (answer field spec D3: beside בדיקה); Android centres a multiline box's text by default.
   sentence: { fontSize: fontSizes.md, lineHeight: lineHeights.md, textAlignVertical: 'top' },
   // While typed it grows from one line to three, then scrolls inside itself.
   sentenceGrows: { maxHeight: 3 * lineHeights.md + 2 * spacing.sm },
