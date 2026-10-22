@@ -466,6 +466,9 @@ export const SessionViewSchema = z.object({
   // Phase 61 (spec D5). A question-types session's chosen types no card could be
   // generated for; absent on every other session.
   skipped_types: z.array(z.object({ type: QuestionTypeSchema, reason: z.literal('not_generated') })).optional(),
+  // Phase 70 (spec D4, D5). How many new words the day's cap held back from this session, and
+  // that cap: present only for a session chosen today under the learner's cap now.
+  held_new_words: z.object({ count: z.number().int().positive(), day_cap: z.number().int() }).optional(),
 });
 
 // Phase 23. A choice is answered by index, a typed card by its text. Empty

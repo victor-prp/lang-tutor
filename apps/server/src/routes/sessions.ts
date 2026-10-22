@@ -104,6 +104,8 @@ function sessionView(sessionId: string, result: SessionResult): z.infer<typeof S
     progress: result.progress.map(progressItem),
     // Phase 61 (spec D5): a question-types session's, only.
     ...(result.skipped_types ? { skipped_types: result.skipped_types } : {}),
+    // Phase 70 (spec D5): only while it is news.
+    ...(result.held_new_words ? { held_new_words: result.held_new_words } : {}),
   };
 }
 
