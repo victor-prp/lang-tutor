@@ -1226,6 +1226,25 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
     expect(met.read.today).toMatchObject({ state: 'done', sessions_budget: 3, sessions_done: 3, ended_early: false });
   });
 
+  it('is owed on the eve with a word below its bar though the budget is met (phase 71, spec D1)', async () => {
+    const { service } = world({
+      saved: ['g_casa'],
+      targets: [target({ dueOn: '2026-10-16', words: ['g_casa'] })],
+      // Met before today, and its one practised skill asked today, missed: the plan owes nothing.
+      startedOn: { g_casa: '2026-10-13' },
+      answersOn: [{ glossId: 'g_casa', sessionId: 's1', targetId: 't1', type: 'typed_translation', correct: false }],
+      budgets: { [`t1|${TODAY}`]: budget(3, 13) },
+      completed: { [`t1|${TODAY}`]: 3 },
+    });
+
+    const read = await service.getTarget(OWNER, 't1');
+
+    expect(read.days_left).toBe(1);
+    expect(read.words[0].today).toBe('done');
+    expect(read.readiness_pct).toBe(0);
+    expect(read.today).toMatchObject({ state: 'owed', sessions_budget: 3, sessions_done: 3, ended_early: false });
+  });
+
   it('ended early when no word is owed after 3 of 5', async () => {
     const { service } = world({
       saved: ['g_casa'],

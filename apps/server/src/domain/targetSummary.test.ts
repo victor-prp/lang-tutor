@@ -257,7 +257,7 @@ describe('readinessSummary on and after the due date (spec D3.7)', () => {
 });
 
 const day = (over: Partial<Parameters<typeof todaySummary>[0]> = {}) =>
-  todaySummary({ plan: 'owed', daysLeft: 5, budget: null, offer: null, sessionsDone: 0, ...over });
+  todaySummary({ plan: 'owed', daysLeft: 5, budget: null, offer: null, sessionsDone: 0, canRaise: false, ...over });
 
 describe('todaySummary (spec D7)', () => {
   it('is owed before the budget is met, with the budget and the sessions done', () => {
@@ -300,6 +300,27 @@ describe('todaySummary (spec D7)', () => {
 
   it("keeps the plan's rest", () => {
     expect(day({ plan: 'rest', offer: { sessions: 0, cards: 0 } })).toMatchObject({ state: 'rest', endedEarly: false, sessionsOffer: 0, minutes: 0 });
+  });
+
+  // Phase 71 (spec D1). The eve has no daily goal: it is owed while one more session can raise the
+  // card, the budget met or not.
+  it('on the eve is owed while a session can raise the card, the budget met', () => {
+    const eve = { daysLeft: 1, budget: { sessions: 5, cards: 40 }, sessionsDone: 5, canRaise: true };
+    expect(day({ ...eve, plan: 'done' })).toMatchObject({ state: 'owed', endedEarly: false, sessionsBudget: 5, sessionsDone: 5 });
+    expect(day({ ...eve, plan: 'owed' })).toMatchObject({ state: 'owed', endedEarly: false });
+    expect(day({ ...eve, budget: null, offer: { sessions: 5, cards: 40 }, sessionsDone: 0, plan: 'rest' })).toMatchObject({ state: 'owed' });
+  });
+
+  it("on the eve once nothing can raise it is the plan's, whatever the budget says", () => {
+    const eve = { daysLeft: 1, canRaise: false };
+    // Every word ready, its check cards still owed, the budget met.
+    expect(day({ ...eve, plan: 'owed', budget: { sessions: 2, cards: 15 }, sessionsDone: 2 })).toMatchObject({ state: 'owed', endedEarly: false });
+    expect(day({ ...eve, plan: 'done', budget: { sessions: 2, cards: 15 }, sessionsDone: 2 })).toMatchObject({ state: 'done', endedEarly: false });
+    expect(day({ ...eve, plan: 'done', budget: { sessions: 2, cards: 15 }, sessionsDone: 1 })).toMatchObject({ state: 'done', endedEarly: true });
+  });
+
+  it('reads canRaise on the eve only: two days left, the budget met is done', () => {
+    expect(day({ daysLeft: 2, canRaise: true, budget: { sessions: 5, cards: 40 }, sessionsDone: 5 })).toMatchObject({ state: 'done' });
   });
 
   it('is due_today on and after the date, whatever the budget says', () => {
