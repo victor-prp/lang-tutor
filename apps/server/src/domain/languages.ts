@@ -93,6 +93,14 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
       'A Russian word typed with е where its spelling has ё is a misspelling: correct it to',
       'the spelling with ё. This does not apply when the е spelling is itself a different',
       'word, as все is beside всё.',
+      // Measured 2026-10-22: `дякую` came back corrected to `спасибо` and translated in 7 of 10
+      // calls (master's CI too), though the shared third-language rule had held it empty since
+      // phase 16: the model drifted under it. Italian's English line is the precedent: the shared
+      // rule alone loses to the correction rules for a third language in the source's own script.
+      // The example is spelled only in letters Russian has, as `дякую` is, and is in no eval case.
+      'Ukrainian is a third language here: a Ukrainian word typed as Russian, such as "будинок",',
+      'is neither Russian nor a misspelling of its Russian translation, even when every letter',
+      'in it is one Russian has. Return an empty entries array for it and omit `correction`.',
     ],
     asTarget: ['For Russian past tense that citation form is masculine singular.'],
     writing: [
