@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** On the eve, the target card counts the words still short with one bar per word, the day stays owed while a session can raise the card, and every eve session is full.
+**Goal:** On the eve, the target card counts the words still short with one bar per word, the day stays owed while a session can raise the card, and no eve session is the owed work alone (spec Ruling R1).
 
 **Architecture:** Two pure domain changes (the eve's state in `todaySummary`, the eve's full-session rule beside `pastBudget`), wired into the summary and session services; one additive wire field (`word_readiness`); the app draws a words row in place of the sessions row when `days_left === 1`.
 

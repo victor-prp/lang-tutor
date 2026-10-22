@@ -32,8 +32,8 @@ sessions to 100%, count up).
 
 - On the eve the card's goal is every word ready; it counts the words still short, and every
   session visibly moves something.
-- Never "done" on the eve while a session can still raise the card; every eve session is a full
-  one.
+- Never "done" on the eve while a session can still raise the card; no eve session is the owed work
+  alone (Ruling R1 under D2: practice more's own short sessions stay, an open question for Victor).
 
 ## Non-goals
 
