@@ -25,6 +25,7 @@ import {
   sessionDots,
   sessionsLine,
   sessionsSpoken,
+  wordBars,
   readyLabel,
   shouldPollTargets,
   stepTitle,
@@ -165,6 +166,7 @@ const DAY = {
   readiness_pct: 0,
   readiness_start_pct: 0,
   practice_more_little: false,
+  word_readiness: [],
   today: { state: 'owed' as const, done: 0, planned: 0, extra: 0, next_practice_in: null, sessions_budget: null, sessions_offer: 0, sessions_done: 0, ended_early: false, minutes: 0 },
   session: null,
 };
@@ -325,6 +327,7 @@ const summary = (
   readiness_pct: 18,
   readiness_start_pct: 18,
   practice_more_little: false,
+  word_readiness: [],
   session: null,
   ...over,
   today: { state, done: 0, planned: 8, extra: 0, next_practice_in: null, sessions_budget: null, sessions_offer: 0, sessions_done: 0, ended_early: false, minutes: 0, ...over.today },
@@ -600,10 +603,15 @@ describe('urgencyOf (phase 64, spec D5)', () => {
   const of = (kind: 'exam' | 'homework', days_left: number, word_count: number, ready_count: number) =>
     urgencyOf({ kind, days_left, word_count, ready_count });
 
-  it('names the words that need strengthening in the last two days (phase 67b D9, Victor)', () => {
-    expect(of('homework', 1, 8, 5)).toEqual({ kind: 'not-ready', text: `שיעורי הבית מחר ו-${ltr('3')} מילים צריכות חיזוק` });
+  it('names the words that need strengthening on the date itself (phase 67b D9, Victor)', () => {
     expect(of('homework', 0, 6, 4)).toEqual({ kind: 'not-ready', text: `שיעורי הבית היום ו-${ltr('2')} מילים צריכות חיזוק` });
-    expect(of('exam', 1, 8, 7)).toEqual({ kind: 'not-ready', text: 'הבוחן מחר ומילה אחת צריכה חיזוק' });
+    expect(of('exam', 0, 8, 7)).toEqual({ kind: 'not-ready', text: 'הבוחן היום ומילה אחת צריכה חיזוק' });
+  });
+
+  // Phase 71 (spec D5, Victor's mock): the eve's count is the card's words row.
+  it('says on the eve that today is for every word to be ready, the count left to the card', () => {
+    expect(of('homework', 1, 8, 5)).toEqual({ kind: 'not-ready', text: 'שיעורי הבית מחר · היום מתרגלים עד שכל המילים מוכנות' });
+    expect(of('exam', 1, 8, 7)).toEqual({ kind: 'not-ready', text: 'הבוחן מחר · היום מתרגלים עד שכל המילים מוכנות' });
   });
 
   it('says every word is ready once none is missing', () => {
@@ -880,5 +888,80 @@ describe('askBeforePracticeMore', () => {
     expect(askBeforePracticeMore(target('owed', true), false)).toBe(false);
     expect(askBeforePracticeMore(target('due_today', true), false)).toBe(false);
     expect(askBeforePracticeMore(target('rest', true), false)).toBe(false);
+  });
+});
+
+// Phase 71 (spec D4, Victor's mock "Option 1 · Words left"). The eve has no daily goal: its row counts
+// the words still below their bar, with a bar a word in place of the session dots.
+describe('the eve: the words still short (phase 71, spec D4)', () => {
+  const eve = (state: TodayState, top: Partial<Omit<TargetSummary, 'today'>>, over: Partial<TargetSummary['today']> = { sessions_budget: 5, sessions_done: 4 }) =>
+    summary('t', state, '2026-10-23', { days_left: 1, ...top, today: over });
+  const VICTOR = { word_count: 9, ready_count: 2, readiness_pct: 82, word_readiness: [65, 100, 92, 70, 88, 100, 80, 75, 68] };
+
+  it('counts the words below their bar, the ready ones beside it, and draws no session dots', () => {
+    const t = eve('owed', VICTOR);
+    expect(sessionsLine(t)).toEqual({
+      kind: 'eve_words',
+      text: `עוד ${ltr('7')} מילים לחזק`,
+      sub: null,
+      tone: 'strong',
+      side: `${ltr('2')} מתוך ${ltr('9')} מוכנות`,
+    });
+    expect(sessionDots(t)).toEqual([]);
+  });
+
+  it('draws a bar a word, the ready ones first, then the strongest first', () => {
+    expect(wordBars(eve('owed', VICTOR))).toEqual([
+      { pct: 100, ready: true },
+      { pct: 100, ready: true },
+      { pct: 92, ready: false },
+      { pct: 88, ready: false },
+      { pct: 80, ready: false },
+      { pct: 75, ready: false },
+      { pct: 70, ready: false },
+      { pct: 68, ready: false },
+      { pct: 65, ready: false },
+    ]);
+  });
+
+  it('says one word as one', () => {
+    expect(sessionsLine(eve('owed', { word_count: 9, ready_count: 8, readiness_pct: 97, word_readiness: [100, 100, 100, 100, 100, 100, 100, 100, 73] })).text).toBe(
+      'עוד מילה אחת לחזק',
+    );
+  });
+
+  it('keeps counting the words whatever the day says: a word missed on its check is short again', () => {
+    expect(sessionsLine(eve('done', { word_count: 3, ready_count: 2, word_readiness: [100, 100, 88] })).kind).toBe('eve_words');
+  });
+
+  it("names the last check while every word is ready and its check cards are owed", () => {
+    const t = eve('owed', { word_count: 3, ready_count: 3, readiness_pct: 100, word_readiness: [100, 100, 100] });
+    expect(sessionsLine(t)).toEqual({ kind: 'eve_check', text: 'נשארה בדיקה אחרונה לפני מחר', sub: null, tone: 'plain', side: null });
+    expect(wordBars(t).every((bar) => bar.ready)).toBe(true);
+  });
+
+  it('says you did it once every word is ready and nothing is owed', () => {
+    const t = eve('done', { word_count: 3, ready_count: 3, readiness_pct: 100, word_readiness: [100, 100, 100] });
+    expect(sessionsLine(t)).toMatchObject({ kind: 'all_ready', text: 'עשית את זה! ✓', tone: 'done', side: null });
+  });
+
+  it('draws nothing for a target with no word', () => {
+    const t = eve('rest', { word_count: 0, ready_count: 0, word_readiness: [] }, { sessions_offer: 0 });
+    expect(sessionsLine(t)).toMatchObject({ text: '', side: null });
+    expect(sessionDots(t)).toEqual([]);
+    expect(wordBars(t)).toEqual([]);
+  });
+
+  it('keeps the sessions row two days out, with no bars', () => {
+    const t = summary('t', 'owed', '2026-10-24', { days_left: 2, word_count: 9, ready_count: 2, word_readiness: VICTOR.word_readiness, today: { sessions_budget: 5, sessions_done: 4 } });
+    expect(sessionsLine(t).kind).toBe('one_left');
+    expect(wordBars(t)).toEqual([]);
+  });
+
+  it('reads the line and its side to a screen reader', () => {
+    expect(sessionsSpoken(eve('owed', VICTOR))).toBe(`עוד ${ltr('7')} מילים לחזק, ${ltr('2')} מתוך ${ltr('9')} מוכנות`);
+    expect(sessionsSpoken(eve('owed', { word_count: 3, ready_count: 3, readiness_pct: 100, word_readiness: [100, 100, 100] }))).toBe(
+      'נשארה בדיקה אחרונה לפני מחר',
+    );
   });
 });

@@ -618,6 +618,14 @@ export const strings = {
     const words = missing === 1 ? 'ומילה אחת צריכה חיזוק' : `ו-${isolateLtr(String(missing))} מילים צריכות חיזוק`;
     return `${TARGET_THE[kind]} ${day} ${words}`;
   },
+  /** Phase 71 (spec D5, Victor's mock). The eve's strip while a word is below its bar: the count is
+   *  the card's words row. */
+  targetEveStrip: (kind: TargetKind): string => `${TARGET_THE[kind]} מחר · היום מתרגלים עד שכל המילים מוכנות`,
+  /** Phase 71 (spec D4). The eve's words row: the words below their bar (one: my call), the ready
+   *  ones beside it, and, every word ready, the check cards still owed (my call). */
+  targetEveWords: (missing: number): string => (missing === 1 ? 'עוד מילה אחת לחזק' : `עוד ${isolateLtr(String(missing))} מילים לחזק`),
+  targetEveReady: (ready: number, count: number): string => `${isolateLtr(String(ready))} מתוך ${isolateLtr(String(count))} מוכנות`,
+  targetEveCheck: 'נשארה בדיקה אחרונה לפני מחר',
   targetAllReady: (kind: TargetKind): string => `כל המילים מוכנות ${TARGET_FOR[kind]} ✓`,
   // My words' header: the number, and what it counts.
   myWordsDue: (count: number) => (count === 1 ? 'מילה מחכה לחזרה' : 'מילים מחכות לחזרה'),

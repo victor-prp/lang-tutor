@@ -203,8 +203,13 @@ export function urgencyOf(target: Pick<TargetSummary, 'kind' | 'days_left' | 'wo
   if (!isUrgent(target) || target.word_count === 0) return null;
   const missing = target.word_count - target.ready_count;
   if (missing <= 0) return { kind: 'ready', text: strings.targetAllReady(target.kind) };
+  // Phase 71 (spec D5): on the eve the count is the card's words row.
+  if (isEve(target)) return { kind: 'not-ready', text: strings.targetEveStrip(target.kind) };
   return { kind: 'not-ready', text: strings.targetNotReady(target.kind, target.days_left, missing) };
 }
+
+/** Phase 71 (spec D4). The eve, one day left, with a word: no daily goal, its row counts the words. */
+const isEve = (target: Pick<TargetSummary, 'days_left' | 'word_count'>): boolean => target.days_left === 1 && target.word_count > 0;
 
 /** Phase 64 (spec D4). A target's button is solid when pressing it is the thing to do now:
  *  work owed today, or the last review on the date until every word is ready (phase 57 D10,
@@ -396,7 +401,8 @@ function sessionBudget(target: TargetSummary): number {
  *  before the budget, and bonus for the sessions past it. */
 export function sessionDots(target: TargetSummary): ('done' | 'todo' | 'faded' | 'bonus')[] {
   const { today } = target;
-  if (today.state === 'due_today') return [];
+  // Phase 71 (spec D4): the eve draws a bar a word instead.
+  if (today.state === 'due_today' || isEve(target)) return [];
   const budget = sessionBudget(target);
   const done = Math.min(today.sessions_done, budget);
   const rest = budget - done;
@@ -414,12 +420,36 @@ export function sessionDots(target: TargetSummary): ('done' | 'todo' | 'faded' |
  *  `side` the minutes before the first session, the bonus or what ended the day early. Empty
  *  text where the card says nothing of sessions (a rest day, the date). */
 export type SessionsLine = {
-  kind: 'offer' | 'progress' | 'one_left' | 'met_more' | 'met_done' | 'all_ready' | 'rest' | 'none';
+  kind: 'offer' | 'progress' | 'one_left' | 'met_more' | 'met_done' | 'all_ready' | 'rest' | 'none' | 'eve_words' | 'eve_check';
   text: string;
   sub: string | null;
-  tone: 'plain' | 'more' | 'done';
+  /** Phase 71: `strong`, the eve's words line, dark grey and bold. */
+  tone: 'plain' | 'strong' | 'more' | 'done';
   side: string | null;
 };
+
+/** Phase 71 (spec D4, Victor's mock). The eve's row: the words below their bar and the ready ones
+ *  beside them; every word ready, the check cards still owed, then "you did it". */
+function eveLine(target: TargetSummary): SessionsLine {
+  const missing = target.word_count - target.ready_count;
+  if (missing > 0) {
+    return {
+      kind: 'eve_words',
+      text: strings.targetEveWords(missing),
+      sub: null,
+      tone: 'strong',
+      side: strings.targetEveReady(target.ready_count, target.word_count),
+    };
+  }
+  return target.today.state === 'owed' ? plainLine('eve_check', strings.targetEveCheck) : allReadyLine(null);
+}
+
+/** Phase 71 (spec D4). The eve's bars, a word each: its readiness as the card counts it, full and
+ *  ready at 100; the ready words first, then the strongest first. None on any other day. */
+export function wordBars(target: TargetSummary): { pct: number; ready: boolean }[] {
+  if (!isEve(target)) return [];
+  return [...target.word_readiness].sort((a, b) => b - a).map((pct) => ({ pct, ready: pct >= 100 }));
+}
 
 const plainLine = (kind: SessionsLine['kind'], text: string, side: string | null = null): SessionsLine => ({
   kind,
@@ -443,6 +473,7 @@ export function sessionsLine(target: TargetSummary): SessionsLine {
   const bonusSide = bonus > 0 ? strings.targetSessionsBonus(bonus) : null;
   const full = target.readiness_pct >= 100;
   if (today.state === 'due_today') return plainLine('none', '');
+  if (isEve(target)) return eveLine(target);
   if (today.state === 'rest') return full ? allReadyLine(bonusSide) : plainLine('rest', '', bonusSide);
   // A day that is done reads as met whether or not the budget was ever set.
   if (today.state === 'done') {
@@ -481,7 +512,10 @@ export function sessionsSpoken(target: TargetSummary): string {
   );
   switch (line.kind) {
     case 'offer':
+    case 'eve_words':
       return `${line.text}, ${line.side}`;
+    case 'eve_check':
+      return line.text;
     case 'progress':
     case 'one_left':
       return `${line.text}, ${count}`;
