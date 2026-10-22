@@ -115,7 +115,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all fifty-two paths and nothing else', async () => {
+  it('contains all fifty-three paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/auth/email-otp/send-verification-otp',
@@ -146,6 +146,7 @@ describe('the document as a whole', () => {
       '/api/grants/{id}',
       '/api/grants/{id}/accept',
       '/api/me',
+      '/api/me/new-words',
       '/api/me/push-devices',
       '/api/me/push-devices/unregister',
       '/api/me/reminders',
@@ -305,6 +306,23 @@ describe('sign-in in the published document (phase 29)', () => {
     expect(Object.keys(op.responses).sort()).toEqual(['204', '400', '401', '403']);
     expect(op.responses['204'].content).toBeUndefined();
     expect(op.requestBody.required).toBe(true);
+  });
+});
+
+// Phase 70 (spec D5). The learner's new-word limits, own only like the reminders.
+describe('the new-word limits in the published document (phase 70)', () => {
+  it.each([
+    ['get', ['200', '401', '403']],
+    ['put', ['200', '400', '401', '403']],
+  ])('declares every status %s /api/me/new-words can return', async (method, statuses) => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths['/api/me/new-words'][method as string].responses).sort()).toEqual(statuses);
+  });
+
+  it('publishes the limits in snake_case, per session null for automatic', async () => {
+    const doc = await openApiDocument();
+    const request = doc.paths['/api/me/new-words'].put.requestBody.content['application/json'].schema;
+    expect(request.required.sort()).toEqual(['day_cap', 'per_session']);
   });
 });
 

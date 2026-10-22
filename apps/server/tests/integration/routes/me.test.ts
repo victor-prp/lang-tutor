@@ -4,7 +4,7 @@ import { createApp } from '../../../src/app';
 import { signUp, signUpWithProfile } from '../../support/auth';
 import { createFakeLogger } from '../../support/fakes';
 import { clearNamespace, expectEmails, mailBaseUrlFor, mockNamespace } from '../../support/mockServer';
-import { setTester, timeZoneOf } from '../../support/seedUser';
+import { setTester, storedNewWordLimitsOf, timeZoneOf } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
@@ -119,5 +119,56 @@ describe('PUT /api/me/time-zone', () => {
     const res = await putTimeZone({ time_zone: 'Asia/Jerusalem' }, { cookie: fresh.cookie });
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'profile required' });
+  });
+});
+
+// Phase 70 (spec D1, D5). The learner's new-word limits.
+describe('GET and PUT /api/me/new-words', () => {
+  const limits = (headers: Record<string, string> = { cookie }) => app.request('/api/me/new-words', { headers });
+  const putLimits = (body: unknown, headers: Record<string, string> = { cookie }) =>
+    app.request('/api/me/new-words', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    });
+
+  it('answers the defaults to a learner who never chose: 15 a day, automatic per session', async () => {
+    const res = await limits();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ day_cap: 15, per_session: null });
+  });
+
+  it('replaces both and answers what it stored; GET then reads it', async () => {
+    const res = await putLimits({ day_cap: 30, per_session: 2 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ day_cap: 30, per_session: 2 });
+    expect(await (await limits()).json()).toEqual({ day_cap: 30, per_session: 2 });
+    expect(await storedNewWordLimitsOf(t.db, userId)).toEqual({ dayNewCap: 30, newPerSession: 2 });
+  });
+
+  it('stores the default cap as null, so choosing per session never pins the cap', async () => {
+    await putLimits({ day_cap: 30, per_session: 2 });
+    const res = await putLimits({ day_cap: 15, per_session: 1 });
+    expect(await res.json()).toEqual({ day_cap: 15, per_session: 1 });
+    expect(await storedNewWordLimitsOf(t.db, userId)).toEqual({ dayNewCap: null, newPerSession: 1 });
+  });
+
+  it.each([
+    ['per session 3', { day_cap: 15, per_session: 3 }],
+    ['per session 0', { day_cap: 15, per_session: 0 }],
+    ['a cap of 0', { day_cap: 0, per_session: null }],
+    ['a cap of 101', { day_cap: 101, per_session: null }],
+    ['a cap that is not whole', { day_cap: 12.5, per_session: null }],
+    ['a body without the cap', { per_session: 2 }],
+  ])('answers 400 for %s and stores nothing', async (_label, body) => {
+    const res = await putLimits(body);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
+    expect(await storedNewWordLimitsOf(t.db, userId)).toEqual({ dayNewCap: null, newPerSession: null });
+  });
+
+  it('answers 401 without a session', async () => {
+    expect((await limits({})).status).toBe(401);
+    expect((await putLimits({ day_cap: 30, per_session: null }, {})).status).toBe(401);
   });
 });

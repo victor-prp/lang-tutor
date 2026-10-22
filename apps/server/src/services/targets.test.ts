@@ -380,7 +380,7 @@ function world(
   const transaction = createFakeTransaction({
     enrollment: stub<EnrollmentRepo>({ findById: async (id) => [ENROLLMENT, OTHER_LIST].find((enrolled) => enrolled.id === id) }),
     grant: stub<GrantRepo>({ findGrantFor: async () => setup.grant ?? null }),
-    user: stub<UserRepo>({ findDayContext: async () => setup.day ?? { kind: 'learner' as const, timeZone: 'UTC' } }),
+    user: stub<UserRepo>({ findDayContext: async () => setup.day ?? { kind: 'learner' as const, timeZone: 'UTC' }, findNewWordLimits: async () => ({ dayCap: null, perSession: null }) }),
     vocabulary,
     photoImport,
     target,

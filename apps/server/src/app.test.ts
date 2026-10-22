@@ -71,6 +71,12 @@ const unreachableUsers: UserService = {
   hasProfile: () => {
     throw new Error('the health route must not reach the user service');
   },
+  newWordLimits: () => {
+    throw new Error('the health route must not reach the user service');
+  },
+  putNewWordLimits: () => {
+    throw new Error('the health route must not reach the user service');
+  },
 };
 
 const unreachableEnrollments: EnrollmentService = {

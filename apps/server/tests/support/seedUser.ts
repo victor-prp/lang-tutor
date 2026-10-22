@@ -77,6 +77,18 @@ export async function timeZoneOf(db: Db, id: string): Promise<string> {
   return row.timeZone;
 }
 
+/** Phase 70 (spec D1). The new-word limits a profile stores, nulls as they are. */
+export async function storedNewWordLimitsOf(db: Db, id: string): Promise<{ dayNewCap: number | null; newPerSession: number | null }> {
+  const [row] = await db.select({ dayNewCap: users.dayNewCap, newPerSession: users.newPerSession }).from(users).where(eq(users.id, id));
+  if (!row) throw new Error(`no profile ${id}`);
+  return row;
+}
+
+/** Phase 70 (spec D1). Stores a profile's new-word limits as the settings route would. */
+export async function setNewWordLimits(db: Db, id: string, limits: { dayNewCap: number | null; newPerSession: number | null }): Promise<void> {
+  await db.update(users).set(limits).where(eq(users.id, id));
+}
+
 /** Phase 35. The day a profile is on: null for a learner. */
 export async function botDayOf(db: Db, username: string): Promise<string | null> {
   const [row] = await db.select({ day: users.botDay }).from(users).where(eq(users.username, username));

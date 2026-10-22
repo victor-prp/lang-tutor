@@ -10,6 +10,7 @@ import { LetterTilesView } from '@/components/LetterTilesView';
 import { MatchingBoardView } from '@/components/MatchingBoardView';
 import { MeetCardView } from '@/components/MeetCardView';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
+import { NewWordCapSheet } from '@/components/NewWordCapSheet';
 import { NewMeaningPrompt } from '@/components/NewMeaningPrompt';
 import { ProgressBar } from '@/components/ProgressBar';
 import { SentenceCorrection } from '@/components/SentenceCorrection';
@@ -25,6 +26,7 @@ import { useCardVoice } from '@/hooks/useCardVoice';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession, type SessionValue } from '@/hooks/useSession';
+import { capNoticeDue } from '@/newWordLimits';
 import { showsSentenceTranslation, splitAtGap } from '@/sentence';
 import { hasBanner } from '@/speaking';
 import { strings } from '@/strings';
@@ -454,7 +456,29 @@ function renderQuestion(question: Question, session: SessionValue, language: str
 export default function SessionScreen() {
   const session = useSession();
   const next = useNextSession();
-  const { active } = useCurrentUser();
+  const { active, user, newWordCapNotice } = useCurrentUser();
+  // Phase 70 (spec D6). The message over the first card when the day's cap held this session's new
+  // words back: the session it was shown for (once each time the screen opens a session), and
+  // while it is being decided or open. The first card waits to be read aloud until it closes.
+  const capShownFor = useRef<string | null>(null);
+  const [capNotice, setCapNotice] = useState<'checking' | 'open' | null>(null);
+  const capDue =
+    session.sessionId !== null &&
+    capNoticeDue({ held: session.heldNewWords, position: session.position, shown: capShownFor.current === session.sessionId });
+  const { sessionId: capSessionId } = session;
+  const username = user?.username ?? null;
+  useEffect(() => {
+    if (!capDue || capSessionId === null) return;
+    capShownFor.current = capSessionId;
+    setCapNotice('checking');
+    void (username ? newWordCapNotice.shouldAsk(username) : Promise.resolve(true)).then((show) => {
+      if (capShownFor.current === capSessionId) setCapNotice(show ? 'open' : null);
+    });
+  }, [capDue, capSessionId, username, newWordCapNotice]);
+  const closeCapNotice = (stopShowing: boolean) => {
+    if (stopShowing && username) void newWordCapNotice.stopAsking(username);
+    setCapNotice(null);
+  };
   // Re-entry guard: a fast double tap on skip must not stack two confirms.
   const skipping = useRef(false);
   // Phase 66b (spec D2). The card whose sentence's reasons הסבר opened, by its id,
@@ -472,7 +496,7 @@ export default function SessionScreen() {
   // Phase 44 (spec D2): the card reads itself aloud. Phase 55 (spec D7): a
   // retype opens showing the answer, so the word is said then, as for a banner,
   // and not again when its banner follows: the cue reads the answer, not the retype.
-  useCardVoice(session.question ?? null, {
+  useCardVoice(capDue || capNotice !== null ? null : (session.question ?? null), {
     language,
     banner: session.answer !== null && hasBanner(session.answer),
     speaking: session.speakingOff === null,
@@ -580,6 +604,8 @@ export default function SessionScreen() {
           sentence={line === null ? null : { line, open: explainOpen, onExplain: () => setExplained(explainOpen ? null : question.id) }}
         />
       ) : null}
+      {/* Phase 70 (spec D6). */}
+      <NewWordCapSheet visible={capNotice === 'open'} dayCap={session.heldNewWords?.dayCap ?? 0} onClose={closeCapNotice} />
     </SafeAreaView>
   );
 }

@@ -83,6 +83,8 @@ export function createFakeAppDeps(): AppDeps {
     me: unreachable,
     setTimeZone: unreachable,
     hasProfile: unreachable,
+    newWordLimits: unreachable,
+    putNewWordLimits: unreachable,
   };
   const enrollments: EnrollmentService = { enroll: unreachable, list: unreachable };
   const translations: TranslationService = {
@@ -352,6 +354,7 @@ export function createFakeTargetRepo(overrides: Partial<TargetRepo> = {}): FakeT
 export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
   const rows: User[] = [];
   const zoneOf = (userId: string) => rows.find((row) => row.id === userId)?.time_zone;
+  const limits = new Map<string, { dayCap: number | null; perSession: number | null }>();
   return {
     rows,
     insertUser: async (id, input) => {
@@ -388,6 +391,11 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
     },
     findBotByName: async () => undefined,
     setBotDay: async () => false,
+    // Phase 70 (spec D1). Stored as the column holds them, nulls for the default.
+    findNewWordLimits: async (userId) => limits.get(userId) ?? { dayCap: null, perSession: null },
+    setNewWordLimits: async (userId, stored) => {
+      if (rows.some((row) => row.id === userId)) limits.set(userId, stored);
+    },
   };
 }
 

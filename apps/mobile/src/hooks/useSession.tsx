@@ -41,6 +41,7 @@ import {
 } from '@/quiz';
 import type { Retype } from '@/retype';
 import { canJudge, judgedAnswer, type JudgeAttempt } from '@/judging';
+import type { HeldNewWords } from '@/newWordLimits';
 import { IDLE_ATTEMPT, passesUnseen, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 import { strings } from '@/strings';
 
@@ -53,6 +54,8 @@ export type SessionValue = {
   answer: CardAnswer | null;
   /** Phase 66b (spec D2). A sentence translation's check, which came with its answer. */
   explanation: ExplainResponse | null;
+  /** Phase 70 (spec D6). What the day's cap held back from this session, while it is news. */
+  heldNewWords: HeldNewWords | null;
   /** The chosen option, for a choice card; null otherwise. */
   selectedOption: number | null;
   answered: boolean;
@@ -477,6 +480,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         total: SESSION_LENGTH,
         answer: null,
         explanation: null,
+        heldNewWords: null,
         selectedOption: null,
         answered: false,
         complete: false,
@@ -517,6 +521,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       total: state.total,
       answer: state.answer,
       explanation: state.explanation,
+      heldNewWords: state.heldNewWords,
       selectedOption: state.answer && 'option_index' in state.answer ? state.answer.option_index : null,
       answered: state.answer !== null,
       complete: state.complete,

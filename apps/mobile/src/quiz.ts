@@ -13,6 +13,7 @@ import { SESSION_LENGTH, TAPPABLE_TYPES, takesHelp } from '@lang-tutor/core/doma
 
 import { checksFit, opensRetry, type CardAnswer } from '@/feedback';
 import type { JudgeAttempt } from '@/judging';
+import type { HeldNewWords } from '@/newWordLimits';
 import { opensRetype, retypeChecked, retypeTyping, startRetype, type Retype } from '@/retype';
 import { IDLE_ATTEMPT, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 import type { ServedWord } from '@/taps';
@@ -73,6 +74,9 @@ export type QuizState = {
   /** Phase 66b (spec D2). A sentence translation's check, which came with its
    *  answer: null until then, when it was not checked, and on every other card. */
   explanation: ExplainResponse | null;
+  /** Phase 70 (spec D6). What the session's view says the day's cap held back, while it is news:
+   *  null until the view is read, and when it says nothing. */
+  heldNewWords: HeldNewWords | null;
 };
 
 /** Phase 19. What a session starts as before its first card is read: starting
@@ -100,6 +104,7 @@ export function enteredState(sessionId: string): QuizState {
     helpMarks: null,
     tapped: [],
     explanation: null,
+    heldNewWords: null,
   };
 }
 
@@ -237,6 +242,7 @@ export function resumed(current: QuizState, view: SessionView): QuizState {
     position: view.position.position,
     total: view.position.total,
     retry: view.pending_retry,
+    heldNewWords: view.held_new_words ? { count: view.held_new_words.count, dayCap: view.held_new_words.day_cap } : null,
   };
 }
 

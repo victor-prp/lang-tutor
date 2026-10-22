@@ -37,6 +37,9 @@ import type { Repos } from './transaction';
 // or by create; started by the start call; offered by current.
 
 const E = 'e1';
+// Phase 70 (spec D4). A learner who never chose, whose day still has room: nothing held back.
+const NOTHING_HELD = { count: 0, dayCap: 15 };
+const NOTHING_HELD_LOG = { new_words_held: 0, day_new_cap: 15 };
 // The learner day the world's clock reads (2026-10-12T10:00Z, in UTC): what a stock records as chosen_on (phase 53).
 const TODAY = '2026-10-12';
 const ENROLLMENT: Enrollment = { id: E, user_id: 'u1', source_language: 'he', target_language: 'en', created_at: '' };
@@ -64,7 +67,7 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
   const service = createSessionService({
     transaction: createFakeTransaction({
       enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
-      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }) }),
+      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }), findNewWordLimits: async () => ({ dayCap: null, perSession: null }) }),
       session: stub<SessionRepo>({
         findAnswersOn: async () => [],
         findPathAnswers: async () => [],
@@ -140,13 +143,13 @@ describe('stockSession (spec D3, D4)', () => {
 
     expect(asked).toEqual(['s_started']);
     expect(pickedGlosses(jobs)).toEqual(['g_b', 'g_a']);
-    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY, null]]);
+    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY, null, NOTHING_HELD]]);
     expect(jobs.enqueued.find((job) => job.name === PREPARE_SESSION)?.data).toMatchObject({
       session_id: 's_new',
       listening: true,
       speaking: false,
     });
-    expect(eventsOf(logger, 'session_stocked')).toEqual([{ event: 'session_stocked', enrollment_id: E, session_id: 's_new', reason: 'start' }]);
+    expect(eventsOf(logger, 'session_stocked')).toEqual([{ event: 'session_stocked', enrollment_id: E, session_id: 's_new', reason: 'start', ...NOTHING_HELD_LOG }]);
   });
 
   it('builds for the newest session’s device when the trigger names none', async () => {
@@ -156,7 +159,7 @@ describe('stockSession (spec D3, D4)', () => {
       findNewestDevices: async () => ({ listening: false, speaking: true }),
     });
     await service.stockSession({ enrollment_id: E, reason: 'complete' });
-    expect(inserted).toEqual([['u1', E, { listening: false, speaking: true }, TODAY, null]]);
+    expect(inserted).toEqual([['u1', E, { listening: false, speaking: true }, TODAY, null, NOTHING_HELD]]);
   });
 
   it.each([
@@ -220,8 +223,8 @@ describe('createNextSession (spec D5)', () => {
       source: 'list',
       created: true,
     });
-    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY, null]]);
-    expect(eventsOf(logger, 'session_stocked')).toEqual([{ event: 'session_stocked', enrollment_id: E, session_id: 's_new', reason: 'create' }]);
+    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY, null, NOTHING_HELD]]);
+    expect(eventsOf(logger, 'session_stocked')).toEqual([{ event: 'session_stocked', enrollment_id: E, session_id: 's_new', reason: 'create', ...NOTHING_HELD_LOG }]);
   });
 
   it('has nothing to ask with an empty list', async () => {
@@ -352,7 +355,7 @@ describe('the main path (spec D1, D2)', () => {
     await service.stockSession({ enrollment_id: E, reason: 'complete' });
     // Newest new words first (phase 35 D5), as chooseWords alone picks them.
     expect(pickedGlosses(jobs)).toEqual(['g_a', 'g_b']);
-    expect(inserted).toEqual([['u1', E, NO_DEVICES, TODAY, null]]);
+    expect(inserted).toEqual([['u1', E, NO_DEVICES, TODAY, null, NOTHING_HELD]]);
     expect(locked).toEqual([E]);
     expect(paths.every(([, path]) => path === null)).toBe(true);
     expect(targets.written).toEqual([]);
@@ -697,11 +700,11 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
     });
     expect(paths).toEqual(['t_exam']);
     expect(retired).toEqual(['s_stock']);
-    expect(inserted).toEqual([['u1', E, STOCK_DEVICES, TODAY, 't_exam']]);
+    expect(inserted).toEqual([['u1', E, STOCK_DEVICES, TODAY, 't_exam', NOTHING_HELD]]);
     expect(writes(targets, 'insertSessionTarget')).toEqual([['s_new', expect.objectContaining({ targetId: 't_exam', ...OWED_TODAY })]]);
     expect(eventsOf(logger, 'session_retired')).toEqual([{ event: 'session_retired', enrollment_id: E, session_id: 's_stock', reason: 'stale_target' }]);
     expect(eventsOf(logger, 'session_stocked')).toEqual([
-      { event: 'session_stocked', enrollment_id: E, session_id: 's_new', reason: 'stale_target', target_id: 't_exam' },
+      { event: 'session_stocked', enrollment_id: E, session_id: 's_new', reason: 'stale_target', target_id: 't_exam', ...NOTHING_HELD_LOG },
     ]);
   });
 
@@ -716,7 +719,7 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
     expect(paths).toEqual(['t_exam']);
     expect(retired).toEqual(['s_stock']);
     // Built for the devices the stock was built for, not the ones create names.
-    expect(inserted).toEqual([['u1', E, STOCK_DEVICES, TODAY, 't_exam']]);
+    expect(inserted).toEqual([['u1', E, STOCK_DEVICES, TODAY, 't_exam', NOTHING_HELD]]);
   });
 
   it('keeps a practice-more stock chosen today while practice more is still the choice: no churn', async () => {
@@ -789,7 +792,7 @@ describe("a target's stock, checked (spec D2, ruling R-D12, final review C1)", (
     expect((await service.currentSession('u1', E, 't_exam')).current?.id).toBe('s_new');
     expect(paths).toEqual(['t_exam']);
     expect(retired).toEqual(['s_stock']);
-    expect(inserted).toEqual([['u1', E, STOCK_DEVICES, TODAY, 't_exam']]);
+    expect(inserted).toEqual([['u1', E, STOCK_DEVICES, TODAY, 't_exam', NOTHING_HELD]]);
   });
 
   it('is played as it is when it was chosen on an earlier day with the cap and owed words of today (phase 43 R5)', async () => {
