@@ -95,20 +95,17 @@ export function stockToCheck(stock: { chosenOn: string } & Pick<StockChoice, 'ow
 /** Phase 53 (ruling R-D12), phase 57 (spec D2). A checked stock is played as it is when today's
  *  choice has the cap and the owed words it recorded; one that recorded nothing is replaced.
  *  Phase 67 (final review 2): one chosen past the budget never is. Checked, it was chosen on an
- *  earlier day (it records the owed words), and holds that day's practice more, not today's cards. */
+ *  earlier day (it records the owed words), and holds that day's practice more, not today's cards.
+ *  Phase 68 (spec D6, ruling 2026-10-22): its step-downs are not compared. One it lacks is asked by
+ *  the stock chosen when it starts; replacing it made the learner wait for a new preparation. */
 export function stockServes(recorded: StockChoice | undefined, today: StockChoice): boolean {
   return (
     recorded !== undefined &&
     recorded.pastBudget !== true &&
     recorded.capHalves === today.capHalves &&
-    recorded.owedGlossIds.join(' ') === today.owedGlossIds.join(' ') &&
-    sameStepDowns(recorded, today)
+    recorded.owedGlossIds.join(' ') === today.owedGlossIds.join(' ')
   );
 }
-
-/** Phase 68 (spec D6). Whether a stock asks the step-downs today's choice asks. */
-export const sameStepDowns = (recorded: Pick<StockChoice, 'stepDowns'> | undefined, today: Pick<StockChoice, 'stepDowns'>): boolean =>
-  (recorded?.stepDowns ?? []).join(' ') === (today.stepDowns ?? []).join(' ');
 
 /** Phase 68 (spec D6). The step-downs a session's picks ask, as session_targets records them. */
 export const stepDownKeys = (picks: readonly ChosenPick[]): string[] =>

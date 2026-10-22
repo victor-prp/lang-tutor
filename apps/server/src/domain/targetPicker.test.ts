@@ -14,7 +14,6 @@ import {
   owedWords,
   picksOfCards,
   raisesCard,
-  sameStepDowns,
   stepDownKeys,
   stockServes,
   stockToCheck,
@@ -621,12 +620,16 @@ describe('stockServes', () => {
     expect(stockServes({ capHalves: 10, owedGlossIds: [] }, { capHalves: 10, owedGlossIds: [] })).toBe(true);
   });
 
-  it('serves only while it asks the step-downs today asks (phase 68 D6); none recorded reads as none', () => {
+  // Phase 68 (spec D6, ruling 2026-10-22): a step-down waits for the stock chosen at the next start;
+  // replacing a stock for one made the learner wait for a new preparation between sessions.
+  it('serves a stock whatever step-downs it or today asks', () => {
     const owed = { capHalves: 10, owedGlossIds: ['g0', 'g1'] };
-    expect(stockServes({ ...owed, stepDowns: ['g0|written_productive'] }, { ...owed, stepDowns: ['g0|written_productive'] })).toBe(true);
-    expect(stockServes({ ...owed, stepDowns: [] }, { ...owed, stepDowns: ['g0|written_productive'] })).toBe(false);
-    expect(stockServes(owed, { ...owed, stepDowns: [] })).toBe(true);
-    expect(sameStepDowns(undefined, { stepDowns: ['g0|spelling'] })).toBe(false);
+    expect(stockServes({ ...owed, stepDowns: [] }, { ...owed, stepDowns: ['g0|written_productive'] })).toBe(true);
+    expect(stockServes({ ...owed, stepDowns: ['g0|written_productive'] }, { ...owed, stepDowns: [] })).toBe(true);
+    expect(stockServes(owed, { ...owed, stepDowns: ['g1|spelling'] })).toBe(true);
+  });
+
+  it('records the step-downs a session asks, sorted (phase 68 D6)', () => {
     expect(stepDownKeys([
       { glossId: 'g1', dimension: SK, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false, relearn: 'practice' },
       { glossId: 'g0', dimension: WP, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false },

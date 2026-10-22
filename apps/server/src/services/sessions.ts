@@ -118,7 +118,6 @@ import {
   owedWords,
   picksOfCards,
   raisesCard,
-  sameStepDowns,
   stepDownKeys,
   stockServes,
   stockToCheck,
@@ -782,25 +781,6 @@ export function createSessionService({
   }
 
   /**
-   * Phase 68 (spec D6). A target path's unstarted list stock whose recorded step-downs are not the
-   * ones today's choice asks, retired and built again for the devices it was built for: it was
-   * chosen when the session in flight started, before that session's misses. A seed, a target no
-   * longer active, a choice with nothing to ask, and a start that took the stock first leave it as
-   * it is. The caller holds the path's next-session lock. Answers the stock built, or null.
-   */
-  async function replaceForStepDowns(repos: Repos, enrolled: Enrollment, stock: SessionSummary, path: string): Promise<Replaced | null> {
-    if (stock.source !== 'list') return null;
-    const choice = await repos.session.findStockChoice(stock.id);
-    if (!choice) return null;
-    const devices = { listening: choice.listening, speaking: choice.speaking };
-    const read = await readChoice(repos, enrolled, devices, path);
-    if (!read || read.path === null || sameStepDowns(await repos.target.findSessionTarget(stock.id, path), read.row)) return null;
-    const picks = await choosePicks(repos, enrolled, read);
-    if (!picks || !(await repos.session.retireStock(stock.id))) return null;
-    return { retired: stock.id, ...(await writeStock(repos, enrolled, devices, read, picks)) };
-  }
-
-  /**
    * Phase 67b fix (Victor's test, 2026-10-21). Whether a practice-more stock that still serves by
    * stockServes is outrun by today's choice: its cards cannot raise the card today and today's
    * choice can (raisesCard). It was chosen beside the session in flight, so it misses a word that
@@ -1172,18 +1152,12 @@ export function createSessionService({
         // first answer is a new row, held for its second try when it opens one.
         // Either may complete the session: the last card's answer only when it
         // opens none, since a pending answer never completes one.
-        // Phase 68 (spec D1, D6). Whether this answer missed: what asks a target path's stock again.
-        let missed: boolean;
         if (outcome.recorded === 'retry') {
           const position = loaded.answers.length - 1;
           const resolved = outcome.record.answers[position];
           await repos.session.resolveRetry(sessionId, position, { text: resolved.retry_answer_string!, verdict: resolved.retry_verdict! });
-          missed = resolved.retry_verdict === 'wrong' || resolved.retry_verdict === 'gave_up';
         } else {
           const recorded = outcome.record.answers[loaded.answers.length];
-          missed = recorded.verdict
-            ? recorded.verdict === 'wrong' || recorded.verdict === 'gave_up'
-            : !recorded.is_correct || ('helped' in answer && answer.helped === true);
           // Phase 38 (spec D4): only the card that has a hint records whether it was opened.
           const askedType = loaded.questions[loaded.answers.length].type;
           const hinted = askedType === 'cloze_typed' ? { hintOpened: hintOpened ?? null } : {};
@@ -1214,15 +1188,9 @@ export function createSessionService({
           await requestStock(repos, { enrollment_id: enrolled.id, reason: 'answer', ...pathPayload(path) });
         }
 
-        // Phase 68 (spec D6). A miss on a target path, or a list word tapped (phase 59), asks for the
-        // path's stock again: it was chosen when this session started, before the miss, which can owe
-        // the word a step-down. The stock job compares and replaces it. A miss that ends the session
-        // asks nothing here: its end takes the progress lock and asks for the stock after it (ADR 0014
-        // R4), and the job compares whatever asked it.
-        if (!outcome.justCompleted && (missed || added.some((tap) => tap.kind === 'list'))) {
-          const missedOn = path ?? (await pathOf());
-          if (missedOn !== null) await requestStock(repos, { enrollment_id: enrolled.id, reason: 'miss', ...pathPayload(missedOn) });
-        }
+        // Phase 68 (spec D6, ruling 2026-10-22). A miss asks for no stock: the next session, chosen
+        // when this one started, is kept, and the step-down the miss owes is asked by the stock chosen
+        // when the next session starts. Replacing the stock made the learner wait for a new one.
 
         if (outcome.justCompleted) {
           const endedAt = now();
@@ -2687,9 +2655,8 @@ export function createSessionService({
           // Review C1. A create running now finishes first, and its stock is seen.
           await repos.session.lockNextSession(enrollmentId, path);
           const { stock } = await repos.session.findOpen(enrollmentId, path);
-          // Phase 68 (spec D6, ruling): whatever asked, a target's stock whose step-downs are not
-          // today's is replaced; the queue keeps one request per path, so a miss's may be another's.
-          if (stock) return (path !== null && (await replaceForStepDowns(repos, enrolled, stock, path))) || { why: 'stocked' };
+          // Phase 68 (spec D6, ruling 2026-10-22): a stock is kept whatever step-downs it asks.
+          if (stock) return { why: 'stocked' };
           if (path === null && !(await repos.session.findLatest(enrollmentId, 'any'))) return { why: 'seed_next' };
           if (path !== null) {
             const target = await repos.target.findTarget(path);

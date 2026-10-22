@@ -7,6 +7,7 @@ import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { jobPayloads, startTestBoss, stopTestBoss } from '../../support/jobs';
 import { insertListSession, type AskedGloss } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
+import { markReady } from '../../support/sessionRows';
 import { enrollmentOf, makeBot, seedUser } from '../../support/seedUser';
 import { readSessionTargets, readStockRow, seedTarget, setTargetWord } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -14,10 +15,10 @@ import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 
 // Phase 68 (spec D1, D3, D6). A miss on a target path owes the word a step-down on the skill it
-// missed, which the next session asks as see it, pick it, produce it. The stock is chosen when the
-// session in flight starts, before its misses, so a miss asks the stock job again, which replaces a
-// stock whose recorded step-downs differ from today's. The learner is a bot, so the day is the
-// profile's (ADR 0013).
+// missed, asked as see it, pick it, produce it. The stock is chosen when the session in flight
+// starts, before its misses, and a miss keeps it (D6 ruling, 2026-10-22): replacing it made the
+// learner wait for a new preparation between sessions. The step-down is asked by the stock chosen
+// when the next session starts. The learner is a bot, so the day is the profile's (ADR 0013).
 
 const E = enrollmentOf('u_1');
 const DAY = '2030-01-08';
@@ -92,43 +93,26 @@ async function startedDay() {
   return { apple, bread, homework, s1, stock };
 }
 
-describe('a miss on a target path (phase 68, spec D6)', () => {
-  it("asks for the path's stock again, which is replaced by one asking the missed word's step-down", async () => {
-    const { apple, bread, homework, s1, stock } = await startedDay();
+describe('a miss on a target path (phase 68, spec D6, ruling 2026-10-22)', () => {
+  it('keeps the next session as it was chosen: no stock is asked for, none retired', async () => {
+    const { s1, stock } = await startedDay();
 
     await service.submitAnswer('u_1', s1.sessionId, s1.questions[0].id, { text: 'zzzz' });
-    expect(await runStockJob()).toMatchObject({ reason: 'miss', target_id: homework });
-
-    expect(await readStockRow(t.db, stock)).toMatchObject({ status: 'skipped' });
-    const fresh = await newestTargetStock();
-    expect(fresh.session_id).not.toBe(stock);
-    expect(await readSessionTargets(t.db, fresh.session_id)).toMatchObject([{ stepDowns: [`${apple.glossId}|written_productive`] }]);
-    // Its owed work is S1's, credited: the step-down alone is no session (ruling T3-m), so practice
-    // more fills it. Its card on apple's writing is the step-down's last, which counts (final review);
-    // bread's first answer of the day can still raise the card, so the session gets no board (D5).
-    expect(fresh.board).toBeUndefined();
-    const asked = fresh.picks.map((pick) => [pick.gloss_id, pick.dimension, pick.relearn ?? null]);
-    expect(asked).toHaveLength(2);
-    expect(asked).toEqual(
-      expect.arrayContaining([
-        [apple.glossId, 'written_productive', 'counts'],
-        [bread.glossId, 'written_productive', null],
-      ]),
-    );
-    expect(logger.events.filter((entry) => entry.event === 'session_retired')).toEqual([
-      expect.objectContaining({ session_id: stock, reason: 'stale_target' }),
-    ]);
+    expect(await boss.fetch(STOCK_SESSION)).toEqual([]);
+    expect(await readStockRow(t.db, stock)).toMatchObject({ status: 'preparing' });
+    expect(logger.events.filter((entry) => entry.event === 'session_retired')).toEqual([]);
   });
 
-  it("asks nothing before the progress lock on the session's last card: its end asks, and the step-down still comes (ADR 0014 R4)", async () => {
-    const { bread, homework, s1, stock } = await startedDay();
+  it('keeps it when the session ends on a missed card: its end asks for the stock, which stays', async () => {
+    const { homework, s1, stock } = await startedDay();
     await service.submitAnswer('u_1', s1.sessionId, s1.questions[0].id, { text: 'apple' });
 
     // The last card, missed, ends S1: its end takes the progress lock, so the stock is asked after it.
     await service.submitAnswer('u_1', s1.sessionId, s1.questions[1].id, { text: 'zzzz' });
     expect(await runStockJob()).toMatchObject({ reason: 'complete', target_id: homework });
-    expect(await readStockRow(t.db, stock)).toMatchObject({ status: 'skipped' });
-    expect(await readSessionTargets(t.db, (await newestTargetStock()).session_id)).toMatchObject([{ stepDowns: [`${bread.glossId}|written_productive`] }]);
+    expect(await readStockRow(t.db, stock)).toMatchObject({ status: 'preparing' });
+    expect((await newestTargetStock()).session_id).toBe(stock);
+    expect(logger.events.filter((entry) => entry.event === 'session_retired')).toEqual([]);
   });
 
   it('asks for no stock on a right answer', async () => {
@@ -139,29 +123,32 @@ describe('a miss on a target path (phase 68, spec D6)', () => {
     expect(await readStockRow(t.db, stock)).toMatchObject({ status: 'preparing' });
   });
 
-  it('keeps a stock that already asks the step-down: the next stock job finds it the same', async () => {
-    const { s1 } = await startedDay();
-    await service.submitAnswer('u_1', s1.sessionId, s1.questions[0].id, { text: 'zzzz' });
-    await runStockJob();
-    const replaced = (await newestTargetStock()).session_id;
-
-    // S1's last card, answered right, ends it: its end asks for the stock, which is kept.
-    await service.submitAnswer('u_1', s1.sessionId, s1.questions[1].id, { text: 'bread' });
+  /** S1 ended, apple missed and bread right; the stock kept beside it, prepared and started: its
+   *  start asks for the next, chosen beside it. Answers that stock's preparation. */
+  async function nextStartAfterAMiss() {
+    const day = await startedDay();
+    await service.submitAnswer('u_1', day.s1.sessionId, day.s1.questions[0].id, { text: 'zzzz' });
+    await service.submitAnswer('u_1', day.s1.sessionId, day.s1.questions[1].id, { text: 'bread' });
     expect(await runStockJob()).toMatchObject({ reason: 'complete' });
-    expect(await readStockRow(t.db, replaced)).toMatchObject({ status: 'preparing' });
-    expect((await newestTargetStock()).session_id).toBe(replaced);
+    await markReady(t.db, day.stock);
+    await service.startSession('u_1', day.stock, NO_DEVICES);
+    expect(await runStockJob()).toMatchObject({ reason: 'start', target_id: day.homework });
+    const next = await newestTargetStock();
+    expect(next.session_id).not.toBe(day.stock);
+    return { ...day, next };
+  }
+
+  it('asks the step-down in the stock chosen when the next session starts', async () => {
+    const { apple, next } = await nextStartAfterAMiss();
+    expect(await readSessionTargets(t.db, next.session_id)).toMatchObject([{ stepDowns: [`${apple.glossId}|written_productive`] }]);
   });
 
   it('asks the step-down once the day is done, in practice more, on top when the session asks its word another skill', async () => {
-    const { apple, bread, s1 } = await startedDay();
-    await service.submitAnswer('u_1', s1.sessionId, s1.questions[0].id, { text: 'zzzz' });
-    await service.submitAnswer('u_1', s1.sessionId, s1.questions[1].id, { text: 'bread' });
-    await runStockJob();
+    const { apple, bread, next } = await nextStartAfterAMiss();
 
     // A homework counts spelling, which apple has not answered today: practice more asks it that
     // (typed, as this device cannot listen), so the writing step-down is practice on top.
-    const fresh = await newestTargetStock();
-    expect(fresh.picks.map((pick) => [pick.gloss_id, pick.dimension, pick.relearn ?? null])).toEqual([
+    expect(next.picks.map((pick) => [pick.gloss_id, pick.dimension, pick.relearn ?? null])).toEqual([
       [apple.glossId, 'spelling', null],
       [bread.glossId, 'written_productive', null],
       [apple.glossId, 'written_productive', 'practice'],

@@ -251,7 +251,9 @@ export const STOCK_SAVE_DELAY_SECONDS = 30;
 
 /** What asked for the stock: logged with it, so a stock can be traced to its cause.
  *  Phase 53 (ruling R-D12b): `target`, a change to a target, which retired the stock.
- *  Phase 58 (final review I1): `words_removed`, a level's words removed, which did too. */
+ *  Phase 58 (final review I1): `words_removed`, a level's words removed, which did too.
+ *  Phase 68 (spec D6): `miss`, a miss on a target path; no longer asked since the ruling of
+ *  2026-10-22, and kept so a job queued before that deploy still parses. */
 export const STOCK_REASONS = ['start', 'answer', 'complete', 'skip', 'save', 'target', 'words_removed', 'miss'] as const;
 
 export const StockSessionPayloadSchema = z.object({

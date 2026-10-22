@@ -18,6 +18,11 @@ export async function markStarted(db: Db, sessionId: string): Promise<void> {
   await db.execute(sql`update sessions set started_at = now() where id = ${sessionId}`);
 }
 
+/** A preparing session made ready, as its preparation would leave it, with no cards. */
+export async function markReady(db: Db, sessionId: string): Promise<void> {
+  await db.execute(sql`update sessions set status = 'ready' where id = ${sessionId} and status = 'preparing'`);
+}
+
 /** Phase 61. A ready session made the enrollment's seeded first one. */
 export async function markSeed(db: Db, sessionId: string): Promise<void> {
   await db.execute(sql`update sessions set source = 'seed' where id = ${sessionId}`);
