@@ -1,10 +1,14 @@
 import { describe, expect, it } from '@jest/globals';
 
+import { SESSION_LENGTH } from '@lang-tutor/core/domain';
+
+import { STEP_DOWNS_PER_SESSION } from './chooseConstants';
 import {
   ACCEPT_RENDERING_EXPIRY_SECONDS,
   AcceptRenderingPayloadSchema,
   LOOK_UP_IMPORT_ITEM_EXPIRY_SECONDS,
   LookUpImportItemPayloadSchema,
+  MAX_SESSION_PICKS,
   PHOTO_READ_BUDGET_MS,
   PrepareSessionPayloadSchema,
   READ_PHOTO_EXPIRY_SECONDS,
@@ -75,6 +79,18 @@ describe('PrepareSessionPayloadSchema', () => {
     expect(PrepareSessionPayloadSchema.parse({ session_id: 's', picks: [{ ...pick, ladder: true }] }).picks).toEqual([{ ...pick, ladder: true }]);
     expect(PrepareSessionPayloadSchema.parse({ session_id: 's', picks: [pick] }).picks[0].ladder).toBeUndefined();
     expect(PrepareSessionPayloadSchema.safeParse({ session_id: 's', picks: [{ ...pick, ladder: 'yes' }] }).success).toBe(false);
+  });
+
+  // Phase 68 (spec D2). A target session's step-downs are asked on top of its SESSION_LENGTH slots,
+  // so its payload holds up to STEP_DOWNS_PER_SESSION more picks. Lane 0, 2026-10-22: ten picks and
+  // one practice step-down failed every attempt, and the homework stayed failed.
+  it('takes a session grown by its step-downs past SESSION_LENGTH, and no more', () => {
+    expect(MAX_SESSION_PICKS).toBe(SESSION_LENGTH + STEP_DOWNS_PER_SESSION);
+    const picks = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({ gloss_id: `g${i}`, sense_id: 'a', variant_id: 'b', relearn: 'practice' }));
+    expect(PrepareSessionPayloadSchema.safeParse({ session_id: 's', picks: picks(SESSION_LENGTH + 1) }).success).toBe(true);
+    expect(PrepareSessionPayloadSchema.safeParse({ session_id: 's', picks: picks(MAX_SESSION_PICKS) }).success).toBe(true);
+    expect(PrepareSessionPayloadSchema.safeParse({ session_id: 's', picks: picks(MAX_SESSION_PICKS + 1) }).success).toBe(false);
   });
 });
 

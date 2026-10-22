@@ -18,8 +18,8 @@ const typed = (glossId: string, type: QuestionType, verdict: GradableAnswer['ver
 });
 const choice = (glossId: string, type: QuestionType, correct: boolean): Answer => ({ glossId, type, correct });
 
-const open = (answers: Answer[], unanswered: { glossId: string; type: QuestionType; intro: boolean }[] = []) =>
-  openStepDowns({ answers, unanswered }).map((step) => `${step.glossId}|${step.dimension}`);
+const open = (answers: Answer[], unanswered: { glossId: string; type: QuestionType; intro: boolean }[] = [], asking: string[] = []) =>
+  openStepDowns({ answers, unanswered, asking }).map((step) => `${step.glossId}|${step.dimension}`);
 
 describe('produces', () => {
   it("is each practised skill's card at the picker's rung", () => {
@@ -79,12 +79,22 @@ describe('openStepDowns', () => {
     ).toEqual(['b|written_productive', 'a|written_productive', 'b|spelling']);
   });
 
-  it("closes on an unanswered produce card of the session in flight, credited right, a practice one's too; a pick card doesn't", () => {
+  it("closes on an unanswered produce card of a step-down the session in flight asks, credited right, a practice one's too; a pick card doesn't", () => {
     const missed = [typed('a', 'typed_translation', 'wrong')];
-    expect(open(missed, [{ glossId: 'a', type: 'cloze_typed', intro: false }])).toEqual([]);
-    expect(open(missed, [{ glossId: 'a', type: 'typed_translation', intro: true }])).toEqual([]);
-    expect(open(missed, [{ glossId: 'a', type: 'reverse_choice', intro: true }])).toEqual(['a|written_productive']);
-    expect(open(missed, [{ glossId: 'b', type: 'typed_translation', intro: false }])).toEqual(['a|written_productive']);
+    const asking = ['a|written_productive'];
+    expect(open(missed, [{ glossId: 'a', type: 'cloze_typed', intro: false }], asking)).toEqual([]);
+    expect(open(missed, [{ glossId: 'a', type: 'typed_translation', intro: true }], asking)).toEqual([]);
+    expect(open(missed, [{ glossId: 'a', type: 'reverse_choice', intro: true }], asking)).toEqual(['a|written_productive']);
+    expect(open(missed, [{ glossId: 'b', type: 'typed_translation', intro: false }], asking)).toEqual(['a|written_productive']);
+  });
+
+  // Final review C1 (ruling 2026-10-22). The next stock is chosen when its session starts, every card
+  // unanswered: a plain card on the missed skill, chosen before the miss, would close the step-down at
+  // every choice, and practice more asks a word its weakest skill each session, so it never came.
+  it("leaves it open beside the session in flight's own card on that skill, when that session asks no step-down there", () => {
+    const missed = [typed('a', 'typed_translation', 'wrong')];
+    expect(open(missed, [{ glossId: 'a', type: 'typed_translation', intro: false }])).toEqual(['a|written_productive']);
+    expect(open(missed, [{ glossId: 'a', type: 'typed_translation', intro: false }], ['a|spelling'])).toEqual(['a|written_productive']);
   });
 
   it("closes on a practice step-down's produce card answered right, and stays open when it is missed (final review)", () => {

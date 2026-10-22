@@ -146,6 +146,20 @@ A stock is chosen when its session in flight starts, before that session's misse
   `stale_target`, as phase 53's replacement); one that matches is kept.
 - `stockServes` (the serve-time check) compares step-downs too.
 
+Ruling (2026-10-22, Victor): a miss keeps the next session. On lane 0 the replacement made the
+learner wait between homework sessions: after the deploy, 6 of 7 homework completions waited
+16–57 s for the next session, against 1 of 31 (28 s) the day before, because a miss in a session's
+last minute retired a stock already prepared, and preparing its replacement takes 40–80 s. 15 of
+the 17 stale retirements came from the miss-asked stock job. Now a miss asks for no stock, the stock
+job and `stockServes` no longer compare step-downs, and a step-down missed in session N is asked by
+the stock chosen when N+1 starts. That stock is chosen before any of N+1's answers, so D1's credit
+of the session in flight's unanswered cards now credits only the step-downs that session asks
+(`session_targets.step_downs`): a plain card on the missed skill, which N+1 was chosen with before
+the miss, no longer closes the step-down at every choice (final review C1; practice more asks a
+word its weakest skill each session, so without this the step-down never came). The cost: when
+N+1's plain card on that skill is answered right, N+2 still asks the step-down. The stock reason
+`miss` stays parseable for a job queued before the deploy.
+
 ## What the simulation says (one-off, uncommitted)
 
 `day.test.ts` does not simulate step-downs. Fed step-downs, the session-end restock, relearn picks

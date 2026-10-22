@@ -2,6 +2,8 @@ import { QuestionTypeSchema } from '@lang-tutor/core/api/schemas';
 import { DIMENSIONS, MAX_LEVEL, MIN_LEVEL, SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { z } from 'zod';
 
+import { STEP_DOWNS_PER_SESSION } from './chooseConstants';
+
 /**
  * Phase 19. The background jobs this server runs: each queue's name and the
  * payload it carries. Here rather than in services/ because repo/jobs.ts and
@@ -90,6 +92,10 @@ export const PREPARE_SESSION_CALL_BUDGETS_MS: readonly number[] = [
 export const PREPARE_SESSION_EXPIRY_SECONDS =
   (2 * PREPARE_SESSION_CALL_BUDGETS_MS.reduce((sum, budget) => sum + budget, 0)) / 1000;
 
+/** Phase 68 (spec D2). The most picks a session's preparation takes: a target session's step-downs
+ *  are asked on top of its SESSION_LENGTH slots, STEP_DOWNS_PER_SESSION at most. */
+export const MAX_SESSION_PICKS = SESSION_LENGTH + STEP_DOWNS_PER_SESSION;
+
 export const PrepareSessionPayloadSchema = z.object({
   session_id: z.string().min(1),
   picks: z
@@ -123,7 +129,8 @@ export const PrepareSessionPayloadSchema = z.object({
       }),
     )
     .min(1)
-    .max(SESSION_LENGTH),
+    // Phase 68 (spec D2): a target session grows past SESSION_LENGTH by its step-downs.
+    .max(MAX_SESSION_PICKS),
   // Phase 24 (spec D5). Absent in a job enqueued before the deploy: such a
   // session gets no listening cards.
   listening: z.boolean().default(false),
@@ -244,7 +251,9 @@ export const STOCK_SAVE_DELAY_SECONDS = 30;
 
 /** What asked for the stock: logged with it, so a stock can be traced to its cause.
  *  Phase 53 (ruling R-D12b): `target`, a change to a target, which retired the stock.
- *  Phase 58 (final review I1): `words_removed`, a level's words removed, which did too. */
+ *  Phase 58 (final review I1): `words_removed`, a level's words removed, which did too.
+ *  Phase 68 (spec D6): `miss`, a miss on a target path; no longer asked since the ruling of
+ *  2026-10-22, and kept so a job queued before that deploy still parses. */
 export const STOCK_REASONS = ['start', 'answer', 'complete', 'skip', 'save', 'target', 'words_removed', 'miss'] as const;
 
 export const StockSessionPayloadSchema = z.object({

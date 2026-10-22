@@ -606,8 +606,8 @@ describe("a target's stock chosen beside the session that asks the day's last ca
   };
 
   it.each([
-    // Phase 68 (spec D6): the step-down a miss owes is the stock job's to add, not the serve's.
-    ['a miss, before its stock job ran', 'zzzz'],
+    // Phase 68 (spec D6, ruling 2026-10-22): a miss keeps the stock; its step-down waits for the next.
+    ['a miss', 'zzzz'],
     ['every answer right', null],
   ])('is played as it is once that session ends with %s: the day is done', async (_, typed) => {
     const { word, exam, s1, stock } = await coveredDay();

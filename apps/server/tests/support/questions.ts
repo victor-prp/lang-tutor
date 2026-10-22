@@ -88,7 +88,7 @@ const CYCLE: QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_trans
  */
 export async function insertListSession(
   db: Db,
-  input: { userId: string; enrollmentId: string; asked: AskedGloss[]; alternatives?: string[]; types?: QuestionType[]; targetId?: string },
+  input: { userId: string; enrollmentId: string; asked: AskedGloss[]; alternatives?: string[]; types?: QuestionType[]; targetId?: string; sessionId?: string },
 ): Promise<{ sessionId: string; questions: Question[] }> {
   return withTx(db, async (tx) => {
     const sessionRepo = createSessionRepo(tx);
@@ -123,7 +123,8 @@ export async function insertListSession(
         ),
       })),
     });
-    const sessionId = await sessionRepo.insertPreparingSession(input.userId, input.enrollmentId, NO_DEVICES, CHOSEN_ON, input.targetId ?? null);
+    // `sessionId`: a preparing session already written, a stock, given these cards as its preparation would.
+    const sessionId = input.sessionId ?? (await sessionRepo.insertPreparingSession(input.userId, input.enrollmentId, NO_DEVICES, CHOSEN_ON, input.targetId ?? null));
     await sessionRepo.insertSessionQuestions(sessionId, generated);
     await sessionRepo.transition(sessionId, ['preparing'], 'ready');
     return { sessionId, questions: generated };

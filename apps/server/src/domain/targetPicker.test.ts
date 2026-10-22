@@ -4,6 +4,7 @@ import { SESSION_LENGTH, type Dimension, type QuestionType } from '@lang-tutor/c
 
 import type { ChosenPick } from './choose';
 import { LADDER_SLOTS, NEW_PER_SESSION, STEP_DOWNS_PER_SESSION } from './chooseConstants';
+import { MAX_SESSION_PICKS } from './jobs';
 import { MAX_PER_TYPE } from './plan';
 import type { TargetDay, WordDay } from './targetDay';
 import {
@@ -14,7 +15,6 @@ import {
   owedWords,
   picksOfCards,
   raisesCard,
-  sameStepDowns,
   stepDownKeys,
   stockServes,
   stockToCheck,
@@ -451,6 +451,13 @@ describe('chooseTargetPicks, step-downs (phase 68)', () => {
     expect(slotsOf(without)).toBe(SESSION_LENGTH);
   });
 
+  it('grows a full session by at most STEP_DOWNS_PER_SESSION, to the most picks a prepare job takes', () => {
+    const owed = Array.from({ length: 8 }, (_, i): WordSpec => ({ id: `g${i}`, chances: { [WP]: 0.5, [SP]: 0.6, [SK]: 0.7 } }));
+    const day = dayOf([...['A', 'B', 'C', 'D'].map((id): WordSpec => ({ id, state: 'done' })), ...owed]);
+    expect(slotsOf(pick(day))).toBe(SESSION_LENGTH);
+    expect(pick(day, { stepDowns: steps(`A|${WP}`, `B|${WP}`, `C|${WP}`, `D|${WP}`) })).toHaveLength(MAX_SESSION_PICKS);
+  });
+
   it("makes the session's own card of its word on that skill its last, which counts as it would have (final review)", () => {
     const day = dayOf([{ id: 'A', chances: { [WP]: 0.5, [SP]: 0.99, [SK]: 0.6 } }]);
     const without = pick(day);
@@ -631,12 +638,16 @@ describe('stockServes', () => {
     expect(stockServes({ capHalves: 10, owedGlossIds: [] }, { capHalves: 10, owedGlossIds: [] })).toBe(true);
   });
 
-  it('serves only while it asks the step-downs today asks (phase 68 D6); none recorded reads as none', () => {
+  // Phase 68 (spec D6, ruling 2026-10-22): a step-down waits for the stock chosen at the next start;
+  // replacing a stock for one made the learner wait for a new preparation between sessions.
+  it('serves a stock whatever step-downs it or today asks', () => {
     const owed = { capHalves: 10, owedGlossIds: ['g0', 'g1'] };
-    expect(stockServes({ ...owed, stepDowns: ['g0|written_productive'] }, { ...owed, stepDowns: ['g0|written_productive'] })).toBe(true);
-    expect(stockServes({ ...owed, stepDowns: [] }, { ...owed, stepDowns: ['g0|written_productive'] })).toBe(false);
-    expect(stockServes(owed, { ...owed, stepDowns: [] })).toBe(true);
-    expect(sameStepDowns(undefined, { stepDowns: ['g0|spelling'] })).toBe(false);
+    expect(stockServes({ ...owed, stepDowns: [] }, { ...owed, stepDowns: ['g0|written_productive'] })).toBe(true);
+    expect(stockServes({ ...owed, stepDowns: ['g0|written_productive'] }, { ...owed, stepDowns: [] })).toBe(true);
+    expect(stockServes(owed, { ...owed, stepDowns: ['g1|spelling'] })).toBe(true);
+  });
+
+  it('records the step-downs a session asks, sorted (phase 68 D6)', () => {
     expect(stepDownKeys([
       { glossId: 'g1', dimension: SK, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false, relearn: 'practice' },
       { glossId: 'g0', dimension: WP, rung: 2, level: 1, r: 1, cls: 'TARGET', ladder: false },
