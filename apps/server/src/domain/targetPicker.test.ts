@@ -4,6 +4,7 @@ import { SESSION_LENGTH, type Dimension, type QuestionType } from '@lang-tutor/c
 
 import type { ChosenPick } from './choose';
 import { LADDER_SLOTS, NEW_PER_SESSION, STEP_DOWNS_PER_SESSION } from './chooseConstants';
+import { MAX_SESSION_PICKS } from './jobs';
 import { MAX_PER_TYPE } from './plan';
 import type { TargetDay, WordDay } from './targetDay';
 import {
@@ -448,6 +449,13 @@ describe('chooseTargetPicks, step-downs (phase 68)', () => {
     const picks = pick(day, { stepDowns: steps(`A|${WP}`) });
     expect(picks).toEqual([...without, practice('A', WP)]);
     expect(slotsOf(without)).toBe(SESSION_LENGTH);
+  });
+
+  it('grows a full session by at most STEP_DOWNS_PER_SESSION, to the most picks a prepare job takes', () => {
+    const owed = Array.from({ length: 8 }, (_, i): WordSpec => ({ id: `g${i}`, chances: { [WP]: 0.5, [SP]: 0.6, [SK]: 0.7 } }));
+    const day = dayOf([...['A', 'B', 'C', 'D'].map((id): WordSpec => ({ id, state: 'done' })), ...owed]);
+    expect(slotsOf(pick(day))).toBe(SESSION_LENGTH);
+    expect(pick(day, { stepDowns: steps(`A|${WP}`, `B|${WP}`, `C|${WP}`, `D|${WP}`) })).toHaveLength(MAX_SESSION_PICKS);
   });
 
   it("makes the session's own card of its word on that skill its last, which counts as it would have (final review)", () => {
