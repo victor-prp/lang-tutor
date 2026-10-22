@@ -41,6 +41,8 @@ export const colors = {
 export const shadows = {
   card: { boxShadow: '0 1px 2px rgba(16, 24, 40, 0.05), 0 6px 18px rgba(16, 24, 40, 0.07)' },
   bar: { boxShadow: '0 -1px 0 #EAECF0' },
+  // Answer field spec D4: a faint primary glow round the field the keyboard types into.
+  focus: { boxShadow: '0 0 0 3px rgba(59, 91, 219, 0.12)' },
 } as const;
 
 export const spacing = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 } as const;

@@ -135,6 +135,8 @@ export function TypedAnswerView({
   frame,
 }: Props) {
   const [text, setText] = useState('');
+  // Answer field spec D4: the field shows where the keyboard is.
+  const [focused, setFocused] = useState(false);
   // Phase 39 (spec D8): the last send was in the wrong alphabet, or one word
   // for a whole sentence; the text stays.
   const [refused, setRefused] = useState<'wrong_script' | 'word_only' | null>(null);
@@ -186,42 +188,51 @@ export function TypedAnswerView({
   // Phase 66b (spec D2): orange for a sentence to fix around a word that is not wrong.
   const border = BORDERS[retyping ? 'idle' : inputTone(verdict, sentence)];
 
-  // The box the learner answers in: only the typing, nothing drawn over or behind it
-  // (help row spec D3). Answer bar spec D2, D5: on the bar while it is typed, in the
-  // card once judged.
+  // The input: only the typing, nothing drawn over or behind it (help row spec D3).
+  // Answer bar spec D2, D5: in the bar's field while it is typed, in the card once judged.
+  const input = (
+    <TextInput
+      testID="typed-input"
+      value={text}
+      onChangeText={(value) => {
+        setText(value);
+        setRefused(null);
+        // Phase 55 (spec D7): the right answer hides at the first character.
+        if (retyping && retype.showing && value !== '') onRetypeTyping?.();
+      }}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      editable={!locked && !checking}
+      // Answer bar spec D8: no focus of its own. The keyboard opens when the box
+      // is tapped, so the question, a second try's note or a retype's answer
+      // shows whole first.
+      autoCapitalize="none"
+      autoCorrect={false}
+      spellCheck={false}
+      autoComplete="off"
+      // A sentence is longer than a word (spec D6); Return still submits.
+      multiline={question.type === 'sentence_translation'}
+      maxLength={question.type === 'sentence_translation' ? MAX_JUDGED_TEXT : 100}
+      returnKeyType="done"
+      submitBehavior="submit"
+      onSubmitEditing={() => {
+        if (!empty) submit(text);
+      }}
+      placeholder={strings.typedPlaceholder}
+      placeholderTextColor={colors.muted}
+      style={[
+        styles.input,
+        !locked && styles.inputInField,
+        question.type === 'sentence_translation' && [styles.sentence, !locked && styles.sentenceGrows],
+        { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction },
+      ]}
+    />
+  );
+
+  // Answer bar spec D5: once judged, the box in the card, in the answer's colour.
   const box = (
     <View style={[styles.box, border]} testID="typed-box">
-      <View style={styles.field}>
-        <TextInput
-          testID="typed-input"
-          value={text}
-          onChangeText={(value) => {
-            setText(value);
-            setRefused(null);
-            // Phase 55 (spec D7): the right answer hides at the first character.
-            if (retyping && retype.showing && value !== '') onRetypeTyping?.();
-          }}
-          editable={!locked && !checking}
-          // Answer bar spec D8: no focus of its own. The keyboard opens when the box
-          // is tapped, so the question, a second try's note or a retype's answer
-          // shows whole first.
-          autoCapitalize="none"
-          autoCorrect={false}
-          spellCheck={false}
-          autoComplete="off"
-          // A sentence is longer than a word (spec D6); Return still submits.
-          multiline={question.type === 'sentence_translation'}
-          maxLength={question.type === 'sentence_translation' ? MAX_JUDGED_TEXT : 100}
-          returnKeyType="done"
-          submitBehavior="submit"
-          onSubmitEditing={() => {
-            if (!empty) submit(text);
-          }}
-          placeholder={strings.typedPlaceholder}
-          placeholderTextColor={colors.muted}
-          style={[styles.input, question.type === 'sentence_translation' && [styles.sentence, !locked && styles.sentenceGrows], { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }]}
-        />
-      </View>
+      <View style={styles.field}>{input}</View>
     </View>
   );
 
@@ -281,9 +292,9 @@ export function TypedAnswerView({
     </View>
   );
 
-  // Answer bar spec D2: what is being typed, on the keyboard. Help row spec D1: the
-  // note line, help's row (עזרה and its reading), and the answer row (בדיקה and the
-  // box), both rows there from the start, the buttons one column at the right.
+  // Answer bar spec D2: what is being typed, on the keyboard. Answer field spec D1: the
+  // note line, then one field: help's shelf (עזרה and its reading), a hairline, and the
+  // answer line (בדיקה and the input), each button inside the field at its right.
   const note = barNote({ refused, failed, checking, retypeAttempt: retyping ? attempt : null });
   const button = barButton({ empty, checking, failed, retyping });
   const bar = locked ? null : (
@@ -308,49 +319,55 @@ export function TypedAnswerView({
           {note === 'retype' ? strings.retypeNotice : strings.tryAgain}
         </Text>
       ) : null}
-      {helps ? (
-        // The RTL row's first child, the button, sits at the right.
-        <View style={styles.row}>
-          <HelpButton
-            testID="typed-help"
-            disabled={checking || typedHelpDone(hinted, text, presses, hebrew)}
-            onPress={() => help?.onPress(text)}
-            style={styles.side}
-          />
-          {/* Help row spec D2, D8: a dashed box, empty before any press, its reading in
-              the answer's direction. No physical textAlign: native RTL swaps a Text's
-              sides and web does not (1fff73e); web drops `direction`, hence writingDirection. */}
-          <View style={[styles.reading, { direction }]} testID="typed-help-row">
-            {reading !== null ? (
-              <Text style={[styles.readingText, { writingDirection: direction }]} testID="typed-hint">
-                {reading.typed}
-                {reading.marked !== '' ? (
-                  <Text style={styles.marked} testID="typed-marks">
-                    {reading.marked}
+      <View style={[styles.answerField, border, focused && [styles.answerFieldFocused, shadows.focus]]} testID="typed-box">
+        {helps ? (
+          <>
+            {/* The RTL row's first child, the button, sits at the right. */}
+            <View style={[styles.line, styles.shelf]}>
+              <HelpButton
+                testID="typed-help"
+                disabled={checking || typedHelpDone(hinted, text, presses, hebrew)}
+                onPress={() => help?.onPress(text)}
+                style={styles.side}
+              />
+              {/* Answer field spec D2 (help row spec D2, D8): empty before any press, its
+                  reading in the answer's direction. No physical textAlign: native RTL swaps
+                  a Text's sides and web does not (1fff73e); web drops `direction`, hence
+                  writingDirection. */}
+              <View style={[styles.reading, { direction }]} testID="typed-help-row">
+                {reading !== null ? (
+                  <Text style={[styles.readingText, { writingDirection: direction }]} testID="typed-hint">
+                    {reading.typed}
+                    {reading.marked !== '' ? (
+                      <Text style={styles.marked} testID="typed-marks">
+                        {reading.marked}
+                      </Text>
+                    ) : null}
+                    {reading.ghost !== '' ? (
+                      <Text style={styles.ghost} testID="typed-ghost">
+                        {reading.ghost}
+                      </Text>
+                    ) : null}
                   </Text>
                 ) : null}
-                {reading.ghost !== '' ? (
-                  <Text style={styles.ghost} testID="typed-ghost">
-                    {reading.ghost}
-                  </Text>
-                ) : null}
-              </Text>
-            ) : null}
-          </View>
+              </View>
+            </View>
+            <View style={styles.divider} />
+          </>
+        ) : null}
+        {/* Answer field spec D3: a sentence's box grows, and בדיקה stays beside its last line. */}
+        <View style={[styles.line, question.type === 'sentence_translation' && styles.lineBottom]}>
+          <Pressable
+            accessibilityRole="button"
+            testID={button.testID}
+            disabled={button.disabled}
+            onPress={() => submit(text)}
+            style={[styles.check, styles.side, question.type === 'sentence_translation' && styles.sideBottom, button.disabled && answerStyles.checkDisabled]}
+          >
+            <Text style={answerStyles.checkLabel}>{BUTTON_LABELS[button.label]}</Text>
+          </Pressable>
+          <View style={styles.field}>{input}</View>
         </View>
-      ) : null}
-      {/* Help row spec D3, D4: a sentence's box grows, and בדיקה stays beside its last line. */}
-      <View style={[styles.row, question.type === 'sentence_translation' && styles.rowBottom]}>
-        <Pressable
-          accessibilityRole="button"
-          testID={button.testID}
-          disabled={button.disabled}
-          onPress={() => submit(text)}
-          style={[answerStyles.check, styles.side, question.type === 'sentence_translation' && styles.sideBottom, button.disabled && answerStyles.checkDisabled]}
-        >
-          <Text style={answerStyles.checkLabel}>{BUTTON_LABELS[button.label]}</Text>
-        </Pressable>
-        <View style={styles.boxSlot}>{box}</View>
       </View>
     </View>
   );
@@ -358,8 +375,13 @@ export function TypedAnswerView({
   return frame(card, bar);
 }
 
-// Help row spec D1, D3: the width of עזרה and בדיקה beside their rows.
-const SIDE_BUTTON = 104;
+// Answer field spec D2, D3: the width of עזרה and בדיקה inside the field; it fits בודקים….
+const SIDE_BUTTON = 92;
+// Answer field spec D1, D3: the field's border, the gap between it and what is inside,
+// and so the inner corners, which follow the field's.
+const FIELD_BORDER = 1.5;
+const FIELD_INSET = 6;
+const INNER_RADIUS = radii.group - FIELD_INSET;
 
 const BUTTON_LABELS: Record<ReturnType<typeof barButton>['label'], string> = {
   check: strings.typedCheck,
@@ -438,8 +460,8 @@ const styles = StyleSheet.create({
   instructionLanguage: { fontWeight: '700' },
   // Phase 39 (spec D8): a refusal, in the colour of the app's other errors, not a second instruction.
   wrongScript: { color: colors.wrong },
-  // Phase 63 (spec D2). The box the learner answers in: its border, and its colour
-  // once answered.
+  // Phase 63 (spec D2). The answer once judged, in the card: its border, and its colour
+  // (answer field spec D5; while typed, the input is in the bar's field).
   box: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -456,25 +478,35 @@ const styles = StyleSheet.create({
     lineHeight: lineHeights.lg,
     color: colors.text,
   },
-  // Help row spec D1. A row of the bar: its button, then what it acts on.
-  row: { flexDirection: 'row', gap: spacing.sm },
-  rowBottom: { alignItems: 'flex-end' },
-  // עזרה and בדיקה, one width, so they stand as one column; it fits בודקים….
+  // Answer field spec D3: in the field, beside בדיקה, the typing is one line of its height.
+  // D4: the field's border marks the focus, so the web draws no ring of the input's own.
+  inputInField: { paddingVertical: spacing.sm, paddingHorizontal: spacing.sm, outlineWidth: 0 },
+  // Answer field spec D1. The bar's one field, around help's shelf and the answer line.
+  answerField: { borderWidth: FIELD_BORDER, borderRadius: radii.group, backgroundColor: colors.surface },
+  // Answer field spec D4: the keyboard is here.
+  answerFieldFocused: { borderColor: colors.primary },
+  // A line of the field: its button, then what it acts on.
+  line: { flexDirection: 'row', gap: spacing.sm, padding: FIELD_INSET },
+  lineBottom: { alignItems: 'flex-end' },
+  // Answer field spec D2. Help's shelf: pale, its top corners the field's inner ones.
+  shelf: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radii.group - FIELD_BORDER,
+    borderTopRightRadius: radii.group - FIELD_BORDER,
+  },
+  divider: { height: 1, backgroundColor: colors.border },
+  // עזרה and בדיקה, one width, so they stand as one column inside the field.
   side: { width: SIDE_BUTTON, justifyContent: 'center', alignSelf: 'stretch' },
   sideBottom: { alignSelf: 'flex-end' },
-  boxSlot: { flex: 1 },
-  // Help row spec D2. Help's reading in a dashed box, as the spoken card's letters box.
-  reading: {
-    flex: 1,
-    minHeight: 48,
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+  // Answer field spec D3. בדיקה inside the field: as tall as one line of typing.
+  check: {
+    backgroundColor: colors.primary,
+    borderRadius: INNER_RADIUS,
+    minHeight: lineHeights.lg + 2 * spacing.sm,
+    alignItems: 'center',
   },
+  // Answer field spec D2. Help's reading, beside עזרה; a long one wraps and the shelf grows.
+  reading: { flex: 1, justifyContent: 'center', paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   readingText: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.text },
   // Phase 63 (spec D3). The marked part on red, then the grey letters.
   marked: {
@@ -486,11 +518,11 @@ const styles = StyleSheet.create({
   ghost: { color: colors.faint },
   // The meaning card asks with a target-language form, which reads left to right.
   promptLtr: { writingDirection: 'ltr' },
-  // Answer bar spec D4. A sentence's text is smaller, so three lines fit beside the
-  // big button; Android centres a multiline box's text by default.
+  // Answer bar spec D4. A sentence's text is smaller, so three lines fit in the bar
+  // (answer field spec D3: beside בדיקה); Android centres a multiline box's text by default.
   sentence: { fontSize: fontSizes.md, lineHeight: lineHeights.md, textAlignVertical: 'top' },
   // While typed it grows from one line to three, then scrolls inside itself.
-  sentenceGrows: { maxHeight: 3 * lineHeights.md + 2 * spacing.md },
+  sentenceGrows: { maxHeight: 3 * lineHeights.md + 2 * spacing.sm },
   // Answer bar spec D2. White and full width on the keyboard: the screen's side
   // padding undone.
   bar: {

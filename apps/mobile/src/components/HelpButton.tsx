@@ -9,7 +9,7 @@ type Props = {
   /** Nothing left to give, or an answer being checked. */
   disabled: boolean;
   testID: string;
-  /** Help row spec D2: the typed card's row gives it בדיקה's width. */
+  /** Answer field spec D2: the typed card's field gives it בדיקה's width. */
   style?: StyleProp<ViewStyle>;
 };
 
