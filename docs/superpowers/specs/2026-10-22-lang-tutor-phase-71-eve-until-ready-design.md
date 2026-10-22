@@ -52,12 +52,21 @@ eve's check cards are left, then `done` (or `rest` before any answer). The budge
 the eve's state. It is still set and stored at the path's first session, as a record, and its
 fields stay on the wire. The new app does not draw them on the eve.
 
-### D2. Every eve session is full (server)
+### D2. No eve session is the owed work alone (server)
 
 Where a target session on the eve would be chosen in `owed` mode, it is chosen in `past_budget`
 mode instead: the owed cards first, then practice more fills the session with the words below
 their bar (phase 65b D2, phase 67b R1). `owed` mode with nothing left to ask still falls to `more`
-(T3-m). The day simulation's `chooseFor` mirrors it.
+(T3-m). The day simulation's `chooseFor` mirrors it. Anti-goal 1 (phase 57: while work is owed, only
+owed work) gets the eve as its second exception beside past the budget, gated as "owed work first".
+
+**Ruling R1 (build):** the spec first said "every eve session is full". The simulation shows that
+practice more itself asks one card a word below its bar (phase 67b R1), so as words reach the bar
+the eve's sessions shrink: 6, 5, 3, then 1 card (10-word homework skipped until the eve, the five
+miss phases). Filling them is a product choice phase 67b left open ("R1's short eve sessions"):
+repeat the short words (faster, and a card right after its answer was shown inflates readiness) or
+add ready words (a miss lowers the card). This phase keeps practice more as it is and fixes only
+the owed-only session, the one-card session Victor met; the simulation reports the sizes ungated.
 
 ### D3. Each word's readiness on the home list (wire)
 
@@ -112,8 +121,8 @@ removes, until its over-the-air update lands. Recorded in `apiLevel.ts` as phase
 
 - Domain: `todaySummary` on the eve (owed while it can raise, after the budget too; the plan's
   state once it cannot); the eve's `past_budget` mode.
-- Day simulation: `chooseFor` mirrors D2; the phase 67b eve gates still hold; a new measure: on the
-  eve, every target session before the card reaches 100% is a full session.
+- Day simulation: `chooseFor` mirrors D2; the phase 67b eve gates still hold; a new gate: on the
+  eve no target session is the owed work alone, its sizes below 100% reported.
 - Services and routes: the summary's eve state and `word_readiness`; the session service's mode on
   the eve.
 - App: the eve's line, side, bars and spoken text by table; the strip; strings.

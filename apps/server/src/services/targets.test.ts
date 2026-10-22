@@ -470,6 +470,7 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
       // Phase 65b D1: an exam five days out asks before practice more (the app asks once today is done).
       // Phase 67b (spec D6): its words are not met yet, so another session can raise the card.
       practice_more_little: false,
+      word_readiness: [0, 0, 0, 0],
       today: {
         state: 'owed',
         done: 0,
@@ -1137,6 +1138,8 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
 
     // Phase 67b (spec D2): 99 and 96 are past the homework bar, each counted 100.
     expect(read.words.map((w) => w.readiness_pct)).toEqual([100, 100, 49]);
+    // Phase 71 (spec D3). The same, on the summary the home list carries.
+    expect(read.word_readiness).toEqual([100, 100, 49]);
     expect(read.ready_count).toBe(2);
     expect(read.words[2].skills).toEqual([
       { dimension: 'written_productive', chance: 49, held: true },

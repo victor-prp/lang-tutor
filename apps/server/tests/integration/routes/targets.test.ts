@@ -140,6 +140,7 @@ describe('POST /api/enrollments/{id}/targets', () => {
         readiness_pct: 0,
         readiness_start_pct: 0,
         practice_more_little: false,
+        word_readiness: [0, 0, 0],
         today: expect.objectContaining({ state: 'owed' }),
         session: null,
         words: [
@@ -271,6 +272,7 @@ describe('GET /api/enrollments/{id}/targets', () => {
             readiness_pct: 0,
             readiness_start_pct: 0,
             practice_more_little: false,
+            word_readiness: [0, 0],
             today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1, ...UNSET },
             session: null,
           },
@@ -285,6 +287,7 @@ describe('GET /api/enrollments/{id}/targets', () => {
             readiness_pct: 0,
             readiness_start_pct: 0,
             practice_more_little: false,
+            word_readiness: [0],
             // Phase 67 (spec D4): its word below 90, it practises again tomorrow.
             today: { state: 'owed', done: 0, planned: 1, extra: 0, next_practice_in: 1, ...UNSET },
             session: null,

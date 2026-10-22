@@ -112,7 +112,7 @@ import { classifyTaps } from '../domain/taps';
 import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
-import { pastBudget } from '../domain/targetBudget';
+import { fullSession } from '../domain/targetBudget';
 import {
   boardsSession,
   chooseTargetPicks,
@@ -577,13 +577,13 @@ export function createSessionService({
     const { day, glossIds, live, canSay, saved, memory, families, inFlight, inFlightCards, dayCap } = picked.read;
     let mode = input.mode;
     // Phase 65b (spec D2). Past the day's budget, counting the session in flight, a session asks
-    // the owed work first and fills the rest with practice more.
+    // the owed work first and fills the rest with practice more. Phase 71 (spec D2): so does every
+    // session on the eve, which has no daily goal.
     if (mode === 'owed') {
-      const budget = await repos.targetBudgets.find(target.id, today);
-      if (budget) {
-        const done = await repos.session.countCompletedOn(enrolled.id, target.id, today);
-        if (pastBudget({ budget: budget.sessions, done, inFlight })) mode = 'past_budget';
-      }
+      // The eve reads no budget: it fills every session whatever the budget says.
+      const budget = day.daysLeft === 1 ? undefined : await repos.targetBudgets.find(target.id, today);
+      const done = budget ? await repos.session.countCompletedOn(enrolled.id, target.id, today) : 0;
+      if (fullSession({ daysLeft: day.daysLeft, budget: budget?.sessions ?? null, done, inFlight })) mode = 'past_budget';
     }
     // Phase 68 (spec D1, D3): the path's open step-downs, the session in flight's unanswered cards credited.
     const stepDowns = openStepDowns({

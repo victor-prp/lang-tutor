@@ -228,6 +228,8 @@ export function createTargetService({
         // Phase 67b (spec D6): the app asks before practice more only when one more session today
         // cannot raise the card.
         practice_more_little: !canRaise,
+        // Phase 71 (spec D3): each word's readiness, for the eve's bars on the home list.
+        word_readiness: words.map((word) => word.readiness_pct),
         today: {
           state: todays.state,
           done: day.done,

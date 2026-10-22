@@ -36,6 +36,11 @@
  * `readiness_pct` and `ready_count` now count a word at its kind's bar as 100 and `practice_more_little`
  * means "no session today can raise the card". The fields keep their types and an older app still
  * draws a percent and asks before practice more less often, so none of it breaks one.
+ *
+ * Not raised by phase 71 (spec D8): a target's `word_readiness` is new, and on the eve `today.state`
+ * is owed while a session can raise the card, its budget met or not. The field keeps its values and
+ * meaning (work owed today); an older app draws its budget line on the eve, "כמעט שם", until its
+ * update lands, which misleads and breaks nothing.
  */
 export const API_LEVEL = 6;
 

@@ -48,6 +48,7 @@ const TARGET: Target = {
   readiness_pct: 0,
   readiness_start_pct: 0,
   practice_more_little: false,
+  word_readiness: [0],
   today: TODAY,
   session: null,
   words: [
@@ -77,6 +78,7 @@ const LIST: TargetList = {
       readiness_pct: 0,
       readiness_start_pct: 0,
       practice_more_little: false,
+      word_readiness: [0],
       today: TODAY,
       session: { session_id: 's1', status: 'ready', source: 'list', answered: 0, total: 10, started: false },
     },
