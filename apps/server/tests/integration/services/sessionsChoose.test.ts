@@ -1,14 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import { eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 
 import { LADDER_SLOTS } from '../../../src/domain/chooseConstants';
-import { sessions as sessionsTable } from '../../../src/db/schema';
 import { PREPARE_SESSION, type PrepareSessionPayload } from '../../../src/domain/jobs';
 import { createFakeLogger } from '../../support/fakes';
 import { jobPayloads, startTestBoss, stopTestBoss } from '../../support/jobs';
 import { insertGlossMemory } from '../../support/progressRows';
 import { insertListSession } from '../../support/questions';
+import { heldNewWordsOf } from '../../support/sessionRows';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, seedUser, setNewWordLimits } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -131,13 +130,7 @@ describe('createNextSession chooses the words (spec D5)', () => {
 // Phase 70 (spec D2, D4, D5). The learner's cap steers the choice, and a session records the new
 // words it held back, which its view reports while that is still news.
 describe("the learner's daily cap (phase 70)", () => {
-  const held = async (sessionId: string) => {
-    const [row] = await t.db
-      .select({ count: sessionsTable.newWordsHeld, dayCap: sessionsTable.dayNewCap })
-      .from(sessionsTable)
-      .where(eq(sessionsTable.id, sessionId));
-    return row;
-  };
+  const held = (sessionId: string) => heldNewWordsOf(t.db, sessionId);
   const stock = () => sessions().createNextSession('u_1', E, { listening: false, speaking: false });
   const lastPicks = async () => ((await jobPayloads(t.db, PREPARE_SESSION)) as PrepareSessionPayload[]).at(-1)!.picks;
 
