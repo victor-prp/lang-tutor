@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import type { Enrollment, Question } from '@lang-tutor/core/api';
-import { judgeTyped } from '@lang-tutor/core/domain';
+import { judgeTyped, SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import {
   createFakeClock,
@@ -17,6 +17,7 @@ import { CHECK_MARKER } from '../domain/check';
 import { CONTEXT_MARKER, servedWords, type RecentContexts } from '../domain/context';
 import { nothingKnown, REWRITE_MARKER, type GenerationContext, type KnownRight, type RecentSentences } from '../domain/distractors';
 import { POINT_CANDIDATE_ANGLES } from '../domain/gapRewrite';
+import { MAX_SESSION_PICKS } from '../domain/jobs';
 import type { LlmJsonRequest } from './llm';
 import type { SessionState } from '../domain/session';
 import { GlossLanguageMismatch, InvalidDistractors } from '../errors';
@@ -584,6 +585,28 @@ describe('prepareSession, phase 24 and 35 (spec D6, D10, D11)', () => {
     const [input] = calls.generated as { questions: { type: string }[] }[];
     expect(input.questions.map((q) => q.type)).not.toContain('listen_choice');
     expect(input.questions.map((q) => q.type)).not.toContain('dictation');
+  });
+});
+
+// Phase 68 (spec D2). A target session's step-downs are asked on top of its SESSION_LENGTH slots.
+// Final review: lane 0's failure (ten picks and one practice step-down, refused on every attempt)
+// was a path no test took through the job; the payload's parse alone did not prove it prepares.
+describe('prepareSession, phase 68 (spec D2)', () => {
+  it('prepares a target session of MAX_SESSION_PICKS picks: ten, and its step-downs on top', async () => {
+    const extra = ['ложка', 'вилка', 'тарелка'].map((form, i) => ({
+      ...TEN[0], glossId: `g-x${i}`, senseId: `x${i}`, variantId: `vx${i}`, lexemeId: `lx${i}`, form, lemma: form, translation: ['כף', 'מזלג', 'צלחת'][i],
+    }));
+    const context = [...TEN, ...extra];
+    // The model answers nothing: a typed card keeps no alternatives, a choice card is refused.
+    const { service, calls } = world({ context, reply: JSON.stringify({ items: [] }) });
+    const picks = context.map((row, i) => ({
+      gloss_id: row.glossId, sense_id: row.senseId, variant_id: row.variantId, ...produce(0.95), ...(i >= SESSION_LENGTH ? { relearn: 'practice' as const } : {}),
+    }));
+    expect(picks).toHaveLength(MAX_SESSION_PICKS);
+    await service.prepareSession({ session_id: SESSION, picks, listening: false, target: true });
+    expect(calls.transitions).toEqual(['preparing→ready']);
+    const [input] = calls.generated as { questions: { form: string }[] }[];
+    expect(new Set(input.questions.map((q) => q.form))).toEqual(new Set(context.map((row) => row.form)));
   });
 });
 
