@@ -183,8 +183,8 @@ export async function readTargetPickInput(
     newRoom: Math.max(0, DAY_NEW_CAP - introduced.length - meeting.size),
     now: read.now,
   };
-  // Phase 68 (spec D1): the session in flight's cards, whose unanswered ones the open step-downs credit.
-  return { read: { ...read, saved, memory, families, inFlight: started != null, inFlightCards: cards }, input };
+  // Phase 68 (spec D1): the session in flight and its cards, whose unanswered ones the open step-downs credit.
+  return { read: { ...read, saved, memory, families, inFlight: started != null, inFlightId: started?.id ?? null, inFlightCards: cards }, input };
 }
 
 /**

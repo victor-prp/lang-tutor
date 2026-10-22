@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import type { QuestionType } from '@lang-tutor/core/domain';
 import type { PgBoss } from 'pg-boss';
 
 import { PREPARE_SESSION, STOCK_SESSION, type PrepareSessionPayload, type StockSessionPayload } from '../../../src/domain/jobs';
@@ -123,14 +124,19 @@ describe('a miss on a target path (phase 68, spec D6, ruling 2026-10-22)', () =>
     expect(await readStockRow(t.db, stock)).toMatchObject({ status: 'preparing' });
   });
 
-  /** S1 ended, apple missed and bread right; the stock kept beside it, prepared and started: its
-   *  start asks for the next, chosen beside it. Answers that stock's preparation. */
-  async function nextStartAfterAMiss() {
+  /** S1 ended, apple missed and bread right; the stock kept beside it, prepared (with `types`' cards
+   *  of apple and bread, else none) and started: its start asks for the next, chosen beside it.
+   *  Answers that stock's preparation. */
+  async function nextStartAfterAMiss(types?: QuestionType[]) {
     const day = await startedDay();
     await service.submitAnswer('u_1', day.s1.sessionId, day.s1.questions[0].id, { text: 'zzzz' });
     await service.submitAnswer('u_1', day.s1.sessionId, day.s1.questions[1].id, { text: 'bread' });
     expect(await runStockJob()).toMatchObject({ reason: 'complete' });
-    await markReady(t.db, day.stock);
+    if (types) {
+      await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: [day.apple, day.bread], types, targetId: day.homework, sessionId: day.stock });
+    } else {
+      await markReady(t.db, day.stock);
+    }
     await service.startSession('u_1', day.stock, NO_DEVICES);
     expect(await runStockJob()).toMatchObject({ reason: 'start', target_id: day.homework });
     const next = await newestTargetStock();
@@ -140,6 +146,13 @@ describe('a miss on a target path (phase 68, spec D6, ruling 2026-10-22)', () =>
 
   it('asks the step-down in the stock chosen when the next session starts', async () => {
     const { apple, next } = await nextStartAfterAMiss();
+    expect(await readSessionTargets(t.db, next.session_id)).toMatchObject([{ stepDowns: [`${apple.glossId}|written_productive`] }]);
+  });
+
+  // Final review C1. The next session was chosen before the miss, and practice more asks a word its
+  // weakest skill again: its unanswered card on that skill must not credit the step-down away.
+  it('asks it even when the next session asks the missed word that skill again', async () => {
+    const { apple, next } = await nextStartAfterAMiss(['typed_translation', 'typed_translation']);
     expect(await readSessionTargets(t.db, next.session_id)).toMatchObject([{ stepDowns: [`${apple.glossId}|written_productive`] }]);
   });
 

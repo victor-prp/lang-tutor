@@ -543,7 +543,7 @@ export function createSessionService({
     const picked = await readTargetPickInput(repos, enrolled, target, devices, today);
     if (!picked) return null;
     const { input } = picked;
-    const { day, glossIds, live, canSay, saved, memory, families, inFlight, inFlightCards } = picked.read;
+    const { day, glossIds, live, canSay, saved, memory, families, inFlight, inFlightId, inFlightCards } = picked.read;
     let mode = input.mode;
     // Phase 65b (spec D2). Past the day's budget, counting the session in flight, a session asks
     // the owed work first and fills the rest with practice more.
@@ -554,10 +554,12 @@ export function createSessionService({
         if (pastBudget({ budget: budget.sessions, done, inFlight })) mode = 'past_budget';
       }
     }
-    // Phase 68 (spec D1, D3): the path's open step-downs, the session in flight's unanswered cards credited.
+    // Phase 68 (spec D1, D3): the path's open step-downs, the session in flight's unanswered cards
+    // credited for the step-downs it asks (final review C1).
     const stepDowns = openStepDowns({
       answers: await repos.session.findPathAnswers(enrolled.id, target.id),
       unanswered: inFlightCards.filter((card) => !card.answered),
+      asking: inFlightId === null ? [] : ((await repos.target.findSessionTarget(inFlightId, target.id))?.stepDowns ?? []),
     });
     let picks = chooseTargetPicks({ ...input, mode, stepDowns });
     // Ruling T3-m. Owed work all asked by the session in flight: practice more instead. Phase 68

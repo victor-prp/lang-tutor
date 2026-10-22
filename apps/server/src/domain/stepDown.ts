@@ -33,12 +33,17 @@ const right = (answer: GradableAnswer) =>
 /**
  * Spec D1. The open step-downs of `answers` (the path's, in answer order), oldest miss first. An
  * intro card is encoding, not evidence (phase 55), and a card that serves no practised skill opens
- * nothing. `unanswered`: the session in flight's cards not answered yet, credited as answered right
- * after every answer, as the picker credits them.
+ * nothing. `unanswered`: the session in flight's cards not answered yet; `asking`, the step-downs
+ * that session asks (session_targets.step_downs, `glossId|dimension`). An unanswered produce card
+ * of one of those is credited as answered right, so a stock never repeats a step-down the session
+ * in flight is about to finish. Final review C1 (ruling 2026-10-22): only those. The next stock is
+ * chosen when its session starts, before that session's answers, and a plain card on the missed
+ * skill it was chosen with would otherwise close the step-down at every choice.
  */
 export function openStepDowns(input: {
   answers: readonly (GradableAnswer & { glossId: string })[];
   unanswered: readonly { glossId: string; type: QuestionType; intro: boolean }[];
+  asking: readonly string[];
 }): StepDown[] {
   /** `glossId|dimension` → the index of its latest miss, in insertion order of that miss. */
   const open = new Map<string, { step: StepDown; at: number }>();
@@ -53,9 +58,11 @@ export function openStepDowns(input: {
       open.delete(key);
     }
   });
+  const asking = new Set(input.asking);
   for (const card of input.unanswered) {
     const dimension = servedSkill(card.type);
-    if (dimension !== null && produces(card.type, dimension)) open.delete(`${card.glossId}|${dimension}`);
+    const key = `${card.glossId}|${dimension}`;
+    if (dimension !== null && produces(card.type, dimension) && asking.has(key)) open.delete(key);
   }
   return [...open.values()].sort((a, b) => a.at - b.at).map((entry) => entry.step);
 }
