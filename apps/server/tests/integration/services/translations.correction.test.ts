@@ -66,6 +66,28 @@ const entries = (
 ];
 
 describe('a corrected lookup, against a real database', () => {
+  // Guard 5 (the CI failure of 2026-10-22). Ukrainian `дякую` under ru → he,
+  // "corrected" to its Russian equivalent: no slip of what was typed, so no word in
+  // either language. The learner gets no senses, as when the model answers it
+  // empty, and nothing is written: no redirect, no variant for either form.
+  // The seed holds `спасибо большое`, never `спасибо` alone.
+  it('answers a correction that is no slip of the input with no senses, and writes nothing', async () => {
+    await expectGeminiJson(ns, {
+      kind: 'word',
+      entries: entries('спасибо', 'interjection', [{ translation: 'תודה', sense_code: 'thanks' }]),
+      correction: { corrected_form: 'спасибо', alternatives: ['благодарю'] },
+      matchText: '"дякую"',
+    });
+
+    const answer = await translations().translate('u_1', { text: 'дякую', from: 'ru', to: 'he' });
+
+    expect(answer.senses).toEqual([]);
+    expect(answer.correction).toBeUndefined();
+    expect(await readDictCorrections(t.db)).toHaveLength(0);
+    expect(await countDictVariants(t.db, 'дякую')).toBe(0);
+    expect(await countDictVariants(t.db, 'спасибо')).toBe(0);
+  });
+
   // Criterion 5. Phase 12's fail-closed rule, asserted for this table:
   // `reconcile` is called ABOVE the `try { transaction(...) }` block, so a
   // failing call never reaches an open transaction — what this proves is

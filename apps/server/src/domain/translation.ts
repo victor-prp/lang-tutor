@@ -7,6 +7,7 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 import { LlmReconciliationSchema, LlmTranslationSchema } from '@lang-tutor/core/api/schemas';
+import { foldDiacritics } from '@lang-tutor/core/domain';
 
 import { normalizeForm } from './dictionary';
 import { LANGUAGES, guardScript, type Language, type LanguageCode } from './languages';
@@ -109,7 +110,42 @@ export type ResolvedCorrection = {
   correction?: TranslationCorrection;
   effectiveForm: string;
   kind: TranslationKind;
+  /** Guard 5: the answer "corrected" the input to a word it is no slip of, so the
+   *  input is no word in either language and the answer's entries are dropped. */
+  notAWord?: true;
 };
+
+/**
+ * Guard 5's test. A misspelling is a slip of the word it misspells, so the edit
+ * distance between them is small next to the word: at most half the longer of the
+ * two, and two edits whatever the length (`gud`, `good`). Case, spaces and
+ * diacritics are not edits (`breakaleg`, `ёлка`), and a slash list is measured
+ * against its nearest part, since the slash rule corrects it to its first.
+ */
+function isSlip(typedForm: string, correctedForm: string): boolean {
+  const bare = (form: string) => foldDiacritics(form.toLowerCase()).replace(/\s+/g, '');
+  const corrected = bare(correctedForm);
+  return typedForm.split('/').some((part) => {
+    const typed = bare(part);
+    const longer = Math.max([...typed].length, [...corrected].length);
+    return editDistance(typed, corrected) <= Math.max(2, Math.ceil(longer / 2));
+  });
+}
+
+/** Levenshtein distance, by code point: insertions, deletions and substitutions. */
+function editDistance(a: string, b: string): number {
+  const x = [...a];
+  const y = [...b];
+  let row = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= y.length; j++) {
+      next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    }
+    row = next;
+  }
+  return row[y.length];
+}
 
 /**
  * The four guards, the empty-entries clearing, the normalization of both forms
@@ -174,6 +210,16 @@ export function resolveCorrection(
   // in the wrong script would be written as a `from` variant. The language
   // table decides, exactly as the request's own script guard does.
   if (guardScript(correctedForm, context.from, context.to) !== 'pass') return null;
+  // Guard 5 — the answer is no word, not merely uncorrected. A correction far from
+  // what was typed is no slip of it: it is the model translating a word of a third
+  // language into the source language, which the prompt's third-language rule
+  // forbids. On 2026-10-22, with the prompt unchanged since CI last passed,
+  // Ukrainian `дякую` (ru → he) came back corrected to `спасибо` and translated in
+  // 5 of 10 calls. Eight rewordings of the rule, 10 calls each, fixed it only by
+  // breaking another measured case: `burnt`'s lemma, `pour`, `go / going`, or
+  // `thruot`'s alternatives. Code can make this call and the prompt cannot hold it,
+  // so the answer is read as the rule asks: no entries, no correction.
+  if (!isSlip(context.typedForm, correctedForm)) return { ...uncorrected, notAWord: true };
 
   return {
     correction: {

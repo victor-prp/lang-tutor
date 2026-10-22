@@ -109,7 +109,7 @@ export async function askModel(
   if (!resolved) throw new Error('the correction named a form in the other script');
   const { correction, kind } = resolved;
 
-  const entries = mergeEntries(parsed.entries);
+  const entries = mergeEntries(resolved.notAWord ? [] : parsed.entries);
   return {
     from,
     to,

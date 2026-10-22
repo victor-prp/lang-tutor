@@ -707,7 +707,12 @@ export function createTranslationService({
       }
     }
 
-    let entries: EntryToStore[] = mergeEntries(parsed.entries);
+    // Guard 5: a correction that is no slip of the input made it no word at all,
+    // and an answer with no entries is answered, never written.
+    if (resolved.notAWord) {
+      logger.info({ event: 'correction_not_a_slip', from, to, corrected_form: parsed.correction?.corrected_form });
+    }
+    let entries: EntryToStore[] = mergeEntries(resolved.notAWord ? [] : parsed.entries);
     let flattened = normalizeSenses(kind, flattenEntries(entries, kind));
 
     // A sentence is not a vocabulary item, and caching "no translation" would
