@@ -133,9 +133,28 @@ test('a wrong tile, the tiles help, the typed help and the retype: both helped c
   const helpBox = (await page.getByTestId('typed-help').boundingBox())!;
   const inputBox = (await page.getByTestId('typed-input').boundingBox())!;
   expect(helpBox.y + helpBox.height).toBeLessThanOrEqual(inputBox.y);
+  // Answer field spec D1: one field, עזרה and בדיקה inside it.
+  const field = page.getByTestId('typed-box');
+  const fieldBox = (await field.boundingBox())!;
+  for (const id of ['typed-help', 'typed-submit']) {
+    const button = (await page.getByTestId(id).boundingBox())!;
+    expect(button.x).toBeGreaterThanOrEqual(fieldBox.x);
+    expect(button.x + button.width).toBeLessThanOrEqual(fieldBox.x + fieldBox.width);
+    expect(button.y).toBeGreaterThanOrEqual(fieldBox.y);
+    expect(button.y + button.height).toBeLessThanOrEqual(fieldBox.y + fieldBox.height);
+  }
+  // Answer field spec D4: blue while the input has the keyboard, grey once it goes.
+  await page.getByTestId('typed-input').click();
+  await expect(field).toHaveCSS('border-top-color', 'rgb(59, 91, 219)');
+  // The field's border is the focus mark: no browser ring of the input's own inside it.
+  await expect(page.getByTestId('typed-input')).toHaveCSS('outline-width', '0px');
+  await page.getByTestId('typed-input').blur();
+  await expect(field).toHaveCSS('border-top-color', 'rgb(227, 228, 236)');
   await expect(page.getByTestId('typed-help')).toContainText('עזרה');
   await page.getByTestId('typed-help').click();
   await expect(page.getByTestId('typed-hint')).toHaveText(`${letters[0]}…`);
+  // Answer field spec D2: the first press moves nothing.
+  expect(Math.abs((await field.boundingBox())!.height - fieldBox.height)).toBeLessThan(1);
   await page.getByTestId('typed-help').click();
   await expect(page.getByTestId('typed-hint')).toHaveText(`${letters[0]}${letters[1]}…`);
   const input = page.getByTestId('typed-input');
