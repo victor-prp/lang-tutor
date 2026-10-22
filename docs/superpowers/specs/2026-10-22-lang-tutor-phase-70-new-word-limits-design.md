@@ -95,7 +95,7 @@ target path only practice more's early starts can differ, so a planned session r
 
 On the session screen, when the session view carries `held_new_words` and no card has been
 answered yet (position 1), a bottom sheet in the readiness sheet's pattern opens over the first
-card, once per session while the app runs. Every path's session, entered from home, a target's
+card, once each time the screen opens the session (ruling B5). Every path's session, entered from home, a target's
 card or a tapped reminder, passes through that screen. The first card is not read aloud until the
 sheet closes.
 
@@ -140,3 +140,20 @@ screen (D6).
 
 Names of functions and test fixtures; where the sheet component and the store sit in the mobile
 tree; how the e2e fixture reaches a session with words held back.
+
+## Rulings (the build, 2026-10-22)
+
+- **B1.** Per session's ceiling stays `NEW_PER_SESSION`; the setting replaces the `NEW_FLOOR`
+  backoff with the learner's number, and its rng-free second run (`heldByCap`, `heldByRoom`)
+  counts what the cap held back without drawing from the real choice's rng.
+- **B2.** One migration, `0050_new_word_limits`, for both tables: `users` gains the two limits
+  (checked 1–100 and 1–2), `sessions` the held count (default 0) and the cap it read.
+- **B3.** `insertPreparingSession` takes the held record as an optional last argument; absent, the
+  columns' defaults (a seed's 0 and null).
+- **B4.** A target's 0 held is pinned by the stock unit tests and the target integration log line;
+  `heldByRoom`'s own tests cover practice more's blocked starts.
+- **B5.** The message shows once each time the session screen opens a held session (a ref on the
+  screen), so leaving before the first answer and coming back shows it again until it is ticked off.
+- **B6.** The reminders screen's chip moved, unchanged, to `components/Chip.tsx`, which the new
+  screen shares.
+
