@@ -135,9 +135,16 @@ export const users = pgTable(
     // Phase 61 (spec D1). A tester may start a session of one word's question types. Set
     // only by `npm run db:tester` (repo/users.ts setTester); off for every new account.
     tester: boolean('tester').notNull().default(false),
+    // Phase 70 (spec D1–D3). The learner's own new-word limits: the day's cap on first meetings,
+    // every path's together, and the new words a regular session includes. Null is the default
+    // (DAY_NEW_CAP; automatic), so a learner who never chose follows a change of it.
+    dayNewCap: integer('day_new_cap'),
+    newPerSession: integer('new_per_session'),
   },
   (t) => [
     check('users_kind_known', sql`${t.kind} in ('learner', 'bot')`),
+    check('users_day_new_cap_range', sql`${t.dayNewCap} between 1 and 100`),
+    check('users_new_per_session_known', sql`${t.newPerSession} in (1, 2)`),
     check('users_bot_day_iff_bot', sql`(${t.kind} = 'bot') = (${t.botDay} is not null)`),
     // Mirrors UsernameSchema in packages/core exactly. Two enforcement points
     // for one rule is deliberate: the schema gives a 400 with a good message,
@@ -1072,6 +1079,12 @@ export const sessions = pgTable(
     // which the old container still runs for a minute after the new one migrates (ADR 0010).
     // A tester's question-types session (phase 61) is always the main path's.
     targetId: uuid('target_id'),
+    // Phase 70 (spec D4). The new words the day's cap held back when the session was chosen (what
+    // the same choice with no cap would have met beyond its own), and the cap it was chosen under.
+    // 0 and null for a seed and for every session before this phase; the default is for the code
+    // before it, which the old container still runs for a minute (ADR 0010).
+    newWordsHeld: integer('new_words_held').notNull().default(0),
+    dayNewCap: integer('day_new_cap'),
   },
   (t) => [
     foreignKey({

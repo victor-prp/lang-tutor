@@ -44,6 +44,7 @@ describe('repos', () => {
       insertPreparingSession: notStubbed,
       insertQuestionTypesSession: notStubbed,
       setSkippedTypes: notStubbed,
+      findHeldNewWords: notStubbed,
       insertSessionQuestions: notStubbed,
       findState: notStubbed,
       transition: notStubbed,
@@ -132,6 +133,11 @@ describe('repos', () => {
     },
     setBotDay: () => {
       throw new Error("the session service must not move a bot's day");
+    },
+    // Phase 70 (spec D2, D3): read by every choice; a learner who never chose.
+    findNewWordLimits: async () => ({ dayCap: null, perSession: null }),
+    setNewWordLimits: () => {
+      throw new Error("the session service must not save a learner's limits");
     },
   };
 
@@ -489,7 +495,7 @@ const nothingToday: Pick<SessionRepo, 'findAnswersOn' | 'findIntroducedOn' | 'fi
 };
 const noHistory = {
   ...noFamilies,
-  user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }) }),
+  user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }), findNewWordLimits: async () => ({ dayCap: null, perSession: null }) }),
   memory: stub<MemoryRepo>({ findRows: async () => [] }),
   progress: stub<ProgressRepo>({ findRows: async () => [] }),
 };
@@ -519,6 +525,7 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
             reads.dayOf = userId;
             return { kind: 'learner' as const, timeZone: 'UTC' };
           },
+          findNewWordLimits: async () => ({ dayCap: null, perSession: null }),
         }),
         session: stub<SessionRepo>({
           findLatest: async () => ({ id: 's0', status: 'completed', source: 'list' }) as never,

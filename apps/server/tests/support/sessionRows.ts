@@ -44,3 +44,13 @@ export async function readSessionPaths(
   );
   return rows.rows;
 }
+
+/** Phase 70 (spec D4). What a session recorded of the new words its choice held back. */
+export async function heldNewWordsOf(db: Db, sessionId: string): Promise<{ count: number; dayCap: number | null }> {
+  const rows = await db.execute<{ count: number; day_cap: number | null }>(
+    sql`select new_words_held as count, day_new_cap as day_cap from sessions where id = ${sessionId}`,
+  );
+  const [row] = rows.rows;
+  if (!row) throw new Error(`no session ${sessionId}`);
+  return { count: row.count, dayCap: row.day_cap };
+}

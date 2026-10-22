@@ -36,7 +36,7 @@ import {
   type CheckFinding,
   type CheckItem,
 } from '../domain/check';
-import { chooseWords, dueGlosses, liveDimensions, type ChoiceInput } from '../domain/choose';
+import { chooseWordsWithHeld, dueGlosses, liveDimensions, type ChoiceInput } from '../domain/choose';
 import { NEW_PER_SESSION } from '../domain/chooseConstants';
 import {
   buildContextPrompt,
@@ -88,6 +88,7 @@ import {
 } from '../domain/jobs';
 import { dropLoneMeets, keepCards, type CardUnit, type Refusal } from '../domain/keepCards';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
+import { limitsOf } from '../domain/newWordLimits';
 import { BOARD_SIZE, planCards } from '../domain/plan';
 import { POINT_REWRITE_ROUNDS, buildPointPrompt, judgePoint, parsePoint, pointItem, readPoint, type PointFinding, type PointItem, type PointTarget } from '../domain/pointing';
 import { keepQuestionTypeCards, questionTypesPlan, renderingFlags } from '../domain/questionTypes';
@@ -115,6 +116,7 @@ import { pastBudget } from '../domain/targetBudget';
 import {
   boardsSession,
   chooseTargetPicks,
+  heldByRoom,
   owedWords,
   picksOfCards,
   raisesCard,
@@ -182,7 +184,11 @@ function logCompletedSession(logger: Logger, sessionId: string, record: SessionR
 
 /** A session as the routes answer it: the record, and what it did to the
  *  learner's saved words, which is empty until it is completed. */
-export type SessionResult = SessionRecord & { progress: ProgressChange[] };
+/** Phase 70 (spec D5): `held_new_words`, the new words the day's cap held back, while it is news. */
+export type SessionResult = SessionRecord & { progress: ProgressChange[]; held_new_words?: HeldNewWords };
+
+/** Phase 70 (spec D4, D5). The new words a session's choice held back for the day's cap, and that cap. */
+type HeldNewWords = { count: number; day_cap: number };
 
 /** Phase 25. What one spoken attempt came to: the transcript, how it was
  *  judged, and the session when the answer was recorded (null when not). */
@@ -205,7 +211,10 @@ type NextSession = { sessionId: string; status: SessionStatus; source: SessionSo
  *  choice found ended on their date, whose events name it, and the stocks those left on their
  *  paths, retired, and (final review I1) their started sessions, skipped. Logged once its
  *  transaction commits. */
-type Stocked = { sessionId: string; path: Path; endedOnDate: string[]; endedStocks: string[]; endedStarted: string[] };
+type Stocked = { sessionId: string; path: Path; endedOnDate: string[]; endedStocks: string[]; endedStarted: string[]; capHeld: StockHeld };
+
+/** Phase 70 (spec D4). What a stock's choice held back for the day's cap, and the cap it read. */
+type StockHeld = { count: number; dayCap: number };
 
 /** Phase 53 (ruling R-D12). A stale stock retired, and the stock built in its place. */
 type Replaced = Stocked & { retired: string };
@@ -455,6 +464,20 @@ export function createSessionService({
   }
 
   /**
+   * Phase 70 (spec D5, builder check). The new words a session's choice held back for the day's
+   * cap, while that is news: chosen on the owner's learner day today, under the cap in force now.
+   * A session chosen last night, or before the learner changed the cap, says nothing: its message
+   * would describe a day or a cap that no longer holds. Null when nothing was held.
+   */
+  async function heldNews(repos: Repos, sessionId: string, userId: string): Promise<HeldNewWords | null> {
+    const row = await repos.session.findHeldNewWords(sessionId);
+    if (!row || row.count === 0 || row.dayCap === null || row.chosenOn === null) return null;
+    if (row.chosenOn !== (await learnerDay(repos, userId, now()))) return null;
+    if (row.dayCap !== limitsOf(await repos.user.findNewWordLimits(userId)).dayCap) return null;
+    return { count: row.count, day_cap: row.dayCap };
+  }
+
+  /**
    * Phase 57 (spec D1, D2, ADR 0014). The target a request names as its path: unknown, or
    * another enrollment's, is TargetNotFound, and another learner's is refused first, by the
    * same check its own enrollment would get (AccessDenied).
@@ -491,6 +514,8 @@ export function createSessionService({
     // with what that day already asked and introduced. At most one gloss per
     // key, across headwords (phase 31 D18), is chooseWords' rule now.
     const glossIds = all.map((gloss) => gloss.glossId);
+    // Phase 70 (spec D2, D3). The learner's own limits.
+    const limits = limitsOf(await repos.user.findNewWordLimits(enrolled.user_id));
     const memory = await repos.memory.findRows({ enrollmentId, glossIds });
     const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
     // Phase 39 (spec D4, D5). The families, and what was recorded of them.
@@ -525,8 +550,13 @@ export function createSessionService({
       rng,
       // Phase 54 (spec D2), phase 60 (D1): a family's new meaning is no ladder, asked or not.
       families: { familyOf: families.familyOf, waiting, newMeanings: families.newMeanings },
+      limits,
     };
-    return { path: null, at, today, saved, families, stored, picks: chooseWords(choice) };
+    // Phase 70 (spec D4). What the cap held back, recorded with the stock.
+    const chosen = chooseWordsWithHeld(choice);
+    const { picks } = chosen;
+    const capHeld: StockHeld = { count: chosen.held, dayCap: limits.dayCap };
+    return { path: null, at, today, saved, families, stored, picks, capHeld };
   }
 
   /**
@@ -544,7 +574,7 @@ export function createSessionService({
     const picked = await readTargetPickInput(repos, enrolled, target, devices, today);
     if (!picked) return null;
     const { input } = picked;
-    const { day, glossIds, live, canSay, saved, memory, families, inFlight, inFlightCards } = picked.read;
+    const { day, glossIds, live, canSay, saved, memory, families, inFlight, inFlightCards, dayCap } = picked.read;
     let mode = input.mode;
     // Phase 65b (spec D2). Past the day's budget, counting the session in flight, a session asks
     // the owed work first and fills the rest with practice more.
@@ -586,6 +616,8 @@ export function createSessionService({
     };
     // Phase 68 (spec D5, ruling): a session none of whose cards can raise the card gets a board.
     const board = boardsSession(picks, { daysLeft: day.daysLeft, now: input.now });
+    // Phase 70 (spec D4). Only practice more's early starts read the day's room.
+    const capHeld: StockHeld = { count: heldByRoom({ ...input, mode, stepDowns }, picks), dayCap };
     return {
       path: target.id,
       at,
@@ -596,6 +628,7 @@ export function createSessionService({
       row,
       now: input.now,
       board,
+      capHeld,
     };
   }
   type MainRead = NonNullable<Awaited<ReturnType<typeof readMain>>>;
@@ -671,7 +704,7 @@ export function createSessionService({
   async function writeStock(repos: Repos, enrolled: Enrollment, devices: Devices, read: ChoiceRead, picks: ChosenStock): Promise<Stocked> {
     const { session, vocabulary, jobs } = repos;
     const enrollmentId = enrolled.id;
-    const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId, devices, read.today, read.path);
+    const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId, devices, read.today, read.path, read.capHeld);
     const endedOnDate: string[] = [];
     const endedStocks: string[] = [];
     const endedStarted: string[] = [];
@@ -717,7 +750,7 @@ export function createSessionService({
       speaking: devices.speaking,
       ...(read.path === null ? {} : { target: true, ...(read.board ? { board: true } : {}) }),
     });
-    return { sessionId, path: read.path, endedOnDate, endedStocks, endedStarted };
+    return { sessionId, path: read.path, endedOnDate, endedStocks, endedStarted, capHeld: read.capHeld };
   }
 
   /**
@@ -830,6 +863,9 @@ export function createSessionService({
       session_id: stocked.sessionId,
       reason,
       ...(stocked.path === null ? {} : { target_id: stocked.path }),
+      // Phase 70 (spec D4).
+      new_words_held: stocked.capHeld.count,
+      day_new_cap: stocked.capHeld.dayCap,
     });
   }
 
@@ -980,7 +1016,8 @@ export function createSessionService({
         await authorizeSession(repos, logger, actorUserId, sessionId);
         const record = await repos.session.loadSession(sessionId);
         if (!record) throw new SessionNotFound(sessionId);
-        return { ...record, progress: await progressOf(repos, sessionId, record) };
+        const held = await heldNews(repos, sessionId, record.user_id);
+        return { ...record, progress: await progressOf(repos, sessionId, record), ...(held ? { held_new_words: held } : {}) };
       }),
 
     /** What the home screen needs in one read, of one path (phase 57, spec D1: the main

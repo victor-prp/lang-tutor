@@ -1,8 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
 import { FSRS6_DEFAULT, SESSION_LENGTH, retrievability, type Dimension, type MemoryState } from '@lang-tutor/core/domain';
 
-import { choosePools, chooseWords, expectedSuccess, liveDimensions, rungFor, type ChoiceInput, type ChosenPick } from './choose';
+import { choosePools, chooseWords, chooseWordsWithHeld, expectedSuccess, liveDimensions, rungFor, type ChoiceInput, type ChosenPick } from './choose';
 import { DAY_NEW_CAP, HARD_CAP, LADDER_SLOTS, NEW_FLOOR, NEW_PER_SESSION, PER_DIMENSION_CAP, RUNG_R, R_TARGET } from './chooseConstants';
+import { DEFAULT_LIMITS } from './newWordLimits';
 import { withSessionInFlight, type Step } from './today';
 
 // Not tests/support/testRng: ADR 0001 R3 greps domain/ for any parent-directory
@@ -76,6 +77,7 @@ function input(words: Word[], over: Partial<ChoiceInput> = {}): ChoiceInput {
     speaking: false,
     rng: testRng(1),
     families: NO_FAMILIES,
+    limits: DEFAULT_LIMITS,
     ...over,
   };
 }
@@ -756,5 +758,93 @@ describe('ladders (phase 54, spec D2, D4; phase 55, spec D4)', () => {
     const picks = chooseWords(input(range(12, (i) => fresh(`n${i}`)), { newToday: DAY_NEW_CAP }));
     expect(ids(picks)).toEqual(['n11', 'n10']);
     expect(ladders(picks)).toBe(NEW_PER_SESSION);
+  });
+});
+
+describe("the learner's new-word limits (phase 70, spec D2, D3, D4)", () => {
+  const news = (picks: ChosenPick[]) => count(picks, (pick) => pick.cls === 'NEW');
+  // Twelve words due in writing: a backlog wider than the session.
+  const backlog = range(12, (i) => known(`d${i}`, { [WP]: 0.5 }));
+  const waiting = range(5, (i) => fresh(`n${i}`));
+  const others = range(10, (i) => known(`k${i}`, { [ALL[i % 5]]: 0.93 }));
+
+  it('a learner cap replaces DAY_NEW_CAP', () => {
+    expect(news(chooseWords(input([...waiting, ...others], { newToday: 3, limits: { dayCap: 3, perSession: null } })))).toBe(0);
+    expect(news(chooseWords(input([...waiting, ...others], { newToday: DAY_NEW_CAP, limits: { dayCap: 20, perSession: null } })))).toBeGreaterThan(0);
+  });
+
+  it('a cap below what today already met leaves no room, and nothing breaks', () => {
+    const picks = chooseWords(input([...waiting, ...others], { newToday: 9, limits: { dayCap: 5, perSession: null } }));
+    expect(news(picks)).toBe(0);
+    expect(picks).toHaveLength(SESSION_LENGTH);
+  });
+
+  it('per session 2 holds two new words against a backlog, where automatic gives way to one', () => {
+    expect(news(chooseWords(input([...backlog, ...waiting])))).toBe(NEW_FLOOR);
+    const two = chooseWords(input([...backlog, ...waiting], { limits: { dayCap: DAY_NEW_CAP, perSession: 2 } }));
+    expect(news(two)).toBe(2);
+    expect(two.filter((pick) => pick.ladder)).toHaveLength(2);
+    // Phase 54 (spec D4): two ladders take eight of the ten slots; two due words fill the rest.
+    expect(count(two, (pick) => pick.cls === 'DUE')).toBe(SESSION_LENGTH - 2 * LADDER_SLOTS);
+  });
+
+  it('per session 1 holds one even with room for two', () => {
+    expect(news(chooseWords(input([...waiting, ...others])))).toBe(NEW_PER_SESSION);
+    expect(news(chooseWords(input([...waiting, ...others], { limits: { dayCap: DAY_NEW_CAP, perSession: 1 } })))).toBe(1);
+  });
+
+  it('per session 2 with one new word waiting asks that one, and reviews the rest', () => {
+    const picks = chooseWords(input([...backlog, fresh('only')], { limits: { dayCap: DAY_NEW_CAP, perSession: 2 } }));
+    expect(news(picks)).toBe(1);
+    expect(picks.filter((pick) => pick.cls === 'DUE').length).toBe(SESSION_LENGTH - LADDER_SLOTS);
+  });
+
+  it('per session never passes the cap: the room left binds first', () => {
+    const picks = chooseWords(input([...backlog, ...waiting], { newToday: DAY_NEW_CAP - 1, limits: { dayCap: DAY_NEW_CAP, perSession: 2 } }));
+    expect(news(picks)).toBe(1);
+  });
+
+  it('chooseWordsWithHeld counts the new words the cap held back from the session', () => {
+    const spent = input([...backlog, ...waiting], { newToday: DAY_NEW_CAP });
+    expect(news(chooseWords(spent))).toBe(0);
+    expect(chooseWordsWithHeld(spent).held).toBe(NEW_FLOOR);
+    const spentTwo = { ...spent, limits: { dayCap: DAY_NEW_CAP, perSession: 2 as const } };
+    expect(chooseWordsWithHeld(spentTwo).held).toBe(2);
+    expect(chooseWordsWithHeld(input([...backlog, ...waiting])).held).toBe(0);
+  });
+
+  // Final review I1. A batch save gives its words one save time, and a family's new meaning costs
+  // one slot where a ladder costs four, so the order the rng breaks the ties in decides how many
+  // new words fit beside a backlog. The count replays the choice's own draws.
+  describe('ties between new words saved together', () => {
+    const tiedNew = range(4, (i) => fresh(`n${i}`, { savedAt: savedAt(0) }));
+    const tiedMeanings = range(3, (i) => fresh(`m${i}`, { savedAt: savedAt(0) }));
+    const families = {
+      families: {
+        familyOf: new Map(tiedMeanings.map((word, i) => [word.id, i])),
+        waiting: new Set<string>(),
+        newMeanings: new Set(tiedMeanings.map((word) => word.id)),
+      },
+    };
+    const words = [...range(6, (i) => known(`d${i}`, { [WP]: 0.5 })), ...range(10, (i) => known(`k${i}`)), ...tiedMeanings, ...tiedNew];
+    const seeds = range(60, (i) => ({ id: String(i + 1) })).map((word) => Number(word.id));
+
+    it('holds none back from a session the cap never touched, whatever the draws', () => {
+      for (const seed of seeds) {
+        expect(chooseWordsWithHeld(input(words, { ...families, rng: testRng(seed) })).held).toBe(0);
+      }
+    });
+
+    it('answers the choice the same draws make, and what those draws with no cap meet beyond it', () => {
+      for (const seed of seeds) {
+        for (const newToday of [0, 10, 13, DAY_NEW_CAP]) {
+          const at = (rngSeed: number) => input(words, { ...families, newToday, rng: testRng(rngSeed) });
+          const { picks, held } = chooseWordsWithHeld(at(seed));
+          expect(picks).toEqual(chooseWords(at(seed)));
+          const uncapped = chooseWords({ ...at(seed), limits: { dayCap: Number.POSITIVE_INFINITY, perSession: null } });
+          expect(held).toBe(Math.max(0, news(uncapped) - news(picks)));
+        }
+      }
+    });
   });
 });

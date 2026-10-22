@@ -108,6 +108,9 @@ const copyToClipboard = (text: string) => Clipboard.setStringAsync(text);
 const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage });
 // Phase 65. Whether to ask before "practise more" past the day's budget, per username.
 const practiceMoreAsk = createPracticeMoreAskStore(AsyncStorage, 'lang-tutor:practice-more-ask:');
+// Phase 70 (spec D6). Whether to show the message when the day's cap held new words back; the
+// practice-more store's shape, per username, under a key of its own.
+const newWordCapNotice = createPracticeMoreAskStore(AsyncStorage, 'lang-tutor:new-word-cap-notice:');
 
 const firstAsset = (result: ImagePicker.ImagePickerResult): PhotoAsset | null =>
   result.canceled || result.assets.length === 0
@@ -332,7 +335,7 @@ export default function RootLayout() {
         <RemindersProvider reminders={reminders}>
           <SpeechProvider speaker={speaker}>
             <RecordingProvider recorder={recorder}>
-              <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} enrollmentStore={enrollmentStore} practiceMoreAsk={practiceMoreAsk}
+              <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} enrollmentStore={enrollmentStore} practiceMoreAsk={practiceMoreAsk} newWordCapNotice={newWordCapNotice}
               >
                 <NextSessionProvider api={api}>
                   <SessionProvider api={api}>

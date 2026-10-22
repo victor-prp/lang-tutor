@@ -351,6 +351,13 @@
       "when": 1792612776000,
       "tag": "0049_discovery",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792664086234,
+      "tag": "0050_new_word_limits",
+      "breakpoints": true
     }
   ]
 }

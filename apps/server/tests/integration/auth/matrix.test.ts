@@ -67,6 +67,9 @@ const OWN_ONLY = new Set([
   'put /api/me/push-devices',
   'post /api/me/push-devices/unregister',
   'post /api/me/reminders/{id}/tap',
+  // Phase 70 (spec D5). The learner's own new-word limits.
+  'get /api/me/new-words',
+  'put /api/me/new-words',
   'post /api/users',
   'get /api/enrollments',
   'post /api/enrollments',

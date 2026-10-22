@@ -2,7 +2,7 @@ import type { Enrollment } from '@lang-tutor/core/api';
 import { speakable } from '@lang-tutor/core/domain';
 
 import { liveDimensions } from '../domain/choose';
-import { DAY_NEW_CAP } from '../domain/chooseConstants';
+import { limitsOf } from '../domain/newWordLimits';
 import { glossFamilies } from '../domain/glossFamilies';
 import type { Devices, Path, SavedGloss } from '../domain/session';
 import type { DayAnswer } from '../domain/today';
@@ -39,6 +39,8 @@ export function enrollmentReads(repos: Repos, enrolled: Enrollment, devices: Dev
     answersOn: once(() => repos.session.findAnswersOn(enrollmentId, today)),
     /** Today's first meetings, every path's. */
     introduced: once(() => repos.session.findIntroducedOn(enrollmentId, today)),
+    /** Phase 70 (spec D2). The learner's cap on them, in place of DAY_NEW_CAP. */
+    dayCap: once(async () => limitsOf(await repos.user.findNewWordLimits(enrolled.user_id)).dayCap),
   };
 }
 
@@ -169,6 +171,7 @@ export async function readTargetPickInput(
   // Ruling T3-n (spec D8). The day's room for new words: the cap less every path's first
   // meetings today and this path's session in flight's.
   const introduced = await shared.introduced();
+  const dayCap = await shared.dayCap();
   const met = new Set([...memory.map((row) => row.glossId), ...introduced]);
   const meeting = new Set(cards.map((card) => card.glossId).filter((glossId) => glossIds.includes(glossId) && !met.has(glossId)));
   const input: TargetPickInput = {
@@ -180,11 +183,11 @@ export async function readTargetPickInput(
     keys: new Map(saved.map((gloss) => [gloss.glossId, gloss.key])),
     // Ruling T3-j: a ladder's intro stage grades nothing.
     inFlight: cards.filter((card) => !card.intro),
-    newRoom: Math.max(0, DAY_NEW_CAP - introduced.length - meeting.size),
+    newRoom: Math.max(0, dayCap - introduced.length - meeting.size),
     now: read.now,
   };
   // Phase 68 (spec D1): the session in flight's cards, whose unanswered ones the open step-downs credit.
-  return { read: { ...read, saved, memory, families, inFlight: started != null, inFlightCards: cards }, input };
+  return { read: { ...read, saved, memory, families, inFlight: started != null, inFlightCards: cards, dayCap }, input };
 }
 
 /**
