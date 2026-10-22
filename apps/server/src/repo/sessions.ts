@@ -79,6 +79,8 @@ export function createSessionRepo(tx: Tx) {
     chosenOn?: string;
     targetId?: string | null;
     kind?: 'practice' | 'question_types';
+    newWordsHeld?: number;
+    dayNewCap?: number;
   }): Promise<string> {
     try {
       const [row] = await tx.insert(sessions).values(values).returning({ id: sessions.id });
@@ -147,9 +149,36 @@ export function createSessionRepo(tx: Tx) {
 
     /** A list session: no questions until prepare-session writes them. Phase 53 (spec
      *  D12): `chosenOn` is the learner day its words were chosen. Phase 57 (spec D1): on
-     *  `path`. */
-    insertPreparingSession: (userId: string, enrollmentId: string, devices: Devices, chosenOn: string, path: Path): Promise<string> =>
-      insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', chosenOn, targetId: path, ...devices }),
+     *  `path`. Phase 70 (spec D4): `held`, the new words the day's cap held back from the choice
+     *  and the cap it read; absent, none and no cap, as the columns' defaults. */
+    insertPreparingSession: (
+      userId: string,
+      enrollmentId: string,
+      devices: Devices,
+      chosenOn: string,
+      path: Path,
+      held?: { count: number; dayCap: number },
+    ): Promise<string> =>
+      insertSessionRow({
+        userId,
+        enrollmentId,
+        status: 'preparing',
+        source: 'list',
+        chosenOn,
+        targetId: path,
+        ...devices,
+        ...(held ? { newWordsHeld: held.count, dayNewCap: held.dayCap } : {}),
+      }),
+
+    /** Phase 70 (spec D4, D5). What a session recorded of the new words its choice held back. */
+    findHeldNewWords: async (sessionId: string): Promise<{ count: number; dayCap: number | null; chosenOn: string | null } | undefined> => {
+      if (!UUID_RE.test(sessionId)) return undefined;
+      const [row] = await tx
+        .select({ count: sessions.newWordsHeld, dayCap: sessions.dayNewCap, chosenOn: sessions.chosenOn })
+        .from(sessions)
+        .where(eq(sessions.id, sessionId));
+      return row;
+    },
 
     /** Phase 61 (spec D3). A tester's session of one word's question types, preparing. A list
      *  session to every reader of `source`, chosen on no day, so no stale check replaces it.

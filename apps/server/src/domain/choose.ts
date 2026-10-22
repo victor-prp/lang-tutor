@@ -8,7 +8,6 @@ import {
 } from '@lang-tutor/core/domain';
 
 import {
-  DAY_NEW_CAP,
   HARD_CAP,
   LADDER_SLOTS,
   NEW_FLOOR,
@@ -19,6 +18,7 @@ import {
   R_TARGET,
   SPEAKING_PER_SESSION,
 } from './chooseConstants';
+import type { NewWordLimits } from './newWordLimits';
 import { shuffle } from './session';
 import type { Step } from './today';
 
@@ -56,6 +56,9 @@ export type ChoiceInput = {
     waiting: ReadonlySet<string>;
     newMeanings: ReadonlySet<string>;
   };
+  /** Phase 70 (spec D2, D3). The learner's day cap, in place of DAY_NEW_CAP, and new words per
+   *  session: null is phase 37's reserve, a number that many while the day has room. */
+  limits: NewWordLimits;
 };
 
 /** Phase 37 (spec D3). `SPEAK` is a gloss the speaking pick moved to spoken
@@ -204,6 +207,36 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
   return choosePools(input, [{ glossIds: null, slots: SESSION_LENGTH, owedNew: 0 }])[0];
 }
 
+/** Phase 70 (spec D4). The new words among `picks`: first meetings, ladders and new meanings. */
+export const countNew = (picks: readonly ChosenPick[]): number => picks.filter((pick) => pick.cls === 'NEW').length;
+
+/**
+ * Phase 70 (spec D4, final review I1). The main path's choice, and how many new words the day's
+ * cap held back from it: what the same choice with no cap meets beyond it. The second run replays
+ * the first's own draws: the rng orders new words saved together (a batch save gives them one
+ * time), and a ladder takes four slots where a family's new meaning takes one, so another order
+ * can fit another number of them. The shuffle is the picker's one draw and the cap moves no word
+ * out of NEW, so both runs see the same order, and the real choice's draws are its own.
+ */
+export function chooseWordsWithHeld(input: ChoiceInput): { picks: ChosenPick[]; held: number } {
+  const draws: number[] = [];
+  const picks = chooseWords({
+    ...input,
+    rng: () => {
+      const draw = input.rng();
+      draws.push(draw);
+      return draw;
+    },
+  });
+  let next = 0;
+  const uncapped = chooseWords({
+    ...input,
+    limits: { ...input.limits, dayCap: Number.POSITIVE_INFINITY },
+    rng: () => draws[next++] ?? 0,
+  });
+  return { picks, held: Math.max(0, countNew(uncapped) - countNew(picks)) };
+}
+
 /**
  * Phase 53 (spec D5, D6, rulings R-D6, R-D7). One call per session. Returns each pool's
  * picks, in pool order. In the first pass each pool takes steps 1–8 over its own words,
@@ -329,7 +362,10 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
   const perDimension = new Map<Dimension, number>();
   let hard = 0;
   let newCount = 0;
-  // Phase 54 (spec D4). The session's ladders, held to NEW_PER_SESSION over every pool and pass.
+  // Phase 54 (spec D4). The session's ladders, held to NEW_PER_SESSION over every pool and pass;
+  // phase 70 (spec D3), to the learner's own number when they chose one.
+  const { perSession } = input.limits;
+  const ceiling = perSession ?? NEW_PER_SESSION;
   let ladders = 0;
   let spoken = 0;
 
@@ -377,7 +413,8 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
     groupsAtFirst[index] ??= groups;
     const pickCap = Math.min(groups, groupsAtFirst[index] - chosen[index].length);
     const owedLeft = Math.max(0, pool.owedNew - introducedBy[index]);
-    const newLeft = Math.max(owedLeft, DAY_NEW_CAP - (input.newToday + newCount));
+    // Phase 70 (spec D2): the learner's cap.
+    const newLeft = Math.max(owedLeft, input.limits.dayCap - (input.newToday + newCount));
     // Ruling R-D6: the session's speaking pick, while no run before has made it.
     const speak = input.speaking && Math.min(slots, pickCap) >= 2 ? Math.max(0, SPEAKING_PER_SESSION - spoken) : 0;
     const room = slots - speak - returns.length - due.length;
@@ -389,11 +426,12 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
     // Phase 54 (spec D4): the reserve counts ladders, the room left after the speaking pick,
     // the returns and the due words over LADDER_SLOTS, a pace the run's slots over LADDER_SLOTS,
     // and no more than the session's ceiling has left.
+    // Phase 70 (spec D3): a learner's own number is the reserve whatever the backlog, and the ceiling.
     const reserve = Math.min(
       fresh.length,
       newLeft,
-      NEW_PER_SESSION - ladders,
-      Math.max(Math.min(NEW_PER_SESSION, Math.max(NEW_FLOOR, ladderRoom(room))), Math.min(owedLeft, ladderRoom(slots))),
+      ceiling - ladders,
+      perSession ?? Math.max(Math.min(NEW_PER_SESSION, Math.max(NEW_FLOOR, ladderRoom(room))), Math.min(owedLeft, ladderRoom(slots))),
     );
 
     const picks: ChosenPick[] = [];
@@ -441,7 +479,7 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
     const offerFresh = (limit: number) => {
       while (nextFresh < fresh.length && introduced < limit && !full()) {
         const candidate = fresh[nextFresh++];
-        if (free(candidate) && fits(candidate) && !(candidate.pick.ladder && ladders >= NEW_PER_SESSION)) add(candidate);
+        if (free(candidate) && fits(candidate) && !(candidate.pick.ladder && ladders >= ceiling)) add(candidate);
       }
     };
     const fill = (from: readonly Candidate[]) => {

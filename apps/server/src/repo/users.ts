@@ -89,6 +89,21 @@ export function createUserRepo(tx: Tx) {
       await tx.update(users).set({ timeZone }).where(eq(users.id, userId));
     },
 
+    /** Phase 70 (spec D1). The new-word limits a profile stores, null for the default; nulls for an
+     *  id with no profile (every bot and learner who never chose has nulls too). */
+    findNewWordLimits: async (userId: string): Promise<{ dayCap: number | null; perSession: number | null }> => {
+      const [row] = await tx
+        .select({ dayCap: users.dayNewCap, perSession: users.newPerSession })
+        .from(users)
+        .where(eq(users.id, userId));
+      return row ?? { dayCap: null, perSession: null };
+    },
+
+    /** Phase 70 (spec D1). Replaces both limits; the caller stores the default cap as null. */
+    setNewWordLimits: async (userId: string, limits: { dayCap: number | null; perSession: number | null }): Promise<void> => {
+      await tx.update(users).set({ dayNewCap: limits.dayCap, newPerSession: limits.perSession }).where(eq(users.id, userId));
+    },
+
     /** Phase 52 (spec D2). The zone the learner's schedule is read in: what the app last reported,
      *  UTC until it has. Undefined for an id with no profile. */
     findTimeZone: async (userId: string): Promise<string | undefined> => {

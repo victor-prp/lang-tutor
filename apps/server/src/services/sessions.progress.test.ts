@@ -100,6 +100,8 @@ function world(opts: {
   };
   const session = stub<SessionRepo>({
     loadSession: async () => opts.record,
+    // Phase 70 (spec D5): a session the cap held nothing back from.
+    findHeldNewWords: async () => ({ count: 0, dayCap: 15, chosenOn: null }),
     insertAnswer: async () => {},
     completeSession: async (_id, day) => {
       calls.completed += 1;
@@ -158,7 +160,7 @@ function world(opts: {
       session,
       progress,
       memory,
-      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner', timeZone: 'UTC' }) }),
+      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner', timeZone: 'UTC' }), findNewWordLimits: async () => ({ dayCap: null, perSession: null }) }),
       enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
       reminders: stub<ReminderRepo>({
         sentOnDay: async (userId, day) => {

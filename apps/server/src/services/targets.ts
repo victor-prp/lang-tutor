@@ -7,7 +7,6 @@ import type {
   TargetList,
 } from '@lang-tutor/core/api';
 
-import { DAY_NEW_CAP } from '../domain/chooseConstants';
 import { daysBetween } from '../domain/progress';
 import { targetDay } from '../domain/targetDay';
 import { activeOn, openOn } from '../domain/targets';
@@ -215,7 +214,7 @@ export function createTargetService({
         // cannot raise the card; an unmet word needs the day's room for new words.
         practice_more_little: !canRaiseToday({
           daysLeft: daysBetween(today, target.dueOn),
-          newRoom: Math.max(0, DAY_NEW_CAP - (await shared.introduced()).length),
+          newRoom: Math.max(0, (await shared.dayCap()) - (await shared.introduced()).length),
           words: shown.map((glossId, i) => {
             const word = dayOf.get(glossId)!;
             return {

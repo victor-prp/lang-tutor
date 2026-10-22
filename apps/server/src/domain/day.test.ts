@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { SESSION_LENGTH, countedSkills, dimensionsTested, gradesFor, type Dimension, type QuestionType } from '@lang-tutor/core/domain';
 
 import { choosePools, chooseWords, liveDimensions, type ChoiceInput, type ChosenPick } from './choose';
+import { DEFAULT_LIMITS } from './newWordLimits';
 import {
   DAY_NEW_CAP,
   KNOWN_STABILITY,
@@ -249,6 +250,7 @@ function runDays(
         speaking: true,
         rng: () => 0.5,
         families: { familyOf: families.familyOf, waiting, newMeanings: families.newMeanings },
+        limits: DEFAULT_LIMITS,
       };
       const picks = chooseWords(input);
       sessions.push({ input, picks, families });
@@ -1264,6 +1266,7 @@ function runPaths(
           speaking: true,
           rng: () => 0.5,
           families: { familyOf: families.familyOf, waiting, newMeanings: families.newMeanings },
+          limits: DEFAULT_LIMITS,
         };
         picks = chooseWords(input);
       }

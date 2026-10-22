@@ -11,6 +11,7 @@ import {
   boardsSession,
   cardOf,
   chooseTargetPicks,
+  heldByRoom,
   owedWords,
   picksOfCards,
   raisesCard,
@@ -563,6 +564,23 @@ describe("chooseTargetPicks, the day's room for new words", () => {
   it('never holds an owed start back', () => {
     const day = dayOf([{ id: 'g0', toStart: true }, { id: 'g1', toStart: true }]);
     expect(pick(day, { newRoom: 0 }).filter((p) => p.ladder).map((p) => p.glossId)).toEqual(['g0', 'g1']);
+  });
+
+  // Phase 70 (spec D4): what the session records the cap held back.
+  it('heldByRoom is 0 for owed starts, which the cap never holds', () => {
+    const day = dayOf([{ id: 'g0', toStart: true }, { id: 'g1', toStart: true }]);
+    const input = { ...base, day, mode: targetMode(day), newRoom: 0 };
+    expect(heldByRoom(input, chooseTargetPicks(input))).toBe(0);
+  });
+
+  it("heldByRoom counts practice more's early starts the day's room held back", () => {
+    const day = dayOf([{ id: 'g0', state: 'later' }, { id: 'g1', state: 'later' }, { id: 'g2', state: 'later' }], 'rest');
+    const none = { ...base, day, mode: targetMode(day), newRoom: 0 };
+    expect(heldByRoom(none, chooseTargetPicks(none))).toBe(2);
+    const one = { ...none, newRoom: 1 };
+    expect(heldByRoom(one, chooseTargetPicks(one))).toBe(1);
+    const room = { ...none, newRoom: 5 };
+    expect(heldByRoom(room, chooseTargetPicks(room))).toBe(0);
   });
 });
 

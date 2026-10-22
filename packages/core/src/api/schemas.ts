@@ -466,6 +466,9 @@ export const SessionViewSchema = z.object({
   // Phase 61 (spec D5). A question-types session's chosen types no card could be
   // generated for; absent on every other session.
   skipped_types: z.array(z.object({ type: QuestionTypeSchema, reason: z.literal('not_generated') })).optional(),
+  // Phase 70 (spec D4, D5). How many new words the day's cap held back from this session, and
+  // that cap: present only for a session chosen today under the learner's cap now.
+  held_new_words: z.object({ count: z.number().int().positive(), day_cap: z.number().int() }).optional(),
 });
 
 // Phase 23. A choice is answered by index, a typed card by its text. Empty
@@ -764,6 +767,15 @@ export const ReminderSettingsSchema = z.object({
   times: z.array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)).min(1).max(8),
 });
 export const ReminderSettingsResponseSchema = ReminderSettingsSchema.extend({ time_zone: z.string() });
+
+// Phase 70 (spec D1–D3, D5). The learner's new-word limits: the day's cap on first meetings, every
+// path's together (a target's planned words still meet past it), and the new words a regular
+// session includes, null for automatic (up to two, one when reviews are due). Two at most: a new
+// word's first session asks the distractor batch three or four of its ten items.
+export const NewWordLimitsSchema = z.object({
+  day_cap: z.number().int().min(1).max(100),
+  per_session: z.union([z.literal(1), z.literal(2)]).nullable(),
+});
 
 // Phase 52 (spec D4). An Expo push token, registered after the permission is granted.
 // Android only; a later platform widens the literal.

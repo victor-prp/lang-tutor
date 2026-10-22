@@ -33,6 +33,7 @@ import type {
   PushDeviceRequest,
   PushDeviceUnregisterRequest,
   QuestionTypesResponse,
+  NewWordLimits,
   ReminderSettings,
   ReminderSettingsResponse,
   SaveVocabularyRequest,
@@ -347,6 +348,9 @@ export function createApiClient({
 
     // Phase 52 (spec D1, D2, D4, D6). Practice reminders: the schedule, the zone its
     // hours are read in, this phone's push token, and a tapped reminder.
+    // Phase 70 (spec D5). The learner's new-word limits.
+    newWordLimits: () => getJson<NewWordLimits>('/api/me/new-words'),
+    putNewWordLimits: (limits: NewWordLimits) => putJson<NewWordLimits>('/api/me/new-words', limits),
     reminderSettings: () => getJson<ReminderSettingsResponse>('/api/me/reminders'),
     putReminderSettings: (settings: ReminderSettings) =>
       putJson<ReminderSettingsResponse>('/api/me/reminders', settings),

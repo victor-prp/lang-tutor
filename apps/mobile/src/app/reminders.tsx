@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Chip } from '@/components/Chip';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { useApi } from '@/hooks/useApi';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -47,36 +48,6 @@ const toWire = ({ enabled, daily_target, days, times }: ReminderSettingsResponse
   days,
   times,
 });
-
-function Chip({
-  label,
-  selected,
-  disabled = false,
-  testID,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  disabled?: boolean;
-  testID: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected, disabled }}
-      // react-native-web 0.21 does not render accessibilityState, so on web this
-      // is what puts the choice in the DOM (and in a test).
-      aria-selected={selected}
-      disabled={disabled}
-      testID={testID}
-      onPress={onPress}
-      style={[styles.chip, selected && styles.chipOn, disabled && styles.disabled]}
-    >
-      <Text style={[styles.chipLabel, selected && styles.chipLabelOn]}>{label}</Text>
-    </Pressable>
-  );
-}
 
 export default function RemindersScreen() {
   const api = useApi();
@@ -391,18 +362,6 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingBottom: spacing.sm },
-  chip: {
-    minWidth: 64,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.md,
-    ...shadows.card,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-  },
-  chipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  chipLabel: { color: colors.text, fontSize: fontSizes.md, fontWeight: '700' },
-  chipLabelOn: { color: colors.onPrimary },
   notice: {
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,

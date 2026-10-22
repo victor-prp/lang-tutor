@@ -130,8 +130,9 @@ describe('a path per target (spec D1, D2)', () => {
     expect(await service.createNextSession('u_1', E, NO_DEVICES)).toMatchObject({ sessionId: main.sessionId, created: false });
     expect(await service.createNextSession('u_1', E, NO_DEVICES, exam)).toMatchObject({ sessionId: own.sessionId, created: false });
     expect(logged('session_stocked')).toEqual([
-      { event: 'session_stocked', enrollment_id: E, session_id: main.sessionId, reason: 'create' },
-      { event: 'session_stocked', enrollment_id: E, session_id: own.sessionId, reason: 'create', target_id: exam },
+      // Phase 70 (spec D4): the cap held nothing back from either; a target's planned starts never.
+      { event: 'session_stocked', enrollment_id: E, session_id: main.sessionId, reason: 'create', new_words_held: 0, day_new_cap: 15 },
+      { event: 'session_stocked', enrollment_id: E, session_id: own.sessionId, reason: 'create', target_id: exam, new_words_held: 0, day_new_cap: 15 },
     ]);
   });
 
