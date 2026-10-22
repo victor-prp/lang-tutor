@@ -6,7 +6,7 @@ import {
   type QuestionType,
 } from '@lang-tutor/core/domain';
 
-import type { ChosenPick } from './choose';
+import { countNew, type ChosenPick } from './choose';
 import { LADDER_SLOTS, NEW_PER_SESSION, STEP_DOWNS_PER_SESSION } from './chooseConstants';
 import { MAX_PER_TYPE, RUNGS } from './plan';
 import { rungOf, type StepDown } from './stepDown';
@@ -447,4 +447,13 @@ export function chooseTargetPicks(input: TargetPickInput): ChosenPick[] {
   }
   stepDowns();
   return picks;
+}
+
+/**
+ * Phase 70 (spec D4). How many new words the day's room held back from `picks`, chosen from
+ * `input`: what the same choice with no room limit starts beyond them. Only practice more's early
+ * starts read the room, so a planned session's is 0.
+ */
+export function heldByRoom(input: TargetPickInput, picks: readonly ChosenPick[]): number {
+  return Math.max(0, countNew(chooseTargetPicks({ ...input, newRoom: Number.POSITIVE_INFINITY })) - countNew(picks));
 }

@@ -88,6 +88,7 @@ import {
 } from '../domain/jobs';
 import { dropLoneMeets, keepCards, type CardUnit, type Refusal } from '../domain/keepCards';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
+import { DEFAULT_LIMITS } from '../domain/newWordLimits';
 import { BOARD_SIZE, planCards } from '../domain/plan';
 import { POINT_REWRITE_ROUNDS, buildPointPrompt, judgePoint, parsePoint, pointItem, readPoint, type PointFinding, type PointItem, type PointTarget } from '../domain/pointing';
 import { keepQuestionTypeCards, questionTypesPlan, renderingFlags } from '../domain/questionTypes';
@@ -525,6 +526,7 @@ export function createSessionService({
       rng,
       // Phase 54 (spec D2), phase 60 (D1): a family's new meaning is no ladder, asked or not.
       families: { familyOf: families.familyOf, waiting, newMeanings: families.newMeanings },
+      limits: DEFAULT_LIMITS,
     };
     return { path: null, at, today, saved, families, stored, picks: chooseWords(choice) };
   }

@@ -1,8 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
 import { FSRS6_DEFAULT, SESSION_LENGTH, retrievability, type Dimension, type MemoryState } from '@lang-tutor/core/domain';
 
-import { choosePools, chooseWords, expectedSuccess, liveDimensions, rungFor, type ChoiceInput, type ChosenPick } from './choose';
+import { choosePools, chooseWords, expectedSuccess, heldByCap, liveDimensions, rungFor, type ChoiceInput, type ChosenPick } from './choose';
 import { DAY_NEW_CAP, HARD_CAP, LADDER_SLOTS, NEW_FLOOR, NEW_PER_SESSION, PER_DIMENSION_CAP, RUNG_R, R_TARGET } from './chooseConstants';
+import { DEFAULT_LIMITS } from './newWordLimits';
 import { withSessionInFlight, type Step } from './today';
 
 // Not tests/support/testRng: ADR 0001 R3 greps domain/ for any parent-directory
@@ -76,6 +77,7 @@ function input(words: Word[], over: Partial<ChoiceInput> = {}): ChoiceInput {
     speaking: false,
     rng: testRng(1),
     families: NO_FAMILIES,
+    limits: DEFAULT_LIMITS,
     ...over,
   };
 }
@@ -756,5 +758,69 @@ describe('ladders (phase 54, spec D2, D4; phase 55, spec D4)', () => {
     const picks = chooseWords(input(range(12, (i) => fresh(`n${i}`)), { newToday: DAY_NEW_CAP }));
     expect(ids(picks)).toEqual(['n11', 'n10']);
     expect(ladders(picks)).toBe(NEW_PER_SESSION);
+  });
+});
+
+describe("the learner's new-word limits (phase 70, spec D2, D3, D4)", () => {
+  const news = (picks: ChosenPick[]) => count(picks, (pick) => pick.cls === 'NEW');
+  // Twelve words due in writing: a backlog wider than the session.
+  const backlog = range(12, (i) => known(`d${i}`, { [WP]: 0.5 }));
+  const waiting = range(5, (i) => fresh(`n${i}`));
+  const others = range(10, (i) => known(`k${i}`, { [ALL[i % 5]]: 0.93 }));
+
+  it('a learner cap replaces DAY_NEW_CAP', () => {
+    expect(news(chooseWords(input([...waiting, ...others], { newToday: 3, limits: { dayCap: 3, perSession: null } })))).toBe(0);
+    expect(news(chooseWords(input([...waiting, ...others], { newToday: DAY_NEW_CAP, limits: { dayCap: 20, perSession: null } })))).toBeGreaterThan(0);
+  });
+
+  it('a cap below what today already met leaves no room, and nothing breaks', () => {
+    const picks = chooseWords(input([...waiting, ...others], { newToday: 9, limits: { dayCap: 5, perSession: null } }));
+    expect(news(picks)).toBe(0);
+    expect(picks).toHaveLength(SESSION_LENGTH);
+  });
+
+  it('per session 2 holds two new words against a backlog, where automatic gives way to one', () => {
+    expect(news(chooseWords(input([...backlog, ...waiting])))).toBe(NEW_FLOOR);
+    const two = chooseWords(input([...backlog, ...waiting], { limits: { dayCap: DAY_NEW_CAP, perSession: 2 } }));
+    expect(news(two)).toBe(2);
+    expect(two.filter((pick) => pick.ladder)).toHaveLength(2);
+    // Phase 54 (spec D4): two ladders take eight of the ten slots; two due words fill the rest.
+    expect(count(two, (pick) => pick.cls === 'DUE')).toBe(SESSION_LENGTH - 2 * LADDER_SLOTS);
+  });
+
+  it('per session 1 holds one even with room for two', () => {
+    expect(news(chooseWords(input([...waiting, ...others])))).toBe(NEW_PER_SESSION);
+    expect(news(chooseWords(input([...waiting, ...others], { limits: { dayCap: DAY_NEW_CAP, perSession: 1 } })))).toBe(1);
+  });
+
+  it('per session 2 with one new word waiting asks that one, and reviews the rest', () => {
+    const picks = chooseWords(input([...backlog, fresh('only')], { limits: { dayCap: DAY_NEW_CAP, perSession: 2 } }));
+    expect(news(picks)).toBe(1);
+    expect(picks.filter((pick) => pick.cls === 'DUE').length).toBe(SESSION_LENGTH - LADDER_SLOTS);
+  });
+
+  it('per session never passes the cap: the room left binds first', () => {
+    const picks = chooseWords(input([...backlog, ...waiting], { newToday: DAY_NEW_CAP - 1, limits: { dayCap: DAY_NEW_CAP, perSession: 2 } }));
+    expect(news(picks)).toBe(1);
+  });
+
+  it('heldByCap counts the new words the cap held back from the session', () => {
+    const spent = input([...backlog, ...waiting], { newToday: DAY_NEW_CAP });
+    expect(news(chooseWords(spent))).toBe(0);
+    expect(heldByCap(spent, chooseWords(spent))).toBe(NEW_FLOOR);
+    const spentTwo = { ...spent, limits: { dayCap: DAY_NEW_CAP, perSession: 2 as const } };
+    expect(heldByCap(spentTwo, chooseWords(spentTwo))).toBe(2);
+    const fresh = input([...backlog, ...waiting]);
+    expect(heldByCap(fresh, chooseWords(fresh))).toBe(0);
+  });
+
+  it('heldByCap leaves the real choice as it was: the rng is not drawn from', () => {
+    // Equal save times, so the rng breaks every tie between the new words.
+    const tied = [...range(5, (i) => fresh(`n${i}`, { savedAt: savedAt(0) })), ...others];
+    const withHeld = input(tied, { newToday: DAY_NEW_CAP - 1, rng: testRng(7) });
+    const without = input(tied, { newToday: DAY_NEW_CAP - 1, rng: testRng(7) });
+    heldByCap(withHeld, chooseWords(withHeld));
+    chooseWords(without);
+    expect(chooseWords(withHeld)).toEqual(chooseWords(without));
   });
 });
