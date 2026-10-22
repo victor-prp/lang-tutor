@@ -50,6 +50,8 @@ export type CurrentUserValue = {
   endGrant: (grantId: string) => Promise<void>;
   /** Phase 65 (spec D9). Whether to ask before practising past the day's budget, per device. */
   practiceMoreAsk: PracticeMoreAskStore;
+  /** Phase 70 (spec D6). Whether to show the message when the day's cap held new words back. */
+  newWordCapNotice: PracticeMoreAskStore;
 };
 
 const CurrentUserContext = createContext<CurrentUserValue | null>(null);
@@ -60,6 +62,7 @@ export function CurrentUserProvider({
   authEvents,
   enrollmentStore,
   practiceMoreAsk,
+  newWordCapNotice,
   children,
 }: {
   api: ApiClient;
@@ -67,6 +70,7 @@ export function CurrentUserProvider({
   authEvents: AuthEvents;
   enrollmentStore: RememberedEnrollmentStore;
   practiceMoreAsk: PracticeMoreAskStore;
+  newWordCapNotice: PracticeMoreAskStore;
   children: ReactNode;
 }) {
   const [status, setStatus] = useState<StartState>('loading');
@@ -269,6 +273,7 @@ export function CurrentUserProvider({
       acceptInvite,
       endGrant,
       practiceMoreAsk,
+      newWordCapNotice,
     }),
     [
       status,
@@ -289,6 +294,7 @@ export function CurrentUserProvider({
       acceptInvite,
       endGrant,
       practiceMoreAsk,
+      newWordCapNotice,
     ],
   );
 

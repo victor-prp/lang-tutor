@@ -15,7 +15,8 @@ import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 /**
  * Phase 64 (spec D7). The הגדרות tab, how the app behaves: the practice reminders, About with
  * the release this phone runs (phase 32 D10, phase 49 D4). Sign-out is the account's, so it is אני's.
- * Phase 65 (spec D9): whether to ask before practising past the day's budget.
+ * Phase 65 (spec D9): whether to ask before practising past the day's budget. Phase 70 (spec D7):
+ * the new-word limits.
  */
 export default function SettingsTab() {
   const { user, practiceMoreAsk } = useCurrentUser();
@@ -47,6 +48,19 @@ export default function SettingsTab() {
             <View style={styles.lead}>
               <Ionicons name="notifications-outline" size={19} color={colors.primary} />
               <Text style={groupStyles.label}>{strings.remindersEntry}</Text>
+            </View>
+            <Ionicons name="chevron-back" size={18} color={colors.tabInactive} />
+          </Pressable>
+          {/* Phase 70 (spec D7): the new-word limits and their message. */}
+          <Pressable
+            accessibilityRole="button"
+            testID="settings-new-words"
+            onPress={() => router.push('/new-words')}
+            style={groupStyles.row}
+          >
+            <View style={styles.lead}>
+              <Ionicons name="sparkles-outline" size={19} color={colors.primary} />
+              <Text style={groupStyles.label}>{strings.newWordsEntry}</Text>
             </View>
             <Ionicons name="chevron-back" size={18} color={colors.tabInactive} />
           </Pressable>

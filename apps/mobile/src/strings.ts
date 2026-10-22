@@ -632,6 +632,23 @@ export const strings = {
   practiceMoreAnyway: 'לתרגל בכל זאת',
   practiceMoreStopAsking: 'אל תציג לי את זה שוב',
   settingsPracticeMoreAsk: 'לשאול לפני תרגול נוסף',
+  // Phase 70 (spec D7, Victor: both limits configurable). The new-word limits screen.
+  newWordsEntry: 'מילים חדשות',
+  newWordsTitle: 'מילים חדשות',
+  newWordsDayLabel: 'מילים חדשות ביום',
+  newWordsDayHint: 'שיעורי בית ומבחנים פוגשים את המילים שתוכננו להם גם אחרי המכסה.',
+  newWordsSessionLabel: 'מילים חדשות בכל תרגול',
+  newWordsAuto: 'אוטומטי',
+  newWordsSessionHint: `אוטומטי: ${isolateLtr('1–2')}, לפי כמה מילים מחכות לחזרה.`,
+  newWordsNoticeSwitch: 'להציג הודעה כשהמכסה מתמלאה',
+  newWordsLoadFailed: 'טעינת ההגדרות נכשלה. אפשר לנסות שוב.',
+  newWordsSaveFailed: 'השמירה נכשלה. אפשר לנסות שוב.',
+  // Phase 70 (spec D6, Victor: a short message with "don't show again").
+  capNoticeTitle: 'הגעת למכסת המילים החדשות',
+  capNoticeBody: (cap: number) =>
+    `המכסה היא ${isolateLtr(String(cap))} מילים חדשות ביום, ולכן בתרגול הזה פחות מילים חדשות. אפשר לשנות אותה בהגדרות.`,
+  capNoticeContinue: 'המשך',
+  capNoticeStop: 'אל תציג לי את זה שוב',
   /** A rest day. `nextIn` is the days to the next practice day, null when none is known. */
   targetRest: (kind: TargetKind, nextIn: number | null): string => {
     const today = `היום אין תרגול ${TARGET_FOR[kind]}.`;
