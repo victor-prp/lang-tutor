@@ -903,6 +903,54 @@ describe('prompts assembled from the language table', () => {
   });
 });
 
+describe('resolveCorrection guard 5: a correction is a slip of what was typed', () => {
+  const parsed = (lemma: string, correctedForm: string) => ({
+    kind: 'word' as const,
+    entries: [
+      {
+        lemma,
+        part_of_speech: 'noun' as const,
+        senses: [{ sense_code: 'thanks', translation: 'תודה' }],
+      },
+    ],
+    correction: { corrected_form: correctedForm, alternatives: [] },
+  });
+
+  // The CI failure of 2026-10-22: Ukrainian `дякую` under ru → he, "corrected" to its
+  // Russian equivalent and translated, in 5 of 10 calls with the prompt unchanged.
+  it('reads дякую "corrected" to спасибо as no word in either language', () => {
+    expect(
+      resolveCorrection(parsed('спасибо', 'спасибо'), { typedForm: 'дякую', from: 'ru', to: 'he' }),
+    ).toEqual({ effectiveForm: 'дякую', kind: 'word', notAWord: true });
+  });
+
+  it('reads an English word "corrected" to its Italian equivalent as no word', () => {
+    expect(
+      resolveCorrection(parsed('finestra', 'finestra'), { typedForm: 'window', from: 'it', to: 'he' }),
+    ).toEqual({ effectiveForm: 'window', kind: 'word', notAWord: true });
+  });
+
+  // Every correction the eval bucket checks, and slips a learner types by ear.
+  const slips: [string, string, LanguageCode][] = [
+    ['thruot', 'throat', 'en'],
+    ['recieve', 'receive', 'en'],
+    ['brake a leg', 'break a leg', 'en'],
+    ['breakaleg', 'break a leg', 'en'],
+    ['decorate / decoration', 'decorate', 'en'],
+    ['go / going', 'go', 'en'],
+    ['nite', 'night', 'en'],
+    ['kwik', 'quick', 'en'],
+    ['amico/a', 'amico', 'it'],
+    ['citta', 'città', 'it'],
+    ['елка', 'ёлка', 'ru'],
+  ];
+  it.each(slips)('keeps %s corrected to %s (%s)', (typedForm, correctedForm, from) => {
+    const resolved = resolveCorrection(parsed(correctedForm, correctedForm), { typedForm, from, to: 'he' });
+    expect(resolved?.notAWord).toBeUndefined();
+    expect(resolved?.correction?.corrected_form).toBe(correctedForm);
+  });
+});
+
 describe('resolveCorrection guard 4 reads the language table', () => {
   const parsed = (correctedForm: string) => ({
     kind: 'word' as const,
