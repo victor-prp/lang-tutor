@@ -765,6 +765,15 @@ export const ReminderSettingsSchema = z.object({
 });
 export const ReminderSettingsResponseSchema = ReminderSettingsSchema.extend({ time_zone: z.string() });
 
+// Phase 70 (spec D1–D3, D5). The learner's new-word limits: the day's cap on first meetings, every
+// path's together (a target's planned words still meet past it), and the new words a regular
+// session includes, null for automatic (up to two, one when reviews are due). Two at most: a new
+// word's first session asks the distractor batch three or four of its ten items.
+export const NewWordLimitsSchema = z.object({
+  day_cap: z.number().int().min(1).max(100),
+  per_session: z.union([z.literal(1), z.literal(2)]).nullable(),
+});
+
 // Phase 52 (spec D4). An Expo push token, registered after the permission is granted.
 // Android only; a later platform widens the literal.
 export const PushDeviceRequestSchema = z.object({ token: z.string().min(1).max(256), platform: z.literal('android') });

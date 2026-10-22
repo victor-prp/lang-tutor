@@ -133,6 +133,11 @@ describe('repos', () => {
     setBotDay: () => {
       throw new Error("the session service must not move a bot's day");
     },
+    // Phase 70 (spec D2, D3): read by every choice; a learner who never chose.
+    findNewWordLimits: async () => ({ dayCap: null, perSession: null }),
+    setNewWordLimits: () => {
+      throw new Error("the session service must not save a learner's limits");
+    },
   };
 
   // Phase 29: read by the authorization of every use case, and for nothing else

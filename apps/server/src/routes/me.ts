@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
-import { ErrorSchema, MeResponseSchema, TimeZoneRequestSchema } from '@lang-tutor/core/api/schemas';
+import { ErrorSchema, MeResponseSchema, NewWordLimitsSchema, TimeZoneRequestSchema } from '@lang-tutor/core/api/schemas';
 
 import { InvalidTimeZone } from '../errors';
 import type { UserService } from '../services/users';
@@ -38,6 +38,35 @@ const timeZoneRoute = createRoute({
   },
 });
 
+const limitsJson = (description: string) => ({ content: { 'application/json': { schema: NewWordLimitsSchema } }, description });
+
+const newWordsRoute = createRoute({
+  method: 'get',
+  path: '/me/new-words',
+  tags: ['users'],
+  summary: 'Your new-word limits',
+  description:
+    'How many new words you meet a day (`day_cap`), every list path and target together, and how many a ' +
+    'regular session includes (`per_session`; null is automatic: up to two, one when reviews are due). ' +
+    "A learner who never chose gets 15 and automatic. A homework or exam's planned words meet past the cap.",
+  responses: { 200: limitsJson('The limits in force.'), ...learnerResponses },
+});
+
+const putNewWordsRoute = createRoute({
+  method: 'put',
+  path: '/me/new-words',
+  tags: ['users'],
+  summary: 'Save your new-word limits',
+  description:
+    'Replaces both. The next session chosen follows them; one already prepared keeps the words it was chosen with.',
+  request: { body: { required: true, content: { 'application/json': { schema: NewWordLimitsSchema } } } },
+  responses: {
+    200: limitsJson('The limits as saved.'),
+    400: { content: { 'application/json': { schema: ErrorSchema } }, description: 'The body did not validate.' },
+    ...learnerResponses,
+  },
+});
+
 // Transport only (ADR 0001 R1). Mounted at /api, so this publishes as /api/me.
 export function createMeRouter(users: UserService) {
   // The adapter's own 400 carries a Zod issue payload; the contract says
@@ -58,5 +87,8 @@ export function createMeRouter(users: UserService) {
       throw error;
     }
   });
+
+  router.openapi(newWordsRoute, async (c) => c.json(await users.newWordLimits(c.var.actor), 200));
+  router.openapi(putNewWordsRoute, async (c) => c.json(await users.putNewWordLimits(c.var.actor, c.req.valid('json')), 200));
   return router;
 }
