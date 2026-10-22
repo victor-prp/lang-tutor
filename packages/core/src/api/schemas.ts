@@ -1127,6 +1127,9 @@ export const TargetSummarySchema = z.object({
   // raise readiness (before the eve every word below its bar has had each counted skill's first
   // answer today and none is left to meet; on and after the date; at 100).
   practice_more_little: z.boolean(),
+  // Phase 71 (spec D3). Each word's readiness as the card counts it (a word's `readiness_pct`, 100
+  // at its kind's bar), in the order the words were added: the eve's card draws a bar per word.
+  word_readiness: z.array(Percent),
   // Phase 57 (spec D9, D10). Today's work on the target's path: owed, done, rest (nothing owed
   // and nothing practised today) or due_today (the date has come). `done`, `planned` and
   // `extra` count words. Phase 65 (spec D7): today is a budget of sessions, set at the path's
@@ -1134,6 +1137,8 @@ export const TargetSummarySchema = z.object({
   // `sessions_offer` is the count it would be (else it is the budget). `sessions_done` counts
   // the path's sessions completed today; `minutes` is about how long the budget's cards take.
   // `done` is the budget met, or no word owed: `ended_early` when that came before the budget.
+  // Phase 71 (spec D1): the eve has no daily goal: owed while one more session can raise the card
+  // (the opposite of `practice_more_little`), else the plan's; its budget is a record only.
   today: z.object({
     state: z.enum(['owed', 'done', 'rest', 'due_today']),
     done: z.number().int(),

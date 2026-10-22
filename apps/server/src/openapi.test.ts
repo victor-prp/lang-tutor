@@ -643,8 +643,11 @@ describe('the target endpoints in the published document (phase 53)', () => {
       'session',
       'today',
       'word_count',
+      'word_readiness',
     ];
     expect(list.properties.targets.items.required.sort()).toEqual(SUMMARY);
+    // Phase 71 (spec D3). Each word's readiness, whole percents.
+    expect(list.properties.targets.items.properties.word_readiness).toMatchObject({ type: 'array', items: { type: 'integer', minimum: 0, maximum: 100 } });
     const today = list.properties.targets.items.properties.today;
     expect(today.properties.state.enum).toEqual(['owed', 'done', 'rest', 'due_today']);
     // Phase 65 (spec D7, D10). Today as a budget of sessions: null until the day's first session

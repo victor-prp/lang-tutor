@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import type { Dimension } from '@lang-tutor/core/domain';
 
-import { PLAY_SESSIONS_MAX, pastBudget, playTodayForward } from './targetBudget';
+import { PLAY_SESSIONS_MAX, fullSession, pastBudget, playTodayForward } from './targetBudget';
 import type { SkillStart, TargetWordInput } from './targetDay';
 import type { TargetPickInput } from './targetPicker';
 
@@ -90,5 +90,21 @@ describe('pastBudget (phase 65b D2)', () => {
     expect(pastBudget({ budget: 5, done: 4, inFlight: true })).toBe(true);
     expect(pastBudget({ budget: 5, done: 5, inFlight: false })).toBe(true);
     expect(pastBudget({ budget: 5, done: 6, inFlight: true })).toBe(true);
+  });
+});
+
+describe('fullSession (phase 71 D2)', () => {
+  it('is true on the eve, with no budget set and none met', () => {
+    expect(fullSession({ daysLeft: 1, budget: null, done: 0, inFlight: false })).toBe(true);
+    expect(fullSession({ daysLeft: 1, budget: 5, done: 2, inFlight: false })).toBe(true);
+  });
+
+  it('is false before the eve while the budget is not met, or not set', () => {
+    expect(fullSession({ daysLeft: 2, budget: null, done: 0, inFlight: false })).toBe(false);
+    expect(fullSession({ daysLeft: 2, budget: 5, done: 3, inFlight: true })).toBe(false);
+  });
+
+  it('is true before the eve once the budget is met (phase 65b D2)', () => {
+    expect(fullSession({ daysLeft: 2, budget: 5, done: 4, inFlight: true })).toBe(true);
   });
 });

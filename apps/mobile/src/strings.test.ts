@@ -292,6 +292,16 @@ describe("home's cards (phase 57 D10, D11)", () => {
     expect(strings.targetSessionsSpoken(5, 5, 2)).toBe(ltr('5') + ' מתוך ' + ltr('5') + ' תרגולים היום ועוד ' + ltr('2') + ' בונוס');
   });
 
+  // Phase 71 (spec D4, D5, D7). The eve's strip and words row: Victor's mock, and my one-word and check lines.
+  it("words the eve's strip and its words row", () => {
+    expect(strings.targetEveStrip('homework')).toBe('שיעורי הבית מחר · היום מתרגלים עד שכל המילים מוכנות');
+    expect(strings.targetEveStrip('exam')).toBe('הבוחן מחר · היום מתרגלים עד שכל המילים מוכנות');
+    expect(strings.targetEveWords(7)).toBe('עוד ' + ltr('7') + ' מילים לחזק');
+    expect(strings.targetEveWords(1)).toBe('עוד מילה אחת לחזק');
+    expect(strings.targetEveReady(2, 9)).toBe(ltr('2') + ' מתוך ' + ltr('9') + ' מוכנות');
+    expect(strings.targetEveCheck).toBe('נשארה בדיקה אחרונה לפני מחר');
+  });
+
   it("words the day's line in its states, as Victor wrote them (phase 67b D7)", () => {
     expect(strings.targetSessionsGoal(4)).toBe('היעד של היום: ' + ltr('4') + ' תרגולים');
     expect(strings.targetSessionsGoal(1)).toBe('היעד של היום: תרגול אחד');

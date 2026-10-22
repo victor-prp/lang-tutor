@@ -14,6 +14,7 @@ import {
   sessionsLine,
   sessionsSpoken,
   targetButtonSolid,
+  wordBars,
   targetCardState,
   targetTitle,
   urgencyOf,
@@ -158,13 +159,16 @@ const paleOf = (hsl: string) => hsl.replace('hsl(', 'hsla(').replace(/\)$/, ', 0
  *  the line is grey until the day's goal is met, then blue while more practice can raise the
  *  card and green when it cannot or at 100%, with its second part under it. A screen reader reads
  *  the row as one Hebrew sentence (sessionsSpoken) and not the dots, which are drawing only; each
- *  dot's kind is in its testID (`target-session-dot-<kind>`). */
+ *  dot's kind is in its testID (`target-session-dot-<kind>`). Phase 71 (spec D4): on the eve the
+ *  row counts the words still short, bold, with a bar a word in place of the dots
+ *  (`target-word-bar-ready`, `target-word-bar-short`), drawing only too. */
 export function Sessions({ target }: { target: TargetSummary }) {
   const { id } = target;
   const line = sessionsLine(target);
   const dots = sessionDots(target);
-  if (!line.text && !line.side && dots.length === 0) return null;
-  const met = line.tone !== 'plain';
+  const bars = wordBars(target);
+  if (!line.text && !line.side && dots.length === 0 && bars.length === 0) return null;
+  const met = line.tone === 'more' || line.tone === 'done';
   const tone = TONE_STYLES[line.tone];
   return (
     <View testID={`target-sessions-${id}`} accessible accessibilityLabel={sessionsSpoken(target)} style={styles.sessions}>
@@ -186,19 +190,31 @@ export function Sessions({ target }: { target: TargetSummary }) {
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
         aria-hidden
-        style={styles.dots}
+        style={bars.length > 0 ? styles.bars : styles.dots}
       >
         {dots.map((dot, at) => (
           <View key={at} testID={`target-session-dot-${dot}`} style={[styles.dot, DOT_STYLES[dot]]} />
         ))}
+        {bars.map((bar, at) =>
+          bar.ready ? (
+            <View key={at} testID="target-word-bar-ready" style={[styles.wordBar, styles.wordBarReady]} />
+          ) : (
+            <View key={at} testID="target-word-bar-short" style={styles.wordBar}>
+              <View style={[styles.wordBarFill, { flex: bar.pct / 100 }]} />
+              <View style={{ flex: 1 - bar.pct / 100 }} />
+            </View>
+          ),
+        )}
       </View>
     </View>
   );
 }
 
-/** Phase 67b (spec D7). The line's colour by tone: grey to do, blue more helps, green done. */
+/** Phase 67b (spec D7). The line's colour by tone: grey to do, blue more helps, green done.
+ *  Phase 71 (spec D4): the eve's words line, grey and bold. */
 const TONE_STYLES = {
   plain: { color: '#344054' },
+  strong: { color: '#344054', fontWeight: '700' },
   more: { color: colors.primary, fontWeight: '700' },
   done: { color: colors.correct, fontWeight: '700' },
 } as const;
@@ -289,6 +305,24 @@ const styles = StyleSheet.create({
   sideMet: { fontSize: fontSizes.sm, color: colors.muted, writingDirection: 'rtl' },
   dots: { flexDirection: 'row', gap: 5, alignItems: 'center' },
   dot: { width: 22, height: 7, borderRadius: radii.pill },
+  // Phase 71 (spec D4): a word's bar on the eve, filled to its readiness; green and full once ready.
+  // Final review I-1: the bars share the row, 30 wide at most, so any count of words fits the card;
+  // past what even the narrowest fit, they wrap rather than run off its end (the weakest words).
+  bars: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center' },
+  wordBar: {
+    flexDirection: 'row',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    maxWidth: 30,
+    minWidth: 3,
+    height: 8,
+    borderRadius: radii.pill,
+    backgroundColor: '#EAECF0',
+    overflow: 'hidden',
+  },
+  wordBarReady: { backgroundColor: colors.progress },
+  wordBarFill: { backgroundColor: '#84ADFF' },
   ready: { fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '600', color: colors.correct, writingDirection: 'rtl' },
   urgency: {
     flexDirection: 'row',

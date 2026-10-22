@@ -205,8 +205,26 @@ export async function expectReadiness(
 }
 
 /** Today's sessions as `expectSessions` reads them: the line, the line under it (none: null or
- *  absent), the words beside it (none: null), and each dot's kind (done, todo, faded, bonus). */
-export type SessionsView = { line: string; sub?: string | null; side: string | null; dots: string[] };
+ *  absent), the words beside it (none: null), and each dot's kind (done, todo, faded, bonus).
+ *  Phase 71: on the eve, each word's bar too, in order (ready, short). */
+export type SessionsView = { line: string; sub?: string | null; side: string | null; dots: string[]; bars?: string[] };
+
+/** Phase 71 (spec D4). The eve's words row: the words below their bar, the ready ones beside them,
+ *  no session dots, and a bar a word, the ready ones first. */
+export const eveOf = (target: Pick<Target, 'word_count' | 'ready_count' | 'word_readiness'>): SessionsView => {
+  const missing = target.word_count - target.ready_count;
+  return {
+    line: missing === 1 ? 'עוד מילה אחת לחזק' : `עוד ${missing} מילים לחזק`,
+    side: `${target.ready_count} מתוך ${target.word_count} מוכנות`,
+    dots: [],
+    bars: [...target.word_readiness].sort((a, b) => b - a).map((pct) => (pct >= 100 ? 'ready' : 'short')),
+  };
+};
+/** Phase 71 (spec D5). The eve's strip while a word is below its bar. */
+export const eveStrip = (kind: Target['kind']) => `${kind === 'exam' ? 'הבוחן' : 'שיעורי הבית'} מחר · היום מתרגלים עד שכל המילים מוכנות`;
+
+/** The word bars' testID prefix (phase 71): each bar's kind follows it (`target-word-bar-ready`). */
+const BAR = 'target-word-bar-';
 
 /** Phase 65 (spec D5, D7), phase 67b (spec D7). The day's goal before its first session, about how
  *  long it takes, and a dot to do per session. */
@@ -253,6 +271,15 @@ export async function expectSessions(scope: Locator, targetId: string, view: Ses
         .evaluateAll((dots, prefix) => dots.map((dot) => dot.getAttribute('data-testid')!.slice(prefix.length)), DOT),
     )
     .toEqual(view.dots);
+  if (view.bars !== undefined) {
+    await expect
+      .poll(() =>
+        row
+          .locator(`[data-testid^="${BAR}"]`)
+          .evaluateAll((bars, prefix) => bars.map((bar) => bar.getAttribute('data-testid')!.slice(prefix.length)), BAR),
+      )
+      .toEqual(view.bars);
+  }
   await expect(row.getByTestId('target-sessions')).toHaveAttribute('aria-hidden', 'true');
   // "תרגול" covers one session ("תרגול אחד", phase 67b) and many ("תרגולים"); a row with no dots
   // (a rest day at 100%) says its line alone.

@@ -164,6 +164,9 @@ export function canRaiseToday(input: {
  * done once the budget is met (only a budget that was set: a session started by its first answer
  * sets none); else the plan's (owed, done when no word owes work, rest). Done before the budget
  * was met is ended early (spec D7.6).
+ *
+ * Phase 71 (spec D1). The eve has no daily goal: it is owed while one more session can raise the
+ * card (`canRaise`, canRaiseToday's), else the plan's state; the budget decides nothing that day.
  */
 export function todaySummary(input: {
   /** The plan's state (targetDay's). */
@@ -174,11 +177,14 @@ export function todaySummary(input: {
   /** The budget as it would be set now, when none is stored. */
   offer: { sessions: number; cards: number } | null;
   sessionsDone: number;
+  /** Phase 71 (spec D1). Whether one more session today can raise the card; read on the eve only. */
+  canRaise: boolean;
 }): { state: TargetDay['state']; sessionsBudget: number | null; sessionsOffer: number; sessionsDone: number; endedEarly: boolean; minutes: number } {
   const { budget, sessionsDone } = input;
   const shown = budget ?? input.offer;
   let state: TargetDay['state'];
   if (input.daysLeft <= 0) state = 'due_today';
+  else if (input.daysLeft === 1) state = input.canRaise ? 'owed' : input.plan;
   else if (budget !== null && sessionsDone >= budget.sessions) state = 'done';
   else state = input.plan;
   return {

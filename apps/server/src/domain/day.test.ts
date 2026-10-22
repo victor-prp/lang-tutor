@@ -18,7 +18,7 @@ import { applySession, type MemoryRow } from './memoryUpdate';
 import { RUNGS, planCards } from './plan';
 import { daysBetween, evaluateSession, type AnsweredQuestion, type ProgressRow } from './progress';
 import { readinessSessionWrite, type TargetReadinessEvent, type TargetReadinessRow } from './readinessWrite';
-import { pastBudget, playTodayForward } from './targetBudget';
+import { fullSession, playTodayForward } from './targetBudget';
 import { servedSkill, targetDay, type TargetDay, type TargetDayInput } from './targetDay';
 import {
   chooseTargetPicks,
@@ -1166,10 +1166,11 @@ function runPaths(
       let mode = pickInput.mode;
       // Phase 65b (spec D2): past the day's budget a session asks the owed work, then practice
       // more. The path's sessions so far today include the one in flight when a stock is built
-      // beside it, so none is counted twice.
+      // beside it, so none is counted twice. Phase 71 (spec D2): so does every session on the eve.
       const set = budgets.get(`${target.id}|${date}`);
       const played = sessions.filter((one) => one.path === target.id && one.date === date).length;
-      if (mode === 'owed' && pastBudget({ budget: set?.sessions ?? null, done: played, inFlight: false })) mode = 'past_budget';
+      const full = fullSession({ daysLeft: daysBetween(date, target.dueOn), budget: set?.sessions ?? null, done: played, inFlight: false });
+      if (mode === 'owed' && full) mode = 'past_budget';
       let picks = chooseTargetPicks({ ...pickInput, mode });
       if (picks.length === 0 && mode === 'owed') {
         mode = 'more';
@@ -1439,6 +1440,33 @@ function expectOnlyOwedWork(run: PathRun): number {
   return checked;
 }
 
+/**
+ * Phase 71 (spec D2), phase 65b (spec D2). Anti-goal 1's exception: a full session, past the day's
+ * budget or on the eve, asks the owed work first and fills the rest with practice more. In the
+ * picker's order, no pick that serves owed work (as expectOnlyOwedWork reads it) comes after one
+ * that does not; a step-down's practice card, added after the session's own, is not counted.
+ * Returns the sessions checked.
+ */
+function expectOwedFirst(run: PathRun): number {
+  let checked = 0;
+  for (const session of run.sessions) {
+    if (session.path === null || session.mode !== 'past_budget') continue;
+    const day = session.home.get(session.path)!;
+    if (day.state !== 'owed') continue;
+    const words = new Map(day.words.map((word) => [word.glossId, word]));
+    const serves = session.picks
+      .filter((pick) => pick.relearn !== 'practice')
+      .map((pick) => {
+        const word = words.get(pick.glossId);
+        return word?.state === 'owed' && (word.toStart || (!pick.ladder && word.cardsLeft > 0 && word.open.includes(pick.dimension)));
+      });
+    const fill = serves.indexOf(false);
+    expect({ at: session.at, owedAfterFill: fill >= 0 && serves.slice(fill).includes(true) }).toEqual({ at: session.at, owedAfterFill: false });
+    checked++;
+  }
+  return checked;
+}
+
 /** Phase 65 (spec D3.6, D11; anti-goal "readiness moves overnight"). Each active target's readiness
  *  at the start of a day reads as it did at the end of the day before, and so does every word it
  *  held then, while its date stays (a date moved is the list's edit, not a night): nothing moves it
@@ -1631,8 +1659,10 @@ function itKeepsTheTargetPaths(run: PathRun, targets: readonly SimTarget[], ever
     expect(ladders).toBeGreaterThan(0);
   });
 
-  it('never asks a target card that serves no owed work while work is owed (anti-goal 1)', () => {
-    expect(expectOnlyOwedWork(run)).toBeGreaterThan(0);
+  // Phase 71 (spec D2): on the eve, as past the budget, the owed work comes first and practice more
+  // fills the rest.
+  it('never asks a target card that serves no owed work while work is owed, but in a full session, past the budget or on the eve, which asks it first (anti-goal 1)', () => {
+    expect(expectOnlyOwedWork(run) + expectOwedFirst(run)).toBeGreaterThan(0);
   });
 
   it('never lowers a target value but for a miss (anti-goal 2)', () => {
@@ -1747,8 +1777,11 @@ describe('the 2026-10-16 replay: homework due tomorrow, six words, the same miss
     expect(played).toBe(run.budgets[0].sessions);
   });
 
-  it('asks only cards that serve owed work: every card of every session (anti-goal 1)', () => {
-    expect(expectOnlyOwedWork(run)).toBe(run.log.length);
+  // Phase 71 (spec D2): every session of the eve is a full one, the owed work first.
+  it('asks the owed work first in every session of its eve, each a full one (anti-goal 1, phase 71 D2)', () => {
+    const eve = run.sessions.filter((session) => session.path === 'homework' && session.date === dueIn(0));
+    expect(eve.map((session) => session.mode)).toEqual(eve.map(() => 'past_budget'));
+    expect(expectOwedFirst(run)).toBe(eve.length);
   });
 
   it("misses as on 2026-10-16, and adds no card for a miss: each word is asked each counted skill once on its eve (phase 67, spec D2)", () => {
@@ -2141,5 +2174,28 @@ describe.each<[TargetKind]>([['exam'], ['homework']])('phase 67b: eighteen words
     for (const o of outcome) expect({ phase: o.phase, ok: o.reached !== null || o.pinned }).toEqual({ phase: o.phase, ok: true });
     expect(outcome.filter((o) => !o.never && o.reached !== null).length).toBeGreaterThanOrEqual(3);
     expect(outcome.find((o) => o.never)!.reached).not.toBeNull();
+  });
+});
+
+// Phase 71 (spec D2). The eve has no daily goal: no session on it is the owed work alone, which
+// left the budget's last session whatever the pass had left (one card, Victor's on 22 Oct). Every
+// one asks the owed work first and fills the rest with practice more, which asks one card a word
+// below its bar (phase 67b R1): its sessions shrink as words reach the bar, reported, not gated.
+describe('phase 71: a ten-word homework skipped until the eve, played until 100% (spec D2)', () => {
+  const homework = targetOf('homework', 5, listIds(1, 10));
+  const eve = dueIn(4);
+  const learners: PathLearner[] = [...EVERY_PHASE, { missEvery: NEVER_MISSES }];
+  const runs = learners.map((learner, phase) => ({
+    name: learner.missEvery === NEVER_MISSES ? 'never' : `p${phase}`,
+    sessions: runPaths(withList(10), 6, (day) => (day === 4 ? { untilDone: 25 } : 0), [homework], learner, { stockLag: true, extraAfterDone: 25 }).sessions.filter(
+      (one) => one.path === homework.id && one.date === eve && one.readiness.before.get(homework.id)!.pct < 100,
+    ),
+  }));
+  const owedOnly = runs.flatMap((run) => run.sessions.filter((one) => one.mode === 'owed').map((one) => `${run.name} s${one.at}: ${slotsOf(one.picks)}`));
+  const sizes = runs.map((run) => `${run.name} ${run.sessions.map((one) => slotsOf(one.picks)).join('/')}`).join(', ');
+
+  it(`asks no eve session the owed work alone (owed-only: ${owedOnly.length ? owedOnly.join(', ') : 'none'}); its slots below 100%, ungated: ${sizes}`, () => {
+    expect(owedOnly).toEqual([]);
+    for (const run of runs) expect(run.sessions.length).toBeGreaterThan(0);
   });
 });

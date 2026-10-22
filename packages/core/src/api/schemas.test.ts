@@ -1453,6 +1453,7 @@ describe('the target read models', () => {
     readiness_pct: 60,
     readiness_start_pct: 47,
     practice_more_little: false,
+    word_readiness: [100, 20],
     today: {
       state: 'owed',
       done: 1,
@@ -1480,6 +1481,17 @@ describe('the target read models', () => {
 
   it('names two kinds', () => {
     expect(TargetKindSchema.options).toEqual(['homework', 'exam']);
+  });
+
+  // Phase 71 (spec D3). Each word's readiness on the home list, in percent, for the eve's bars.
+  it("carries each word's readiness, whole percents", () => {
+    expect(TargetSummarySchema.parse(summary).word_readiness).toEqual([100, 20]);
+    expect(TargetSummarySchema.parse({ ...summary, word_readiness: [] }).word_readiness).toEqual([]);
+    const { word_readiness: _, ...without } = summary;
+    expect(TargetSummarySchema.safeParse(without).success).toBe(false);
+    for (const bad of [[101], [-1], [12.5], ['90']]) {
+      expect(TargetSummarySchema.safeParse({ ...summary, word_readiness: bad }).success).toBe(false);
+    }
   });
 
   it('carries the learner day a target was created on (phase 64, spec D5)', () => {

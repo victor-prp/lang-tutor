@@ -14,7 +14,7 @@ import { API_URL } from '../urls';
 import { expectGeneration } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapUntil } from './support/interactions';
-import { BOARD_WORDS } from './support/lexemes';
+import { BOARD_WORDS, SINGLE_WORDS } from './support/lexemes';
 import { clearGemini, expectGeminiMatching, userText } from './support/mockServer';
 import { answerSessionRight, enrollmentIdOf, readCurrent, readyPathSession, skipSeed } from './support/sessions';
 import {
@@ -37,6 +37,8 @@ import {
   moveDueDateToToday,
   makeTargetReady,
   moveTargetBack,
+  eveOf,
+  eveStrip,
   offerOf,
   playSessionRight,
   readTarget,
@@ -303,9 +305,9 @@ test('an exam is prepared from a photo and a typed word; a word goes, the date m
   expect(await openImports(page.request, enrollmentId)).toEqual([]);
 
   // 5. Done returns to home (phase 64, spec D8), whose card is the exam's: its kind, how soon,
-  // its readiness and today as sessions (phase 65, spec D5): before the day's first session, the
-  // offer, a dot to do for each. Due tomorrow with nothing ready, the fuse burns amber and the
-  // card names the words not ready (spec D5).
+  // and its readiness. Due tomorrow, the eve has no daily goal (phase 71, spec D4, D5): the card
+  // counts the words still short with a bar a word, the fuse burns amber, and the strip says today
+  // is for every word to be ready.
   const wordOf = (form: string) => {
     const word = target.words.find((candidate) => candidate.form === form);
     if (!word) throw new Error(`the target holds no ${form}: ${JSON.stringify(target.words)}`);
@@ -320,23 +322,22 @@ test('an exam is prepared from a photo and a typed word; a word goes, the date m
   expect(offered).toMatchObject({ readiness_pct: 0, readiness_start_pct: 0 });
   const card = page.getByTestId(`target-card-${target.id}`);
   await expectReadiness(card, offered);
-  await expectSessions(card, target.id, offerOf(offered.today));
-  await expectLabel(
-    page.getByTestId(`target-urgency-${target.id}`),
-    'הבוחן מחר ו-3 מילים צריכות חיזוק',
-  );
+  expect(offered.word_readiness, report()).toEqual([0, 0, 0]);
+  await expectSessions(card, target.id, eveOf(offered));
+  await expectLabel(page.getByTestId(`target-urgency-${target.id}`), eveStrip('exam'));
   await expect(page.getByTestId(`target-fuse-${target.id}`)).toHaveAttribute('aria-label', 'hot');
 
   // 6. Its screen lists the ticked words and the typed one, with the date chosen.
   // Phase 57 (spec D12): the header is the card's, and an exam due tomorrow plans every word
-  // for today, so all three are owed. Phase 65 (spec D6): the card's readiness and sessions.
+  // for today, so all three are owed. Phase 65 (spec D6): the card's readiness, and (phase 71) its
+  // words row.
   await row.click();
   await expect(page.getByTestId('target-title'), report()).toHaveText('בוחן');
   await expect(page.getByTestId('target-due')).toHaveText(first.label);
   await expectLabel(page.getByTestId('target-countdown'), 'בוחן מחר');
   const header = screenHeader(page);
   await expectReadiness(header, offered);
-  await expectSessions(header, target.id, offerOf(offered.today));
+  await expectSessions(header, target.id, eveOf(offered));
   await expect(page.getByTestId('target-word-readiness')).toHaveCount(3);
   await expect(page.getByTestId('target-group-owed')).toContainText('נשאר להיום');
   for (const form of ['campo', 'sedia', 'tavolo']) {
@@ -351,11 +352,11 @@ test('an exam is prepared from a photo and a typed word; a word goes, the date m
   await expect(page.getByTestId(`target-word-${sedia.gloss_id}`)).toBeVisible();
   await tapAndWaitForResponse(page, page.getByTestId(`target-word-remove-${sedia.gloss_id}`), WORD_REMOVE);
   await expect(page.getByTestId(`target-word-${sedia.gloss_id}`)).toHaveCount(0);
-  // Two words owe less than three: the offer is read again, and the header shows it.
+  // Two words owe less than three: the offer is read again, and the header counts two words.
   const removed = await read<Target>(page.request, `/api/targets/${target.id}`);
   expect(removed.words.map((word) => word.form).sort()).toEqual(['campo', 'tavolo']);
   expect(removed.today.sessions_offer, report()).toBeLessThan(offered.today.sessions_offer);
-  await expectSessions(header, target.id, offerOf(removed.today));
+  await expectSessions(header, target.id, eveOf(removed));
   expect(await savedLemmas(page.request, enrollmentId)).toEqual(['campo', 'sedia', 'tavolo']);
 
   // 8. The date moves: the wizard offers its date step alone, and the screen shows the new day.
@@ -767,5 +768,33 @@ test('home orders its paths: the exam due today first with good luck, then work 
   await expect(page.getByTestId(`target-word-today-${examOnly.gloss_id}`)).toHaveCount(0);
   await expect(page.getByTestId('target-change-date')).toHaveCount(0);
   await expect(page.getByTestId('target-end')).toHaveCount(0);
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 71 (spec D4, final review I-1). The eve draws a bar a word: at a phone's width a fourteen-word
+// homework keeps every bar inside its card, none clipped off its end (the weakest words are last).
+test("the eve's word bars stay inside the card at a phone's width, fourteen words", async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  await withVoices(page, []);
+  await signUpLearner(page, 'e2e_eve_bars', 'ru');
+  const enrollmentId = await enrollmentIdOf(page.request);
+  await skipSeed(page.request, enrollmentId);
+  const entries = (await lookUpEntries(page.request, enrollmentId, [...BOARD_WORDS, ...Object.values(SINGLE_WORDS)])).flat();
+  await expectGeneration(request);
+  const { today } = await readTargets(page.request, enrollmentId);
+  const target = await createTarget(page.request, enrollmentId, { kind: 'homework', due_on: addDays(today, 1), entries });
+  expect(target.word_count, report()).toBe(14);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await openApp(page, `target-card-${target.id}`);
+
+  const card = page.getByTestId(`target-card-${target.id}`);
+  const bars = card.locator('[data-testid^="target-word-bar-"]');
+  await expect(bars, report()).toHaveCount(14);
+  const box = (await card.boundingBox())!;
+  for (const bar of await bars.all()) {
+    const at = (await bar.boundingBox())!;
+    expect({ left: at.x >= box.x, right: at.x + at.width <= box.x + box.width, width: at.width > 0 }).toEqual({ left: true, right: true, width: true });
+  }
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

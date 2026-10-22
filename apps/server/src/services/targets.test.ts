@@ -470,6 +470,7 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
       // Phase 65b D1: an exam five days out asks before practice more (the app asks once today is done).
       // Phase 67b (spec D6): its words are not met yet, so another session can raise the card.
       practice_more_little: false,
+      word_readiness: [0, 0, 0, 0],
       today: {
         state: 'owed',
         done: 0,
@@ -1137,6 +1138,8 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
 
     // Phase 67b (spec D2): 99 and 96 are past the homework bar, each counted 100.
     expect(read.words.map((w) => w.readiness_pct)).toEqual([100, 100, 49]);
+    // Phase 71 (spec D3). The same, on the summary the home list carries.
+    expect(read.word_readiness).toEqual([100, 100, 49]);
     expect(read.ready_count).toBe(2);
     expect(read.words[2].skills).toEqual([
       { dimension: 'written_productive', chance: 49, held: true },
@@ -1224,6 +1227,25 @@ describe('readiness and today’s budget on the summary (phase 65)', () => {
     const met = await at(3);
     expect(met.read.words[0].today).toBe('owed');
     expect(met.read.today).toMatchObject({ state: 'done', sessions_budget: 3, sessions_done: 3, ended_early: false });
+  });
+
+  it('is owed on the eve with a word below its bar though the budget is met (phase 71, spec D1)', async () => {
+    const { service } = world({
+      saved: ['g_casa'],
+      targets: [target({ dueOn: '2026-10-16', words: ['g_casa'] })],
+      // Met before today, and its one practised skill asked today, missed: the plan owes nothing.
+      startedOn: { g_casa: '2026-10-13' },
+      answersOn: [{ glossId: 'g_casa', sessionId: 's1', targetId: 't1', type: 'typed_translation', correct: false }],
+      budgets: { [`t1|${TODAY}`]: budget(3, 13) },
+      completed: { [`t1|${TODAY}`]: 3 },
+    });
+
+    const read = await service.getTarget(OWNER, 't1');
+
+    expect(read.days_left).toBe(1);
+    expect(read.words[0].today).toBe('done');
+    expect(read.readiness_pct).toBe(0);
+    expect(read.today).toMatchObject({ state: 'owed', sessions_budget: 3, sessions_done: 3, ended_early: false });
   });
 
   it('ended early when no word is owed after 3 of 5', async () => {

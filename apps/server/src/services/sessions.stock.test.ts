@@ -995,6 +995,21 @@ describe("a target path's choice beside its session in flight (rulings T3-j, T3-
     expect(owedOf(past)).toEqual(['g_a', 'g_b']);
   });
 
+  it('fills every session on the eve with practice more after the owed work, no budget set (phase 71, spec D2)', async () => {
+    // As above, the date tomorrow: g_a owes its writing card, g_b's is in flight, and no budget is set.
+    const { service, jobs, targets } = pathWorld({
+      found: target('t_exam', '2026-10-13', ['g_a', 'g_b']),
+      words: { g_a: YESTERDAY, g_b: YESTERDAY },
+      starts: { g_a: 0.5, g_b: 0.5 },
+      cards: [{ glossId: 'g_b', type: 'typed_translation', intro: false }],
+    });
+    await build(service, 't_exam');
+    // g_a's owed card first, then practice more past it, g_b's.
+    expect(picksOf(jobs)[0]).toEqual(['g_a', 'written_productive']);
+    expect(picksOf(jobs).length).toBeGreaterThan(1);
+    expect(writes(targets, 'insertSessionTarget')).toEqual([['s_new', expect.objectContaining({ daysLeft: 1, pastBudget: true, owedGlossIds: ['g_a', 'g_b'] })]]);
+  });
+
   it("leaves practice more only the day's room for new words, less the in-flight session's first meetings (ruling T3-n)", async () => {
     // Forty days left, made today: one word of three planned today (g_a, started and ready, so
     // the day is done) and two later. Fourteen first meetings today, g_a's among them, and the

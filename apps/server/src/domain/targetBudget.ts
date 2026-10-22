@@ -65,3 +65,12 @@ export function playTodayForward(input: { pick: Omit<TargetPickInput, 'day' | 'm
 export function pastBudget(input: { budget: number | null; done: number; inFlight: boolean }): boolean {
   return input.budget !== null && input.done + (input.inFlight ? 1 : 0) >= input.budget;
 }
+
+/**
+ * Phase 71 (spec D2). Whether a target path's next session is a full one, the owed work first and
+ * then practice more (the picker's past_budget mode): always on the eve, which has no daily goal,
+ * and before it once the day's budget is met (pastBudget).
+ */
+export function fullSession(input: { daysLeft: number; budget: number | null; done: number; inFlight: boolean }): boolean {
+  return input.daysLeft === 1 || pastBudget(input);
+}

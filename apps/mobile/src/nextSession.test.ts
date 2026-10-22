@@ -189,6 +189,7 @@ const targetWith = (session: CurrentSessionResponse['current']): TargetSummary =
   readiness_pct: 18,
   readiness_start_pct: 18,
   practice_more_little: false,
+  word_readiness: [],
   today: { state: 'owed', done: 0, planned: 8, extra: 0, next_practice_in: null, sessions_budget: null, sessions_offer: 0, sessions_done: 0, ended_early: false, minutes: 0 },
   session,
 });

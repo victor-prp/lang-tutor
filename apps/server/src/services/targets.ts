@@ -190,12 +190,27 @@ export function createTargetService({
       const offered = budget === null && read !== null && activeOn(target, today);
       const played = offered && day.state === 'owed' ? await readTodayBudget(repos, enrolled, target, devices, today, shared) : null;
       const sessionsDone = played?.doneBefore ?? (await repos.session.countCompletedOn(enrolled.id, target.id, today));
+      // Phase 67b (spec D6): whether one more session today can raise the card; an unmet word
+      // needs the day's room for new words. Phase 71 (spec D1): the eve is owed while it can.
+      const canRaise = canRaiseToday({
+        daysLeft: daysBetween(today, target.dueOn),
+        newRoom: Math.max(0, (await shared.dayCap()) - (await shared.introduced()).length),
+        words: shown.map((glossId, i) => {
+          const word = dayOf.get(glossId)!;
+          return {
+            readinessPct: readiness.words[i].readinessPct,
+            met: word.state !== 'later' && !word.toStart,
+            weakestOpenToday: readiness.words[i].weakestOpenToday,
+          };
+        }),
+      });
       const todays = todaySummary({
         plan: day.state,
         daysLeft: day.daysLeft,
         budget,
         offer: offered ? (played ?? { sessions: sessionsDone, cards: 0 }) : null,
         sessionsDone,
+        canRaise,
       });
       const { started, stock } = await repos.session.findOpen(enrolled.id, target.id);
       const latest = started || stock ? undefined : await repos.session.findLatest(enrolled.id, target.id);
@@ -211,19 +226,10 @@ export function createTargetService({
         readiness_pct: readiness.readinessPct,
         readiness_start_pct: readiness.readinessStartPct,
         // Phase 67b (spec D6): the app asks before practice more only when one more session today
-        // cannot raise the card; an unmet word needs the day's room for new words.
-        practice_more_little: !canRaiseToday({
-          daysLeft: daysBetween(today, target.dueOn),
-          newRoom: Math.max(0, (await shared.dayCap()) - (await shared.introduced()).length),
-          words: shown.map((glossId, i) => {
-            const word = dayOf.get(glossId)!;
-            return {
-              readinessPct: readiness.words[i].readinessPct,
-              met: word.state !== 'later' && !word.toStart,
-              weakestOpenToday: readiness.words[i].weakestOpenToday,
-            };
-          }),
-        }),
+        // cannot raise the card.
+        practice_more_little: !canRaise,
+        // Phase 71 (spec D3): each word's readiness, for the eve's bars on the home list.
+        word_readiness: words.map((word) => word.readiness_pct),
         today: {
           state: todays.state,
           done: day.done,
