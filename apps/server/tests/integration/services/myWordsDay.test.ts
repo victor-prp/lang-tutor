@@ -7,7 +7,7 @@ import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import { markQuestionTypes, readMyWordsDays, storeMyWordsGoal } from '../../support/myWordsRows';
 import { asChoice, insertListSession, type AskedGloss } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
-import { enrollmentOf, seedEnrollment, seedUser } from '../../support/seedUser';
+import { enrollmentOf, seedEnrollment, seedUser, setTimeZone } from '../../support/seedUser';
 import { setLevel } from '../../support/progressRows';
 import { markSeed } from '../../support/sessionRows';
 import { seedTarget, setTargetWord } from '../../support/targetRows';
@@ -120,16 +120,30 @@ describe('a counted My words session records its day', () => {
   });
 
   it("lands a session started at 23:50 and completed at 00:10 on the new day, in the learner's zone", async () => {
+    // Jerusalem is UTC+2 in March: local midnight is 22:00Z, so UTC's date stays the 4th.
+    await setTimeZone(t.db, 'u_1', 'Asia/Jerusalem');
     const apple = await word(E, 'apple', 'תפוח');
     const bread = await word(E, 'bread', 'לחם');
     const session = await mainSession(E, [apple, bread]);
-    clock = Date.parse('2026-03-04T23:50:00Z');
+    clock = Date.parse('2026-03-04T21:50:00Z');
     const [first, last] = session.questions.map(asChoice);
     await service.submitAnswer('u_1', session.sessionId, first.id, { option_index: first.correct_option });
-    clock = Date.parse('2026-03-05T00:10:00Z');
+    clock = Date.parse('2026-03-04T22:10:00Z');
     await service.submitAnswer('u_1', session.sessionId, last.id, { option_index: last.correct_option });
 
     expect(await readMyWordsDays(t.db, E)).toMatchObject([{ day: '2026-03-05', sessionsDone: 1 }]);
+  });
+
+  it('does not count a word first answered in a still-open session new for a later My words session', async () => {
+    const [apple, bread] = [await word(E, 'apple', 'תפוח'), await word(E, 'bread', 'לחם')];
+    const homework = await seedTarget(t.db, { enrollmentId: E, kind: 'homework', dueOn: '2026-03-20', glossIds: [apple.glossId, bread.glossId] });
+    for (const w of [apple, bread]) await setTargetWord(t.db, { targetId: homework, glossId: w.glossId, startedOn: '2026-03-03', halves: {} });
+    const open = await mainSession(E, [apple, bread], homework);
+    const first = asChoice(open.questions[0]);
+    await service.submitAnswer('u_1', open.sessionId, first.id, { option_index: first.correct_option });
+    await complete(await mainSession(E, [apple]));
+
+    expect(await readMyWordsDays(t.db, E)).toMatchObject([{ sessionsDone: 1, newWords: 0 }]);
   });
 
   it('keeps two enrollments of one learner apart', async () => {

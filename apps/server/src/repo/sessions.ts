@@ -407,8 +407,8 @@ export function createSessionRepo(tx: Tx) {
     },
 
     /** Phase 73 (spec D3). Per saved gloss, the session of its first answer given while saved,
-     *  over every session of every path (as findIntroducedOn reads it), kept when that session
-     *  counts for `day`: the words a day's My words sessions introduced. */
+     *  over every session of every path, open ones too (as findIntroducedOn reads it), by
+     *  answer time, kept when that session counts for `day` (an open one never does): the words a day's My words sessions introduced. */
     findFirstAnswerSessions: async (enrollmentId: string, day: string): Promise<{ glossId: string; sessionId: string }[]> => {
       const rows = await tx.execute<{ gloss_id: string; session_id: string; practice_day: string | null }>(sql`
         SELECT DISTINCT ON (q.gloss_id) q.gloss_id, s.id AS session_id, s.practice_day::text AS practice_day
@@ -418,8 +418,8 @@ export function createSessionRepo(tx: Tx) {
         JOIN vocabulary_entries ve ON ve.enrollment_id = s.enrollment_id AND ve.gloss_id = q.gloss_id
         WHERE s.enrollment_id = ${enrollmentId}
           AND a.answered_at >= ve.created_at
-          AND s.practice_day IS NOT NULL
-        ORDER BY q.gloss_id, s.practice_day, s.created_at, a.answered_at`);
+          AND (s.practice_day IS NOT NULL OR s.status IN ('preparing', 'ready'))
+        ORDER BY q.gloss_id, a.answered_at`);
       return rows.rows
         .filter((row) => row.practice_day === day)
         .map((row) => ({ glossId: row.gloss_id, sessionId: row.session_id }));
