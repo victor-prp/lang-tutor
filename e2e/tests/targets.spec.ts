@@ -448,7 +448,8 @@ const createsSent = (diagnostics: { apiRequests: string[] }) =>
 
 /** Results lead home, where every card is read again. */
 async function backHome(page: Page) {
-  await page.getByTestId('results-next-session').click();
+  // Phase 72 (spec D3): a target session's results continue on its path; סיום goes home.
+  await page.getByTestId('results-done').click();
   await expect(page.getByTestId('results-score')).toBeHidden();
 }
 

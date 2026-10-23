@@ -62,7 +62,8 @@ async function tapCardUntil(page: Page, targetId: string, shown: string) {
  *  path's next session is ready (home's button is not pressable while it is prepared). */
 async function playAndReturn(page: Page, request: APIRequestContext, enrollmentId: string, targetId: string) {
   await playSessionRight(page, request, [WORD]);
-  await page.getByTestId('results-next-session').click();
+  // Phase 72 (spec D3): a target session's results continue on its path; סיום goes home.
+  await page.getByTestId('results-done').click();
   await expect(page.getByTestId('results-score')).toBeHidden();
   await readyPathSession(page.request, enrollmentId, targetId);
   await showCard(page, targetId);
