@@ -634,6 +634,16 @@ describe('a target path on create and current', () => {
       body: { current: null, next_source: 'list', saved_count: 1, due_count: 1 },
     });
   });
+
+  // Phase 72 (spec D1). The results screen learns the session's target from its read.
+  it("names a target path's session's target on GET /api/sessions/:id, and no target for the main path's", async () => {
+    const app = buildTestApp();
+    // The seed first: any session at all puts it behind (phase 57, spec D2).
+    expect(await startSeed(app, E())).not.toHaveProperty('target_id');
+    const target = await targetOf('u_1', '2099-01-01');
+    const created = await (await postJson(app, '/api/sessions', { enrollment_id: E(), target_id: target })).json();
+    expect(await (await getJson(app, `/api/sessions/${created.session_id}`)).json()).toMatchObject({ target_id: target });
+  });
 });
 
 // Phase 29 (spec D13): practising is the owner's alone, whether the request
