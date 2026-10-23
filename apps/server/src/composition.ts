@@ -21,6 +21,7 @@ import { createDiscoveryRepo } from './repo/discovery';
 import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
+import { createMyWordsDayRepo } from './repo/myWordsDays';
 import { createTargetBudgetRepo } from './repo/targetBudgets';
 import { createTargetReadinessRepo } from './repo/targetReadiness';
 import { createTargetRepo } from './repo/targets';
@@ -147,6 +148,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     targetSkills: createTargetSkillRepo(tx),
     targetReadiness: createTargetReadinessRepo(tx),
     targetBudgets: createTargetBudgetRepo(tx),
+    myWordsDays: createMyWordsDayRepo(tx),
     discovery: createDiscoveryRepo(tx),
   };
 }

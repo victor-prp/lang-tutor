@@ -449,6 +449,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     targetReadiness: repos.targetReadiness ?? unreachableRepo('target readiness repo'),
     targetBudgets: repos.targetBudgets ?? unreachableRepo('target budget repo'),
     discovery: repos.discovery ?? unreachableRepo('discovery repo'),
+    myWordsDays: repos.myWordsDays ?? unreachableRepo('my words day repo'),
   };
   return (run) => run(bound);
 }

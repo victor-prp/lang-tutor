@@ -147,6 +147,7 @@ import {
   WrongScript,
 } from '../errors';
 import type { Logger } from '../logger';
+import { recordMyWordsDay } from './myWordsDay';
 import { authorizeEnrollment } from './access';
 import { learnerDay } from './learnerDay';
 import { readFamilies, readTargetDay, readTargetPickInput, readTodayBudget } from './targetDayRead';
@@ -1242,6 +1243,12 @@ export function createSessionService({
           const reminderId = reminderForSession(await repos.reminders.sentOnDay(enrolled.user_id, day), endedAt);
           if (reminderId) await repos.reminders.markSession(reminderId, sessionId);
           await recordProgress(repos, sessionId, enrolled.id);
+          // Phase 73 (spec D2). A counted My words session (main path, a practice of the list) writes
+          // its day; the repo's own definition of "counted" decides, so a target's session, a seed
+          // and a tester's question-types session write none.
+          if ((await repos.session.findCountedMainSessions(enrolled.id, day)).includes(sessionId)) {
+            await recordMyWordsDay(repos, logger, { enrollmentId: enrolled.id, day, sessionId, reason: 'session' });
+          }
           // Phase 43 (spec D3). A stock that failed, or was never built, is
           // built now; one already there makes this a no-op. Its path's (phase 57).
           await requestStock(repos, { enrollment_id: enrolled.id, reason: 'complete', ...pathPayload(await pathOf()) });

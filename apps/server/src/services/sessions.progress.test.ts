@@ -122,6 +122,8 @@ function world(opts: {
     },
     // Phase 43 (spec D2). Started by its start call before any of these answers.
     markStarted: async () => false,
+    // Phase 73 (spec D2): the session is not a counted My words one, so its completion records no day.
+    findCountedMainSessions: async () => [],
   });
   const jobs = createFakeJobRepo();
   const progress = stub<ProgressRepo>({

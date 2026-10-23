@@ -12,6 +12,7 @@ import type { ReminderRepo } from '../repo/reminders';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { TargetRepo } from '../repo/targets';
+import type { MyWordsDayRepo } from '../repo/myWordsDays';
 import type { TargetBudgetRepo } from '../repo/targetBudgets';
 import type { TargetReadinessRepo } from '../repo/targetReadiness';
 import type { TargetSkillRepo } from '../repo/targetSkills';
@@ -51,6 +52,7 @@ export type Repos = {
   targetReadiness: TargetReadinessRepo;
   // Phase 65 (spec D7). Today's budget per target, set at its path's first session of the day.
   targetBudgets: TargetBudgetRepo;
+  myWordsDays: MyWordsDayRepo;
   // Phase 69 (spec D9). Words for me: a learner's profile, runs and cards.
   discovery: DiscoveryRepo;
 };
