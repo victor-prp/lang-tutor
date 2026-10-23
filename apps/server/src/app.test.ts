@@ -32,6 +32,9 @@ const unreachableSessions: SessionService = {
   createNextSession: () => {
     throw new Error('the health route must not reach the session service');
   },
+  myWordsDay: () => {
+    throw new Error('the health route must not reach the session service');
+  },
   startSession: () => {
     throw new Error('the health route must not reach the session service');
   },

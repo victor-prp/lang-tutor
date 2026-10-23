@@ -1035,6 +1035,19 @@ export function createSessionService({
      *  holds (a target's stock chosen on an earlier day, or as practice more: final review
      *  C1), and the stock is read again under it. Phase 57 (spec D11): and how many of the
      *  path's words wait (waitingOn). */
+    /** Phase 75 (spec D1). What a reminder reads of My words: currentSession's day, waiting and
+     *  saved counts for the main path, without its writes (no stale stock replaced, nothing
+     *  logged). One read transaction. */
+    myWordsDay: (actorUserId: string, enrollmentId: string): Promise<{ today: MyWordsToday; waiting: number; saved: number }> =>
+      transaction(async (repos) => {
+        const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
+        return {
+          today: await myWordsToday(repos, enrolled),
+          waiting: await waitingOn(repos, enrolled, null),
+          saved: await savedOn(repos, enrolled, null),
+        };
+      }),
+
     currentSession: async (
       actorUserId: string,
       enrollmentId: string,
