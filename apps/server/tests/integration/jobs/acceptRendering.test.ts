@@ -280,9 +280,10 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
 
   it("never writes a session's own typed alternatives into the dictionary", async () => {
     await expectAccept(ns, { answers: ['codex'], answer_form: null });
-    // Phase 54 (spec D5), phase 55 (spec D3): the two new words' ladders, stage by stage, merged
-    // with tome's typed translation (q7): their intro stages q1-q4 ask nothing.
-    await expectDistractors(ns, { tasks: [null, null, null, null, 'meaning', 'meaning', 'typed', 'word', 'word', 'typed', 'typed'] });
+    // Order by word (2026-10-23): the two new words' intro stages first (q1-q4, asking nothing), then
+    // sprint's multiple choice, tome's typed translation (q6, not a second multiple choice in a row),
+    // lantern's, and the two ladders' reverse choices and typed translations.
+    await expectDistractors(ns, { tasks: [null, null, null, null, 'meaning', 'typed', 'meaning', 'word', 'word', 'typed', 'typed'] });
     await expectCheck(ns);
     await registerWorkers(boss, deps(), { pollingIntervalSeconds: 0.5 });
     const { sessionId, saved } = await requestListSession({ typedTome: true });

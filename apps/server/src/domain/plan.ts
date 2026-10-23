@@ -26,8 +26,10 @@ import { READ_ALOUD_MAX_LEVEL } from './progress';
  *  `ladder`: phase 54 (spec D3), a new word's first session: the pick is asked
  *  as the cards of ladderCards, whatever its rung, R, level and flags say
  *  (phase 55, spec D2: its tiles and speakable still choose the intro's
- *  cards); absent is false. */
+ *  cards); absent is false. `glossId`: the word the pick asks (2026-10-23, order by word, spec D1):
+ *  picks with one glossId are one word, whose cards the order keeps as one sequence. */
 export type PlanPick = {
+  glossId: string;
   form: string;
   translation: string;
   tiles: boolean;
@@ -263,45 +265,94 @@ function cardFor(pick: PlanPick, used: ReadonlyMap<QuestionType, number>, listen
  *  (spec D2, as ruled) `intro`. */
 type Unit = { indices: number[]; type: QuestionType; types?: QuestionType[]; intro?: true; p: number; step: boolean };
 
-/** Whether `counts`, the types still to place, can follow `last` with no type
- *  twice in a row: no type more than half of what is left, rounded up, or
- *  rounded down for the type just placed. */
-function separable(counts: ReadonlyMap<QuestionType, number>, last: QuestionType | null): boolean {
+/** Whether `counts`, what is still to place by type or by word, can follow `last`
+ *  with no key twice in a row: no key more than half of what is left, rounded up,
+ *  or rounded down for the key just placed. */
+function separable<K>(counts: ReadonlyMap<K, number>, last: K | null): boolean {
   let left = 0;
   for (const n of counts.values()) left += n;
-  for (const [type, n] of counts) {
-    if (n > (type === last ? Math.floor(left / 2) : Math.ceil(left / 2))) return false;
+  for (const [key, n] of counts) {
+    if (n > (key === last ? Math.floor(left / 2) : Math.ceil(left / 2))) return false;
   }
   return true;
 }
 
-/** Spec D6. Highest p first, and no type twice in a row where an order without
- *  it exists: the highest-p unit whose type differs from the last and leaves
- *  the rest separable, else the highest-p one that differs, else the highest.
- *  `last` is the type placed just before these units, if any. */
-function ordered(units: Unit[], before: QuestionType | null): { out: Unit[]; last: QuestionType | null } {
-  const left = [...units].sort((a, b) => b.p - a.p || a.indices[0] - b.indices[0]);
-  const counts = new Map<QuestionType, number>();
-  for (const unit of left) counts.set(unit.type, (counts.get(unit.type) ?? 0) + 1);
-  const out: Unit[] = [];
-  let last: QuestionType | null = before;
-  while (left.length > 0) {
-    const fits = (unit: Unit) => {
-      if (unit.type === last) return false;
-      counts.set(unit.type, counts.get(unit.type)! - 1);
-      const ok = separable(counts, unit.type);
-      counts.set(unit.type, counts.get(unit.type)! + 1);
-      return ok;
+/** `counts` with one fewer of `key`. */
+const lessOne = <K>(counts: ReadonlyMap<K, number>, key: K): Map<K, number> => new Map(counts).set(key, (counts.get(key) ?? 0) - 1);
+
+/** The board's sequence, which no gloss id can name. */
+const BOARD = '\u0000board';
+
+/**
+ * Order by word (2026-10-23, spec D3, D4). `sequences` holds each word's units in the order the word
+ * asks them. One pass: at each position every sequence offers its next unit, and the one placed is
+ * decided by these in turn, the first that tells two apart deciding: a new word's meet first (R1);
+ * not of a word just placed; every word can still be kept apart; not the type just placed; every type
+ * can still be kept apart; the sequence with the most of its units left for the positions left; the
+ * higher p; the lower pick index. A board is each of its four words to the word tests. Phase 37 D6: a
+ * return is offered once every unit that is neither a return nor of a `streamed` word (a ladder's or a
+ * step-down's) is placed, and while it waits the type test counts only what can go before it (D4).
+ */
+function byWord(sequences: ReadonlyMap<string, readonly Unit[]>, wordsOf: (unit: Unit) => ReadonlySet<string>, streamed: ReadonlySet<string>): Unit[] {
+  const total = [...sequences.values()].reduce((sum, sequence) => sum + sequence.length, 0);
+  const placed = new Map<string, number>();
+  const rest = (key: string) => sequences.get(key)!.slice(placed.get(key) ?? 0);
+  const merged: Unit[] = [];
+  while (merged.length < total) {
+    const t = merged.length;
+    const last = merged[t - 1];
+    const lastWords = last ? wordsOf(last) : new Set<string>();
+    const lastType = last ? (last.types?.[last.types.length - 1] ?? last.type) : null;
+    const waiting = [...sequences.keys()].some((key) => !streamed.has(key) && rest(key).some((unit) => !unit.step));
+    const words = new Map<string, number>();
+    const types = new Map<QuestionType, number>();
+    for (const key of sequences.keys()) {
+      for (const unit of rest(key)) {
+        for (const word of wordsOf(unit)) words.set(word, (words.get(word) ?? 0) + 1);
+        if (!waiting || !unit.step) types.set(unit.type, (types.get(unit.type) ?? 0) + 1);
+      }
+    }
+    /** Whether, after `unit`, some word holds more units than the others can keep apart: the test
+     *  separable() makes, with a board counted once for each of its words. */
+    const wordsStuck = (unit: Unit) => {
+      const own = wordsOf(unit);
+      const left = total - t - 1;
+      for (const [word, n] of words) {
+        if (n - (own.has(word) ? 1 : 0) > (own.has(word) ? Math.floor(left / 2) : Math.ceil(left / 2))) return true;
+      }
+      return false;
     };
-    let at = left.findIndex(fits);
-    if (at < 0) at = left.findIndex((unit) => unit.type !== last);
-    if (at < 0) at = 0;
-    const [unit] = left.splice(at, 1);
-    counts.set(unit.type, counts.get(unit.type)! - 1);
-    out.push(unit);
-    last = unit.type;
+    const heads = [...sequences].flatMap(([key, sequence]) => {
+      const k = placed.get(key) ?? 0;
+      return k < sequence.length ? [{ key, unit: sequence[k], k, n: sequence.length }] : [];
+    });
+    const open = heads.filter(({ unit }) => !waiting || !unit.step);
+    const meeting = t === 0 && heads.some(({ unit }) => unit.type === 'meet');
+    const scored = (open.length > 0 ? open : heads).map((head) => {
+      const { unit, k, n } = head;
+      const score = [
+        meeting && unit.type !== 'meet' ? 1 : 0,
+        [...wordsOf(unit)].some((word) => lastWords.has(word)) ? 1 : 0,
+        wordsStuck(unit) ? 1 : 0,
+        (unit.types?.[0] ?? unit.type) === lastType ? 1 : 0,
+        separable(lessOne(types, unit.type), unit.type) ? 0 : 1,
+        // Final review: the share of the positions left the word's units need. An ideal slot spread
+        // over the whole session left a ladder's last cards to the end, after every one-card word.
+        -(n - k) / (total - t),
+        -unit.p,
+        unit.indices[0],
+      ];
+      return { head, score };
+    });
+    const first = (a: number[], b: number[]) => a.findIndex((value, i) => value !== b[i]);
+    const best = scored.reduce((winner, next) => {
+      const i = first(next.score, winner.score);
+      return i >= 0 && next.score[i] < winner.score[i] ? next : winner;
+    });
+    merged.push(best.head.unit);
+    placed.set(best.head.key, best.head.k + 1);
   }
-  return { out, last };
+  return merged;
 }
 
 export function planCards(picks: readonly PlanPick[], input: PlanInput): SessionPlan {
@@ -357,64 +408,39 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
   );
   if (board) units.push({ indices: board, type: 'matching', p: Math.max(...board.map((index) => cards[index]?.p ?? 1)), step: false });
 
-  // Phase 55 (spec D3). A word's intro stage is one unit, so nothing is merged inside it;
-  // then every ladder's first practice card, its second, its third, each stage in pick order.
-  // The ladder's own speaking is the session's (input.speaking), not the one-word rule's.
+  // Order by word (2026-10-23, spec D2). Each word's units are one sequence, in the order the word
+  // asks them: its ladder's intro stage (one unit, phase 55 D3) and practice cards, its step-down's
+  // see, pick and produce (phase 68 D2), then its other cards in pick order, so the 67b say card is a
+  // new word's last. The board is a sequence of its own. The ladder's own speaking is the session's
+  // (input.speaking), not the one-word rule's.
   const ladders = picks.flatMap((pick, index) => (pick.ladder ? [index] : []));
-  const cardsOf = ladders.map((index) => ladderCards(picks[index], input.speaking));
-  const intro: Unit[] = ladders.map((index, k) => ({
-    indices: cardsOf[k].intro.map(() => index),
-    type: 'meet',
-    types: cardsOf[k].intro,
-    intro: true,
-    p: 1,
-    step: false,
-  }));
-  const practice = (stage: number): Unit[] =>
-    ladders.map((index, k) => ({ indices: [index], type: cardsOf[k].practice[stage], p: 1, step: false }));
-  // Phase 68 (spec D2). A step-down's see, pick and produce cards, each stage between the ladders'.
-  const relearnStage = (stage: 'see' | 'pick' | 'produce'): Unit[] =>
-    relearns.flatMap((index) => {
-      const type = relearnOf.get(index)![stage];
-      if (type === null) return [];
-      const evidence = stage === 'produce' && picks[index].relearn === 'counts';
-      return [{ indices: [index], type, ...(evidence ? {} : { intro: true as const }), p: 1, step: false }];
-    });
-  const stream: Unit[] = [
-    ...intro,
-    ...relearnStage('see'),
-    ...practice(0),
-    ...relearnStage('pick'),
-    ...practice(1),
-    ...relearnStage('produce'),
-    ...practice(2),
-  ];
-
-  // Phase 37 (spec D6): the returns after every other card, so each is at least
-  // the rest of the session away from the answer that owed it. Phase 54 (spec D5,
-  // as ruled): they are the last of the other cards, ordered as before, so they
-  // follow every other card but can go between a ladder's cards: a session of one
-  // ladder and its returns does not ask the ladder back to back. With no ladder,
-  // the returns come last, as before.
-  const first = ordered(units.filter((unit) => !unit.step), null);
-  const returns = ordered(units.filter((unit) => unit.step), first.last);
-  const others = [...first.out, ...returns.out];
-
-  // Merged evenly with the other cards: the stream places its next unit when its
-  // share of the stream placed is no more than the other cards' share. A ladder
-  // unit never follows its own word while another card is left to put between
-  // them.
-  const merged: Unit[] = [];
-  let a = 0;
-  let b = 0;
-  while (a < stream.length || b < others.length) {
-    const L = stream.length;
-    const O = others.length;
-    let fromStream = b >= O || (a < L && (a + 0.5) / L <= (b + 0.5) / O);
-    const last = merged[merged.length - 1];
-    if (fromStream && b < O && last && last.indices.includes(stream[a].indices[0])) fromStream = false;
-    merged.push(fromStream ? stream[a++] : others[b++]);
+  const sequences = new Map<string, Unit[]>();
+  const sequenceOf = (key: string): Unit[] => {
+    const sequence = sequences.get(key) ?? [];
+    sequences.set(key, sequence);
+    return sequence;
+  };
+  for (const index of ladders) {
+    const { intro, practice } = ladderCards(picks[index], input.speaking);
+    const sequence = sequenceOf(picks[index].glossId);
+    sequence.push({ indices: intro.map(() => index), type: 'meet', types: intro, intro: true, p: 1, step: false });
+    for (const type of practice) sequence.push({ indices: [index], type, p: 1, step: false });
   }
+  for (const index of relearns) {
+    const sequence = sequenceOf(picks[index].glossId);
+    for (const stage of ['see', 'pick', 'produce'] as const) {
+      const type = relearnOf.get(index)![stage];
+      if (type === null) continue;
+      const evidence = stage === 'produce' && picks[index].relearn === 'counts';
+      sequence.push({ indices: [index], type, ...(evidence ? {} : { intro: true as const }), p: 1, step: false });
+    }
+  }
+  for (const unit of units) sequenceOf(unit.type === 'matching' ? BOARD : picks[unit.indices[0]].glossId).push(unit);
+
+  // Phase 37 (spec D6): the returns after every other card but a ladder's or a step-down's word's,
+  // so each is at least the rest of the session away from the answer that owed it.
+  const streamed = new Set([...ladders, ...relearns].map((index) => picks[index].glossId));
+  const merged = byWord(sequences, (unit) => new Set(unit.indices.map((index) => picks[index].glossId)), streamed);
 
   const order: number[] = [];
   const types: QuestionType[] = [];

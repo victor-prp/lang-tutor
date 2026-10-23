@@ -2811,10 +2811,10 @@ describe('prepareSession, a ladder (phase 54, spec D3, D7; phase 55, spec D2)', 
       example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null,
     });
     const context = [...CONTEXT, row(3, 'быстро', 'מהר'), row(4, 'дом', 'בית'), row(5, 'окно', 'חלון'), row(6, 'стол', 'שולחן')];
-    // The ladder (g-s1) and five others, which outnumber its four units: the merge places an
-    // other first. In plan order: лук's multiple choice; the ladder's meet card and tiles; быстро's
-    // tiles; the ladder's multiple choice; стол's typed card; the ladder's reverse choice; дом's;
-    // the ladder's typed card; окно's.
+    // The ladder (g-s1) and five others. Order by word (2026-10-23, R1): the ladder's meet card and
+    // tiles open the session. Then лук's multiple choice; быстро's tiles; the ladder's multiple
+    // choice; стол's typed card; the ladder's reverse choice; окно's typed card; дом's reverse choice;
+    // the ladder's typed card: no type twice in a row.
     const picks = [
       { gloss_id: 'g-s1', sense_id: 's1', variant_id: 'v1', ladder: true },
       { gloss_id: 'g-s2', sense_id: 's2', variant_id: 'v2', ...RECOGNISE },
@@ -2829,18 +2829,32 @@ describe('prepareSession, a ladder (phase 54, spec D3, D7; phase 55, spec D2)', 
       const { service, calls } = world({ context, reply: answering() });
       await service.prepareSession({ ...PAYLOAD, picks });
       expect(insertedOf(calls).map((q) => `${q.type}:${q.glossId}`)).toEqual([
-        'multiple_choice:g-s2', 'meet:g-s1', 'letter_tiles:g-s1', 'letter_tiles:g-s3', 'multiple_choice:g-s1',
-        'typed_translation:g-s6', 'reverse_choice:g-s1', 'reverse_choice:g-s4', 'typed_translation:g-s1', 'typed_translation:g-s5',
+        'meet:g-s1', 'letter_tiles:g-s1', 'multiple_choice:g-s2', 'letter_tiles:g-s3', 'multiple_choice:g-s1',
+        'typed_translation:g-s6', 'reverse_choice:g-s1', 'typed_translation:g-s5', 'reverse_choice:g-s4', 'typed_translation:g-s1',
       ]);
-      expect(marks(calls)).toEqual([false, true, true, false, false, false, false, false, false, false]);
+      expect(marks(calls)).toEqual([true, true, false, false, false, false, false, false, false, false]);
     });
 
-    it('keeps the mark on its card when a card before it is dropped', async () => {
-      const { service, calls, logger } = world({ context, reply: answering('лук') });
-      await service.prepareSession({ ...PAYLOAD, picks });
-      expect(events(logger, 'card_dropped')).toEqual([expect.objectContaining({ key: 'q1', type: 'multiple_choice', stage: 'validation' })]);
-      expect(insertedOf(calls).slice(0, 3).map((q) => `${q.type}:${q.glossId}`)).toEqual(['meet:g-s1', 'letter_tiles:g-s1', 'letter_tiles:g-s3']);
-      expect(marks(calls)).toEqual([true, true, false, false, false, false, false, false, false]);
+    it("keeps the mark on its card when a card before it is dropped: a step-down's pick card", async () => {
+      // Order by word (2026-10-23, R1): nothing comes before a ladder's intro stage any more, so a
+      // step-down's marked cards (phase 68 D2), which other cards can precede, carry the check. In plan
+      // order: прочитала's read aloud*; лук's multiple choice, refused; прочитала's reverse choice*;
+      // быстро's typed meaning; прочитала's typed translation*, a practice step-down's; дом's dictation;
+      // окно's listen and choose. Seven cards, so the refused one is dropped (MIN_SESSION_CARDS).
+      const stepDown = [
+        { gloss_id: 'g-s1', sense_id: 's1', variant_id: 'v1', dimension: 'written_productive', rung: 2, level: 1, r: 1, relearn: 'practice' },
+        { gloss_id: 'g-s2', sense_id: 's2', variant_id: 'v2', dimension: 'written_receptive', rung: 1, level: 1, r: 1 },
+        { gloss_id: 'g-s3', sense_id: 's3', variant_id: 'v3', dimension: 'written_receptive', rung: 2, level: 3, r: 1 },
+        { gloss_id: 'g-s4', sense_id: 's4', variant_id: 'v4', dimension: 'spelling', rung: 1, level: 1, r: 1 },
+        { gloss_id: 'g-s5', sense_id: 's5', variant_id: 'v5', dimension: 'spoken_receptive', rung: 1, level: 1, r: 1 },
+      ];
+      const { service, calls, logger } = world({ context: context.slice(0, stepDown.length), reply: answering('лук') });
+      await service.prepareSession({ ...PAYLOAD, picks: stepDown, listening: true, speaking: true, target: true });
+      expect(events(logger, 'card_dropped')).toEqual([expect.objectContaining({ key: 'q2', type: 'multiple_choice', stage: 'validation' })]);
+      expect(insertedOf(calls).map((q) => `${q.type}:${q.glossId}`)).toEqual([
+        'read_aloud:g-s1', 'reverse_choice:g-s1', 'typed_meaning:g-s3', 'typed_translation:g-s1', 'dictation:g-s4', 'listen_choice:g-s5',
+      ]);
+      expect(marks(calls)).toEqual([true, true, false, true, false, false]);
     });
   });
 });
