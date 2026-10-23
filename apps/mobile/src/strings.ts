@@ -600,6 +600,14 @@ export const strings = {
     (bonus > 0 ? ` ועוד ${isolateLtr(String(bonus))} בונוס` : ''),
   targetReadinessPct: (kind: TargetKind, pct: number) => `מוכנות ${TARGET_FOR[kind]}: ${isolateLtr(`${pct}%`)}`,
   practiceNow: 'לתרגל עכשיו',
+  // Phase 73 (spec D5). My words' day: what is left, what was done, the tiles and the button
+  // once the goal is met. The goal and the minutes are targetSessionsGoal and targetSessionsMinutes.
+  myWordsTodayLeft: (left: number) =>
+    left === 1 ? 'כל הכבוד! עוד תרגול אחד להיום' : `כל הכבוד! עוד ${isolateLtr(String(left))} תרגולים להיום`,
+  myWordsTodayDone: (done: number) =>
+    done === 1 ? 'כל הכבוד! עשית תרגול אחד היום' : `כל הכבוד! עשית ${isolateLtr(String(done))} תרגולים היום`,
+  myWordsTileNew: (count: number) => (count === 1 ? 'מילה חדשה היום' : 'מילים חדשות היום'),
+  myWordsTileMovedUp: (count: number) => (count === 1 ? 'עלתה רמה היום' : 'עלו רמה היום'),
   // Phase 64 (spec D4, D5). The card's blue header: the countdown's big line, the fuse's label
   // in the last two days, the "not ready" line and the line once every word is ready.
   countdownDays: 'ימים',

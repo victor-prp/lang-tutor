@@ -1,6 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
 import type { CurrentSessionResponse, TargetSummary } from '@lang-tutor/core/api';
-import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import {
   createLook,
@@ -39,15 +38,15 @@ const withCurrent = (
 
 describe('homeActionOf — the seven home states', () => {
   it.each([
-    ['no session yet: start the seed', none('seed'), { kind: 'start-seed' }],
+    ['no session yet, nothing saved: Words for me', none('seed'), { kind: 'discover' }],
     ['past the seed with saved words: create', none('list', 3), { kind: 'create' }],
-    ['past the seed with nothing saved', none('list', 0), { kind: 'save-words-first' }],
+    ['past the seed with nothing saved', none('list', 0), { kind: 'discover' }],
     ['preparing', withCurrent('preparing'), { kind: 'preparing', sessionId: 's1' }],
     ['ready and untouched: start', withCurrent('ready', 0), { kind: 'start', sessionId: 's1' }],
     ['ready with answers: resume', withCurrent('ready', 2), { kind: 'resume', sessionId: 's1' }],
     ['failed, with saved words to try again', withCurrent('failed'), { kind: 'failed' }],
     // create would answer 409 no_saved_words and loop silently
-    ['failed, with nothing saved', withCurrent('failed', 0, 0), { kind: 'save-words-first' }],
+    ['failed, with nothing saved', withCurrent('failed', 0, 0), { kind: 'discover' }],
   ])('%s', (_label, state, action) => {
     expect(homeActionOf(state)).toEqual(action);
   });
@@ -108,7 +107,7 @@ describe('shouldAutoCreate', () => {
   it('sends nothing for any other state', () => {
     expect(shouldAutoCreate({ kind: 'start', sessionId: 's1' }, null, 'e1')).toBe(false);
     expect(shouldAutoCreate({ kind: 'failed' }, null, 'e1')).toBe(false);
-    expect(shouldAutoCreate({ kind: 'save-words-first' }, null, 'e1')).toBe(false);
+    expect(shouldAutoCreate({ kind: 'discover' }, null, 'e1')).toBe(false);
     expect(shouldAutoCreate(null, null, 'e1')).toBe(false);
   });
 });
@@ -150,8 +149,7 @@ describe('reminderStartOf', () => {
     expect(reminderStartOf({ kind: 'start', sessionId: 's1' }, stale)).toEqual({ kind: 'wait' });
     expect(reminderStartOf({ kind: 'resume', sessionId: 's1' }, stale)).toEqual({ kind: 'wait' });
     // Nor does a held state with nothing to start clear the param before the new read says so.
-    expect(reminderStartOf({ kind: 'start-seed' }, stale)).toEqual({ kind: 'wait' });
-    expect(reminderStartOf({ kind: 'save-words-first' }, stale)).toEqual({ kind: 'wait' });
+    expect(reminderStartOf({ kind: 'discover' }, stale)).toEqual({ kind: 'wait' });
     expect(reminderStartOf({ kind: 'failed' }, stale)).toEqual({ kind: 'wait' });
     expect(reminderStartOf({ kind: 'create' }, stale)).toEqual({ kind: 'wait' });
     expect(reminderStartOf({ kind: 'preparing', sessionId: 's1' }, stale)).toEqual({ kind: 'wait' });
@@ -170,8 +168,7 @@ describe('reminderStartOf', () => {
   });
 
   it('clears when the new read has nothing ready to start', () => {
-    expect(reminderStartOf({ kind: 'start-seed' }, fresh)).toEqual({ kind: 'clear' });
-    expect(reminderStartOf({ kind: 'save-words-first' }, fresh)).toEqual({ kind: 'clear' });
+    expect(reminderStartOf({ kind: 'discover' }, fresh)).toEqual({ kind: 'clear' });
     expect(reminderStartOf({ kind: 'failed' }, fresh)).toEqual({ kind: 'clear' });
   });
 });
@@ -376,16 +373,15 @@ describe('myWordsLine', () => {
     expect(myWordsLine(none('list', 30), 'איטלקית')).toBe('30 משמעויות שמורות באיטלקית');
   });
 
-  it("names the seed's words before the first session", () => {
-    expect(myWordsLine(none('seed'), 'איטלקית')).toBe('10 מילים באיטלקית');
+  it('counts the saved meanings in a seed state too (no seed branch)', () => {
+    expect(myWordsLine(none('seed', 0), 'איטלקית')).toBe('0 משמעויות שמורות באיטלקית');
   });
 });
 
 // Phase 64 (spec D4). My words' blue header and its button's look.
 describe('mainButtonSolid (phase 64, spec D4)', () => {
   it('is solid whenever the button starts or resumes a session', () => {
-    expect(mainButtonSolid({ kind: 'start-seed' })).toBe(true);
-    expect(mainButtonSolid({ kind: 'start', sessionId: 's1' })).toBe(true);
+        expect(mainButtonSolid({ kind: 'start', sessionId: 's1' })).toBe(true);
     expect(mainButtonSolid({ kind: 'resume', sessionId: 's1' })).toBe(true);
   });
 
@@ -393,7 +389,7 @@ describe('mainButtonSolid (phase 64, spec D4)', () => {
     expect(mainButtonSolid({ kind: 'preparing', sessionId: 's1' })).toBe(false);
     expect(mainButtonSolid({ kind: 'create' })).toBe(false);
     expect(mainButtonSolid({ kind: 'failed' })).toBe(false);
-    expect(mainButtonSolid({ kind: 'save-words-first' })).toBe(false);
+    expect(mainButtonSolid({ kind: 'discover' })).toBe(false);
     expect(mainButtonSolid(null)).toBe(false);
   });
 });
@@ -401,8 +397,8 @@ describe('mainButtonSolid (phase 64, spec D4)', () => {
 describe('myWordsBand (phase 64, spec D4)', () => {
   const ltr = (text: string) => `\u2066${text}\u2069`;
 
-  it('counts the seed set before the first session', () => {
-    expect(myWordsBand(none('seed'), 'איטלקית')).toEqual({ big: ltr(String(SESSION_LENGTH)), line: 'מילים באיטלקית' });
+  it('counts the saved meanings in a seed state (no seed branch)', () => {
+    expect(myWordsBand(none('seed', 0), 'איטלקית')).toEqual({ big: ltr('0'), line: 'משמעויות שמורות באיטלקית' });
   });
 
   it('counts the words due for review', () => {

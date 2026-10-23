@@ -47,7 +47,8 @@ type SessionActionProps = {
   onRetry: () => void;
   /** Phase 43 (spec D7). Home's own create for the `create` state failed. */
   makeFailed: boolean;
-  onStartSeed: () => void;
+  /** Phase 73 (spec D6). With no words of its own: on to Words for me. */
+  onDiscover: () => void;
   onMake: () => void;
   onEnter: (sessionId: string, fresh: boolean) => void;
   onSkip: (sessionId: string) => void;
@@ -61,7 +62,7 @@ function SessionAction({
   busy,
   onRetry,
   makeFailed,
-  onStartSeed,
+  onDiscover,
   onMake,
   onEnter,
   onSkip,
@@ -121,17 +122,20 @@ function SessionAction({
     );
   }
   switch (action.kind) {
-    case 'start-seed':
-      return primary('start-button', strings.practiceNow, onStartSeed);
+    case 'discover':
+      return (
+        <>
+          {emptyNote.kind === 'all-in-targets' && (
+            <Text testID="all-words-in-targets" style={styles.notice}>
+              {emptyNote.text}
+            </Text>
+          )}
+          {primary('start-button', strings.practiceNow, onDiscover)}
+        </>
+      );
     case 'create':
       // Phase 43 (spec D7). Home sends create itself: this is how it looks.
       return makeFailed ? retry : preparingLabel;
-    case 'save-words-first':
-      return (
-        <Text testID={emptyNote.kind === 'all-in-targets' ? 'all-words-in-targets' : 'save-words-first'} style={styles.notice}>
-          {emptyNote.text}
-        </Text>
-      );
     case 'preparing':
       return (
         <>

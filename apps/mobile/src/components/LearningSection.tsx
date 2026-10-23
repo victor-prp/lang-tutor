@@ -140,13 +140,6 @@ export function LearningSection({ active }: { active: Enrollment }) {
     }
   }
 
-  // The seed's cards are fixed, so its create does not wait on the voices: the
-  // start it is entered with waits instead, without holding the tap.
-  const startSeed = () =>
-    run(async () => {
-      const created = await next.create({ waitForVoices: false });
-      if (created.status === 'ready') enterSession(created.session_id, true);
-    });
   // Phase 43 (spec D7). Makes the next session without entering it: home shows
   // it preparing, then offers it.
   const makeNext = (enrollmentId: string) =>
@@ -253,7 +246,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
           busy={busy}
           onRetry={reload}
           makeFailed={createLook(makeFailedFor, active.id) === 'retry'}
-          onStartSeed={startSeed}
+          onDiscover={() => router.push({ pathname: '/discover', params: { from: 'my-words' } })}
           onMake={() => void makeNext(active.id)}
           onEnter={enterSession}
           onSkip={skip}
