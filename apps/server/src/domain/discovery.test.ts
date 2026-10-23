@@ -5,9 +5,11 @@ import {
   CANDIDATES,
   DISCOVERY_MARKER,
   EXCLUDE_IN_PROMPT,
+  PHRASES_FROM_LEVEL,
   ROUND_SIZE,
   bandOf,
   buildDiscoveryPrompt,
+  choicesOf,
   firstLevel,
   levelAfter,
   parseDiscovery,
@@ -96,6 +98,23 @@ describe('buildDiscoveryPrompt (phase 69, spec D4)', () => {
     expect(user).toMatchObject({ language: 'Italian', level: 'B1 upper', age: 10, learning_context: 'school', exclude: ['gatto', 'cane'] });
   });
 
+  it('asks every item for three wrong Hebrew meanings, and for useful words (phase 74, spec D4)', () => {
+    const { system, schema } = buildDiscoveryPrompt(input);
+    expect(system).toContain('"wrong" holds three Hebrew meanings');
+    expect(system).toContain('people use often');
+    expect(system).toContain('no rare');
+    expect(schema.shape.words.element.shape.wrong).toBeDefined();
+  });
+
+  it('asks for phrases from B2, not below (phase 74, spec D4)', () => {
+    expect(PHRASES_FROM_LEVEL).toBe(7);
+    expect(buildDiscoveryPrompt({ ...input, level: 7 }).system).toContain('About 4 of the 14 items are multi-word expressions');
+    expect(buildDiscoveryPrompt({ ...input, level: 12 }).system).toContain('About 4 of the 14 items are multi-word expressions');
+    const below = buildDiscoveryPrompt({ ...input, level: 6 }).system;
+    expect(below).not.toContain('About 4 of the 14');
+    expect(below).toContain('Mostly single words.');
+  });
+
   it('sends at most 400 words to leave out, the first ones', () => {
     const exclude = Array.from({ length: 450 }, (_, index) => `w${index}`);
     const user = JSON.parse(buildDiscoveryPrompt({ ...input, exclude }).user) as { exclude: string[] };
@@ -114,19 +133,21 @@ describe('wordKey (phase 69, spec D4)', () => {
 });
 
 describe('parseDiscovery (phase 69, spec D4)', () => {
-  const word = (text: string, hebrew = 'משהו', alternatives: string[] = []) => ({
+  const word = (text: string, hebrew = 'משהו', alternatives: string[] = [], wrong = ['כלב', 'בית', 'ספר']) => ({
     word: text,
     part_of_speech: 'noun',
     hebrew,
     alternatives,
+    wrong,
   });
   const raw = (words: unknown[]) => JSON.stringify({ words });
 
   it('keeps the words in order, each with its meanings', () => {
     const parsed = parseDiscovery(raw([word('gatto', ' חתול ', ['חתלתול', ' '])]), new Set());
     expect(parsed).toEqual({
-      words: [{ word: 'gatto', partOfSpeech: 'noun', hebrew: 'חתול', alternatives: ['חתלתול'] }],
+      words: [{ word: 'gatto', partOfSpeech: 'noun', hebrew: 'חתול', alternatives: ['חתלתול'], wrong: ['כלב', 'בית', 'ספר'] }],
       dropped: 0,
+      droppedForWrong: 0,
     });
   });
 
@@ -148,12 +169,50 @@ describe('parseDiscovery (phase 69, spec D4)', () => {
   });
 
   it('drops a word with no meaning', () => {
-    expect(parseDiscovery(raw([word('gatto', ' ')]), new Set())).toEqual({ words: [], dropped: 1 });
+    expect(parseDiscovery(raw([word('gatto', ' ')]), new Set())).toEqual({ words: [], dropped: 1, droppedForWrong: 0 });
+  });
+
+  it('drops a wrong meaning that is a right one, with or without niqqud (phase 74, spec D4)', () => {
+    const parsed = parseDiscovery(raw([word('finestra', 'חלון', ['אשנב'], ['חַלּוֹן', 'אשנב', 'דלת', 'וילון', 'מרפסת'])]), new Set());
+    expect(parsed?.words[0].wrong).toEqual(['דלת', 'וילון', 'מרפסת']);
+    expect(parsed?.droppedForWrong).toBe(0);
+  });
+
+  it('keeps the first three wrong meanings, each once, trimmed (phase 74, spec D4)', () => {
+    const parsed = parseDiscovery(raw([word('finestra', 'חלון', [], [' דלת ', 'דלת', 'וילון', 'מרפסת', 'גג'])]), new Set());
+    expect(parsed?.words[0].wrong).toEqual(['דלת', 'וילון', 'מרפסת']);
+  });
+
+  it('drops a word left with fewer than three wrong meanings in Hebrew, and counts it (phase 74, spec D4)', () => {
+    const parsed = parseDiscovery(
+      raw([word('finestra', 'חלון', [], ['דלת', 'door', 'וילון', ' ']), word('cane', 'כלב', [], ['חתול', 'כלב', 'סוס']), word('casa')]),
+      new Set(),
+    );
+    expect(parsed?.words.map((kept) => kept.word)).toEqual(['casa']);
+    expect(parsed?.dropped).toBe(2);
+    expect(parsed?.droppedForWrong).toBe(2);
   });
 
   it('answers null when the answer is not the schema', () => {
     expect(parseDiscovery('not json', new Set())).toBeNull();
     expect(parseDiscovery(JSON.stringify({ items: [] }), new Set())).toBeNull();
     expect(parseDiscovery(raw([{ word: 'gatto' }]), new Set())).toBeNull();
+  });
+});
+
+describe('choicesOf (phase 74, spec D4)', () => {
+  const wrong = ['דלת', 'וילון', 'מרפסת'];
+
+  it('puts the right meaning among the three wrong ones, at `right`', () => {
+    for (const roll of [0, 0.3, 0.6, 0.99]) {
+      const { choices, right } = choicesOf('חלון', wrong, () => roll);
+      expect(choices).toHaveLength(4);
+      expect(choices[right]).toBe('חלון');
+      expect([...choices].sort()).toEqual(['חלון', ...wrong].sort());
+    }
+  });
+
+  it('takes its order from the random source', () => {
+    expect(choicesOf('חלון', wrong, () => 0).choices).not.toEqual(choicesOf('חלון', wrong, () => 0.99).choices);
   });
 });
