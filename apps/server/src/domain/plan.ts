@@ -286,12 +286,12 @@ const BOARD = '\u0000board';
 /**
  * Order by word (2026-10-23, spec D3, D4). `sequences` holds each word's units in the order the word
  * asks them. One pass: at each position every sequence offers its next unit, and the one placed is
- * decided by these in turn, the first that tells two apart deciding: not of the word just placed;
- * every word can still be kept apart; not the type just placed; every type can still be kept apart;
- * the sequence furthest behind an even spread over the session; the higher p; the lower pick index.
- * Phase 37 D6: a return is offered once every unit that is neither a return nor of a `streamed` word
- * (a ladder's or a step-down's) is placed, and while it waits the type test counts only what can go
- * before it (D4).
+ * decided by these in turn, the first that tells two apart deciding: a new word's meet first (R1);
+ * not of a word just placed; every word can still be kept apart; not the type just placed; every type
+ * can still be kept apart; the sequence with the most of its units left for the positions left; the
+ * higher p; the lower pick index. A board is each of its four words to the word tests. Phase 37 D6: a
+ * return is offered once every unit that is neither a return nor of a `streamed` word (a ladder's or a
+ * step-down's) is placed, and while it waits the type test counts only what can go before it (D4).
  */
 function byWord(sequences: ReadonlyMap<string, readonly Unit[]>, wordsOf: (unit: Unit) => ReadonlySet<string>, streamed: ReadonlySet<string>): Unit[] {
   const total = [...sequences.values()].reduce((sum, sequence) => sum + sequence.length, 0);
@@ -307,24 +307,38 @@ function byWord(sequences: ReadonlyMap<string, readonly Unit[]>, wordsOf: (unit:
     const words = new Map<string, number>();
     const types = new Map<QuestionType, number>();
     for (const key of sequences.keys()) {
-      const units = rest(key);
-      if (units.length > 0) words.set(key, units.length);
-      for (const unit of units) if (!waiting || !unit.step) types.set(unit.type, (types.get(unit.type) ?? 0) + 1);
+      for (const unit of rest(key)) {
+        for (const word of wordsOf(unit)) words.set(word, (words.get(word) ?? 0) + 1);
+        if (!waiting || !unit.step) types.set(unit.type, (types.get(unit.type) ?? 0) + 1);
+      }
     }
+    /** Whether, after `unit`, some word holds more units than the others can keep apart: the test
+     *  separable() makes, with a board counted once for each of its words. */
+    const wordsStuck = (unit: Unit) => {
+      const own = wordsOf(unit);
+      const left = total - t - 1;
+      for (const [word, n] of words) {
+        if (n - (own.has(word) ? 1 : 0) > (own.has(word) ? Math.floor(left / 2) : Math.ceil(left / 2))) return true;
+      }
+      return false;
+    };
     const heads = [...sequences].flatMap(([key, sequence]) => {
       const k = placed.get(key) ?? 0;
       return k < sequence.length ? [{ key, unit: sequence[k], k, n: sequence.length }] : [];
     });
     const open = heads.filter(({ unit }) => !waiting || !unit.step);
+    const meeting = t === 0 && heads.some(({ unit }) => unit.type === 'meet');
     const scored = (open.length > 0 ? open : heads).map((head) => {
-      const { key, unit, k, n } = head;
+      const { unit, k, n } = head;
       const score = [
+        meeting && unit.type !== 'meet' ? 1 : 0,
         [...wordsOf(unit)].some((word) => lastWords.has(word)) ? 1 : 0,
-        separable(lessOne(words, key), key) ? 0 : 1,
+        wordsStuck(unit) ? 1 : 0,
         (unit.types?.[0] ?? unit.type) === lastType ? 1 : 0,
         separable(lessOne(types, unit.type), unit.type) ? 0 : 1,
-        // Behind an even spread: the share of the word placed against the share of the session.
-        (k + 0.5) / n - (t + 0.5) / total,
+        // Final review: the share of the positions left the word's units need. An ideal slot spread
+        // over the whole session left a ladder's last cards to the end, after every one-card word.
+        -(n - k) / (total - t),
         -unit.p,
         unit.indices[0],
       ];

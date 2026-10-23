@@ -932,6 +932,21 @@ describe('planCards: order by word', () => {
     expect(beside.map((index) => picks[index].glossId).filter((glossId) => onBoard.has(glossId))).toEqual([]);
   });
 
+  it('opens with the meet card even where the other cards fall back to multiple choice (R1)', () => {
+    // A device that can neither listen nor speak: the listening picks are asked as multiple choice,
+    // and keeping that type apart put one of them before the meet.
+    const picks = [ladder(0), owed(1, WP, { rung: 1 }), owed(2, SR, { rung: 1 }), owed(3, SR, { rung: 1 }), owed(4, WR, { rung: 1 }), owed(5, WR, { rung: 1 })];
+    expect(planCards(picks, { listening: false, speaking: false, target: true }).types[0]).toBe('meet');
+  });
+
+  it("spreads a ladder's practice cards over the session, so no type follows itself", () => {
+    // Final review: every one-card word was placed before a ladder's last practice cards, which were
+    // left to the end, and a reverse choice followed another.
+    const picks = [ladder(0), owed(1, WR), owed(2, SP), owed(3, WP, { rung: 1 }), owed(4, WR)];
+    const types = planCards(picks, TARGET).types;
+    expect(types.filter((type, k) => k > 0 && type === types[k - 1])).toEqual([]);
+  });
+
   it('counts only the cards that can go before the returns when it keeps the types apart', () => {
     // Spec D4. Counting the waiting return too, the say card went first and the two typed meanings met.
     const known = (n: number, dimension: Dimension, r: number, step = false) => pick(n, { dimension, rung: 2, level: 1, r, step });
@@ -991,6 +1006,7 @@ describe('planCards: order by word', () => {
         if (p.relearn === 'counts') rule(at.every((position, k) => plan.intro[position] === k < at.length - 1), 'a step-down is out of order');
         if (p.relearn === 'practice') rule(at.every((position) => plan.intro[position]), 'a practice step-down counts');
       });
+      rule(!picks.some((p) => p.ladder) || plan.types[0] === 'meet', 'a new word does not open its session');
       // Phase 37 D6: the returns follow every unit that is neither a return nor of a ladder's or a step-down's word.
       const streamed = new Set(picks.filter((p) => p.ladder || p.relearn).map((p) => p.glossId));
       const others = plan.order.flatMap((index, position) => (onBoard(position) || (!picks[index].step && !streamed.has(picks[index].glossId)) ? [position] : []));
