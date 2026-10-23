@@ -365,6 +365,13 @@
       "when": 1792776250540,
       "tag": "0051_my_words_goal",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1792794486090,
+      "tag": "0052_discovery_choices",
+      "breakpoints": true
     }
   ]
 }

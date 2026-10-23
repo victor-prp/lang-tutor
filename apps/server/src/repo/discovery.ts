@@ -2,11 +2,12 @@ import type {
   DiscoveryLearningContext,
   DiscoveryRunStatus,
   DiscoverySelfLevel,
+  DiscoveryStartedBy,
   PartOfSpeech,
   PhotoImportItemReason,
   PhotoImportOption,
 } from '@lang-tutor/core/api';
-import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { discoveryCards, discoveryProfiles, discoveryRuns } from '../db/schema';
@@ -28,11 +29,14 @@ export type RunRow = {
   goal: number;
   status: DiscoveryRunStatus;
   settledRound: number;
+  startedBy: DiscoveryStartedBy;
   createdAt: Date;
   endedAt: Date | null;
 };
 
-export type CardAnswer = 'unknown' | 'typed';
+/** Phase 74: `choice` is a meaning picked; `unknown` is "אין לי מושג"; `typed` is phase 69's. */
+export type CardAnswer = 'unknown' | 'typed' | 'choice';
+export type Suggestion = 'add' | 'skip';
 export type CardVerdict = 'exact' | 'alternative' | 'wrong';
 export type JudgedBy = 'rule' | 'model' | 'unavailable';
 export type LookupStatus = 'pending' | 'ready' | 'failed';
@@ -60,6 +64,15 @@ export type CardRow = {
   ticked: boolean;
   hebrewMismatch: boolean;
   reason: PhotoImportItemReason | null;
+  /** Phase 74 (spec D1). The four Hebrew meanings in the order shown; empty on phase 69's cards. */
+  choices: string[];
+  rightChoice: number | null;
+  /** The meaning picked; null with answer `unknown` ("אין לי מושג"). */
+  picked: number | null;
+  suggested: Suggestion | null;
+  added: boolean | null;
+  /** When its lookup saved the added word to My words. */
+  savedAt: Date | null;
 };
 
 export type NewCard = {
@@ -70,15 +83,18 @@ export type NewCard = {
   partOfSpeech: PartOfSpeech;
   hebrew: string;
   alternatives: string[];
+  choices: string[];
+  rightChoice: number;
 };
 
+/** Phase 74 (spec D2, D3, D5). One card's answer: the pick, the suggestion shown, the choice. */
 export type AnswerWrite = {
-  answer: CardAnswer;
-  typedText: string | null;
-  verdict: CardVerdict | null;
+  answer: 'choice' | 'unknown';
+  picked: number | null;
+  suggested: Suggestion;
+  added: boolean;
   known: boolean;
-  judgedBy: JudgedBy | null;
-  /** 'pending' for a card the learner did not know: its lookup is enqueued with it. */
+  /** 'pending' for an added card: its lookup is enqueued with it. */
   lookupStatus: 'pending' | null;
   answeredAt: Date;
 };
@@ -96,6 +112,7 @@ const runColumns = {
   goal: discoveryRuns.goal,
   status: discoveryRuns.status,
   settledRound: discoveryRuns.settledRound,
+  startedBy: discoveryRuns.startedBy,
   createdAt: discoveryRuns.createdAt,
   endedAt: discoveryRuns.endedAt,
 };
@@ -137,10 +154,10 @@ export function createDiscoveryRepo(tx: Tx) {
     },
 
     /** Undefined when the enrollment has an open run: the index allows one. */
-    insertRun: async (input: { enrollmentId: string; goal: number }): Promise<RunRow | undefined> => {
+    insertRun: async (input: { enrollmentId: string; goal: number; startedBy: DiscoveryStartedBy }): Promise<RunRow | undefined> => {
       const [row] = await tx
         .insert(discoveryRuns)
-        .values({ enrollmentId: input.enrollmentId, goal: input.goal, status: 'asking' })
+        .values({ enrollmentId: input.enrollmentId, goal: input.goal, startedBy: input.startedBy, status: 'asking' })
         .onConflictDoNothing()
         .returning(runColumns);
       return row ? asRun(row) : undefined;
@@ -225,22 +242,24 @@ export function createDiscoveryRepo(tx: Tx) {
       return rows.length > 0;
     },
 
-    /** The learner's change. The service has already checked it (domain refuseItemUpdate). */
-    updateItem: async (
-      runId: string,
-      position: number,
-      update: { ticked?: boolean; chosenGlossId?: string },
-    ): Promise<CardRow | undefined> => {
-      if (!UUID_RE.test(runId)) return undefined;
-      const [row] = await tx
+    /** Phase 74 (spec D5). The added word's save, once: stamps `saved_at` on a card not yet saved. */
+    markSaved: async (runId: string, position: number): Promise<boolean> => {
+      const rows = await tx
         .update(discoveryCards)
-        .set({
-          ...(update.ticked !== undefined ? { ticked: update.ticked } : {}),
-          ...(update.chosenGlossId !== undefined ? { chosenGlossId: update.chosenGlossId } : {}),
-        })
-        .where(cardKey(runId, position))
-        .returning();
-      return row ? asCard(row) : undefined;
+        .set({ savedAt: sql`now()` })
+        .where(and(cardKey(runId, position), sql`${discoveryCards.savedAt} is null`))
+        .returning({ position: discoveryCards.position });
+      return rows.length > 0;
+    },
+
+    /** Phase 74 (spec D7). When the enrollment's runs the app started were created, from `since`
+     *  on: the caller asks whether one falls on the learner's day. */
+    appRunsCreatedSince: async (enrollmentId: string, since: Date): Promise<Date[]> => {
+      const rows = await tx
+        .select({ createdAt: discoveryRuns.createdAt })
+        .from(discoveryRuns)
+        .where(and(eq(discoveryRuns.enrollmentId, enrollmentId), eq(discoveryRuns.startedBy, 'app'), gte(discoveryRuns.createdAt, since)));
+      return rows.map((row) => row.createdAt);
     },
 
     /** Spec D4. Every word the learner answered in any of the enrollment's runs, newest

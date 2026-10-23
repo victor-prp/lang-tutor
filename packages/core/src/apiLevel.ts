@@ -41,8 +41,13 @@
  * is owed while a session can raise the card, its budget met or not. The field keeps its values and
  * meaning (work owed today); an older app draws its budget line on the eve, "כמעט שם", until its
  * update lands, which misleads and breaks nothing.
+ *
+ * 7: phase 74 (spec D11). Words for me's cards are choices: a card's answer is a pick and an add,
+ * not a typed meaning, and a run loses `unknown_count` and `items` (its list) for `added_count` and
+ * `added`, with the list's endpoints gone; the new-word limits' PUT requires `discover_count`. An
+ * older app would type into a card the server no longer grades and wait on a list that never comes.
  */
-export const API_LEVEL = 6;
+export const API_LEVEL = 7;
 
 /** Written here and nowhere else (ADR 0012 R3). */
 export const API_LEVEL_HEADER = 'X-Api-Level';
