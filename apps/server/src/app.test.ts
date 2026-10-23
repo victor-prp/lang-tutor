@@ -304,6 +304,8 @@ describe('serving the web export (phase 30)', () => {
     mkdirSync(join(dir, '_expo', 'static', 'js', 'web'), { recursive: true });
     writeFileSync(join(dir, '_expo', 'static', 'js', 'web', 'entry-3f9a.js'), 'globalThis.loaded = true;');
     writeFileSync(join(dir, 'favicon.ico'), 'icon');
+    mkdirSync(join(dir, 'notifications'));
+    writeFileSync(join(dir, 'notifications', 'exam.png'), 'png');
   });
 
   afterAll(() => {
@@ -325,6 +327,14 @@ describe('serving the web export (phase 30)', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('javascript');
     expect(res.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+  });
+
+  // Phase 75 (spec D4). A reminder's side picture is a file of the export, at the URL the tick sends.
+  it("serves a reminder's picture from the export's notifications folder", async () => {
+    const res = await app().request('/notifications/exam.png');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('image/png');
+    expect(await (await app().request('/notifications/missing.png')).text()).not.toContain('id="root"');
   });
 
   it('answers an app route with index.html, so a reload on a screen works', async () => {

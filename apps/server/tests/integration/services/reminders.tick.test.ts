@@ -11,15 +11,19 @@ import {
   stubPushReceipts,
   stubPushSend,
 } from '../../support/mockServer';
-import { allReminders, devicesOf, pinDecidedAt, remindersOf, seedCompletedSession } from '../../support/reminderRows';
-import { seedUser, seedUserWithoutEnrollment, setTimeZone } from '../../support/seedUser';
+import { storeMyWordsGoal } from '../../support/myWordsRows';
+import { allReminders, backdateTarget, devicesOf, pinDecidedAt, remindersOf, seedMyWordsDay } from '../../support/reminderRows';
+import { enrollmentOf, seedUser, seedUserWithoutEnrollment, setTimeZone } from '../../support/seedUser';
+import { endTargetNow, seedTarget } from '../../support/targetRows';
+import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 
 // Phase 52 (spec D5, D6). The tick against Postgres and a faked Expo, through the service
 // production assembles. The decision logic, case by case, is src/services/reminders.test.ts's;
-// this is the proof that the claim, the count, the send and the record meet in the database.
+// this is the proof that the claim, the reads, the send and the record meet in the database.
+// Phase 75 (Done means 1–4): the learner's day is read as home reads it.
 //
 // The clock is pinned in the past on purpose. The database stamps decided_at with its own
 // clock, so a reminder this suite sends was decided "now", long after the pinned tick: no
@@ -31,8 +35,8 @@ const ZONE = 'Asia/Jerusalem';
 const AT = Date.parse('2026-09-02T10:05:00Z');
 const DAY = '2026-09-02';
 const minutes = (n: number) => n * 60_000;
-const TITLE = 'הגיע הזמן לתרגל';
-const BODY = 'כמה דקות עכשיו, והמילים נשארות בזיכרון.';
+/** The default My words reminder of a learner with words and none of the day's three sessions done. */
+const TITLE = 'המילים שלי';
 const DNR = { status: 'error', message: 'not registered', details: { error: 'DeviceNotRegistered' } } as const;
 
 let t: TestDb;
@@ -62,17 +66,17 @@ afterEach(async () => {
 
 const tokenOf = (id: string) => `ExponentPushToken[${id}]`;
 
-/** A learner in Jerusalem with one phone, registered as the app registers it. */
+/** A learner in Jerusalem with one phone, registered as the app registers it, and a word of their
+ *  own, so My words owes its default goal of three sessions (phase 75 D1). */
 async function learnerWithPhone(id: string, token = tokenOf(id)): Promise<void> {
   await seedUser(t.db, id);
   await setTimeZone(t.db, id, ZONE);
   await service.registerDevice(id, { token, platform: 'android' });
+  await seedSavedSenses(t.db, { enrollmentId: enrollmentOf(id), lemma: `apple-${id}`, translations: ['תפוח'] });
 }
 
 const rowsOf = (userId: string) => remindersOf(t.db, userId);
 const ticks = () => logger.events.filter((e) => e.event === 'reminder_tick');
-const completedSessionOn = (userId: string, day: string) =>
-  seedCompletedSession(t.db, { userId, day, completedAt: new Date(AT - minutes(60)) });
 
 describe('the tick', () => {
   it("reminds a learner whose slot is due on their clock: one push naming the reminder, and the row sent with its ticket", async () => {
@@ -85,13 +89,21 @@ describe('the tick', () => {
     expect(rows).toHaveLength(1);
     const [row] = rows;
     expect(await pushSends(ns)).toEqual([
-      { to: tokenOf('u_1'), title: TITLE, body: BODY, channelId: 'reminders', priority: 'high', data: { reminder_id: row.id } },
+      {
+        to: tokenOf('u_1'),
+        title: TITLE,
+        body: expect.stringMatching(/^היעד של היום: 3 תרגולים/),
+        channelId: 'reminders',
+        priority: 'high',
+        tag: 'reminder',
+        data: { reminder_id: row.id, enrollment_id: enrollmentOf('u_1') },
+      },
     ]);
     expect(row).toMatchObject({
       localDay: DAY,
       slot: '13:00',
       outcome: 'sent',
-      evidence: { completed_today: 0, daily_target: 1, time_zone: ZONE, devices: 1 },
+      evidence: { time_zone: ZONE, devices: 1, chosen: { kind: 'my_words', rank: 3, title: TITLE } },
       tickets: [{ status: 'ok', id: 'ticket-1', to: tokenOf('u_1') }],
       receipts: null,
       receiptsCheckedAt: null,
@@ -99,9 +111,9 @@ describe('the tick', () => {
     expect(ticks()).toEqual([{ event: 'reminder_tick', candidates: 1, claimed: 1, sent: 1, skipped: 0, failed: 0 }]);
   });
 
-  it('skips a learner who already finished a session that day, with the evidence, and asks Expo nothing', async () => {
+  it("skips a learner whose My words' goal is met and who owes nothing else, with the paths it read, and asks Expo nothing", async () => {
     await learnerWithPhone('u_1');
-    await completedSessionOn('u_1', DAY);
+    await seedMyWordsDay(t.db, { userId: 'u_1', day: DAY, sessionsDone: 3 });
 
     await service.tick();
 
@@ -111,20 +123,36 @@ describe('the tick', () => {
       localDay: DAY,
       slot: '13:00',
       outcome: 'skip_target_met',
-      evidence: { completed_today: 1, daily_target: 1, time_zone: ZONE, devices: 1 },
+      evidence: {
+        time_zone: ZONE,
+        devices: 1,
+        paths: [{ enrollment_id: enrollmentOf('u_1'), kind: 'my_words', goal: 3, sessions_done: 3 }],
+        chosen: null,
+      },
       tickets: null,
     });
     expect(await pushSends(ns)).toEqual([]);
   });
 
-  it('counts only that day: a session finished the day before does not skip the reminder', async () => {
+  it("counts only that day: My words' goal met the day before does not skip the reminder", async () => {
     await learnerWithPhone('u_1');
-    await completedSessionOn('u_1', '2026-09-01');
+    await seedMyWordsDay(t.db, { userId: 'u_1', day: '2026-09-01', sessionsDone: 3 });
     await stubPushSend(ns, [{ status: 'ok', id: 'ticket-1' }]);
 
     await service.tick();
 
-    expect((await rowsOf('u_1'))[0]).toMatchObject({ outcome: 'sent', evidence: { completed_today: 0 } });
+    expect((await rowsOf('u_1'))[0]).toMatchObject({ outcome: 'sent', evidence: { chosen: { kind: 'my_words' } } });
+  });
+
+  it('skips a learner with no word of their own and no target: My words has nothing to practise (spec D1)', async () => {
+    await seedUser(t.db, 'u_new');
+    await setTimeZone(t.db, 'u_new', ZONE);
+    await service.registerDevice('u_new', { token: tokenOf('u_new'), platform: 'android' });
+
+    await service.tick();
+
+    expect(await rowsOf('u_new')).toMatchObject([{ outcome: 'skip_target_met', evidence: { paths: [{ saved: 0 }] } }]);
+    expect(await pushSends(ns)).toEqual([]);
   });
 
   it('decides a slot once: a second tick at 13:10 sends nothing more and writes no new row', async () => {
@@ -157,7 +185,7 @@ describe('the tick', () => {
     const [failed] = await rowsOf('u_1');
     expect(failed).toMatchObject({
       outcome: 'failed',
-      evidence: { completed_today: 0, daily_target: 1, time_zone: ZONE, devices: 1, error: 'push service unavailable (500)' },
+      evidence: { time_zone: ZONE, devices: 1, error: 'push service unavailable (500)' },
       tickets: null,
     });
     const [sent] = await rowsOf('u_2');
@@ -196,6 +224,82 @@ describe('the tick', () => {
     expect(await allReminders(t.db)).toEqual([]);
     expect(await pushSends(ns)).toEqual([]);
     expect(ticks()).toEqual([{ event: 'reminder_tick', candidates: 2, claimed: 0, sent: 0, skipped: 0, failed: 0 }]);
+  });
+});
+
+// Phase 75 (Done means 1–4). One Wednesday: homework due Thursday, My words' goal of three.
+describe('the most pressing path, through the reads home makes', () => {
+  /** u_1's homework due tomorrow over two words of their own, made the week before. */
+  async function homeworkDueTomorrow(): Promise<string> {
+    const words = [
+      await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'bread', translations: ['לחם'] }),
+      await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'cheese', translations: ['גבינה'] }),
+    ];
+    const id = await seedTarget(t.db, {
+      enrollmentId: enrollmentOf('u_1'),
+      kind: 'homework',
+      dueOn: '2026-09-03',
+      glossIds: words.map((word) => word.glossIds[0]),
+    });
+    await backdateTarget(t.db, id, new Date(AT - 7 * 24 * 60 * minutes(1)));
+    return id;
+  }
+
+  it('names the homework due tomorrow after a My words session, then My words once it is gone, then nothing once the goal is met', async () => {
+    await learnerWithPhone('u_1');
+    const homework = await homeworkDueTomorrow();
+    await seedMyWordsDay(t.db, { userId: 'u_1', day: DAY, sessionsDone: 1 });
+    await stubPushSend(ns, [{ status: 'ok', id: 'ticket' }]);
+
+    // 13:05 (Done means 1, 4): the homework, not My words, though a session was done today.
+    await service.tick();
+    const [first] = await pushSends(ns);
+    expect(first).toMatchObject({
+      title: 'שיעורי הבית מחר',
+      body: expect.stringMatching(/^2 מילים צריכות חיזוק · מוכנות לשיעורי הבית: \d+%$/),
+      data: { enrollment_id: enrollmentOf('u_1'), target_id: homework },
+    });
+    expect((await rowsOf('u_1'))[0]).toMatchObject({
+      slot: '13:00',
+      outcome: 'sent',
+      evidence: {
+        paths: [
+          { kind: 'homework', target_id: homework, state: 'owed', days_left: 1, word_count: 2 },
+          { kind: 'my_words', goal: 3, sessions_done: 1 },
+        ],
+        chosen: { kind: 'homework', target_id: homework, rank: 1, image: 'homework-urgent' },
+      },
+    });
+
+    // 17:05 (Done means 2): the homework ended, only My words' goal is left.
+    await endTargetNow(t.db, homework);
+    clock = AT + 4 * 60 * minutes(1);
+    await service.tick();
+    const second = (await pushSends(ns))[1];
+    expect(second).toMatchObject({ title: 'המילים שלי', body: 'כל הכבוד! עוד 2 תרגולים להיום' });
+    expect(second.data).toEqual({ reminder_id: expect.any(String), enrollment_id: enrollmentOf('u_1') });
+
+    // 20:05 (Done means 3): the goal met, nothing is owed anywhere.
+    await seedMyWordsDay(t.db, { userId: 'u_1', day: DAY, sessionsDone: 3 });
+    clock = AT + 7 * 60 * minutes(1);
+    await service.tick();
+    expect(await pushSends(ns)).toHaveLength(2);
+    expect((await rowsOf('u_1')).map((row) => [row.slot, row.outcome])).toEqual([
+      ['13:00', 'sent'],
+      ['17:00', 'sent'],
+      ['20:00', 'skip_target_met'],
+    ]);
+  });
+
+  it('turns My words off with its goal, and still names the homework', async () => {
+    await learnerWithPhone('u_1');
+    await storeMyWordsGoal(t.db, enrollmentOf('u_1'), 0);
+    const homework = await homeworkDueTomorrow();
+    await stubPushSend(ns, [{ status: 'ok', id: 'ticket' }]);
+
+    await service.tick();
+
+    expect((await pushSends(ns))[0]).toMatchObject({ data: { target_id: homework } });
   });
 });
 
