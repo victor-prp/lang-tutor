@@ -83,6 +83,19 @@ export default function ResultsScreen() {
     }, [preparing, reload]),
   );
 
+  // Phase 72 (final review I1). Whether this screen is still the one shown. A press still on its way
+  // when the learner left (סיום, back) opens nothing: a late replace would take home's place in the
+  // stack, and back from the session would have nowhere to go. The stock waits on home's card.
+  const shown = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      shown.current = true;
+      return () => {
+        shown.current = false;
+      };
+    }, []),
+  );
+
   // One action at a time, as home's: a double tap must not send two creates.
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
@@ -95,7 +108,7 @@ export default function ResultsScreen() {
     } catch (error) {
       // Phase 72 (spec D5). The target ended since: home shows what is left. Anything else: the
       // create read the targets again, and the button shows that state.
-      if (error instanceof ApiError && error.code === 'target closed') router.dismissTo('/');
+      if (error instanceof ApiError && error.code === 'target closed' && shown.current) router.dismissTo('/');
       if (error instanceof ApiError && error.code === 'not enough questions') {
         Alert.alert(strings.errorTitle, strings.sessionNoQuestions);
       }
@@ -107,6 +120,7 @@ export default function ResultsScreen() {
 
   // Phase 72 (spec D3). The next session in place of this screen: the stack stays home → session.
   const openSession = (sessionId: string, fresh: boolean) => {
+    if (!shown.current) return;
     if (fresh) void next.start(sessionId);
     session.enter(sessionId);
     router.replace('/session');

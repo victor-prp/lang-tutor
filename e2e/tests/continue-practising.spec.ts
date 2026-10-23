@@ -5,7 +5,7 @@ import { expectGeneration } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { BOARD_WORDS } from './support/lexemes';
 import { clearGemini } from './support/mockServer';
-import { enrollmentIdOf, readyPathSession, skipSeed } from './support/sessions';
+import { enrollmentIdOf, readCurrent, readyPathSession, skipSeed } from './support/sessions';
 import {
   FILLED,
   HOMEWORK_WORDS,
@@ -142,5 +142,38 @@ test('once today is done, continuing asks home’s question first, and “אחז
   await expect(page.getByTestId(`target-card-${target.id}`)).toBeVisible();
   await expect(page.getByTestId('progress-label')).toHaveCount(0);
   expect(createsSent(diagnostics), report()).toBe(creates);
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+test('a continue still on its way when the learner goes home opens nothing, and leaves home in place', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const { enrollmentId, target } = await homeworkOf(page, request, 'e2e_continue_left', HOMEWORK_WORDS, 2);
+  await tapUntil(page, `target-practice-${target.id}`, 'progress-label');
+  await playSessionRight(page, request, HOMEWORK_WORDS);
+  await readyPathSession(page.request, enrollmentId, target.id);
+  const next = page.getByTestId('results-continue');
+  await expectLabel(next, 'להמשיך לתרגל');
+  await expect(next).toBeEnabled();
+
+  // The create is held on its way, and the learner leaves with סיום meanwhile.
+  await page.route('**/api/sessions', async (route) => {
+    if (route.request().method() === 'POST') await new Promise((done) => setTimeout(done, 3_000));
+    await route.continue();
+  });
+  const created = page.waitForResponse((res) => res.request().method() === 'POST' && /\/api\/sessions$/.test(res.url()));
+  await next.click();
+  await page.getByTestId('results-done').click();
+  await expect(page.getByTestId('results-score')).toBeHidden();
+  await created;
+  // The create reads the targets again before it answers; give the answer a moment to land.
+  await page.waitForTimeout(1_500);
+
+  await expect(page.getByTestId('progress-label'), report()).toHaveCount(0);
+  await showCard(page, target.id);
+  await expect(page.getByTestId(`target-card-${target.id}`)).toBeVisible();
+  // Nothing was started: the stock waits on home's card.
+  const { current } = await readCurrent(page.request, enrollmentId, target.id);
+  expect(current, report()).toMatchObject({ status: 'ready', started: false });
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
