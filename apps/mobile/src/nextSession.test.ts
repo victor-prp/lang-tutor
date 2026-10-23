@@ -12,6 +12,7 @@ import {
   myWordsBand,
   myWordsLine,
   openSessionOf,
+  practiceStartOf,
   reminderStartOf,
   shouldAutoCreate,
   shouldPoll,
@@ -408,5 +409,75 @@ describe('myWordsBand (phase 64, spec D4)', () => {
 
   it('counts the meanings saved when none is due', () => {
     expect(myWordsBand(none('list', 64), 'איטלקית')).toEqual({ big: ltr('64'), line: 'משמעויות שמורות באיטלקית' });
+  });
+});
+
+// Phase 75 (spec D6). The practice screen a tapped reminder opens: the named path's card button,
+// at the moment of the tap, and a wait while its session prepares.
+describe('practiceStartOf', () => {
+  const read = { failed: false, read: true };
+  const base = { main: null, flags: read, created: { kind: 'none' } as const, made: 'none' as const, latest: [] as TargetSummary[] };
+  const forTarget = (targets: 'reading' | 'failed' | readonly TargetSummary[], over: Partial<Parameters<typeof practiceStartOf>[0]> = {}) =>
+    practiceStartOf({ ...base, targetId: 't1', targets, ...over });
+  const forMyWords = (main: Parameters<typeof practiceStartOf>[0]['main'], over: Partial<Parameters<typeof practiceStartOf>[0]> = {}) =>
+    practiceStartOf({ ...base, targetId: null, targets: [], main, ...over });
+
+  it('waits for the targets read made after opening, and goes home when it failed', () => {
+    expect(forTarget('reading')).toEqual({ kind: 'wait' });
+    expect(forTarget('failed')).toEqual({ kind: 'home' });
+  });
+
+  it('goes home when the named target is not in the read: ended or removed since', () => {
+    expect(forTarget([{ ...targetWith(null), id: 't_other' }])).toEqual({ kind: 'home' });
+  });
+
+  it("does what the target's button does: resume a started session, create otherwise", () => {
+    expect(forTarget([targetWith(session('ready', 2))])).toEqual({ kind: 'enter', sessionId: 'ts1', fresh: false });
+    expect(forTarget([targetWith(session('ready', 0))])).toEqual({ kind: 'create', targetId: 't1', waitForVoices: false });
+    expect(forTarget([targetWith(null)])).toEqual({ kind: 'create', targetId: 't1', waitForVoices: true });
+  });
+
+  it('makes a failed session again, as the button retries, rather than leaving it', () => {
+    expect(forTarget([targetWith(session('failed'))])).toEqual({ kind: 'create', targetId: 't1', waitForVoices: true });
+  });
+
+  it('waits on its create, enters what it answers ready, and goes home when it failed', () => {
+    const owed = [targetWith(session('ready', 0))];
+    expect(forTarget(owed, { created: { kind: 'sending' } })).toEqual({ kind: 'wait' });
+    expect(forTarget(owed, { created: { kind: 'answered', sessionId: 'ts1', status: 'ready' } })).toEqual({
+      kind: 'enter',
+      sessionId: 'ts1',
+      fresh: true,
+    });
+    expect(forTarget(owed, { created: { kind: 'failed' } })).toEqual({ kind: 'home' });
+    expect(forTarget(owed, { created: { kind: 'open', sessionId: 'ts9' } })).toEqual({ kind: 'enter', sessionId: 'ts9', fresh: false });
+  });
+
+  it('waits while the answered session prepares, and enters it once a later read shows it ready', () => {
+    const owed = [targetWith(session('ready', 0))];
+    const created = { kind: 'answered', sessionId: 'ts2', status: 'preparing' } as const;
+    const latest = (status: 'preparing' | 'ready') => [targetWith({ ...session(status), session_id: 'ts2' })];
+    expect(forTarget(owed, { created, latest: latest('preparing') })).toEqual({ kind: 'wait' });
+    expect(forTarget(owed, { created, latest: latest('ready') })).toEqual({ kind: 'enter', sessionId: 'ts2', fresh: true });
+  });
+
+  it("waits for My words' read made after opening, and goes home when it failed", () => {
+    expect(forMyWords({ kind: 'start', sessionId: 'm1' }, { flags: { failed: false, read: false } })).toEqual({ kind: 'wait' });
+    expect(forMyWords(null)).toEqual({ kind: 'wait' });
+    expect(forMyWords(null, { flags: { failed: true, read: true } })).toEqual({ kind: 'home' });
+  });
+
+  it("does what My words' button does: start, resume, wait while preparing, Words for me with no words", () => {
+    expect(forMyWords({ kind: 'start', sessionId: 'm1' })).toEqual({ kind: 'enter', sessionId: 'm1', fresh: true });
+    expect(forMyWords({ kind: 'resume', sessionId: 'm1' })).toEqual({ kind: 'enter', sessionId: 'm1', fresh: false });
+    expect(forMyWords({ kind: 'preparing', sessionId: 'm1' })).toEqual({ kind: 'wait' });
+    expect(forMyWords({ kind: 'discover' })).toEqual({ kind: 'discover' });
+  });
+
+  it('makes a missing or failed My words session once, waits on it, and goes home when it failed', () => {
+    expect(forMyWords({ kind: 'create' })).toEqual({ kind: 'make' });
+    expect(forMyWords({ kind: 'failed' })).toEqual({ kind: 'make' });
+    expect(forMyWords({ kind: 'create' }, { made: 'sending' })).toEqual({ kind: 'wait' });
+    expect(forMyWords({ kind: 'create' }, { made: 'failed' })).toEqual({ kind: 'home' });
   });
 });

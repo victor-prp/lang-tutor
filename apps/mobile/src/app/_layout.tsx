@@ -43,7 +43,7 @@ import { VocabularyProvider } from '@/hooks/useVocabulary';
 import { createPhotoPicker, type PhotoAsset } from '@/photos';
 import { createRecorder, type RecordPermission } from '@/recording';
 import type { AppRelease } from '@/release';
-import { createReminders, openReminderTap, type NotificationsEngine, type Permission } from '@/reminders';
+import { createReminders, openReminderTap, reminderTapOf, type NotificationsEngine, type Permission } from '@/reminders';
 import { createSpeaker } from '@/speech';
 import { MAX_PHOTOS } from '@/targetWizard';
 import { colors, layout } from '@/theme';
@@ -235,11 +235,10 @@ const Notifications: typeof NotificationsModule | null = isExpoGo ? null : requi
 
 const asPermission = (N: typeof NotificationsModule, status: NotificationsModule.PermissionStatus): Permission =>
   status === N.PermissionStatus.GRANTED ? 'granted' : status === N.PermissionStatus.DENIED ? 'denied' : 'undetermined';
-// The server sends `data: { reminder_id }` with every reminder (spec D5).
-const reminderIdOf = (response: NotificationsModule.NotificationResponse | null): string | null => {
-  const id = response?.notification.request.content.data?.reminder_id;
-  return typeof id === 'string' ? id : null;
-};
+// The server sends `data: { reminder_id }` with every reminder (spec D5), and since phase 75 the
+// path it was about (`enrollment_id`, `target_id`).
+const reminderTapOfResponse = (response: NotificationsModule.NotificationResponse) =>
+  reminderTapOf(response.notification.request.content.data);
 const notificationsEngine = (Notifications: typeof NotificationsModule): NotificationsEngine => ({
   setChannel: async () => {
     await Notifications.setNotificationChannelAsync('reminders', {
@@ -255,7 +254,7 @@ const notificationsEngine = (Notifications: typeof NotificationsModule): Notific
     (await Notifications.getExpoPushTokenAsync({ projectId: Constants.expoConfig?.extra?.eas?.projectId })).data,
   onTap: (listener) => {
     const subscription = Notifications.addNotificationResponseReceivedListener((response) =>
-      listener(reminderIdOf(response)),
+      listener(reminderTapOfResponse(response)),
     );
     return () => subscription.remove();
   },
@@ -263,7 +262,7 @@ const notificationsEngine = (Notifications: typeof NotificationsModule): Notific
   lastTap: async () => {
     const response = Notifications.getLastNotificationResponse();
     if (response) Notifications.clearLastNotificationResponse();
-    return reminderIdOf(response);
+    return response ? reminderTapOfResponse(response) : null;
   },
   openSettings: () => Linking.openSettings(),
 });
@@ -323,8 +322,9 @@ export default function RootLayout() {
   // the ready session; the tap that launched the app is read once from the last
   // response. Phase 64: dismissed to the tabs when a screen is over them, rather than
   // a second Home pushed over a session in progress; navigated to בית when a tab is
-  // on top (openReminderTap).
-  useEffect(() => reminders.onTap(() => openReminderTap(router)), []);
+  // on top (openReminderTap). Phase 75 (spec D6): a reminder naming its path opens the
+  // practice screen over בית, which goes straight into that path's session.
+  useEffect(() => reminders.onTap((tap) => openReminderTap(router, tap)), []);
 
   return (
     // Every screen uses SafeAreaView. The navigator happens to provide a
