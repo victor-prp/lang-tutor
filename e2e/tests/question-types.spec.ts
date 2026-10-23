@@ -5,7 +5,7 @@ import { answerChoice, answerMeaning, answerTyped, expectGeneration, nearMiss, r
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { SINGLE_WORDS } from './support/lexemes';
-import { seedMemory, type MemorySeed } from './support/memory';
+import { declineWordsForMe, type MemorySeed, seedMemory } from './support/memory';
 import { clearGemini, expectJudge } from './support/mockServer';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
@@ -59,6 +59,8 @@ async function startMixedSession(page: Page, request: APIRequestContext, usernam
     await tapAndWaitForWrite(page, page.getByTestId('translate-save'));
   }
   await seedMemory(username, MEMORY);
+  // Phase 74 (spec D7): every word met, so Words for me first; this learner declined it today.
+  await declineWordsForMe(username);
 
   await clearGemini(request);
   await expectGeneration(request);

@@ -2,7 +2,7 @@ import { FSRS6_DEFAULT, retrievability, type Dimension } from '@lang-tutor/core/
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { createDb } from '../../../apps/server/src/db/client';
-import { glossMemory, glossProgress } from '../../../apps/server/src/db/schema';
+import { discoveryRuns, glossMemory, glossProgress } from '../../../apps/server/src/db/schema';
 import { E2E_DATABASE_URL } from '../../globalSetup';
 
 // Phase 35 (spec §6, e2e). A session no longer gives position N a fixed type:
@@ -113,6 +113,26 @@ export async function seedMemory(username: string, seeds: MemorySeed[]): Promise
           );
       }
     });
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Phase 74 (spec D7). A learner whose every word has been met is sent to Words for me first, once
+ * a learner day. A spec about such a learner's session writes the run the app started today, as
+ * if they had declined it, so home offers the session.
+ */
+export async function declineWordsForMe(username: string): Promise<void> {
+  const handle = createDb(E2E_DATABASE_URL, { max: 1, onError: () => {} });
+  try {
+    const enrollments = await handle.db.execute<{ id: string }>(sql`
+      select e.id from enrollments e join users u on u.id = e.user_id where u.username = ${username}
+    `);
+    if (enrollments.rows.length === 0) throw new Error(`${username} has no enrollment`);
+    await handle.db
+      .insert(discoveryRuns)
+      .values(enrollments.rows.map((row) => ({ enrollmentId: row.id, goal: 10, status: 'saved', startedBy: 'app', endedAt: new Date() })));
   } finally {
     await handle.close();
   }

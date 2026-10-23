@@ -5,7 +5,7 @@ import { WRONG_RUSSIAN, answerTyped, boardWords, buildTiles, expectGeneration, p
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
-import { seedMemory, type MemorySeed } from './support/memory';
+import { declineWordsForMe, type MemorySeed, seedMemory } from './support/memory';
 import { clearGemini, expectGeminiMatching, userText } from './support/mockServer';
 import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
@@ -85,6 +85,8 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
   await signUpLearner(page, 'e2e_listen_ru', 'ru');
   await saveTenWords(page.request);
   await seedMemory('e2e_listen_ru', MEMORY);
+  // Phase 74 (spec D7): every word met, so Words for me first; this learner declined it today.
+  await declineWordsForMe('e2e_listen_ru');
 
   await clearGemini(request);
   await expectGeneration(request);
@@ -216,6 +218,8 @@ test('help on the listening card spells the word heard', async ({ page, request 
   await signUpLearner(page, 'e2e_listen_help_ru', 'ru');
   await saveTenWords(page.request);
   await seedMemory('e2e_listen_help_ru', MEMORY);
+  // Phase 74 (spec D7): every word met, so Words for me first; this learner declined it today.
+  await declineWordsForMe('e2e_listen_help_ru');
 
   await clearGemini(request);
   await expectGeneration(request);
