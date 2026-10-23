@@ -3,10 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   CATCH_UP_MINUTES,
   DEFAULT_REMINDER_SETTINGS,
-  REMINDER_BODY,
   REMINDER_CHANNEL,
-  REMINDER_TITLE,
-  decide,
   dueSlots,
   normalizeSettings,
   reminderForSession,
@@ -38,8 +35,6 @@ describe('the fixed values', () => {
     });
     expect(CATCH_UP_MINUTES).toBe(30);
     expect(REMINDER_CHANNEL).toBe('reminders');
-    expect(REMINDER_TITLE).toBe('הגיע הזמן לתרגל');
-    expect(REMINDER_BODY).toBe('כמה דקות עכשיו, והמילים נשארות בזיכרון.');
   });
 });
 
@@ -114,37 +109,6 @@ describe('dueSlots', () => {
   it('does not carry a late-evening slot over midnight', () => {
     // 23:50 is not due at 00:10 the next day: the window never leaves its day.
     expect(dueSlots({ ...oneSlot, times: ['23:50'] }, 'UTC', at(0, 10, 15))).toEqual([]);
-  });
-});
-
-describe('decide', () => {
-  const evidence = (completedToday: number) => ({
-    completed_today: completedToday,
-    daily_target: 1,
-    time_zone: 'UTC',
-    devices: 2,
-  });
-
-  it('skips once the target is met', () => {
-    expect(decide({ completedToday: 1, dailyTarget: 1, timeZone: 'UTC', devices: 2 })).toEqual({
-      kind: 'skip_target_met',
-      evidence: evidence(1),
-    });
-  });
-
-  it('skips when the learner did more than the target', () => {
-    expect(decide({ completedToday: 3, dailyTarget: 1, timeZone: 'UTC', devices: 2 }).kind).toBe('skip_target_met');
-  });
-
-  it('sends while the target is not met', () => {
-    expect(decide({ completedToday: 0, dailyTarget: 1, timeZone: 'UTC', devices: 2 })).toEqual({
-      kind: 'send',
-      evidence: evidence(0),
-    });
-  });
-
-  it('sends one short of a larger target', () => {
-    expect(decide({ completedToday: 2, dailyTarget: 3, timeZone: 'UTC', devices: 2 }).kind).toBe('send');
   });
 });
 

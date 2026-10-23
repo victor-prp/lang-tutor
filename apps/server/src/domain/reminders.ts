@@ -1,8 +1,8 @@
 /**
  * Phase 52 (spec D2, D3, D5, D6). The rules of a practice reminder, pure
  * (ADR 0001 R3): which slots of a learner's schedule are due at an instant,
- * whether a due slot sends or is skipped, and which sent reminder a finished
- * session counts for. The tick and the session's completion call these; the
+ * which path a due slot is about (phase 75) and its words, and which sent
+ * reminder a finished session counts for. The tick and the session's completion call these; the
  * instant is passed in, never taken from the system.
  */
 
@@ -25,9 +25,6 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
 export const CATCH_UP_MINUTES = 30;
 
 export const REMINDER_CHANNEL = 'reminders';
-// Hebrew, like every string the app shows.
-export const REMINDER_TITLE = 'הגיע הזמן לתרגל';
-export const REMINDER_BODY = 'כמה דקות עכשיו, והמילים נשארות בזיכרון.';
 
 /** One slot of one learner's day: the pair the `reminders` row is unique on. */
 export type DueSlot = { localDay: string; slot: string };
@@ -62,24 +59,6 @@ export function dueSlots(settings: ReminderSettings, timeZone: string, now: numb
       return sinceStart >= 0 && sinceStart < CATCH_UP_MINUTES;
     })
     .map((slot) => ({ localDay, slot }));
-}
-
-export type Decision = {
-  kind: 'send' | 'skip_target_met';
-  evidence: { completed_today: number; daily_target: number; time_zone: string; devices: number };
-};
-
-/** A target already met today skips the reminder; anything short of it sends. */
-export function decide(input: { completedToday: number; dailyTarget: number; timeZone: string; devices: number }): Decision {
-  return {
-    kind: input.completedToday >= input.dailyTarget ? 'skip_target_met' : 'send',
-    evidence: {
-      completed_today: input.completedToday,
-      daily_target: input.dailyTarget,
-      time_zone: input.timeZone,
-      devices: input.devices,
-    },
-  };
 }
 
 /** A sent reminder of the learner's day, with the session it was already marked for, if any. */

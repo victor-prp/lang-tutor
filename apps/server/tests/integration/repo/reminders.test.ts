@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { eq, sql } from 'drizzle-orm';
 
-import { enrollments, pushDevices, reminders, reminderSettings, sessions, users } from '../../../src/db/schema';
+import { enrollments, pushDevices, reminders, reminderSettings, users } from '../../../src/db/schema';
 import type { ReminderSettings } from '../../../src/domain/reminders';
 import { createReminderRepo, type ReminderResult } from '../../../src/repo/reminders';
-import { enrollmentOf, seedEnrollment, seedUser, seedUserWithoutEnrollment, setTimeZone } from '../../support/seedUser';
+import { seedEnrollment, seedUser, seedUserWithoutEnrollment, setTimeZone } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
 
@@ -56,20 +56,6 @@ const LONG_AGO = new Date('2020-01-01T00:00:00Z');
 /** Moves a device's clocks back, so that a later bump is plainly later. */
 const backdateDevice = (token: string) =>
   t.db.update(pushDevices).set({ createdAt: LONG_AGO, lastSeenAt: LONG_AGO }).where(eq(pushDevices.token, token));
-/** A session row in the state and on the day a test names; a completed one carries its completion time. */
-async function insertSession(input: { userId: string; enrollmentId: string; status: 'completed' | 'skipped' | 'ready'; practiceDay: string | null }) {
-  await t.db.insert(sessions).values({
-    userId: input.userId,
-    enrollmentId: input.enrollmentId,
-    status: input.status,
-    source: 'list',
-    completedAt: input.status === 'completed' ? new Date('2026-10-14T09:00:00Z') : null,
-    practiceDay: input.practiceDay,
-    listening: false,
-    speaking: false,
-  });
-}
-
 describe('reminder settings (D2)', () => {
   it('has none for a learner who never saved a schedule', async () => {
     expect(await repo((r) => r.getSettings('u_1'))).toBeNull();
@@ -236,32 +222,6 @@ describe('claim (D5, D6)', () => {
     ]);
     expect(results.filter((id) => id !== null)).toHaveLength(1);
     expect(await t.db.select().from(reminders)).toHaveLength(1);
-  });
-});
-
-describe('countCompletedOnDay (D3)', () => {
-  it('counts completed sessions of the day across every enrollment the learner owns', async () => {
-    await seedEnrollment(t.db, { id: 'e_u_1_it', userId: 'u_1', targetLanguage: 'it' });
-    await insertSession({ userId: 'u_1', enrollmentId: enrollmentOf('u_1'), status: 'completed', practiceDay: DAY });
-    await insertSession({ userId: 'u_1', enrollmentId: enrollmentOf('u_1'), status: 'completed', practiceDay: DAY });
-    await insertSession({ userId: 'u_1', enrollmentId: 'e_u_1_it', status: 'completed', practiceDay: DAY });
-
-    expect(await repo((r) => r.countCompletedOnDay('u_1', DAY))).toBe(3);
-  });
-
-  it('does not count a skipped, unfinished, other-day or other learner\'s session', async () => {
-    await seedEnrollment(t.db, { id: 'e_u_1_it', userId: 'u_1', targetLanguage: 'it' });
-    await insertSession({ userId: 'u_1', enrollmentId: enrollmentOf('u_1'), status: 'completed', practiceDay: DAY });
-    await insertSession({ userId: 'u_1', enrollmentId: enrollmentOf('u_1'), status: 'skipped', practiceDay: DAY });
-    await insertSession({ userId: 'u_1', enrollmentId: 'e_u_1_it', status: 'ready', practiceDay: null });
-    await insertSession({ userId: 'u_1', enrollmentId: 'e_u_1_it', status: 'completed', practiceDay: '2026-10-13' });
-    await insertSession({ userId: 'u_2', enrollmentId: enrollmentOf('u_2'), status: 'completed', practiceDay: DAY });
-
-    expect(await repo((r) => r.countCompletedOnDay('u_1', DAY))).toBe(1);
-    expect(await repo((r) => r.countCompletedOnDay('u_1', '2026-10-13'))).toBe(1);
-    expect(await repo((r) => r.countCompletedOnDay('u_2', DAY))).toBe(1);
-    expect(await repo((r) => r.countCompletedOnDay('u_3', DAY))).toBe(0);
-    expect(await repo((r) => r.countCompletedOnDay('u_1', '2026-10-15'))).toBe(0);
   });
 });
 

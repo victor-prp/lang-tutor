@@ -76,6 +76,7 @@ export async function main(): Promise<void> {
     webDistDir: config.webDistDir,
     botSecret,
     pushBaseUrl: config.pushBaseUrl,
+    reminderImageBaseUrl: config.reminderImageBaseUrl,
     reminderSecret,
     boss,
     // Bodies on everywhere, prod included, while only a few testers use it.
