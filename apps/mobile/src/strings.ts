@@ -663,6 +663,15 @@ export const strings = {
   newWordsNoticeSwitch: 'להציג הודעה כשהמכסה מתמלאה',
   newWordsLoadFailed: 'טעינת ההגדרות נכשלה. אפשר לנסות שוב.',
   newWordsSaveFailed: 'השמירה נכשלה. אפשר לנסות שוב.',
+  // Phase 73 (spec D1). The My words daily goal screen.
+  myWordsGoalEntry: 'יעד יומי',
+  myWordsGoalTitle: (language: string) => `יעד יומי · ${languageName(language)}`,
+  myWordsGoalSwitch: 'יעד יומי',
+  myWordsGoalValue: (goal: number) => (goal === 1 ? 'תרגול אחד' : `${isolateLtr(String(goal))} תרגולים`),
+  myWordsGoalLess: 'פחות תרגולים',
+  myWordsGoalMore: 'יותר תרגולים',
+  myWordsGoalLoadFailed: 'טעינת היעד נכשלה. אפשר לנסות שוב.',
+  myWordsGoalSaveFailed: 'השמירה נכשלה. אפשר לנסות שוב.',
   // Phase 70 (spec D6, Victor: a short message with "don't show again").
   capNoticeTitle: 'הגעת למכסת המילים החדשות',
   capNoticeBody: (cap: number) =>
