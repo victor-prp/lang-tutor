@@ -8,8 +8,8 @@ import { CardStack } from '@/components/CardStack';
 import { MyWordsCard } from '@/components/MyWordsCard';
 import { PracticeMoreSheet } from '@/components/PracticeMoreSheet';
 import { TargetCard } from '@/components/TargetCard';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
+import { isSessionOpen, usePracticeTarget } from '@/hooks/usePracticeTarget';
 import { useSession } from '@/hooks/useSession';
 import { useTargets } from '@/hooks/useTargets';
 import {
@@ -21,17 +21,12 @@ import {
   openSessionOf,
   shouldAutoCreate,
   shouldPoll,
-  targetPress,
-  targetSessionAction,
   type HomeAction,
   type TargetCreate,
 } from '@/nextSession';
 import { strings } from '@/strings';
-import { askBeforePracticeMore, homeOrder, shouldPollTargets, stackBars, type HomeCard } from '@/targets';
+import { homeOrder, shouldPollTargets, stackBars, type HomeCard } from '@/targets';
 import { colors, fontSizes, lineHeights } from '@/theme';
-
-/** Final review N1. Create refused: the path has a started session (409 session_open). */
-const isSessionOpen = (error: unknown) => error instanceof ApiError && error.code === 'session_open';
 
 /** Phase 52 (spec D8), phase 57. What home holds of a tapped reminder: the main path's read it
  *  first saw, the targets read made after the tap (its list), and the create a target first
@@ -61,11 +56,6 @@ export function LearningSection({ active }: { active: Enrollment }) {
   // focus, and the one whose create failed: a missing session is made once per
   // focus, then offered as a retry.
   const attemptedFor = useRef<string | null>(null);
-  const { user, practiceMoreAsk } = useCurrentUser();
-  const [asking, setAsking] = useState<{
-    target: TargetSummary;
-    press: Extract<ReturnType<typeof targetPress>, { kind: 'create' }>;
-  } | null>(null);
   const [makeFailedFor, setMakeFailedFor] = useState<string | null>(null);
   // Phase 52 (spec D8). `start=reminder` is acted on once: the param is cleared
   // as it is, and this holds the render or two before the clear reaches `start`.
@@ -177,46 +167,8 @@ export function LearningSection({ active }: { active: Enrollment }) {
       attemptedFor.current = null;
     });
 
-  // Phase 57 (spec D1). A target's button acts on its own path's session: a started one is
-  // resumed; otherwise it goes through create with the target's id (final review C1: create
-  // answers the path's stock, replaced first when it no longer serves the target's day, or
-  // builds one), and the session create answers is entered when ready, else the card shows
-  // it preparing (home polls the targets meanwhile). A preparing one is not pressable.
-  // Final review N1: a create refused with session_open means the path has a started session
-  // after all (the card's list predates the start); the list read again names it, and it is
-  // entered as it is.
-  const startTarget = (target: TargetSummary, press: Extract<ReturnType<typeof targetPress>, { kind: 'create' }>) => {
-    void run(async () => {
-      try {
-        const created = await createTargetSession(target.id, { waitForVoices: press.waitForVoices });
-        if (created.status === 'ready') enterSession(created.session_id, true);
-      } catch (error) {
-        if (!isSessionOpen(error)) throw error;
-        const open = openSessionOf((await reloadTargets())?.targets ?? null, target.id);
-        if (open) enterSession(open, false);
-      }
-    });
-  };
-
-  // Phase 65 (spec D9). Past the day's budget, when another session adds little, the press asks
-  // first (unless the learner turned that off); a storage failure reads as "ask".
-  const practiceTarget = (target: TargetSummary) => {
-    const press = targetPress(targetSessionAction(target));
-    if (press.kind === 'enter') enterSession(press.sessionId, press.fresh);
-    if (press.kind !== 'create') return;
-    if (!askBeforePracticeMore(target, false)) return startTarget(target, press);
-    void (async () => {
-      const ask = user ? await practiceMoreAsk.shouldAsk(user.username) : true;
-      if (askBeforePracticeMore(target, !ask)) setAsking({ target, press });
-      else startTarget(target, press);
-    })();
-  };
-  const answerAsk = (stopAsking: boolean, start: boolean) => {
-    const held = asking;
-    setAsking(null);
-    if (stopAsking && user) void practiceMoreAsk.stopAsking(user.username);
-    if (start && held) startTarget(held.target, held.press);
-  };
+  // Phase 72 (spec D6). A target's button: the same press a target session's results screen makes.
+  const { practice: practiceTarget, asking, answerAsk, cancelAsk } = usePracticeTarget({ run, openSession: enterSession });
 
   // Phase 43 (spec D7). A missing session is made, not offered as a button.
   // After every render: the guard sends it once per focus and enrollment, and
@@ -329,9 +281,10 @@ export function LearningSection({ active }: { active: Enrollment }) {
       ) : null}
       <CardStack resetKey={order.join(',')} bars={bars} cards={order.map((card) => ({ key: card, node: cardNode(card) }))} />
       <PracticeMoreSheet
-        visible={asking !== null}
+        visible={asking}
         onLater={(stop) => answerAsk(stop, false)}
         onAnyway={(stop) => answerAsk(stop, true)}
+        onCancel={cancelAsk}
       />
     </>
   );
