@@ -9,12 +9,12 @@ import { MyWordsCard } from '@/components/MyWordsCard';
 import { PracticeMoreSheet } from '@/components/PracticeMoreSheet';
 import { TargetCard } from '@/components/TargetCard';
 import { useNextSession } from '@/hooks/useNextSession';
+import { usePracticeMyWords } from '@/hooks/usePracticeMyWords';
 import { isSessionOpen, usePracticeTarget } from '@/hooks/usePracticeTarget';
 import { useSession } from '@/hooks/useSession';
 import { useTargets } from '@/hooks/useTargets';
 import {
   POLL_INTERVAL_MS,
-  createLook,
   homeActionOf,
   homeReminderStartOf,
   mainEmptyNote,
@@ -53,10 +53,9 @@ export function LearningSection({ active }: { active: Enrollment }) {
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   // Phase 43 (spec D7). The enrollment home sent its own create for in this
-  // focus, and the one whose create failed: a missing session is made once per
-  // focus, then offered as a retry.
+  // focus: a missing session is made once per focus, then offered as a retry
+  // (usePracticeMyWords holds the failure).
   const attemptedFor = useRef<string | null>(null);
-  const [makeFailedFor, setMakeFailedFor] = useState<string | null>(null);
   // Phase 52 (spec D8). `start=reminder` is acted on once: the param is cleared
   // as it is, and this holds the render or two before the clear reaches `start`.
   const reminderHandled = useRef(false);
@@ -79,7 +78,6 @@ export function LearningSection({ active }: { active: Enrollment }) {
   useFocusEffect(
     useCallback(() => {
       attemptedFor.current = null;
-      setMakeFailedFor(null);
       reload();
       void reloadTargets();
     }, [reload, reloadTargets]),
@@ -140,25 +138,18 @@ export function LearningSection({ active }: { active: Enrollment }) {
     }
   }
 
-  // Phase 43 (spec D7). Makes the next session without entering it: home shows
-  // it preparing, then offers it.
-  const makeNext = (enrollmentId: string) =>
-    run(async () => {
-      try {
-        await next.create();
-        setMakeFailedFor(null);
-      } catch (error) {
-        setMakeFailedFor(enrollmentId);
-        throw error;
-      }
-    });
-  // A skip from home can leave no session at all (the one in stock skipped):
-  // home may make the next one again in this focus.
-  const skip = (sessionId: string) =>
-    run(async () => {
-      await next.skip(sessionId);
+  // Phase 73 (spec D8). My words' button: the same press a My words session's results screen makes.
+  // A skip from home can leave no session at all (the one in stock skipped): home may make
+  // the next one again in this focus.
+  const myWords = usePracticeMyWords({
+    run,
+    openSession: enterSession,
+    onDiscover: () => router.push({ pathname: '/discover', params: { from: 'my-words' } }),
+    onSkipped: () => {
       attemptedFor.current = null;
-    });
+    },
+  });
+  const { makeNext, makeFailed } = myWords;
 
   // Phase 72 (spec D6). A target's button: the same press a target session's results screen makes.
   const { practice: practiceTarget, asking, answerAsk, cancelAsk } = usePracticeTarget({ run, openSession: enterSession });
@@ -169,7 +160,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
   useEffect(() => {
     if (inFlight.current || !shouldAutoCreate(action, attemptedFor.current, active.id)) return;
     attemptedFor.current = active.id;
-    void makeNext(active.id);
+    void makeNext();
   });
 
   // Phase 52 (spec D8). A tapped reminder opens home with start=reminder. Home
@@ -203,7 +194,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
       held.targets,
       action,
       {
-        failed: next.loadFailed || createLook(makeFailedFor, active.id) === 'retry',
+        failed: next.loadFailed || makeFailed,
         read: next.current !== held.read,
       },
       held.created,
@@ -245,11 +236,11 @@ export function LearningSection({ active }: { active: Enrollment }) {
           loadFailed={next.loadFailed}
           busy={busy}
           onRetry={reload}
-          makeFailed={createLook(makeFailedFor, active.id) === 'retry'}
-          onDiscover={() => router.push({ pathname: '/discover', params: { from: 'my-words' } })}
-          onMake={() => void makeNext(active.id)}
+          makeFailed={makeFailed}
+          onDiscover={() => myWords.press({ kind: 'discover' })}
+          onMake={() => void makeNext()}
           onEnter={enterSession}
-          onSkip={skip}
+          onSkip={myWords.skip}
         />
       );
     }

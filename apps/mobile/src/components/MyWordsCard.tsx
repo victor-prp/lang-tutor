@@ -2,7 +2,9 @@ import type { CurrentSessionResponse } from '@lang-tutor/core/api';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BandCard, cardButton } from '@/components/BandCard';
-import { mainButtonSolid, myWordsBand, type HomeAction, type mainEmptyNote } from '@/nextSession';
+import { MyWordsToday } from '@/components/MyWordsToday';
+import { myWordsButton } from '@/myWordsToday';
+import { myWordsBand, type HomeAction, type mainEmptyNote } from '@/nextSession';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
@@ -20,8 +22,12 @@ export function MyWordsCard({
 }: {
   current: CurrentSessionResponse | null;
   language: string;
-} & Omit<SessionActionProps, 'filled'>) {
+} & Omit<SessionActionProps, 'filled' | 'label'>) {
   const band = current ? myWordsBand(current, language) : null;
+  // Phase 73 (spec D5). Today's line, dots and tiles above the button; an older server sends
+  // none and the card is as it was. Once the goal is met the button offers more, pale.
+  const today = current?.today;
+  const button = myWordsButton(today, session.action);
   return (
     <BandCard
       testID="home-my-words"
@@ -30,7 +36,8 @@ export function MyWordsCard({
       big={band?.big ?? '…'}
       unit={null}
       line={band?.line ?? null}
-      footer={<SessionAction {...session} filled={mainButtonSolid(session.action)} />}
+      info={today ? <MyWordsToday today={today} testID="home-my-words-today" /> : null}
+      footer={<SessionAction {...session} filled={button.filled} label={button.label} />}
     />
   );
 }
@@ -42,6 +49,8 @@ type SessionActionProps = {
   emptyNote: ReturnType<typeof mainEmptyNote>;
   /** Phase 64 (spec D4). Solid when pressing it starts or resumes a session, else pale. */
   filled: boolean;
+  /** Phase 73 (spec D5). לתרגל עכשיו, or לתרגל עוד once the day's goal is met. */
+  label: string;
   loadFailed: boolean;
   busy: boolean;
   onRetry: () => void;
@@ -58,6 +67,7 @@ function SessionAction({
   action,
   emptyNote,
   filled,
+  label,
   loadFailed,
   busy,
   onRetry,
@@ -130,7 +140,7 @@ function SessionAction({
               {emptyNote.text}
             </Text>
           )}
-          {primary('start-button', strings.practiceNow, onDiscover)}
+          {primary('start-button', label, onDiscover)}
         </>
       );
     case 'create':
@@ -147,7 +157,7 @@ function SessionAction({
     case 'resume':
       return (
         <>
-          {primary('start-button', strings.practiceNow, () => onEnter(action.sessionId, action.kind === 'start'))}
+          {primary('start-button', label, () => onEnter(action.sessionId, action.kind === 'start'))}
           {skip(action.sessionId)}
         </>
       );
