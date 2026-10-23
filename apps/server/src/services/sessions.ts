@@ -895,11 +895,6 @@ export function createSessionService({
     return dueGlosses(memory, liveDimensions(devices.listening, devices.speaking), today).length;
   }
 
-  /**
-   * Phase 65 (spec D7.1, D7.2). A target's budget for the learner's today, set once: when the day
-   * has none, the one readTodayBudget reads now; a day set already keeps its own, so the count
-   * never grows. A target no longer active, or with no saved word, gets none. Takes no lock.
-   */
   /** Phase 73 (spec D4). The main path's day: the recorded row's counts, or zeros before the day's
    *  first counted session; the goal is the one in force now, not the row's. */
   async function myWordsToday(repos: Repos, enrolled: Enrollment): Promise<MyWordsToday> {
@@ -915,6 +910,11 @@ export function createSessionService({
     };
   }
 
+  /**
+   * Phase 65 (spec D7.1, D7.2). A target's budget for the learner's today, set once: when the day
+   * has none, the one readTodayBudget reads now; a day set already keeps its own, so the count
+   * never grows. A target no longer active, or with no saved word, gets none. Takes no lock.
+   */
   async function setTodayBudget(repos: Repos, enrolled: Enrollment, targetId: string, devices: Devices): Promise<void> {
     const today = await learnerDay(repos, enrolled.user_id, now());
     if (await repos.targetBudgets.find(targetId, today)) return;
@@ -2729,7 +2729,14 @@ export function createSessionService({
           const { stock } = await repos.session.findOpen(enrollmentId, path);
           // Phase 68 (spec D6, ruling 2026-10-22): a stock is kept whatever step-downs it asks.
           if (stock) return { why: 'stocked' };
-          if (path === null && !(await repos.session.findLatest(enrollmentId, 'any'))) return { why: 'seed_next' };
+          // Phase 73 (spec D6): the seed is next only for an enrollment with no word of its own either.
+          if (
+            path === null &&
+            !(await repos.session.findLatest(enrollmentId, 'any')) &&
+            nextSource(false, (await savedOn(repos, enrolled, null)) > 0) === 'seed'
+          ) {
+            return { why: 'seed_next' };
+          }
           if (path !== null) {
             const target = await repos.target.findTarget(path);
             const today = await learnerDay(repos, enrolled.user_id, now());

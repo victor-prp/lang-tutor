@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import { DEFAULT_MY_WORDS_GOAL, goalMinutes, goalOf, MAX_MY_WORDS_GOAL, storedGoal } from './myWordsGoal';
 
 describe('goalOf (phase 73 D1)', () => {

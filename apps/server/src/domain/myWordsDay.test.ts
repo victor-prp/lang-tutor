@@ -1,8 +1,22 @@
+import { describe, expect, it } from '@jest/globals';
 import { myWordsDayCounts } from './myWordsDay';
 import type { SnapshotRead } from './progress';
 
-function row(glossId: string, dimension: SnapshotRead['dimension'], before: number, after: number): SnapshotRead {
-  return { glossId, dimension, levelBefore: before, levelAfter: after, form: glossId, translation: glossId, position: 0 } as SnapshotRead;
+function row(
+  glossId: string,
+  dimension: SnapshotRead['dimension'],
+  before: number,
+  after: number,
+): SnapshotRead {
+  return {
+    glossId,
+    dimension,
+    levelBefore: before,
+    levelAfter: after,
+    form: glossId,
+    translation: glossId,
+    position: 0,
+  } as SnapshotRead;
 }
 
 describe('myWordsDayCounts (phase 73 D2)', () => {

@@ -37,6 +37,9 @@ export function createMyWordsGoalService({
           enrollmentId,
           permission: 'my_words_goal.manage',
         });
+        // ADR 0014 R4: no next-session lock here, so the progress lock alone orders this against a
+        // counted completion.
+        await repos.progress.lockEnrollment(enrollmentId);
         await repos.enrollment.setMyWordsGoal(enrollmentId, storedGoal(input.goal));
         const day = await learnerDay(repos, enrolled.user_id, now());
         if (await repos.myWordsDays.find(enrollmentId, day)) {

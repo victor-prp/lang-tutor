@@ -19,6 +19,9 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 
+// Phase 73 (spec D4). A new learner's day on the main path: the default goal, nothing counted.
+const TODAY_ZERO = { goal: 3, sessions_done: 0, new_words: 0, moved_up: 0, minutes: 15 };
+
 // Phase 57 (spec D1, D2, D10, ADR 0014). Every session belongs to one path: the main path ("My
 // words"), which asks saved words in no active target, or a target's, which asks its words
 // only. Each path has its own stock and its own started session. A change to a target retires
@@ -721,7 +724,7 @@ describe('the home read of a path (spec D11)', () => {
     await insertGlossMemory(t.db, [faded(words[0].glossId), faded(words[3].glossId)]);
 
     // Ruling T5-q: the main path's saved words are those in no active target.
-    expect(await service.currentSession('u_1', E)).toMatchObject({ current: null, nextSource: 'list', savedCount: 3, dueCount: 1 });
+    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'list', savedCount: 3, dueCount: 1, today: TODAY_ZERO });
     // Five days of five: one word of three owed today.
     expect(await service.currentSession('u_1', E, exam)).toEqual({ current: null, nextSource: 'list', savedCount: 6, dueCount: 1 });
 
