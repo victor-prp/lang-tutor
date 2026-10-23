@@ -232,12 +232,36 @@ function targetReminderStep(
     case 'answered': {
       if (created.status === 'ready') return { kind: 'enter', sessionId: created.sessionId, fresh: true };
       if (created.status !== 'preparing') return { kind: 'clear' };
-      const now = latest.find((candidate) => candidate.id === target.id)?.session;
-      if (now?.session_id !== created.sessionId) return { kind: 'wait' };
+      const listed = latest.find((candidate) => candidate.id === target.id);
+      const now = listed?.session;
+      if (now?.session_id !== created.sessionId) {
+        // Home's render can be from before create's own read, so it waits a different session out.
+        // The practice screen's list is read after its create (final review I1): a different
+        // session is the path's now, and none, or a failed one, is home's to explain.
+        if (onFailed === 'clear' || !listed) return { kind: 'wait' };
+        if (!now) return { kind: 'clear' };
+        if (now.status === 'ready') return { kind: 'enter', sessionId: now.session_id, fresh: !(now.started || now.answered > 0) };
+        return now.status === 'preparing' ? { kind: 'wait' } : { kind: 'clear' };
+      }
       if (now.status === 'ready') return { kind: 'enter', sessionId: created.sessionId, fresh: true };
       return now.status === 'preparing' ? { kind: 'wait' } : { kind: 'clear' };
     }
   }
+}
+
+/** Phase 75 (spec D6). Where the practice screen's own My words create stands: not sent, out,
+ *  made and read again (final review I1), or failed. */
+export type MyWordsMade = 'none' | 'sending' | 'made' | 'failed';
+
+/** Final review I1. The practice screen's make: the create, then a read of what it made, so the
+ *  screen judges on that read; a create or a read that failed is `failed`, never left waiting. */
+export async function makeMyWords(create: () => Promise<unknown>, refresh: () => Promise<boolean>): Promise<'made' | 'failed'> {
+  try {
+    await create();
+  } catch {
+    return 'failed';
+  }
+  return (await refresh()) ? 'made' : 'failed';
 }
 
 /** Phase 75 (spec D6). What the practice screen does next. */
@@ -264,7 +288,7 @@ export function practiceStartOf(input: {
   main: HomeAction | null;
   flags: { failed: boolean; read: boolean };
   created: TargetCreate;
-  made: 'none' | 'sending' | 'failed';
+  made: MyWordsMade;
   latest: readonly TargetSummary[];
 }): PracticeStep {
   const { targetId, targets, main, flags, made } = input;
@@ -289,6 +313,7 @@ export function practiceStartOf(input: {
       return { kind: 'discover' };
     case 'create':
     case 'failed':
+      // Made and read again, and still none, or failed to prepare: home's card explains it.
       return made === 'none' ? { kind: 'make' } : made === 'sending' ? { kind: 'wait' } : { kind: 'home' };
   }
 }

@@ -10,7 +10,16 @@ import { useNextSession } from '@/hooks/useNextSession';
 import { isSessionOpen } from '@/hooks/usePracticeTarget';
 import { useSession } from '@/hooks/useSession';
 import { useTargets } from '@/hooks/useTargets';
-import { POLL_INTERVAL_MS, homeActionOf, openSessionOf, practiceStartOf, shouldPoll, type TargetCreate } from '@/nextSession';
+import {
+  POLL_INTERVAL_MS,
+  homeActionOf,
+  makeMyWords,
+  openSessionOf,
+  practiceStartOf,
+  shouldPoll,
+  type MyWordsMade,
+  type TargetCreate,
+} from '@/nextSession';
 import { strings } from '@/strings';
 import { askBeforePracticeMore } from '@/targets';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
@@ -41,7 +50,7 @@ export default function PracticeScreen() {
   const [held, setHeld] = useState<'reading' | 'failed' | readonly TargetSummary[]>('reading');
   const [main, setMain] = useState<'reading' | 'failed' | 'read'>('reading');
   const [created, setCreated] = useState<TargetCreate>({ kind: 'none' });
-  const [made, setMade] = useState<'none' | 'sending' | 'failed'>('none');
+  const [made, setMade] = useState<MyWordsMade>('none');
   const [ask, setAsk] = useState<Ask>('unweighed');
   const readsStarted = useRef(false);
   const switched = useRef(false);
@@ -127,7 +136,7 @@ export default function PracticeScreen() {
         return leave({ sessionId: step.sessionId, fresh: step.fresh });
       case 'make':
         setMade('sending');
-        void next.create().catch(() => setMade('failed'));
+        void makeMyWords(next.create, next.refresh).then(setMade);
         return;
       case 'create': {
         if (ask === 'weighing' || ask === 'asking') return;

@@ -11,6 +11,7 @@ import {
   mainEmptyNote,
   myWordsBand,
   myWordsLine,
+  makeMyWords,
   openSessionOf,
   practiceStartOf,
   reminderStartOf,
@@ -461,6 +462,20 @@ describe('practiceStartOf', () => {
     expect(forTarget(owed, { created, latest: latest('ready') })).toEqual({ kind: 'enter', sessionId: 'ts2', fresh: true });
   });
 
+  // Final review I1. The practice screen's list is read after its create, so a different session
+  // there is the path's now, not a stale render: entered when ready, waited on while it prepares,
+  // and home when it failed or none is left. Home itself keeps waiting (its render can be stale).
+  it('acts on a different session the list shows after its create, rather than waiting on it forever', () => {
+    const owed = [targetWith(session('ready', 0))];
+    const created = { kind: 'answered', sessionId: 'ts2', status: 'preparing' } as const;
+    const other = (status: 'preparing' | 'ready' | 'failed') => [targetWith({ ...session(status), session_id: 'ts3' })];
+    expect(forTarget(owed, { created, latest: other('ready') })).toEqual({ kind: 'enter', sessionId: 'ts3', fresh: true });
+    expect(forTarget(owed, { created, latest: other('preparing') })).toEqual({ kind: 'wait' });
+    expect(forTarget(owed, { created, latest: other('failed') })).toEqual({ kind: 'home' });
+    expect(forTarget(owed, { created, latest: [targetWith(null)] })).toEqual({ kind: 'home' });
+    expect(homeReminderStartOf(owed, null, read, created, other('ready'))).toEqual({ kind: 'wait' });
+  });
+
   it("waits for My words' read made after opening, and goes home when it failed", () => {
     expect(forMyWords({ kind: 'start', sessionId: 'm1' }, { flags: { failed: false, read: false } })).toEqual({ kind: 'wait' });
     expect(forMyWords(null)).toEqual({ kind: 'wait' });
@@ -479,5 +494,34 @@ describe('practiceStartOf', () => {
     expect(forMyWords({ kind: 'failed' })).toEqual({ kind: 'make' });
     expect(forMyWords({ kind: 'create' }, { made: 'sending' })).toEqual({ kind: 'wait' });
     expect(forMyWords({ kind: 'create' }, { made: 'failed' })).toEqual({ kind: 'home' });
+  });
+
+  // Final review I1. Once its session is made and read again, a My words read that still shows no
+  // session, or one that failed to prepare, is home's to explain (its card offers a retry): never
+  // a spinner that waits on nothing.
+  it('goes home when the session it made failed to prepare, or the read after making it shows none', () => {
+    expect(forMyWords({ kind: 'failed' }, { made: 'made' })).toEqual({ kind: 'home' });
+    expect(forMyWords({ kind: 'create' }, { made: 'made' })).toEqual({ kind: 'home' });
+    expect(forMyWords({ kind: 'preparing', sessionId: 'm2' }, { made: 'made' })).toEqual({ kind: 'wait' });
+    expect(forMyWords({ kind: 'start', sessionId: 'm2' }, { made: 'made' })).toEqual({ kind: 'enter', sessionId: 'm2', fresh: true });
+  });
+});
+
+// Final review I1. The practice screen's make: the create, then a read of what it made.
+describe('makeMyWords', () => {
+  it('answers made once the create and the read after it both landed', async () => {
+    expect(await makeMyWords(async () => undefined, async () => true)).toBe('made');
+  });
+
+  it('answers failed when the create failed, or the read after it did', async () => {
+    expect(
+      await makeMyWords(
+        async () => {
+          throw new Error('offline');
+        },
+        async () => true,
+      ),
+    ).toBe('failed');
+    expect(await makeMyWords(async () => undefined, async () => false)).toBe('failed');
   });
 });
