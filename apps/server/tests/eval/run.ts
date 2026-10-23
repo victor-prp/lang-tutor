@@ -31,7 +31,7 @@ import { POINT_REWRITE_ROUNDS, judgePoint, pointItem, readPoint, type PointFindi
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import type { SentenceContent } from '../../src/domain/sentences';
 import { TRANSLATION_JUDGE_THINKING } from '../../src/domain/judge';
-import { DISCOVERY_THINKING, wordKey } from '../../src/domain/discovery';
+import { DISCOVERY_THINKING, PHRASES_FROM_LEVEL, wordKey } from '../../src/domain/discovery';
 import { EXPLAIN_THINKING } from '../../src/domain/explain';
 import { LANGUAGES } from '../../src/domain/languages';
 import { DEFAULT_SOUND_ALIKE_THRESHOLD } from '../../src/domain/soundAlike';
@@ -1668,6 +1668,15 @@ async function main(): Promise<void> {
       const words = parsed?.words ?? [];
       const offScript = words.filter((word) => [...word.word].some((char) => /\p{L}/u.test(char) && !letters.test(char)));
       const notHebrew = words.filter((word) => !/[\u0590-\u05FF]/.test(word.hebrew) || /[A-Za-z\u0400-\u04FF]/.test(word.hebrew));
+      // Phase 74 (spec D4). The parser keeps only words with three wrong meanings in Hebrew, none a
+      // right one: what it dropped for them is what the model got wrong.
+      const droppedForWrong = parsed?.droppedForWrong ?? 0;
+      const wrongNotHebrew = words.filter((word) => word.wrong.some((wrong) => !/[\u0590-\u05FF]/.test(wrong) || /[A-Za-z\u0400-\u04FF]/.test(wrong)));
+      const phrases = words.filter((word) => word.word.includes(' '));
+      const phraseCheck =
+        kase.input.level >= PHRASES_FROM_LEVEL
+          ? [{ name: 'at least 2 phrases kept', ok: phrases.length >= 2, detail: phrases.map((word) => word.word).join(', ') || 'none' }]
+          : [];
       return {
         label: kase.label,
         text,
@@ -1680,8 +1689,15 @@ async function main(): Promise<void> {
           { name: 'no word repeated', ok: repeated.length === 0, detail: repeated.join(', ') || undefined },
           { name: "every word in its language's script", ok: offScript.length === 0, detail: offScript.map((word) => word.word).join(', ') || undefined },
           { name: 'every meaning in Hebrew', ok: notHebrew.length === 0, detail: notHebrew.map((word) => `${word.word}=${word.hebrew}`).join(', ') || undefined },
+          { name: 'at most 2 words dropped for their wrong meanings', ok: droppedForWrong <= 2, detail: droppedForWrong > 0 ? `${droppedForWrong} dropped` : undefined },
+          {
+            name: 'every wrong meaning in Hebrew',
+            ok: wrongNotHebrew.length === 0,
+            detail: wrongNotHebrew.map((word) => `${word.word}: ${word.wrong.join('/')}`).join(', ') || undefined,
+          },
+          ...phraseCheck,
         ],
-        verdict: `${seconds} s: ${words.map((word) => `${word.word}=${word.hebrew}`).join(', ')}`,
+        verdict: `${seconds} s: ${words.map((word) => `${word.word}=${word.hebrew} (${word.wrong.join('/')})`).join(', ')}`,
       };
     } catch (error) {
       return {
