@@ -7,7 +7,7 @@ import type { PgBoss } from 'pg-boss';
 import { NEW_PER_SESSION } from '../../../src/domain/chooseConstants';
 import { PREPARE_SESSION, type PrepareSessionPayload } from '../../../src/domain/jobs';
 import { startTestBoss, stopTestBoss } from '../../support/jobs';
-import { enrollmentOf, seedEnrollment, seedUser } from '../../support/seedUser';
+import { enrollmentOf, seedEnrollment, seedUser, setNewWordLimits } from '../../support/seedUser';
 import { seedGrant } from '../../support/grantRows';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { seedDiscoveryRun } from '../../support/discoveryRows';
@@ -34,6 +34,7 @@ import type { SessionService } from '../../../src/services/sessions';
 import type { VocabularyService } from '../../../src/services/vocabulary';
 import {
   failInsertsInto,
+  insertAnsweredSession,
   insertGlossMemory,
   readMemory,
   readProgress,
@@ -282,6 +283,24 @@ describe('needsNewWords (phase 74, spec D7)', () => {
     const kite = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
     await insertGlossMemory(t.db, [met(kite.glossIds[0])]);
     await seedDiscoveryRun(t.db, { enrollmentId: E, status: 'saved', startedBy: 'app', createdAt: new Date(Date.now() - 30 * 3600_000), cards: [] });
+    expect((await service.currentSession('u_1', E)).needsNewWords).toBe(true);
+  });
+
+  // Final review I3 (spec D7, my call): the day's cap holds a word back, it does not meet it.
+  it("counts a word the day's new-word cap holds back as new", async () => {
+    const kite = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
+    const cat = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'cat', translations: ['חתול'] });
+    await setNewWordLimits(t.db, 'u_1', { dayNewCap: 1, newPerSession: null });
+    // kite met today in a session not yet ended: the day's one new word, so the cap holds cat back.
+    await insertAnsweredSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      status: 'ready',
+      asked: [{ glossId: kite.glossIds[0], variantId: kite.variantId, translation: 'עפיפון' }],
+      answers: [{ position: 0, correct: true, at: new Date().toISOString() }],
+    });
+    expect((await service.currentSession('u_1', E)).needsNewWords).toBe(false);
+    await insertGlossMemory(t.db, [met(cat.glossIds[0])]);
     expect((await service.currentSession('u_1', E)).needsNewWords).toBe(true);
   });
 

@@ -419,14 +419,23 @@ describe('ending a run (phase 74, spec D5, D8)', () => {
     expect(stocks(jobs)).toEqual([]);
   });
 
-  it('asks for the session at once when a word of the run is saved', async () => {
+  it('asks for the session at once when a word of the run is saved and none is still looked up', async () => {
     const { service, repo, jobs } = setup();
     const id = await seedRun(repo, { rounds: 1, answeredInLast: 6, knownPerRound: 5 });
-    repo.cards.get(id)![5].savedAt = new Date(NOW);
+    Object.assign(repo.cards.get(id)![5], { savedAt: new Date(NOW), lookupStatus: 'ready' });
     await service.end(OWNER, id);
     expect(stocks(jobs)).toEqual([
       { name: STOCK_SESSION, data: { enrollment_id: 'e1', reason: 'discovery' }, options: { singletonKey: 'e1' } },
     ]);
+  });
+
+  // Final review I2: a session stocked now would hold the one word saved, and never take the others.
+  it('asks for no session while a word added is still looked up: its save asks once it lands', async () => {
+    const { service, repo, jobs } = setup();
+    const id = await seedRun(repo, { rounds: 1, answeredInLast: 7, knownPerRound: 5 });
+    Object.assign(repo.cards.get(id)![5], { savedAt: new Date(NOW), lookupStatus: 'ready' });
+    await service.end(OWNER, id);
+    expect(stocks(jobs)).toEqual([]);
   });
 
   it('answers an ended run as it is, and refuses a discarded one', async () => {
@@ -483,6 +492,28 @@ describe("an added word's lookup and save (phase 74, spec D5)", () => {
     const id = await seedRun(repo, { rounds: 1, knownPerRound: 9, status: 'saved' });
     await service.lookUpWord({ run_id: id, position: 9 });
     expect(inserted).toHaveLength(1);
+    expect(stocks(jobs)).toHaveLength(1);
+  });
+
+  // Final review I2: after the end, the session waits for the last lookup, so it holds every word.
+  it('after the run ended, asks for the session once the last word added is looked up, not before', async () => {
+    const { service, repo, jobs, inserted } = looking();
+    const id = await seedRun(repo, { rounds: 1, knownPerRound: 7, status: 'saved' });
+    await service.lookUpWord({ run_id: id, position: 7 });
+    expect(stocks(jobs)).toEqual([]);
+    await service.lookUpWord({ run_id: id, position: 8 });
+    expect(stocks(jobs)).toEqual([]);
+    await service.lookUpWord({ run_id: id, position: 9 });
+    expect(inserted).toHaveLength(3);
+    expect(stocks(jobs)).toHaveLength(1);
+  });
+
+  it('after the run ended, a failed last lookup still lets the saved words have their session', async () => {
+    const { service, repo, jobs } = looking();
+    const id = await seedRun(repo, { rounds: 1, knownPerRound: 8, status: 'saved' });
+    await service.lookUpWord({ run_id: id, position: 8 });
+    expect(stocks(jobs)).toEqual([]);
+    await service.failWord({ run_id: id, position: 9 });
     expect(stocks(jobs)).toHaveLength(1);
   });
 

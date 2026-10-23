@@ -43,6 +43,12 @@ function asRowState(card: CardRow): ImportItemState {
 const lastRoundOf = (cards: readonly CardRow[]) => cards.reduce((max, card) => Math.max(max, card.round), 0);
 const addedOf = (cards: readonly CardRow[]) => cards.filter((card) => card.added === true);
 const savedCountOf = (cards: readonly CardRow[]) => cards.filter((card) => card.savedAt !== null).length;
+const lookingUp = (cards: readonly CardRow[]) => cards.some((card) => card.added === true && card.lookupStatus === 'pending');
+
+/** Phase 74 (spec D5, final review I2). An ended run asks for its session once none of its added
+ *  words is still looked up and one was saved: a session stocked sooner would hold only the
+ *  words saved by then, and a waiting session is never replaced. */
+const endedRunReady = (cards: readonly CardRow[]) => savedCountOf(cards) > 0 && !lookingUp(cards);
 
 /** Phase 74 (spec D9, D11). An added word as far as its lookup got: saved, still looked up, or
  *  failed (its lookup gave no gloss, or ran out of retries). */
@@ -155,14 +161,14 @@ export function createDiscoveryService({
 
   /**
    * Phase 74 (spec D5, D6). Ends an asking run, settling its round first; with a word of it
-   * already saved, asks for the session at once (a run that ends at one word still gets one).
-   * The caller holds the row.
+   * saved and none still looked up, asks for the session at once (a run that ends at one word
+   * still gets one). Otherwise the last lookup to land asks. The caller holds the row.
    */
   const endRun = async (repos: Repos, run: RunRow, cards: readonly CardRow[], reason: string): Promise<RunRow> => {
     const settled = await settle(repos, run, cards);
     await repos.discovery.transition(run.id, ['asking'], 'saved');
     const savedCount = savedCountOf(cards);
-    if (savedCount > 0) await requestStock(repos, { enrollment_id: run.enrollmentId, reason: 'discovery' });
+    if (endedRunReady(cards)) await requestStock(repos, { enrollment_id: run.enrollmentId, reason: 'discovery' });
     logger.info({
       event: 'discovery_ended',
       run_id: run.id,
@@ -435,8 +441,10 @@ export function createDiscoveryService({
         if (entries.length === 0) return { written: true as const, saved: false };
         await saveEntriesInTx(repos, logger, { enrolled: read.enrolled, actorUserId: read.enrolled.user_id, entries, stockSaveDelaySeconds: null });
         await repos.discovery.markSaved(runId, position);
-        const savedCount = savedCountOf(await repos.discovery.listCards(runId));
-        const stocked = savedCount === 2 || run.status === 'saved';
+        const after = await repos.discovery.listCards(runId);
+        const savedCount = savedCountOf(after);
+        // While the run asks, its 2nd saved word (Victor); once it ended, its last lookup.
+        const stocked = run.status === 'asking' ? savedCount === 2 : endedRunReady(after);
         if (stocked) await requestStock(repos, { enrollment_id: run.enrollmentId, reason: 'discovery' });
         return { written: true as const, saved: true, savedCount, stocked };
       });
@@ -462,11 +470,18 @@ export function createDiscoveryService({
       }
     },
 
-    /** The lookup's dead letter: the word is marked failed; the rest unaffected. */
+    /** The lookup's dead letter: the word is marked failed; the rest unaffected. Phase 74 (final
+     *  review I2): when it was an ended run's last lookup, the words saved get their session. */
     failWord: async (data: unknown): Promise<void> => {
       const { run_id: runId, position } = LookUpDiscoveredWordPayloadSchema.parse(data);
-      const marked = await transaction(({ discovery }) => discovery.markLookupFailed(runId, position));
-      logger.info({ event: 'discovered_word_failed', run_id: runId, position, marked });
+      const { marked, stocked } = await transaction(async (repos) => {
+        const run = await repos.discovery.findRunForUpdate(runId);
+        const marked = await repos.discovery.markLookupFailed(runId, position);
+        const stocked = marked && run?.status === 'saved' && endedRunReady(await repos.discovery.listCards(runId));
+        if (stocked) await requestStock(repos, { enrollment_id: run.enrollmentId, reason: 'discovery' });
+        return { marked, stocked };
+      });
+      logger.info({ event: 'discovered_word_failed', run_id: runId, position, marked, stocked });
     },
   };
 }
