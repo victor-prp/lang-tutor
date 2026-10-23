@@ -167,7 +167,10 @@ export default function ResultsScreen() {
   const myWords = usePracticeMyWords({
     run,
     openSession,
-    onDiscover: () => router.dismissTo('/'),
+    // Like home's card: Words for me, from My words.
+    onDiscover: () => {
+      if (shown.current) router.replace({ pathname: '/discover', params: { from: 'my-words' } });
+    },
     onSkipped: () => undefined,
   });
 
@@ -193,6 +196,11 @@ export default function ResultsScreen() {
         {target ? <TargetBlock target={target} /> : null}
         {myWordsLanded && next.current?.today && hasToday(next.current.today) ? (
           <MyWordsBlock today={next.current.today} />
+        ) : null}
+        {myWordsScreen && myWordsRead === 'reading' ? (
+          <View style={[styles.target, styles.targetReading]} testID="results-my-words-reading">
+            <ActivityIndicator color={colors.primary} />
+          </View>
         ) : null}
         {view.kind === 'reading' ? (
           <View style={[styles.target, styles.targetReading]} testID="results-target-reading">

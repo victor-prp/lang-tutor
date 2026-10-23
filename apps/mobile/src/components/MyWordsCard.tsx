@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 
 import { BandCard, cardButton } from '@/components/BandCard';
 import { MyWordsToday } from '@/components/MyWordsToday';
-import { myWordsButton } from '@/myWordsToday';
+import { hasToday, myWordsButton } from '@/myWordsToday';
 import { myWordsBand, type HomeAction, type mainEmptyNote } from '@/nextSession';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
@@ -36,7 +36,7 @@ export function MyWordsCard({
       big={band?.big ?? '…'}
       unit={null}
       line={band?.line ?? null}
-      info={today ? <MyWordsToday today={today} testID="home-my-words-today" /> : null}
+      info={today && hasToday(today) ? <MyWordsToday today={today} testID="home-my-words-today" /> : null}
       footer={<SessionAction {...session} filled={button.filled} label={button.label} />}
     />
   );
