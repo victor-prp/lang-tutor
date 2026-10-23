@@ -198,19 +198,15 @@ export function createReminders({ engine, api, platform, isExpoGo, timeZone, log
 
 export type Reminders = ReturnType<typeof createReminders>;
 
-/** Where a tapped reminder goes: בית, told to start the ready session (phase 52), or just בית
- *  under the practice screen (phase 75). */
-export type ReminderHref = { pathname: '/'; params?: { start: 'reminder' } };
-
-/** Phase 75 (spec D6). The screen that opens the session of the path a reminder named. */
-export type PracticeHref = { pathname: '/practice'; params: { enrollment: string; target?: string } };
+/** Where a tapped reminder goes: בית, told to start the ready session (phase 52), or, for a
+ *  reminder that names its path (phase 75, spec D6), told to open that path's practice screen. */
+export type ReminderHref = { pathname: '/'; params: { start: 'reminder'; enrollment?: string; target?: string } };
 
 /** The part of expo-router's router a tapped reminder uses. */
 export type ReminderRouter = {
   canDismiss: () => boolean;
   dismissTo: (href: ReminderHref) => void;
   navigate: (href: ReminderHref) => void;
-  push: (href: PracticeHref) => void;
 };
 
 /**
@@ -221,18 +217,18 @@ export type ReminderRouter = {
  * tab navigator (its router has no such action), so the tap navigates, which jumps to בית and
  * sets the param.
  *
- * Phase 75 (spec D6). A reminder that names its path goes to בית the same way, without the param,
- * and the practice screen is pushed over it: it opens that path's session in its own place, so
- * back from the session lands on בית. One sent before phase 75 keeps start=reminder.
+ * Phase 75 (spec D6). A reminder that names its path hands it over too, and home opens the
+ * practice screen over itself, which goes straight into that path's session: back from it lands
+ * on בית. One sent before phase 75 names none, and home starts its first card as before.
  */
 export function openReminderTap(router: ReminderRouter, tap: ReminderTap): void {
-  const href: ReminderHref =
-    tap.enrollmentId === null ? { pathname: '/', params: { start: 'reminder' } } : { pathname: '/' };
+  const params: ReminderHref['params'] =
+    tap.enrollmentId === null
+      ? { start: 'reminder' }
+      : tap.targetId === null
+        ? { start: 'reminder', enrollment: tap.enrollmentId }
+        : { start: 'reminder', enrollment: tap.enrollmentId, target: tap.targetId };
+  const href: ReminderHref = { pathname: '/', params };
   if (router.canDismiss()) router.dismissTo(href);
   else router.navigate(href);
-  if (tap.enrollmentId === null) return;
-  router.push({
-    pathname: '/practice',
-    params: tap.targetId === null ? { enrollment: tap.enrollmentId } : { enrollment: tap.enrollmentId, target: tap.targetId },
-  });
 }

@@ -600,6 +600,8 @@ export const strings = {
     (bonus > 0 ? ` ועוד ${isolateLtr(String(bonus))} בונוס` : ''),
   targetReadinessPct: (kind: TargetKind, pct: number) => `מוכנות ${TARGET_FOR[kind]}: ${isolateLtr(`${pct}%`)}`,
   practiceNow: 'לתרגל עכשיו',
+  // Phase 75 (spec D6). The practice screen a tapped reminder opens, until its session is entered.
+  practiceOpening: 'פותחים את התרגול…',
   // Phase 73 (spec D5). My words' day: what is left, what was done, the tiles and the button
   // once the goal is met. The goal and the minutes are targetSessionsGoal and targetSessionsMinutes.
   myWordsTodayLeft: (left: number) =>

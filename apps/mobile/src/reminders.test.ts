@@ -387,7 +387,6 @@ describe('openReminderTap', () => {
         canDismiss: () => canDismiss,
         dismissTo: (href: unknown) => void calls.push(`dismissTo ${JSON.stringify(href)}`),
         navigate: (href: unknown) => void calls.push(`navigate ${JSON.stringify(href)}`),
-        push: (href: unknown) => void calls.push(`push ${JSON.stringify(href)}`),
       },
     };
   };
@@ -404,24 +403,20 @@ describe('openReminderTap', () => {
     expect(calls).toEqual([`navigate ${JSON.stringify(HREF)}`]);
   });
 
-  // Phase 75 (spec D6). A reminder that names its path opens the practice screen over home, so
-  // back from the session lands on home.
-  it("opens the practice screen for a target's reminder, over home", () => {
+  // Phase 75 (spec D6). A reminder that names its path hands it to home with the same param, and
+  // home opens the practice screen over itself, so back from the session lands on home.
+  it("hands a target's reminder to home with its path", () => {
     const { router, calls } = routerWith(true);
     openReminderTap(router, { reminderId: 'r1', enrollmentId: 'e1', targetId: 't1' });
     expect(calls).toEqual([
-      `dismissTo ${JSON.stringify({ pathname: '/' })}`,
-      `push ${JSON.stringify({ pathname: '/practice', params: { enrollment: 'e1', target: 't1' } })}`,
+      `dismissTo ${JSON.stringify({ pathname: '/', params: { start: 'reminder', enrollment: 'e1', target: 't1' } })}`,
     ]);
   });
 
-  it("opens the practice screen for My words' reminder with no target, from a tab too", () => {
+  it("hands My words' reminder to home with no target, from a tab too", () => {
     const { router, calls } = routerWith(false);
     openReminderTap(router, { reminderId: 'r1', enrollmentId: 'e1', targetId: null });
-    expect(calls).toEqual([
-      `navigate ${JSON.stringify({ pathname: '/' })}`,
-      `push ${JSON.stringify({ pathname: '/practice', params: { enrollment: 'e1' } })}`,
-    ]);
+    expect(calls).toEqual([`navigate ${JSON.stringify({ pathname: '/', params: { start: 'reminder', enrollment: 'e1' } })}`]);
   });
 });
 
