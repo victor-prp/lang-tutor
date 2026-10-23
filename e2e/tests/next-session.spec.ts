@@ -25,7 +25,7 @@ test('with nothing saved the card offers Words for me, and a session is built fr
 
   // 1–2. Nothing saved: the card never starts the seed (phase 73, spec D6). Its button opens Words
   // for me, not a quiz, and closing it is home again.
-  await tapUntil(page, 'start-button', 'discover-close');
+  await tapUntil(page, 'my-words-discover', 'discover-close');
   await expect(page.getByTestId('progress-label'), report()).toHaveCount(0);
   await page.getByTestId('discover-close').click();
   await expect(page.getByTestId('home-my-words'), report()).toBeVisible();

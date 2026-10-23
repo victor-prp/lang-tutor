@@ -13,8 +13,9 @@ test('on an iPad-wide screen, home sits in a centred column at most 640 wide', a
   await openApp(page);
 
   const column = await page.getByTestId('content-column').boundingBox();
-  const start = await page.getByTestId('start-button').boundingBox();
-  if (!column || !start) throw new Error('the content column or the start button has no box');
+  // A new learner has no word of their own: My words' button leads to Words for me (phase 73).
+  const start = await page.getByTestId('my-words-discover').boundingBox();
+  if (!column || !start) throw new Error("the content column or My words' button has no box");
 
   expect(column.width).toBeLessThanOrEqual(640);
   expect(Math.abs(column.x + column.width / 2 - 1024 / 2)).toBeLessThanOrEqual(2);

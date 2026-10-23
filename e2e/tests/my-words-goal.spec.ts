@@ -376,8 +376,9 @@ test('with no words of their own, the card opens Words for me, and saving there 
     tiles: null,
   });
   await expect(page.getByTestId('save-words-first')).toHaveCount(0);
-  await expectLabel(card.getByTestId('start-button'), 'לתרגל עכשיו');
-  await tapUntil(page, 'start-button', 'discover-question');
+  await expectLabel(card.getByTestId('my-words-discover'), 'לתרגל עכשיו');
+  await expect(card.getByTestId('start-button')).toHaveCount(0);
+  await tapUntil(page, 'my-words-discover', 'discover-question');
   await expect(page.getByTestId('discover-question')).toHaveText('כמה רוסית אתם כבר יודעים?');
   await page.getByTestId('discover-option-basic').click();
   await page.getByTestId('discover-option-self').click();

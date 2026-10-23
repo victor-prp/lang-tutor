@@ -140,7 +140,9 @@ function SessionAction({
               {emptyNote.text}
             </Text>
           )}
-          {primary('start-button', label, onDiscover)}
+          {/* Its own testID: a read from before a save draws this until the reload lands, and
+              `start-button` must mean a session to start (phase 73, CI on PR #242). */}
+          {primary('my-words-discover', label, onDiscover)}
         </>
       );
     case 'create':

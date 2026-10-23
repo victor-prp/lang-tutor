@@ -36,7 +36,8 @@ test('a new learner signs up with a code, onboards, signs out and back in, and k
   await expect(page.getByTestId('enroll-ru')).toBeVisible({ timeout: 30_000 });
   await page.getByTestId('enroll-ru').click();
   await page.getByTestId('enroll-submit').click();
-  await expect(page.getByTestId('start-button')).toBeVisible({ timeout: 30_000 });
+  // Home, with no word of the learner's own yet: My words' button leads to Words for me (phase 73).
+  await expect(page.getByTestId('my-words-discover')).toBeVisible({ timeout: 30_000 });
   await page.getByTestId('profile-button').click();
   await expect(page.getByTestId('profile-name')).toHaveText('יוני');
   await page.getByTestId('tab-home').click();
