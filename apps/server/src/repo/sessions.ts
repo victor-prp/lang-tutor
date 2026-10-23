@@ -494,6 +494,7 @@ export function createSessionRepo(tx: Tx) {
           status: sessions.status,
           source: sessions.source,
           skippedTypes: sessions.skippedTypes,
+          targetId: sessions.targetId,
         })
         .from(sessions)
         .where(eq(sessions.id, sessionId))
@@ -562,6 +563,7 @@ export function createSessionRepo(tx: Tx) {
         status: session.status as SessionStatus,
         source: session.source as SessionSource,
         ...(session.skippedTypes === null ? {} : { skipped_types: session.skippedTypes as SkippedType[] }),
+        ...(session.targetId === null ? {} : { target_id: session.targetId }),
       };
     },
 

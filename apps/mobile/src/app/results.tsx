@@ -1,14 +1,25 @@
-import { Redirect, router } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { MissedQuestion, SessionProgressItem, TargetSummary } from '@lang-tutor/core/api';
+import { Redirect, router, useFocusEffect } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ApiError } from '@/api/client';
+import { cardButton } from '@/components/BandCard';
 import { LevelBadge } from '@/components/LevelBadge';
+import { PracticeMoreSheet } from '@/components/PracticeMoreSheet';
 import { SpeakButton } from '@/components/SpeakButton';
+import { Readiness, Sessions } from '@/components/TargetCard';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useNextSession } from '@/hooks/useNextSession';
+import { usePracticeTarget } from '@/hooks/usePracticeTarget';
 import { useSession } from '@/hooks/useSession';
+import { useTargets } from '@/hooks/useTargets';
+import { POLL_INTERVAL_MS, targetSessionAction } from '@/nextSession';
 import { missedPair, practisedRows } from '@/progress';
 import { strings } from '@/strings';
-import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { continueButton, resultsTarget, targetCardState } from '@/targets';
+import { colors, fontSizes, lineHeights, radii, shadows, spacing } from '@/theme';
 
 function headlineFor(correct: number, total: number): string {
   const ratio = total === 0 ? 0 : correct / total;
@@ -17,18 +28,110 @@ function headlineFor(correct: number, total: number): string {
   return strings.resultsHeadlineKeepPractising;
 }
 
+/** What the screen draws of the session it was opened for. */
+type Finished = {
+  correctCount: number;
+  total: number;
+  missedQuestions: MissedQuestion[];
+  progress: SessionProgressItem[];
+  targetId: string | null;
+};
+
 export default function ResultsScreen() {
   const session = useSession();
   // Voice phase. A practised row's form and a missed row's word are in the
   // active enrollment's target language, whatever the card's type.
   const { active } = useCurrentUser();
   const language = active?.target_language ?? null;
+  // Phase 72 (spec D2). The session as it ended, kept from the first render: continuing enters the
+  // next session, which replaces the shared state at once, while this screen is still on its way out.
+  const [finished] = useState<Finished | null>(() =>
+    session.hasSession
+      ? {
+          correctCount: session.correctCount,
+          total: session.total,
+          missedQuestions: session.missedQuestions,
+          progress: session.progress,
+          targetId: session.targetId,
+        }
+      : null,
+  );
+  const targetId = finished?.targetId ?? null;
+  const next = useNextSession();
+  const { list, reload } = useTargets();
+  // Phase 72 (spec D2). Home's numbers come from a read made after the session ended: the list a
+  // render holds before it lands can be home's read from before the session, and is not shown.
+  const [read, setRead] = useState<'reading' | 'failed' | 'landed'>('reading');
+  const view = resultsTarget(targetId, read === 'landed' && list ? list : read === 'failed' ? 'failed' : 'reading');
+  const target = view.kind === 'target' ? view.target : null;
+  const action = target ? targetSessionAction(target) : null;
 
-  if (!session.hasSession) {
+  useFocusEffect(
+    useCallback(() => {
+      if (targetId === null) return;
+      void reload().then((landed) => setRead((was) => (landed ? 'landed' : was === 'landed' ? was : 'failed')));
+    }, [targetId, reload]),
+  );
+
+  // Phase 72 (spec D5). As home does: read again while the target's next session is prepared.
+  const preparing = action?.kind === 'preparing';
+  useFocusEffect(
+    useCallback(() => {
+      if (!preparing) return undefined;
+      const timer = setInterval(() => void reload(), POLL_INTERVAL_MS);
+      return () => clearInterval(timer);
+    }, [preparing, reload]),
+  );
+
+  // Phase 72 (final review I1). Whether this screen is still the one shown. A press still on its way
+  // when the learner left (סיום, back) opens nothing: a late replace would take home's place in the
+  // stack, and back from the session would have nowhere to go. The stock waits on home's card.
+  const shown = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      shown.current = true;
+      return () => {
+        shown.current = false;
+      };
+    }, []),
+  );
+
+  // One action at a time, as home's: a double tap must not send two creates.
+  const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
+  async function run(work: () => Promise<void>) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    try {
+      await work();
+    } catch (error) {
+      // Phase 72 (spec D5). The target ended since: home shows what is left. Anything else: the
+      // create read the targets again, and the button shows that state.
+      if (error instanceof ApiError && error.code === 'target closed' && shown.current) router.dismissTo('/');
+      if (error instanceof ApiError && error.code === 'not enough questions') {
+        Alert.alert(strings.errorTitle, strings.sessionNoQuestions);
+      }
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  // Phase 72 (spec D3). The next session in place of this screen: the stack stays home → session.
+  const openSession = (sessionId: string, fresh: boolean) => {
+    if (!shown.current) return;
+    if (fresh) void next.start(sessionId);
+    session.enter(sessionId);
+    router.replace('/session');
+  };
+  const { practice, asking, answerAsk, cancelAsk } = usePracticeTarget({ run, openSession });
+
+  if (finished === null) {
     return <Redirect href="/" />;
   }
 
-  const { correctCount, total, missedQuestions, progress } = session;
+  const { correctCount, total, missedQuestions, progress } = finished;
 
   // Phase 43 (spec D7). Home, where the next session waits in stock: it was
   // built while this one was played. When it is not there, home makes it, or
@@ -42,6 +145,13 @@ export default function ResultsScreen() {
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Text style={styles.headline}>{headlineFor(correctCount, total)}</Text>
         <Text style={styles.score} testID="results-score">{strings.scoreLabel(correctCount, total)}</Text>
+
+        {target ? <TargetBlock target={target} /> : null}
+        {view.kind === 'reading' ? (
+          <View style={[styles.target, styles.targetReading]} testID="results-target-reading">
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : null}
 
         {progress.length > 0 ? (
           <View style={styles.missed} testID="practised-section">
@@ -98,14 +208,24 @@ export default function ResultsScreen() {
       </ScrollView>
 
       <View style={styles.actions}>
-        <Pressable
-          accessibilityRole="button"
-          testID="results-next-session"
-          onPress={onNextSession}
-          style={styles.primary}
-        >
-          <Text style={styles.primaryLabel}>{strings.nextSession}</Text>
-        </Pressable>
+        {view.kind === 'none' ? (
+          <Pressable
+            accessibilityRole="button"
+            testID="results-next-session"
+            onPress={onNextSession}
+            style={styles.primary}
+          >
+            <Text style={styles.primaryLabel}>{strings.nextSession}</Text>
+          </Pressable>
+        ) : (
+          <ContinueButton
+            target={target}
+            preparing={preparing}
+            failed={action?.kind === 'failed'}
+            busy={busy}
+            onPress={() => target && practice(target)}
+          />
+        )}
         <Pressable
           accessibilityRole="button"
           testID="results-done"
@@ -118,7 +238,70 @@ export default function ResultsScreen() {
           <Text style={styles.secondaryLabel}>{strings.done}</Text>
         </Pressable>
       </View>
+      {/* Phase 72 (spec D4). Home's question past the day's budget; "אחזור מחר" means done for today. */}
+      <PracticeMoreSheet
+        visible={asking}
+        onLater={(stop) => {
+          answerAsk(stop, false);
+          router.dismissTo('/');
+        }}
+        onAnyway={(stop) => answerAsk(stop, true)}
+        onCancel={cancelAsk}
+      />
     </SafeAreaView>
+  );
+}
+
+/** Phase 72 (spec D2). What home's card says of the target: its countdown, its readiness and
+ *  today's line, drawn by the card's own parts from the same read. */
+function TargetBlock({ target }: { target: TargetSummary }) {
+  const card = targetCardState(target);
+  return (
+    <View style={styles.target} testID="results-target">
+      <Text style={styles.targetTitle}>
+        {card.title.before}
+        {card.title.number}
+        {card.title.after}
+      </Text>
+      <Readiness target={target} readiness={card.readiness} />
+      <Sessions target={target} />
+    </View>
+  );
+}
+
+/** Phase 72 (spec D3, D5). The continue button: home's label and look for the target, its preparing
+ *  look while the next session is built, its retry after a failed one; disabled until the read lands. */
+function ContinueButton({
+  target,
+  preparing,
+  failed,
+  busy,
+  onPress,
+}: {
+  target: TargetSummary | null;
+  preparing: boolean;
+  failed: boolean;
+  busy: boolean;
+  onPress: () => void;
+}) {
+  const look = target ? continueButton(target) : { label: strings.continuePractising, filled: true };
+  const box = look.filled ? cardButton.solid : cardButton.pale;
+  const text = look.filled ? cardButton.solidLabel : cardButton.paleLabel;
+  const disabled = target === null || preparing || busy;
+  return (
+    <>
+      {failed ? <Text style={styles.failed}>{strings.preparationFailed}</Text> : null}
+      <Pressable
+        accessibilityRole="button"
+        testID="results-continue"
+        disabled={disabled}
+        onPress={onPress}
+        style={[box, preparing && styles.preparing, disabled && cardButton.disabled]}
+      >
+        {preparing ? <ActivityIndicator color={look.filled ? colors.onPrimary : colors.primary} /> : null}
+        <Text style={text}>{preparing ? strings.preparingQuestions : failed ? strings.translateRetry : look.label}</Text>
+      </Pressable>
+    </>
   );
 }
 
@@ -193,6 +376,31 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.sm,
     lineHeight: lineHeights.sm,
     color: colors.primary,
+    writingDirection: 'rtl',
+  },
+  // Phase 72 (spec D2). Home's card look: white, rounded, on its soft shadow.
+  target: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.card,
+    padding: 15,
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    ...shadows.card,
+  },
+  targetReading: { minHeight: 160, justifyContent: 'center' },
+  targetTitle: {
+    fontSize: fontSizes.md,
+    lineHeight: lineHeights.md,
+    fontWeight: '700',
+    color: colors.text,
+    writingDirection: 'rtl',
+  },
+  preparing: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm },
+  failed: {
+    fontSize: fontSizes.md,
+    lineHeight: lineHeights.md,
+    color: colors.muted,
+    textAlign: 'center',
     writingDirection: 'rtl',
   },
   actions: { paddingBottom: spacing.lg, gap: spacing.sm },

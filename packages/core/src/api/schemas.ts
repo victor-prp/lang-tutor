@@ -469,6 +469,9 @@ export const SessionViewSchema = z.object({
   // Phase 70 (spec D4, D5). How many new words the day's cap held back from this session, and
   // that cap: present only for a session chosen today under the learner's cap now.
   held_new_words: z.object({ count: z.number().int().positive(), day_cap: z.number().int() }).optional(),
+  // Phase 72 (spec D1). The target whose path the session is on; absent on the main path's, the
+  // seed's and a question-types session's. The results screen continues on that path.
+  target_id: z.string().min(1).optional(),
 });
 
 // Phase 23. A choice is answered by index, a typed card by its text. Empty

@@ -8,16 +8,19 @@ import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
  * Phase 65 (spec D9). The bottom sheet that asks before practising past the day's budget.
  * Only "לתרגל בכל זאת" starts a session; "אחזור מחר", a tap outside and Android's back close it.
  * The tick box applies to whichever button is pressed, and is passed up with the choice; a tap
- * outside or back is a cancel, which saves nothing, so it passes false whatever the box says.
+ * outside or back is a cancel (phase 72: `onCancel`), which saves nothing whatever the box says.
  */
 export function PracticeMoreSheet({
   visible,
   onLater,
   onAnyway,
+  onCancel,
 }: {
   visible: boolean;
   onLater: (stopAsking: boolean) => void;
   onAnyway: (stopAsking: boolean) => void;
+  /** Phase 72 (spec D4). A tap outside or back: not "אחזור מחר", which a results screen takes home. */
+  onCancel: () => void;
 }) {
   const [stop, setStop] = useState(false);
   const later = () => {
@@ -29,7 +32,7 @@ export function PracticeMoreSheet({
     setStop(false);
   };
   const cancel = () => {
-    onLater(false);
+    onCancel();
     setStop(false);
   };
   return (

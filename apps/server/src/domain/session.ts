@@ -39,6 +39,8 @@ export type SessionRecord = {
   source: SessionSource;
   /** Phase 61 (spec D5). A question-types session's chosen types no card was generated for; absent on every other session. */
   skipped_types?: SkippedType[];
+  /** Phase 72 (spec D1). The target whose path the session is on; absent on the main path's. */
+  target_id?: string;
 };
 
 /** Phase 61 (spec D5). A chosen question type no card could be generated for. */

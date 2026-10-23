@@ -18,6 +18,8 @@ import {
   doneFailureMessage,
   homeOrder,
   askBeforePracticeMore,
+  continueButton,
+  resultsTarget,
   readinessColor,
   readinessName,
   readinessBar,
@@ -969,5 +971,36 @@ describe('the eve: the words still short (phase 71, spec D4)', () => {
     expect(sessionsSpoken(eve('owed', { word_count: 3, ready_count: 3, readiness_pct: 100, word_readiness: [100, 100, 100] }))).toBe(
       'נשארה בדיקה אחרונה לפני מחר',
     );
+  });
+});
+
+// Phase 72 (spec D2). Which block a target session's results screen draws from the targets read.
+describe('resultsTarget (phase 72, spec D2)', () => {
+  const list: TargetList = { today: '2026-10-15', targets: [summary('t', 'owed', '2026-10-20')] };
+  it('is none for a session with no target, a failed read, or a target the read does not hold', () => {
+    expect(resultsTarget(null, list)).toEqual({ kind: 'none' });
+    expect(resultsTarget(null, 'reading')).toEqual({ kind: 'none' });
+    expect(resultsTarget('t', 'failed')).toEqual({ kind: 'none' });
+    expect(resultsTarget('gone', list)).toEqual({ kind: 'none' });
+  });
+  it('waits for the read, then is the target it names', () => {
+    expect(resultsTarget('t', 'reading')).toEqual({ kind: 'reading' });
+    expect(resultsTarget('t', list)).toEqual({ kind: 'target', target: list.targets[0] });
+  });
+});
+
+// Phase 72 (spec D3). The results screen's button: "להמשיך לתרגל" while today owes, else home's label;
+// filled when home's is.
+describe('continueButton (phase 72, spec D3)', () => {
+  it('continues while today owes work, filled', () => {
+    expect(continueButton(summary('t', 'owed', '2026-10-20'))).toEqual({ label: 'להמשיך לתרגל', filled: true });
+  });
+  it("says home's label once today is done, on a rest day, and on the date", () => {
+    expect(continueButton(summary('t', 'done', '2026-10-20'))).toEqual({ label: 'לתרגל עוד', filled: false });
+    expect(continueButton(summary('t', 'rest', '2026-10-20'))).toEqual({ label: 'לתרגל עוד', filled: false });
+    expect(continueButton(summary('t', 'due_today', '2026-10-15', { ready_count: 7, word_count: 8, readiness_pct: 99 }))).toEqual({
+      label: 'חזרה אחרונה',
+      filled: true,
+    });
   });
 });

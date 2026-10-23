@@ -52,6 +52,7 @@ const BASE: QuizState = {
   tapped: [],
   explanation: null,
   heldNewWords: null,
+  targetId: null,
 };
 
 describe('applyQueued (spec D9, Review Focus 3)', () => {
@@ -158,6 +159,22 @@ describe('the second try (phase 34 D9)', () => {
     expect(resumed(BASE, { ...view, held_new_words: { count: 2, day_cap: 15 } }).heldNewWords).toEqual({ count: 2, dayCap: 15 });
     expect(resumed(BASE, view).heldNewWords).toBeNull();
     expect(enteredState('s').heldNewWords).toBeNull();
+  });
+
+  // Phase 72 (spec D1). The results screen continues on the target the read names.
+  it("keeps the target a resumed session's read names, and none for the main path's", () => {
+    const view: SessionView = {
+      session_id: 's',
+      status: 'ready',
+      source: 'list',
+      position: { position: 1, total: 10 },
+      question: TYPED,
+      pending_retry: null,
+      progress: [],
+    };
+    expect(enteredState('s').targetId).toBeNull();
+    expect(resumed(enteredState('s'), { ...view, target_id: 't' }).targetId).toBe('t');
+    expect(resumed(enteredState('s'), view).targetId).toBeNull();
   });
 
   it('the first answer goes without retry, the second with retry: true', () => {

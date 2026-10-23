@@ -106,6 +106,8 @@ function sessionView(sessionId: string, result: SessionResult): z.infer<typeof S
     ...(result.skipped_types ? { skipped_types: result.skipped_types } : {}),
     // Phase 70 (spec D5): only while it is news.
     ...(result.held_new_words ? { held_new_words: result.held_new_words } : {}),
+    // Phase 72 (spec D1): a target path's session names its target.
+    ...(result.target_id ? { target_id: result.target_id } : {}),
   };
 }
 

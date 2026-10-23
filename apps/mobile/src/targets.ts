@@ -211,6 +211,26 @@ export function urgencyOf(target: Pick<TargetSummary, 'kind' | 'days_left' | 'wo
 /** Phase 71 (spec D4). The eve, one day left, with a word: no daily goal, its row counts the words. */
 const isEve = (target: Pick<TargetSummary, 'days_left' | 'word_count'>): boolean => target.days_left === 1 && target.word_count > 0;
 
+/** Phase 72 (spec D2). What a target session's results screen draws from the targets read: the
+ *  target the session's read named, while the read is out, or nothing (no target, a failed read, or a
+ *  target the read does not hold: ended or removed), when the screen is the main path's. */
+export function resultsTarget(
+  targetId: string | null,
+  read: 'reading' | 'failed' | TargetList,
+): { kind: 'none' } | { kind: 'reading' } | { kind: 'target'; target: TargetSummary } {
+  if (targetId === null || read === 'failed') return { kind: 'none' };
+  if (read === 'reading') return { kind: 'reading' };
+  const target = read.targets.find((candidate) => candidate.id === targetId);
+  return target ? { kind: 'target', target } : { kind: 'none' };
+}
+
+/** Phase 72 (spec D3). The results screen's button: "להמשיך לתרגל" while today owes work, else the
+ *  label home's card shows for the day; filled when home's is. */
+export function continueButton(target: TargetSummary): { label: string; filled: boolean } {
+  const label = target.today.state === 'owed' ? strings.continuePractising : (targetCardState(target).button ?? strings.practiceMore);
+  return { label, filled: targetButtonSolid(target) };
+}
+
 /** Phase 64 (spec D4). A target's button is solid when pressing it is the thing to do now:
  *  work owed today, or the last review on the date until every word is ready (phase 57 D10,
  *  phase 65: ready is a word at READINESS_WORD_READY). */

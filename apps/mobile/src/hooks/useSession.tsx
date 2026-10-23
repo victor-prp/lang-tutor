@@ -66,6 +66,8 @@ export type SessionValue = {
   progress: SessionProgressItem[];
   /** The session id while one is loaded, for skip. */
   sessionId: string | null;
+  /** Phase 72 (spec D1). The target whose path the session is on, once its read lands; null otherwise. */
+  targetId: string | null;
   /** Loads a ready session and continues from its current question. Starting
    *  and resuming are the same call: the server knows how far it got. */
   enter: (sessionId: string) => void;
@@ -488,6 +490,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         missedQuestions: [],
         progress: [],
         sessionId: null,
+        targetId: null,
         enter,
         select,
         submitText,
@@ -529,6 +532,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       missedQuestions: state.missedQuestions,
       progress: state.progress,
       sessionId: state.sessionId,
+      targetId: state.targetId,
       enter,
       select,
       submitText,
