@@ -152,7 +152,7 @@ describe('0011_session_status', () => {
     // session is a closed one, so the seed is behind it.
     const latest = await db.transaction((tx) => createSessionRepo(tx).findLatest('e_1', 'any'));
     expect(latest).toMatchObject({ status: 'skipped', source: 'seed' });
-    expect(nextSource(latest !== undefined)).toBe('list');
+    expect(nextSource(latest !== undefined, false)).toBe('list');
   });
 });
 

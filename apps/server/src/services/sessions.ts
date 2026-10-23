@@ -963,7 +963,13 @@ export function createSessionService({
         }
 
         // Phase 57 (spec D2). The seed is the main path's: a target's path never plays it.
-        if (path === null && nextSource((await session.findLatest(enrollmentId, 'any')) !== undefined) === 'seed') {
+        // Phase 73 (spec D6): and only for an enrollment with no word of its own either; the
+        // count is read only here, where the session check has passed.
+        if (
+          path === null &&
+          (await session.findLatest(enrollmentId, 'any')) === undefined &&
+          nextSource(false, (await savedOn(repos, enrolled, null)) > 0) === 'seed'
+        ) {
           const pool = await question.loadQuestionPool(
             enrolled.target_language,
             enrolled.source_language,
@@ -1051,6 +1057,7 @@ export function createSessionService({
         const latest = await repos.session.findLatest(enrollmentId, path);
         // The seed is the main path's (phase 57, spec D2): any session at all puts it behind.
         const any = latest ?? (await repos.session.findLatest(enrollmentId, 'any'));
+        const savedCount = await savedOn(repos, enrolled, path);
         return {
           // Final review N1: whether it was started, which a session left before any answer is.
           current: open.started
@@ -1061,8 +1068,8 @@ export function createSessionService({
                 ? { ...latest, started: false }
                 : null,
           offered: open.started ? undefined : open.stock,
-          nextSource: path === null ? nextSource(any !== undefined) : ('list' as const),
-          savedCount: await savedOn(repos, enrolled, path),
+          nextSource: path === null ? nextSource(any !== undefined, savedCount > 0) : ('list' as const),
+          savedCount,
           dueCount: await waitingOn(repos, enrolled, target),
           today: path === null ? await myWordsToday(repos, enrolled) : undefined,
           replaced,

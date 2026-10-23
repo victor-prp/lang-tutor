@@ -262,10 +262,11 @@ export function isOpen(status: SessionStatus): boolean {
   return OPEN_STATUSES.includes(status);
 }
 
-/** The first session of an enrollment is the seed; every later one, after a
- *  completion, a skip or a failure, is built from the saved list. */
-export function nextSource(hasAnySession: boolean): SessionSource {
-  return hasAnySession ? 'list' : 'seed';
+/** Phase 73 (spec D6). The shared starter list is for an enrollment with no session and no
+ *  saved word on the main path; any session, or any word of its own, puts it behind, and the
+ *  session is built from the saved list. */
+export function nextSource(hasAnySession: boolean, hasSavedWords: boolean): SessionSource {
+  return hasAnySession || hasSavedWords ? 'list' : 'seed';
 }
 
 /** A uniform shuffle under the injected rng. A copy: the caller's array is left alone. */

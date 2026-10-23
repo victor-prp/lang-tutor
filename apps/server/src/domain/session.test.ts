@@ -263,9 +263,11 @@ describe('shuffle', () => {
 describe('nextSource and status sets', () => {
   const ALL: SessionStatus[] = ['preparing', 'ready', 'completed', 'skipped', 'failed'];
 
-  it('starts with the seed and moves to the list once any session exists', () => {
-    expect(nextSource(false)).toBe('seed');
-    expect(nextSource(true)).toBe('list');
+  it('is the seed only with no session and no saved word', () => {
+    expect(nextSource(false, false)).toBe('seed');
+    expect(nextSource(false, true)).toBe('list');
+    expect(nextSource(true, false)).toBe('list');
+    expect(nextSource(true, true)).toBe('list');
   });
 
   it('counts preparing and ready as open', () => {
