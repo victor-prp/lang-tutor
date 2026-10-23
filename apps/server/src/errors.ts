@@ -368,7 +368,7 @@ export class DiscoveryNotFound extends Error {
 }
 
 // Phase 69. A profile asked twice, a run started without one, or a run in the wrong
-// state for the request: an answer once it lists, a save while a row is looked up (409).
+// state for the request: an answer once it ended, an end once it was discarded (409).
 export class DiscoveryConflict extends Error {
   constructor(readonly id: string, readonly reason: string) {
     super(`discovery ${id}: ${reason}`);
@@ -376,11 +376,11 @@ export class DiscoveryConflict extends Error {
   }
 }
 
-// Phase 69. A change a list row cannot take, as a photo row's (400).
-export class InvalidDiscoveryItem extends Error {
-  constructor(readonly runId: string, readonly position: number, readonly reason: string) {
-    super(`discovery run ${runId} row ${position}: ${reason}`);
-    this.name = 'InvalidDiscoveryItem';
+// Phase 74 (spec D2). A pick past the card's choices (400).
+export class InvalidDiscoveryAnswer extends Error {
+  constructor(readonly runId: string, readonly position: number, readonly pick: number) {
+    super(`discovery run ${runId} card ${position}: no choice ${pick}`);
+    this.name = 'InvalidDiscoveryAnswer';
   }
 }
 

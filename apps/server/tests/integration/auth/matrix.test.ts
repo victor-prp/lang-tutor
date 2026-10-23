@@ -149,7 +149,7 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
   'post /api/photo-imports/{id}/discard': () => ({ url: `/api/photo-imports/${ids.photoImport}/discard` }),
   // Phase 69 (spec D10). Words for me is its list owner's alone, a tutor of the list included. A
   // call that got through would show in the counts of discovery_profiles, discovery_runs or
-  // discovery_cards, or in the run's status, its first card's answer or its second card's tick.
+  // discovery_cards, or in the run's status or its first card's answer.
   'get /api/enrollments/{id}/discovery': () => ({ url: `/api/enrollments/${ids.enrollment}/discovery` }),
   'post /api/enrollments/{id}/discovery/profile': () => ({
     url: `/api/enrollments/${ids.enrollment}/discovery/profile`,
@@ -160,15 +160,9 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
   'post /api/discovery/runs/{id}/rounds': () => ({ url: `/api/discovery/runs/${ids.discoveryRun}/rounds` }),
   'post /api/discovery/runs/{id}/cards/{position}/answer': () => ({
     url: `/api/discovery/runs/${ids.discoveryRun}/cards/0/answer`,
-    body: { kind: 'unknown' },
+    body: { pick: null, add: true },
   }),
   'post /api/discovery/runs/{id}/end': () => ({ url: `/api/discovery/runs/${ids.discoveryRun}/end` }),
-  'patch /api/discovery/runs/{id}/items/{position}': () => ({
-    url: `/api/discovery/runs/${ids.discoveryRun}/items/1`,
-    body: { ticked: false },
-  }),
-  'post /api/discovery/runs/{id}/save': () => ({ url: `/api/discovery/runs/${ids.discoveryRun}/save` }),
-  'post /api/discovery/runs/{id}/discard': () => ({ url: `/api/discovery/runs/${ids.discoveryRun}/discard` }),
   // Phase 73 (spec D1). The My words goal is its course owner's alone, a tutor included. A PUT that
   // got through would show in enrollments.my_words_goal.
   'get /api/enrollments/{id}/my-words-goal': () => ({ url: `/api/enrollments/${ids.enrollment}/my-words-goal` }),

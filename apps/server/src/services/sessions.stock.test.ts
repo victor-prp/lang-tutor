@@ -69,7 +69,7 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
     transaction: createFakeTransaction({
       enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT, findMyWordsGoal: async () => null }),
       myWordsDays: stub<MyWordsDayRepo>({ find: async () => undefined }),
-      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }), findNewWordLimits: async () => ({ dayCap: null, perSession: null }) }),
+      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }), findNewWordLimits: async () => ({ dayCap: null, perSession: null, discoverCount: null }) }),
       session: stub<SessionRepo>({
         findAnswersOn: async () => [],
         findPathAnswers: async () => [],

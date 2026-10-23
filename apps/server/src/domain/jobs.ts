@@ -178,8 +178,8 @@ export const LookUpImportItemPayloadSchema = z.object({
 });
 export type LookUpImportItemPayload = z.infer<typeof LookUpImportItemPayloadSchema>;
 
-/** Phase 69 (spec D7). Looks up one Words for me card the learner did not know, as a
- *  photo row is looked up, so its list is ready when the run ends. */
+/** Phase 69 (spec D7). Looks up one Words for me card the learner added, as a photo row is
+ *  looked up; phase 74 (spec D5): then saves it to My words. */
 export const LOOK_UP_DISCOVERED_WORD = 'look-up-discovered-word';
 export const LOOK_UP_DISCOVERED_WORD_FAILED = 'look-up-discovered-word-failed';
 /** The photo row's chain, and the photo row's reason. */
@@ -254,7 +254,8 @@ export const STOCK_SAVE_DELAY_SECONDS = 30;
  *  Phase 58 (final review I1): `words_removed`, a level's words removed, which did too.
  *  Phase 68 (spec D6): `miss`, a miss on a target path; no longer asked since the ruling of
  *  2026-10-22, and kept so a job queued before that deploy still parses. */
-export const STOCK_REASONS = ['start', 'answer', 'complete', 'skip', 'save', 'target', 'words_removed', 'miss'] as const;
+// Phase 74 (spec D5): `discovery` is a Words for me run's 2nd saved word, or a save after it ended.
+export const STOCK_REASONS = ['start', 'answer', 'complete', 'skip', 'save', 'target', 'words_removed', 'miss', 'discovery'] as const;
 
 export const StockSessionPayloadSchema = z.object({
   enrollment_id: z.string().min(1),

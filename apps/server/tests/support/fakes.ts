@@ -132,9 +132,6 @@ export function createFakeAppDeps(): AppDeps {
     nextRound: unreachable,
     answer: unreachable,
     end: unreachable,
-    updateItem: unreachable,
-    save: unreachable,
-    discard: unreachable,
     lookUpWord: unreachable,
     failWord: unreachable,
   };
@@ -355,7 +352,7 @@ export function createFakeTargetRepo(overrides: Partial<TargetRepo> = {}): FakeT
 export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
   const rows: User[] = [];
   const zoneOf = (userId: string) => rows.find((row) => row.id === userId)?.time_zone;
-  const limits = new Map<string, { dayCap: number | null; perSession: number | null }>();
+  const limits = new Map<string, { dayCap: number | null; perSession: number | null; discoverCount: number | null }>();
   return {
     rows,
     insertUser: async (id, input) => {
@@ -393,7 +390,7 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
     findBotByName: async () => undefined,
     setBotDay: async () => false,
     // Phase 70 (spec D1). Stored as the column holds them, nulls for the default.
-    findNewWordLimits: async (userId) => limits.get(userId) ?? { dayCap: null, perSession: null },
+    findNewWordLimits: async (userId) => limits.get(userId) ?? { dayCap: null, perSession: null, discoverCount: null },
     setNewWordLimits: async (userId, stored) => {
       if (rows.some((row) => row.id === userId)) limits.set(userId, stored);
     },
@@ -630,6 +627,10 @@ export function newCardRow(runId: string, card: NewCard): CardRow {
     ticked: false,
     hebrewMismatch: false,
     reason: null,
+    picked: null,
+    suggested: null,
+    added: null,
+    savedAt: null,
   };
 }
 
@@ -663,10 +664,10 @@ export function createFakeDiscoveryRepo(): FakeDiscoveryRepo {
       if (profile) profiles.set(enrollmentId, { ...profile, level });
     },
     findOpenRun: async (enrollmentId) => [...runs.values()].find((run) => run.enrollmentId === enrollmentId && isOpen(run.status)),
-    insertRun: async ({ enrollmentId, goal }) => {
+    insertRun: async ({ enrollmentId, goal, startedBy }) => {
       if ([...runs.values()].some((run) => run.enrollmentId === enrollmentId && isOpen(run.status))) return undefined;
       const id = `00000000-0000-0000-0000-${String(nextId++).padStart(12, '0')}`;
-      const run: RunRow = { id, enrollmentId, goal, status: 'asking', settledRound: 0, createdAt: new Date(0), endedAt: null };
+      const run: RunRow = { id, enrollmentId, goal, status: 'asking', settledRound: 0, startedBy, createdAt: new Date(0), endedAt: null };
       runs.set(id, run);
       cards.set(id, []);
       return { ...run };
@@ -716,13 +717,16 @@ export function createFakeDiscoveryRepo(): FakeDiscoveryRepo {
       Object.assign(card, { lookupStatus: 'failed', ticked: false });
       return true;
     },
-    updateItem: async (runId, position, update) => {
+    markSaved: async (runId, position) => {
       const card = cardOf(runId, position);
-      if (!card) return undefined;
-      if (update.ticked !== undefined) card.ticked = update.ticked;
-      if (update.chosenGlossId !== undefined) card.chosenGlossId = update.chosenGlossId;
-      return { ...card };
+      if (!card || card.savedAt !== null) return false;
+      card.savedAt = new Date(0);
+      return true;
     },
+    appRunsCreatedSince: async (enrollmentId, since) =>
+      [...runs.values()]
+        .filter((run) => run.enrollmentId === enrollmentId && run.startedBy === 'app' && run.createdAt >= since)
+        .map((run) => run.createdAt),
     answeredWords: async (enrollmentId) => {
       const answered = [...runs.values()]
         .filter((run) => run.enrollmentId === enrollmentId)
