@@ -57,22 +57,28 @@ Every unit the plan places belongs to the sequence of its word, in the order the
 3. its other cards, in pick order. **(Victor)** The 67b say card is one of these, so it is the new
    word's last card, after its typed translation.
 
-A board is a sequence of its own. It holds four words: criterion 1 below counts it as each of them,
-criterion 2 as one sequence.
+A board is a sequence of its own. It holds four words, and the word criteria below count it as each
+of them.
 
 ## D3. One pass places the cards
 
 At each position, every sequence with a unit left offers its next one. Of those, the unit placed is
 decided by these criteria in turn, the first that tells two units apart deciding:
 
-1. **Not the word just placed.** No unit of a word placed in the last unit, when another can go.
-2. **Every word can still be kept apart.** After the unit, no sequence holds more units than the rest
-   can separate: the same test `separable()` makes for types, over each sequence's units left.
-3. **Not the type just placed.** The unit's first card is not the last card's type.
-4. **Every type can still be kept apart** (`separable()`).
-5. **The word furthest behind an even spread.** A word whose `k` of `n` units are placed, at
-   position `t` of `T` units, is behind by `(t + ½) / T − (k + ½) / n`; the larger goes first.
-6. The higher p, then the lower pick index.
+1. **A new word's meet first.** At the first position, a ladder's intro stage goes before any other
+   unit (R1).
+2. **Not the word just placed.** No unit of a word placed in the last unit, when another can go.
+3. **Every word can still be kept apart.** After the unit, no word holds more units than the rest can
+   separate: the test `separable()` makes for types, over each word's units left, a board counted
+   once for each of its words.
+4. **Not the type just placed.** The unit's first card is not the last card's type.
+5. **Every type can still be kept apart** (`separable()`).
+6. **The word that needs the most of the positions left.** A word with `k` of `n` units placed, at
+   position `t` of `T` units, needs `(n − k) / (T − t)` of what is left; the larger goes first.
+   **(my call, final review)** The first build compared each unit's ideal slot over the whole session,
+   `(k + ½) / n` against `(t + ½) / T`: a one-card word's slot is always the middle, so every one-card
+   word went before a ladder's last practice cards, which piled up at the end with types repeating.
+7. The higher p, then the lower pick index.
 
 Phase 37 D6 stands: a return is offered only once every unit that is neither a return nor of a
 ladder's or a step-down's word is placed.
@@ -82,37 +88,45 @@ are chosen as now, and an intro stage's cards stay back to back.
 
 ## D4. The type test counts what can be placed now **(my call)**
 
-While returns wait, criterion 4 counts only the units that can go before them. Counting the returns
+While returns wait, criterion 5 counts only the units that can go before them. Counting the returns
 too made the test refuse orders that were fine, and cost a type repeat in list sessions with returns
 (found by the proof of concept's sweep).
 
 ## Rulings (Victor, 2026-10-23)
 
-- **R1. A new word always opens its session.** Its meet card comes first (criterion 5: a ladder
-  starts furthest behind). Today it opened 16 of lane 0's 24 sessions with a new word.
+- **R1. A new word always opens its session.** Its meet card comes first (criterion 1). Today it
+  opened 16 of lane 0's 24 sessions with a new word.
 - **R2. Several new words no longer go strictly stage by stage.** The stages mix where it avoids
-  three of one type in a row (criterion 3 before 5).
-- **R3. The say card is the new word's last card.** In a session with two new words they end
-  "say A, say B".
+  three of one type in a row (criterion 4 before 6).
+- **R3. The say card is the new word's last card.** In a session of two new words and nothing else
+  they end "say A, say B".
 
-## Evidence (proof of concept)
+## Evidence
 
-The planner inputs pg-boss still held on lane 0 (45 sessions, 39 distinct, 2026-10-22 01:14 to
-2026-10-23 08:52), planned both ways. Today's `planCards` on those inputs gives every served session's
-order, up to the cards the prepare job later downgraded or dropped.
+The planner inputs pg-boss still held on lane 0 (47 sessions, 2026-10-22 01:14 to 2026-10-23), planned
+both ways with the built code. Today's `planCards` on those inputs gives every served session's order,
+up to the cards the prepare job later downgraded or dropped.
 
 | | Today | By word |
 |---|---|---|
 | Cards before their word's meet | 1 | 0 |
-| Same word back to back | 37 | 5, all unavoidable |
-| Same type back to back | 79 | 41 |
-| Mean gap between a word's cards | 3.17 | 3.58 |
+| Same word back to back | 39 | 5, all unavoidable (worse in no session) |
+| Same type back to back | 82 | 35 (better in 25 sessions, worse in 5) |
+| Sessions with a new word that open with its meet | 16 of 24 | 24 of 24 |
 
-A sweep of 5,000 random sessions with every feature (new meanings, list boards, no speaking or
-listening, returns, step-downs, two ladders) broke none of the rules below, and today's planner put a
-card before its meet in 956 of them. Each word's graded cards keep their order within each skill on
-all 232 of lane 0's words, so step-downs and "a skill's first answer of the day" read what they read
-today. The day simulation passed 223 of 224 checks; the other is miss-rhythm noise to measure (Tests).
+A sweep of 4,000 random sessions of each kind, shaped as production makes them (a target board never
+beside a ladder; the board counted as its four words):
+
+| Per 4,000 sessions | Today: word / type repeats | By word: word / type repeats |
+|---|---|---|
+| List (0–2 ladders, returns) | 128 / 4,278 | 178 / 818 |
+| Target (0–2 ladders and their say cards, step-downs) | 6,907 / 4,915 | 0 / 583 |
+| Target with a board | 9,619 / 1,509 | 1,338 / 880 |
+
+Today puts a card before its meet in 1,703 of the target sessions; by word, in none. The one count that
+rises is list sessions' same-word repeats, where the old merge's guard did a little better. Each word's
+graded cards keep their order within each skill on all of lane 0's words, so step-downs and "a skill's
+first answer of the day" read what they read today.
 
 ## Tests
 
@@ -131,12 +145,23 @@ today. The day simulation passed 223 of 224 checks; the other is miss-rhythm noi
 ladder's intro stage any more.
 
 The day simulation passes its planned picks' `glossId`. With words grouped, five of its gates moved at
-phase 37's five phases (a homework's FSRS share, the fresh homework's day 1, the exam's volume step, the
-homework's practice-more share, and the families' "some phase knows m0"). Over thirty learners (missing
-every 4th to 8th card, every phase), the new order matches or beats master on each, marks unchanged:
-1-day homework FSRS share 0.471 → 0.551, fresh day 1 mean 19.47 → 19.57, words known in the families run
-126 → 126. Those five gates are held over the thirty learners (`EVERY_RHYTHM`), with their marks as they
-were; the rest stay at the five phases. **(my call)**
+phase 37's five phases (a homework's readiness and FSRS share, the fresh homework's day 1, the exam's
+volume step, the homework's practice-more share, and the families' "some phase knows m0"). Those five
+are held over thirty learners (`EVERY_RHYTHM`: missing every 4th to 8th card, every phase), marked at
+master's reading over the same learners less a point, which raises every mark. **(my call, final
+review)** Master against the new order there:
+
+| Over thirty learners | Master | By word |
+|---|---|---|
+| Homework 5 / 2 / 1 days ahead: readiness on the date | 96.77 / 92.77 / 86.27 | 96.57 / 92.40 / 87.63 |
+| Same: share ready by FSRS | 0.936 / 0.711 / 0.471 | 0.942 / 0.729 / 0.551 |
+| Fresh homework, day 1: mean, runs under 16 | 19.47, 5 | 19.57, 5 |
+| Practice more flagged "can": rose, exam / homework | 0.790 / 0.930 | 0.793 / 0.931 |
+| Families: words known, of them m0 | 126, 22 of 30 | 125, 19 of 30 |
+
+Two readings sit just under master (readiness 2 and 5 days ahead, by 0.37 and 0.2) and the families'
+m0 is known in fewer runs, though the seven words are known about as often: within the point of noise
+a fixed miss rhythm makes. The rest of the simulation stays at the five phases.
 
 ## Left to the builder
 
