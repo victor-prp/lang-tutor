@@ -632,6 +632,8 @@ export const strings = {
   myWordsSeed: (language: string) => `מילים ב${language}`,
   myWordsSaved: (language: string) => `משמעויות שמורות ב${language}`,
   practiceMore: 'לתרגל עוד',
+  // Phase 72 (spec D3). A target session's results screen, while today still owes work.
+  continuePractising: 'להמשיך לתרגל',
   // Phase 65 (spec D9). The sheet that asks before practising past the day's budget; no number.
   // Phase 67b (spec D8, Victor).
   practiceMoreSheetTitle: 'עשית עבודה מצוינת להיום',

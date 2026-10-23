@@ -77,6 +77,9 @@ export type QuizState = {
   /** Phase 70 (spec D6). What the session's view says the day's cap held back, while it is news:
    *  null until the view is read, and when it says nothing. */
   heldNewWords: HeldNewWords | null;
+  /** Phase 72 (spec D1). The target whose path the session is on, from its read; null on the main path's
+   *  and until the read lands. The results screen continues on it. */
+  targetId: string | null;
 };
 
 /** Phase 19. What a session starts as before its first card is read: starting
@@ -105,6 +108,7 @@ export function enteredState(sessionId: string): QuizState {
     tapped: [],
     explanation: null,
     heldNewWords: null,
+    targetId: null,
   };
 }
 
@@ -243,6 +247,7 @@ export function resumed(current: QuizState, view: SessionView): QuizState {
     total: view.position.total,
     retry: view.pending_retry,
     heldNewWords: view.held_new_words ? { count: view.held_new_words.count, dayCap: view.held_new_words.day_cap } : null,
+    targetId: view.target_id ?? null,
   };
 }
 
