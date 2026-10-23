@@ -724,9 +724,9 @@ describe('the home read of a path (spec D11)', () => {
     await insertGlossMemory(t.db, [faded(words[0].glossId), faded(words[3].glossId)]);
 
     // Ruling T5-q: the main path's saved words are those in no active target.
-    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'list', savedCount: 3, dueCount: 1, today: TODAY_ZERO });
+    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'list', savedCount: 3, dueCount: 1, today: TODAY_ZERO, needsNewWords: false });
     // Five days of five: one word of three owed today.
-    expect(await service.currentSession('u_1', E, exam)).toEqual({ current: null, nextSource: 'list', savedCount: 6, dueCount: 1 });
+    expect(await service.currentSession('u_1', E, exam)).toEqual({ current: null, nextSource: 'list', savedCount: 6, dueCount: 1, needsNewWords: false });
 
     await endTargetNow(t.db, exam);
     expect((await service.currentSession('u_1', E)).dueCount).toBe(2);
