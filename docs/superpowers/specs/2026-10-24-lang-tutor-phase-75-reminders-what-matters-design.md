@@ -39,6 +39,9 @@ changes, and a tap opens whichever card is first on home.
 
 ## Goals, non-goals, anti-goals
 
+- **Kept from the talk (builder check 3, 4):** nothing on a target's due date (one of the three
+  calls on the mockup page Victor checked); a test before homework at every rank (Victor's words;
+  both still get reminded the same day, since reminders go on until nothing is owed).
 - **In (Victor):** at each of the learner's reminder times, one notification about the single most
   pressing thing, in specific words; the order below; reminders stop only when nothing is owed on
   any path, in every course; a tap opens that path's session directly; תרגולים ביום leaves the
@@ -71,9 +74,12 @@ per course, across every enrollment the learner owns:
   nothing (phase 57: nothing is owed on the date itself).
 - **My words:** a new read-only use case, `sessions.myWordsDay(actor, enrollmentId)`, answering
   phase 73's `myWordsToday` (the goal in force, the sessions done) and the main path's waiting
-  count (`waitingOn`, home's "N מילים מחכות לחזרה"). It is home's `currentSession` read without
-  its writes (the stale-stock replacement, the offered log). My words is **owed** while its goal is
-  on and `sessions_done < goal`.
+  count (`waitingOn`, home's "N מילים מחכות לחזרה") and its saved count (`savedOn`, which sends
+  home's card to Words for me at 0). It is home's `currentSession` read without its writes (the
+  stale-stock replacement, the offered log). My words is **owed** while its goal is on,
+  `sessions_done < goal`, and the course has words of its own (**ruling, builder check 1**: a
+  course with none, a beginner's or one opened once and left, would otherwise be reminded at every
+  slot with nothing to practise; home's Words for me is how such a course starts).
 
 The reminder service is handed these reads as closures by the composition root, as phase 26 hands
 the photo-import service `translations.translate` (ADR 0001 R8's phase 26 note): it imports their
@@ -177,8 +183,12 @@ follows the kind only when the learner owns more than one enrollment (my call), 
   itself** with the session screen (phase 72's way), so back from the session lands on home.
 - **Nothing to open** (the target ended or was removed, the course is gone, a read failed): it
   replaces itself with home, which shows what is left (my call, the parked question).
-- **No "practice more" question** on this path (my call): the reminder fires only while the day is
-  owed, and a learner who tapped it chose to practise.
+- **The card's button, at the moment of the tap** (**ruling, builder check 2 and 5**): `tag` replaces
+  a reminder only when the next is sent, so a reminder can be tapped after its path's day was done.
+  The screen then does what that card's button does now: a target past its budget asks the
+  "practice more" question when the card would (`askBeforePracticeMore`, the same sheet; "later"
+  goes home), My words past its goal enters, as its card offers more. A failed session is made
+  again, as the button retries, not left alone as `homeReminderStartOf` leaves it.
 
 ### D7. The reminders screen (Victor)
 
