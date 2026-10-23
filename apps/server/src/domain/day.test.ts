@@ -2021,10 +2021,12 @@ describe("the anti-goal: an exam in 5 days, ten words, the same two skills misse
  *  for the date, to let a change pass. Phase 67b, measured 2026-10-21 (readiness is now the card,
  *  a word at its bar counted 100): 5 days 20, 95.2, 0.93; 2 days 11, 89.4, 0.68; 1 day 9, 85.8,
  *  0.41; the sessions marks tightened to them. */
+/*  Order by word (2026-10-23, final review): readiness and the FSRS share are held over every rhythm
+ *  (EVERY_RHYTHM), at master's reading there less a point: 96.77, 0.936; 92.77, 0.711; 86.27, 0.471. */
 const HOMEWORK_PASS: Record<number, { sessions: number; readiness: number; fsrs: number }> = {
-  5: { sessions: 20, readiness: 85, fsrs: 0.85 },
-  2: { sessions: 11, readiness: 75, fsrs: 0.55 },
-  1: { sessions: 9, readiness: 70, fsrs: 0.4 },
+  5: { sessions: 20, readiness: 95.7, fsrs: 0.92 },
+  2: { sessions: 11, readiness: 91.7, fsrs: 0.7 },
+  1: { sessions: 9, readiness: 85.2, fsrs: 0.46 },
 };
 
 describe.each<[number]>([[5], [2], [1]])('a homework of fifteen words given %i day(s) ahead, two cards a day (phase 67, spec D2, D3, D5)', (days) => {
@@ -2035,9 +2037,9 @@ describe.each<[number]>([[5], [2], [1]])('a homework of fifteen words given %i d
   const totals = perDay.map((one) => one.reduce((sum, n) => sum + n, 0));
   const onDate = runs.map((run) => readinessOnDate(run, homework));
   const shares = runs.map((run) => fsrsReadyShare(run, homework));
-  // Order by word (2026-10-23, ruling): the readiness gate over every rhythm (EVERY_RHYTHM), its marks as
-  // they were. Master reads 96.77 / 0.936, 92.77 / 0.711 and 86.27 / 0.471 there (5, 2 and 1 days); the
-  // five phases alone put the new order's 1-day share at 0.37, under its mark, and its thirty at 0.551.
+  // Order by word (2026-10-23, ruling): the readiness gate over every rhythm (EVERY_RHYTHM), marked at
+  // master's reading there less a point (HOMEWORK_PASS). The five phases alone put the new order's
+  // 1-day share at 0.37, the thirty learners at 0.551.
   const rhythmRuns = EVERY_RHYTHM.map((learner) => runPaths(withList(15), days + 1, { untilDone: 25 }, [homework], learner, { stockLag: true }));
   const onDateOverRhythms = mean(rhythmRuns.map((run) => readinessOnDate(run, homework)));
   const sharesOverRhythms = mean(rhythmRuns.map((run) => fsrsReadyShare(run, homework)));
@@ -2087,9 +2089,12 @@ describe("a homework of three words due in 10 days, each day's stock chosen besi
 
 /** Phase 67b (spec Testing). Measured 2026-10-21 over the rhythm's five phases: the first session
  *  reads 7 7 4 4 6, day 1 ends at 19 18 16 18 18 (phase 67 read 0 all day). The lowest phase.
- *  Order by word (2026-10-23, ruling): held on the mean over every rhythm, where five of master's
- *  thirty runs end day 1 under it (lowest 10, mean 19.47), as five of the new order's do (13, 19.57). */
+ *  Order by word (2026-10-23, final review): held over every rhythm as master reads there, where five
+ *  of its thirty runs end day 1 under 16 (lowest 10) and the mean is 19.47: at most that many runs
+ *  under it, and the mean less a point. */
 const FRESH_DAY_ONE_PASS = 16;
+const FRESH_DAY_ONE_UNDER_PASS = 5;
+const FRESH_DAY_ONE_MEAN_PASS = 18.4;
 /** Phase 67b (spec D3's note): before the eve, more sessions may end a day lower on one phase, as
  *  first answers that would have waited for tomorrow come today; never more than this on the mean.
  *  Order by word (2026-10-23, ruling): the mean over every rhythm, where master's worst step is −0.3
@@ -2103,9 +2108,9 @@ const BEFORE_THE_EVE = [0, 1, 2, 3] as const;
 /** Review C1. The share of practice-more sessions before the eve, flagged "can raise", that raised
  *  the card, over 5, 10 and 15 sessions a day and the five phases; measured 2026-10-21 (exam
  *  95/136, homework 106/116; a miss, and an exam's hold, keep the rest from rising). Order by word
- *  (2026-10-23, ruling): over every rhythm, master's exam 610/772 (0.790) and homework 624/671
- *  (0.930), the new order's 614/770 (0.797) and 632/684 (0.924). */
-const CAN_RAISE_ROSE_PASS: Record<TargetKind, number> = { exam: 0.69, homework: 0.91 };
+ *  (2026-10-23, final review): over every rhythm, at master's reading there less a point, exam 610/772
+ *  (0.790) and homework 624/671 (0.930). */
+const CAN_RAISE_ROSE_PASS: Record<TargetKind, number> = { exam: 0.78, homework: 0.92 };
 
 describe('phase 67b: a fresh homework of eighteen words due in 5 days, its budget each day (spec D1, D4)', () => {
   const homework = targetOf('homework', 5, listIds(1, 18));
@@ -2114,9 +2119,11 @@ describe('phase 67b: a fresh homework of eighteen words due in 5 days, its budge
   const firsts = runs.map((run) => run.sessions.find((one) => one.path === homework.id)!.readiness.after.get(homework.id)!.pct);
   const dayOneEnds = runs.map((run) => run.days[0].readiness.end.get(homework.id)!.pct);
 
-  it(`moves the card from the first session (lowest ${Math.min(...firsts)}) and ends day 1 at ${mean(dayOneEnds).toFixed(1)} over every rhythm, lowest ${Math.min(...dayOneEnds)} (pass > 0, mean ≥ ${FRESH_DAY_ONE_PASS})`, () => {
+  const under = dayOneEnds.filter((pct) => pct < FRESH_DAY_ONE_PASS).length;
+  it(`moves the card from the first session (lowest ${Math.min(...firsts)}) and ends day 1 at ${mean(dayOneEnds).toFixed(1)} over every rhythm, ${under} of ${runs.length} under ${FRESH_DAY_ONE_PASS} (pass > 0, mean ≥ ${FRESH_DAY_ONE_MEAN_PASS}, ≤ ${FRESH_DAY_ONE_UNDER_PASS} under)`, () => {
     for (const pct of firsts) expect(pct).toBeGreaterThan(0);
-    expect(mean(dayOneEnds)).toBeGreaterThanOrEqual(FRESH_DAY_ONE_PASS);
+    expect(mean(dayOneEnds)).toBeGreaterThanOrEqual(FRESH_DAY_ONE_MEAN_PASS);
+    expect(under).toBeLessThanOrEqual(FRESH_DAY_ONE_UNDER_PASS);
   });
 });
 
