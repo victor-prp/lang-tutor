@@ -132,43 +132,46 @@ describe('GET and PUT /api/me/new-words', () => {
       body: JSON.stringify(body),
     });
 
-  it('answers the defaults to a learner who never chose: 15 a day, automatic per session', async () => {
+  it('answers the defaults to a learner who never chose: 15 a day, automatic per session, 10 for Words for me', async () => {
     const res = await limits();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ day_cap: 15, per_session: null });
+    expect(await res.json()).toEqual({ day_cap: 15, per_session: null, discover_count: 10 });
   });
 
-  it('replaces both and answers what it stored; GET then reads it', async () => {
-    const res = await putLimits({ day_cap: 30, per_session: 2 });
+  it('replaces every limit and answers what it stored; GET then reads it', async () => {
+    const res = await putLimits({ day_cap: 30, per_session: 2, discover_count: 20 });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ day_cap: 30, per_session: 2 });
-    expect(await (await limits()).json()).toEqual({ day_cap: 30, per_session: 2 });
-    expect(await storedNewWordLimitsOf(t.db, userId)).toEqual({ dayNewCap: 30, newPerSession: 2 });
+    expect(await res.json()).toEqual({ day_cap: 30, per_session: 2, discover_count: 20 });
+    expect(await (await limits()).json()).toEqual({ day_cap: 30, per_session: 2, discover_count: 20 });
+    expect(await storedNewWordLimitsOf(t.db, userId)).toEqual({ dayNewCap: 30, newPerSession: 2, discoverCount: 20 });
   });
 
-  it('stores the default cap as null, so choosing per session never pins the cap', async () => {
-    await putLimits({ day_cap: 30, per_session: 2 });
-    const res = await putLimits({ day_cap: 15, per_session: 1 });
-    expect(await res.json()).toEqual({ day_cap: 15, per_session: 1 });
-    expect(await storedNewWordLimitsOf(t.db, userId)).toEqual({ dayNewCap: null, newPerSession: 1 });
+  it('stores the default cap and count as null, so choosing per session never pins them', async () => {
+    await putLimits({ day_cap: 30, per_session: 2, discover_count: 20 });
+    const res = await putLimits({ day_cap: 15, per_session: 1, discover_count: 10 });
+    expect(await res.json()).toEqual({ day_cap: 15, per_session: 1, discover_count: 10 });
+    expect(await storedNewWordLimitsOf(t.db, userId)).toEqual({ dayNewCap: null, newPerSession: 1, discoverCount: null });
   });
 
   it.each([
-    ['per session 3', { day_cap: 15, per_session: 3 }],
-    ['per session 0', { day_cap: 15, per_session: 0 }],
-    ['a cap of 0', { day_cap: 0, per_session: null }],
-    ['a cap of 101', { day_cap: 101, per_session: null }],
-    ['a cap that is not whole', { day_cap: 12.5, per_session: null }],
-    ['a body without the cap', { per_session: 2 }],
+    ['per session 3', { day_cap: 15, per_session: 3, discover_count: 10 }],
+    ['per session 0', { day_cap: 15, per_session: 0, discover_count: 10 }],
+    ['a cap of 0', { day_cap: 0, per_session: null, discover_count: 10 }],
+    ['a cap of 101', { day_cap: 101, per_session: null, discover_count: 10 }],
+    ['a cap that is not whole', { day_cap: 12.5, per_session: null, discover_count: 10 }],
+    ['a body without the cap', { per_session: 2, discover_count: 10 }],
+    ['a count of 0', { day_cap: 15, per_session: null, discover_count: 0 }],
+    ['a count of 31', { day_cap: 15, per_session: null, discover_count: 31 }],
+    ['a body without the count', { day_cap: 15, per_session: null }],
   ])('answers 400 for %s and stores nothing', async (_label, body) => {
     const res = await putLimits(body);
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid request' });
-    expect(await storedNewWordLimitsOf(t.db, userId)).toEqual({ dayNewCap: null, newPerSession: null });
+    expect(await storedNewWordLimitsOf(t.db, userId)).toEqual({ dayNewCap: null, newPerSession: null, discoverCount: null });
   });
 
   it('answers 401 without a session', async () => {
     expect((await limits({})).status).toBe(401);
-    expect((await putLimits({ day_cap: 30, per_session: null }, {})).status).toBe(401);
+    expect((await putLimits({ day_cap: 30, per_session: null, discover_count: 10 }, {})).status).toBe(401);
   });
 });

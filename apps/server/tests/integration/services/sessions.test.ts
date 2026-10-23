@@ -10,6 +10,8 @@ import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import { enrollmentOf, seedEnrollment, seedUser } from '../../support/seedUser';
 import { seedGrant } from '../../support/grantRows';
 import { seedSavedSenses } from '../../support/vocabularyRows';
+import { seedDiscoveryRun } from '../../support/discoveryRows';
+import { seedTarget } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { asChoice, insertListSession, readIntroducedOn, readVerdicts, type AskedGloss } from '../../support/questions';
@@ -32,6 +34,7 @@ import type { SessionService } from '../../../src/services/sessions';
 import type { VocabularyService } from '../../../src/services/vocabulary';
 import {
   failInsertsInto,
+  insertGlossMemory,
   readMemory,
   readProgress,
   readSnapshot,
@@ -203,12 +206,12 @@ describe('currentSession', () => {
   const E = enrollmentOf('u_1');
 
   it('is empty before any session, and points at the seed', async () => {
-    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'seed', savedCount: 0, dueCount: 0, today: TODAY_ZERO });
+    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'seed', savedCount: 0, dueCount: 0, today: TODAY_ZERO, needsNewWords: false });
   });
 
   it('points at the list before any session when a word is saved', async () => {
     await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
-    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'list', savedCount: 1, dueCount: 0, today: TODAY_ZERO });
+    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'list', savedCount: 1, dueCount: 0, today: TODAY_ZERO, needsNewWords: false });
   });
 
   it('shows the open session with its progress', async () => {
@@ -221,6 +224,7 @@ describe('currentSession', () => {
       savedCount: 0,
       dueCount: 0,
       today: expect.anything(),
+      needsNewWords: false,
     });
   });
 
@@ -234,11 +238,60 @@ describe('currentSession', () => {
   it("keeps one enrollment's session out of another's", async () => {
     await seedEnrollment(t.db, { id: 'e_ru', userId: 'u_1', targetLanguage: 'ru' });
     await service.createNextSession('u_1', E, { listening: false, speaking: false });
-    expect(await service.currentSession('u_1', 'e_ru')).toEqual({ current: null, nextSource: 'seed', savedCount: 0, dueCount: 0, today: TODAY_ZERO });
+    expect(await service.currentSession('u_1', 'e_ru')).toEqual({ current: null, nextSource: 'seed', savedCount: 0, dueCount: 0, today: TODAY_ZERO, needsNewWords: false });
   });
 
   it('refuses an enrollment that does not exist', async () => {
     await expect(service.currentSession('u_1', 'e_nobody')).rejects.toBeInstanceOf(EnrollmentNotFound);
+  });
+});
+
+describe('needsNewWords (phase 74, spec D7)', () => {
+  const E = enrollmentOf('u_1');
+  const met = (glossId: string) => ({
+    enrollmentId: E,
+    glossId,
+    dimension: 'written_receptive',
+    stability: 1,
+    difficulty: 5,
+    lastDay: '2026-10-01',
+    reps: 1,
+    lapses: 0,
+    params: 'fsrs6-default',
+  });
+
+  it('is false while a word of the main path was never met', async () => {
+    const kite = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
+    await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'cat', translations: ['חתול'] });
+    await insertGlossMemory(t.db, [met(kite.glossIds[0])]);
+    expect((await service.currentSession('u_1', E)).needsNewWords).toBe(false);
+  });
+
+  it('is true once every word has been met, and false again after the app started a run today', async () => {
+    const kite = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
+    await insertGlossMemory(t.db, [met(kite.glossIds[0])]);
+    expect((await service.currentSession('u_1', E)).needsNewWords).toBe(true);
+    // A run the learner started does not count; one the app started today does.
+    await seedDiscoveryRun(t.db, { enrollmentId: E, status: 'saved', startedBy: 'learner', cards: [] });
+    expect((await service.currentSession('u_1', E)).needsNewWords).toBe(true);
+    await seedDiscoveryRun(t.db, { enrollmentId: E, status: 'saved', startedBy: 'app', cards: [] });
+    expect((await service.currentSession('u_1', E)).needsNewWords).toBe(false);
+  });
+
+  it('is not turned off by a run the app started on an earlier day', async () => {
+    const kite = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
+    await insertGlossMemory(t.db, [met(kite.glossIds[0])]);
+    await seedDiscoveryRun(t.db, { enrollmentId: E, status: 'saved', startedBy: 'app', createdAt: new Date(Date.now() - 30 * 3600_000), cards: [] });
+    expect((await service.currentSession('u_1', E)).needsNewWords).toBe(true);
+  });
+
+  it('ignores a word an active target holds, and is false on a target\'s path', async () => {
+    const kite = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
+    const cat = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'cat', translations: ['חתול'] });
+    await insertGlossMemory(t.db, [met(kite.glossIds[0])]);
+    const target = await seedTarget(t.db, { enrollmentId: E, kind: 'exam', dueOn: '2099-01-01', glossIds: [cat.glossIds[0]] });
+    expect((await service.currentSession('u_1', E)).needsNewWords).toBe(true);
+    expect((await service.currentSession('u_1', E, target)).needsNewWords).toBe(false);
   });
 });
 

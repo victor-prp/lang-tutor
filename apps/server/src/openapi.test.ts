@@ -115,7 +115,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all fifty-four paths and nothing else', async () => {
+  it('contains all fifty-one paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/auth/email-otp/send-verification-otp',
@@ -124,11 +124,8 @@ describe('the document as a whole', () => {
       '/api/auth/sign-out',
       '/api/discovery/runs/{id}',
       '/api/discovery/runs/{id}/cards/{position}/answer',
-      '/api/discovery/runs/{id}/discard',
       '/api/discovery/runs/{id}/end',
-      '/api/discovery/runs/{id}/items/{position}',
       '/api/discovery/runs/{id}/rounds',
-      '/api/discovery/runs/{id}/save',
       '/api/enrollments',
       '/api/enrollments/{id}/discovery',
       '/api/enrollments/{id}/discovery/profile',
@@ -323,7 +320,7 @@ describe('the new-word limits in the published document (phase 70)', () => {
   it('publishes the limits in snake_case, per session null for automatic', async () => {
     const doc = await openApiDocument();
     const request = doc.paths['/api/me/new-words'].put.requestBody.content['application/json'].schema;
-    expect(request.required.sort()).toEqual(['day_cap', 'per_session']);
+    expect(request.required.sort()).toEqual(['day_cap', 'discover_count', 'per_session']);
   });
 });
 
@@ -784,9 +781,6 @@ describe('the 403 of an owner-only or granted route in the published document', 
     ['/api/discovery/runs/{id}/rounds', 'post', /another learner's/],
     ['/api/discovery/runs/{id}/cards/{position}/answer', 'post', /another learner's/],
     ['/api/discovery/runs/{id}/end', 'post', /another learner's/],
-    ['/api/discovery/runs/{id}/items/{position}', 'patch', /another learner's/],
-    ['/api/discovery/runs/{id}/save', 'post', /another learner's/],
-    ['/api/discovery/runs/{id}/discard', 'post', /another learner's/],
     // Phase 73 (spec D1).
     ['/api/enrollments/{id}/my-words-goal', 'get', /another learner's/],
     ['/api/enrollments/{id}/my-words-goal', 'put', /another learner's/],

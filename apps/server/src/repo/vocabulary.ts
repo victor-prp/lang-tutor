@@ -446,6 +446,19 @@ export function createVocabularyRepo(tx: Tx) {
       return rows.rows[0].n;
     },
 
+    /** Phase 74 (spec D7). The enrollment's saved glosses with no memory row, less `except` (a
+     *  target's words, those introduced today): the words My words has never met. A count, so
+     *  the home read reads no list. */
+    countNeverMet: async (enrollmentId: string, except: readonly string[]): Promise<number> => {
+      const rows = await tx.execute<{ n: number }>(
+        sql`SELECT count(*)::int AS n FROM vocabulary_entries ve
+            WHERE ve.enrollment_id = ${enrollmentId}
+              AND NOT EXISTS (SELECT 1 FROM gloss_memory gm WHERE gm.enrollment_id = ve.enrollment_id AND gm.gloss_id = ve.gloss_id)
+              ${except.length > 0 ? sql`AND ve.gloss_id NOT IN (${sql.join(except.map((glossId) => sql`${glossId}`), sql`, `)})` : sql``}`,
+      );
+      return rows.rows[0].n;
+    },
+
     findWordsPage: async (input: {
       enrollmentId: string;
       limit: number;

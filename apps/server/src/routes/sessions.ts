@@ -549,7 +549,7 @@ export function createSessionsRouter(sessions: SessionService) {
     const { id } = c.req.valid('param');
     const { target_id } = c.req.valid('query');
     try {
-      const { current, nextSource, savedCount, dueCount, today } = await sessions.currentSession(c.var.actor, id, target_id ?? null);
+      const { current, nextSource, savedCount, dueCount, today, needsNewWords } = await sessions.currentSession(c.var.actor, id, target_id ?? null);
       return c.json(
         {
           current: current
@@ -566,6 +566,7 @@ export function createSessionsRouter(sessions: SessionService) {
           saved_count: savedCount,
           due_count: dueCount,
           ...(today ? { today } : {}),
+          needs_new_words: needsNewWords,
         },
         200,
       );

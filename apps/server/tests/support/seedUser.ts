@@ -77,9 +77,15 @@ export async function timeZoneOf(db: Db, id: string): Promise<string> {
   return row.timeZone;
 }
 
-/** Phase 70 (spec D1). The new-word limits a profile stores, nulls as they are. */
-export async function storedNewWordLimitsOf(db: Db, id: string): Promise<{ dayNewCap: number | null; newPerSession: number | null }> {
-  const [row] = await db.select({ dayNewCap: users.dayNewCap, newPerSession: users.newPerSession }).from(users).where(eq(users.id, id));
+/** Phase 70 (spec D1), phase 74 (D10). The new-word limits a profile stores, nulls as they are. */
+export async function storedNewWordLimitsOf(
+  db: Db,
+  id: string,
+): Promise<{ dayNewCap: number | null; newPerSession: number | null; discoverCount: number | null }> {
+  const [row] = await db
+    .select({ dayNewCap: users.dayNewCap, newPerSession: users.newPerSession, discoverCount: users.discoverCount })
+    .from(users)
+    .where(eq(users.id, id));
   if (!row) throw new Error(`no profile ${id}`);
   return row;
 }

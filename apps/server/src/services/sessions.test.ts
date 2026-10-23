@@ -297,6 +297,7 @@ describe('repos', () => {
     listSavedGlosses: forbidden,
     findSavedWords: forbidden,
     countEntries: forbidden,
+    countNeverMet: forbidden,
     savedLemmas: forbidden,
   };
 
