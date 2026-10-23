@@ -642,6 +642,8 @@ export const strings = {
   practiceMore: 'לתרגל עוד',
   // Phase 72 (spec D3). A target session's results screen, while today still owes work.
   continuePractising: 'להמשיך לתרגל',
+  // Phase 73 (spec D7). The title of the day's block on a My words session's results screen.
+  myWordsResultsTitle: 'המילים שלי · היום',
   // Phase 65 (spec D9). The sheet that asks before practising past the day's budget; no number.
   // Phase 67b (spec D8, Victor).
   practiceMoreSheetTitle: 'עשית עבודה מצוינת להיום',

@@ -80,6 +80,10 @@ export type QuizState = {
   /** Phase 72 (spec D1). The target whose path the session is on, from its read; null on the main path's
    *  and until the read lands. The results screen continues on it. */
   targetId: string | null;
+  /** Phase 73 (spec D7). Where the session's words come from and its kind, from its read: null
+   *  until it lands. Which results screen a finished session gets. */
+  source: 'seed' | 'list' | null;
+  kind: 'practice' | 'question_types' | undefined;
 };
 
 /** Phase 19. What a session starts as before its first card is read: starting
@@ -109,6 +113,8 @@ export function enteredState(sessionId: string): QuizState {
     explanation: null,
     heldNewWords: null,
     targetId: null,
+    source: null,
+    kind: undefined,
   };
 }
 
@@ -248,6 +254,8 @@ export function resumed(current: QuizState, view: SessionView): QuizState {
     retry: view.pending_retry,
     heldNewWords: view.held_new_words ? { count: view.held_new_words.count, dayCap: view.held_new_words.day_cap } : null,
     targetId: view.target_id ?? null,
+    source: view.source,
+    kind: view.kind,
   };
 }
 

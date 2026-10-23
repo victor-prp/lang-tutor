@@ -1,4 +1,4 @@
-import type { MissedQuestion, SessionProgressItem, TargetSummary } from '@lang-tutor/core/api';
+import type { CurrentSessionResponse, MissedQuestion, SessionProgressItem, TargetSummary } from '@lang-tutor/core/api';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -7,16 +7,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ApiError } from '@/api/client';
 import { cardButton } from '@/components/BandCard';
 import { LevelBadge } from '@/components/LevelBadge';
+import { MyWordsToday } from '@/components/MyWordsToday';
 import { PracticeMoreSheet } from '@/components/PracticeMoreSheet';
 import { SpeakButton } from '@/components/SpeakButton';
 import { Readiness, Sessions } from '@/components/TargetCard';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
+import { usePracticeMyWords } from '@/hooks/usePracticeMyWords';
 import { usePracticeTarget } from '@/hooks/usePracticeTarget';
 import { useSession } from '@/hooks/useSession';
 import { useTargets } from '@/hooks/useTargets';
-import { POLL_INTERVAL_MS, targetSessionAction } from '@/nextSession';
+import { homeActionOf, POLL_INTERVAL_MS, targetSessionAction } from '@/nextSession';
 import { missedPair, practisedRows } from '@/progress';
+import { myWordsContinue, resultsScreenOf } from '@/resultsMyWords';
 import { strings } from '@/strings';
 import { continueButton, resultsTarget, targetCardState } from '@/targets';
 import { colors, fontSizes, lineHeights, radii, shadows, spacing } from '@/theme';
@@ -35,6 +38,8 @@ type Finished = {
   missedQuestions: MissedQuestion[];
   progress: SessionProgressItem[];
   targetId: string | null;
+  source: 'seed' | 'list' | null;
+  kind: 'practice' | 'question_types' | undefined;
 };
 
 export default function ResultsScreen() {
@@ -53,10 +58,13 @@ export default function ResultsScreen() {
           missedQuestions: session.missedQuestions,
           progress: session.progress,
           targetId: session.targetId,
+          source: session.source,
+          kind: session.kind,
         }
       : null,
   );
   const targetId = finished?.targetId ?? null;
+  const myWordsScreen = finished !== null && resultsScreenOf(finished) === 'my-words';
   const next = useNextSession();
   const { list, reload } = useTargets();
   // Phase 72 (spec D2). Home's numbers come from a read made after the session ended: the list a
@@ -73,7 +81,29 @@ export default function ResultsScreen() {
     }, [targetId, reload]),
   );
 
-  // Phase 72 (spec D5). As home does: read again while the target's next session is prepared.
+  // Phase 73 (spec D7). The same wait for My words: the block and the button come from a read made
+  // after the session ended, not from the one home held before it.
+  const [myWordsRead, setMyWordsRead] = useState<'reading' | 'failed' | 'landed'>('reading');
+  const { refresh } = next;
+  useFocusEffect(
+    useCallback(() => {
+      if (!myWordsScreen) return;
+      void refresh().then((landed) => setMyWordsRead((was) => (landed ? 'landed' : was === 'landed' ? was : 'failed')));
+    }, [myWordsScreen, refresh]),
+  );
+  const myWordsLanded = myWordsScreen && myWordsRead === 'landed';
+  const myWordsAction = myWordsLanded && next.current ? homeActionOf(next.current) : null;
+  const myWordsState = myWordsContinue(myWordsScreen ? myWordsRead : 'reading', myWordsAction);
+  const myWordsPreparing = myWordsState === 'preparing';
+  useFocusEffect(
+    useCallback(() => {
+      if (!myWordsPreparing) return undefined;
+      const timer = setInterval(() => void refresh(), POLL_INTERVAL_MS);
+      return () => clearInterval(timer);
+    }, [myWordsPreparing, refresh]),
+  );
+
+  // Phase 72 (spec D2). As home does: read again while the target's next session is prepared.
   const preparing = action?.kind === 'preparing';
   useFocusEffect(
     useCallback(() => {
@@ -126,6 +156,14 @@ export default function ResultsScreen() {
     router.replace('/session');
   };
   const { practice, asking, answerAsk, cancelAsk } = usePracticeTarget({ run, openSession });
+  // Phase 73 (spec D7, D8). My words' button: the press home's card makes. Nothing to skip here, and a
+  // learner left with no words goes home, which shows its state.
+  const myWords = usePracticeMyWords({
+    run,
+    openSession,
+    onDiscover: () => router.dismissTo('/'),
+    onSkipped: () => undefined,
+  });
 
   if (finished === null) {
     return <Redirect href="/" />;
@@ -147,6 +185,9 @@ export default function ResultsScreen() {
         <Text style={styles.score} testID="results-score">{strings.scoreLabel(correctCount, total)}</Text>
 
         {target ? <TargetBlock target={target} /> : null}
+        {myWordsLanded && next.current?.today ? (
+          <MyWordsBlock today={next.current.today} />
+        ) : null}
         {view.kind === 'reading' ? (
           <View style={[styles.target, styles.targetReading]} testID="results-target-reading">
             <ActivityIndicator color={colors.primary} />
@@ -208,7 +249,13 @@ export default function ResultsScreen() {
       </ScrollView>
 
       <View style={styles.actions}>
-        {view.kind === 'none' ? (
+        {myWordsScreen ? (
+          <MyWordsContinueButton
+            state={myWordsState}
+            busy={busy}
+            onPress={() => myWordsAction && (myWordsState === 'retry' ? void myWords.makeNext() : myWords.press(myWordsAction))}
+          />
+        ) : view.kind === 'none' ? (
           <Pressable
             accessibilityRole="button"
             testID="results-next-session"
@@ -266,6 +313,48 @@ function TargetBlock({ target }: { target: TargetSummary }) {
       <Readiness target={target} readiness={card.readiness} />
       <Sessions target={target} />
     </View>
+  );
+}
+
+/** Phase 73 (spec D7). The day's block: its title over the line, dots and tiles home's card draws. */
+function MyWordsBlock({ today }: { today: NonNullable<CurrentSessionResponse['today']> }) {
+  return (
+    <View style={styles.target} testID="results-my-words">
+      <Text style={styles.targetTitle}>{strings.myWordsResultsTitle}</Text>
+      <MyWordsToday today={today} testID="results-my-words-today" />
+    </View>
+  );
+}
+
+/** Phase 73 (spec D7). Always filled, `להמשיך לתרגל`; the preparing look while the next session is
+ *  built, the retry after a failed one, disabled until the read lands. */
+function MyWordsContinueButton({
+  state,
+  busy,
+  onPress,
+}: {
+  state: ReturnType<typeof myWordsContinue>;
+  busy: boolean;
+  onPress: () => void;
+}) {
+  const preparing = state === 'preparing';
+  const disabled = state === 'waiting' || preparing || busy;
+  return (
+    <>
+      {state === 'retry' ? <Text style={styles.failed}>{strings.preparationFailed}</Text> : null}
+      <Pressable
+        accessibilityRole="button"
+        testID="results-continue"
+        disabled={disabled}
+        onPress={onPress}
+        style={[cardButton.solid, preparing && styles.preparing, disabled && cardButton.disabled]}
+      >
+        {preparing ? <ActivityIndicator color={colors.onPrimary} /> : null}
+        <Text style={cardButton.solidLabel}>
+          {preparing ? strings.preparingQuestions : state === 'retry' ? strings.translateRetry : strings.continuePractising}
+        </Text>
+      </Pressable>
+    </>
   );
 }
 

@@ -68,6 +68,9 @@ export type SessionValue = {
   sessionId: string | null;
   /** Phase 72 (spec D1). The target whose path the session is on, once its read lands; null otherwise. */
   targetId: string | null;
+  /** Phase 73 (spec D7). The session's source and kind, once its read lands; they pick its results screen. */
+  source: 'seed' | 'list' | null;
+  kind: 'practice' | 'question_types' | undefined;
   /** Loads a ready session and continues from its current question. Starting
    *  and resuming are the same call: the server knows how far it got. */
   enter: (sessionId: string) => void;
@@ -491,6 +494,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         progress: [],
         sessionId: null,
         targetId: null,
+        source: null,
+        kind: undefined,
         enter,
         select,
         submitText,
@@ -533,6 +538,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       progress: state.progress,
       sessionId: state.sessionId,
       targetId: state.targetId,
+      source: state.source,
+      kind: state.kind,
       enter,
       select,
       submitText,
