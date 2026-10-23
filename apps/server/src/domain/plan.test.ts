@@ -11,8 +11,10 @@ const SP: Dimension = 'spelling';
 const SR: Dimension = 'spoken_receptive';
 const SK: Dimension = 'spoken_productive';
 
-/** A new word unless told otherwise: written receptive, rung 1, level 1, no R. */
+/** A new word unless told otherwise: written receptive, rung 1, level 1, no R. Picks with one `n`
+ *  are one word. */
 const pick = (n: number, over: Partial<PlanPick> = {}): PlanPick => ({
+  glossId: `g${n}`,
   form: `word${n}`,
   translation: `מילה${n}`,
   tiles: true,
@@ -29,6 +31,16 @@ const pick = (n: number, over: Partial<PlanPick> = {}): PlanPick => ({
 /** A known word at rung 1: R 0.5, level 1. At rung 2: R 0.9, level 3. */
 const at = (n: number, dimension: Dimension, rung: 1 | 2, over: Partial<PlanPick> = {}): PlanPick =>
   pick(n, rung === 1 ? { dimension, rung, level: 1, r: 0.5, ...over } : { dimension, rung, level: 3, r: 0.9, ...over });
+
+// Not tests/support/testRng: ADR 0001 R3 greps domain/ for any parent-directory
+// import, test files included. Same LCG.
+function testRng(seed: number): () => number {
+  let value = seed;
+  return () => {
+    value = (value * 1103515245 + 12345) % 2147483648;
+    return value / 2147483648;
+  };
+}
 
 const ALL: PlanInput = { listening: true, speaking: true };
 const NONE: PlanInput = { listening: false, speaking: false };
@@ -552,17 +564,13 @@ describe('planCards: a ladder', () => {
     expect(count(plan.types, 'multiple_choice')).toBe(4 + 3);
   });
 
-  it('merges three ladders, nothing else, by stage: every intro stage, then every first practice card, and so on', () => {
+  it('merges three ladders, nothing else: every intro stage first, in pick order, then each ladder in order', () => {
+    // Order by word (2026-10-23, ruling R2): the practice stages mix where that avoids a type repeat.
     const plan = planCards([ladder(0), ladder(1), ladder(2)], ALL);
-    expect(plan.order).toEqual([0, 0, 0, 1, 1, 1, 2, 2, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2]);
-    expect(plan.types).toEqual([
-      ...INTRO,
-      ...INTRO,
-      ...INTRO,
-      ...Array(3).fill('multiple_choice'),
-      ...Array(3).fill('reverse_choice'),
-      ...Array(3).fill('typed_translation'),
-    ]);
+    expect(plan.order.slice(0, 3 * INTRO.length)).toEqual([0, 0, 0, 1, 1, 1, 2, 2, 2]);
+    expect(plan.types.slice(0, 3 * INTRO.length)).toEqual([...INTRO, ...INTRO, ...INTRO]);
+    for (const index of [0, 1, 2]) expect(typesOf(plan, index)).toEqual(LADDER_ALL);
+    expect(adjacentBeyondIntro(plan, INTRO.length)).toEqual([]);
     expect(plan.board).toBeNull();
   });
 
@@ -581,10 +589,13 @@ describe('planCards: a ladder', () => {
     ]);
   });
 
-  it('spreads three ladders evenly through the one other card', () => {
+  it('puts the one other card among three ladders after every intro stage, between two practice cards', () => {
     const plan = planCards([ladder(0), ladder(1), ladder(2), at(3, SR, 1)], ALL);
-    expect(plan.order).toEqual([0, 0, 0, 1, 1, 1, 2, 2, 2, 0, 1, 2, 3, 0, 1, 2, 0, 1, 2]);
-    expect(plan.types[12]).toBe('listen_choice');
+    const [other] = positionsOf(plan, 3);
+    expect(plan.types[other]).toBe('listen_choice');
+    expect(other).toBeGreaterThan(3 * INTRO.length - 1);
+    expect([plan.intro[other - 1], plan.intro[other + 1]]).toEqual([false, false]);
+    for (const index of [0, 1, 2]) expect(typesOf(plan, index)).toEqual(LADDER_ALL);
   });
 
   it('spreads one ladder through three others: its intro stage in a row, one other between each two stages', () => {
@@ -645,26 +656,17 @@ describe('planCards: a ladder', () => {
     expect(plan.board).toBeNull();
   });
 
-  it('asks the returns after every other card, as the last of the cards a ladder merges with', () => {
-    // The other cards are 2 (reverse choice) and 3 (listening), then the returns 4 and 5: O = 4,
-    // and the stream is eight units (two intro stages and six practice cards), L = 8. The stream
-    // places its next unit while (a + ½) / 8 ≤ (b + ½) / 4: I0, 2, I1, P1₀, 3, P1₁, P2₀, 4, P2₁, P3₀, 5, P3₁.
+  it('asks the returns after every other card, and keeps each ladder in order around them', () => {
+    // The other cards are 2 (reverse choice) and 3 (listening), then the returns 4 and 5, which the
+    // ladders' cards can go between (phase 54 D5, as ruled).
     const list = [ladder(0), ladder(1), at(2, WP, 1), at(3, SR, 1), back(4, WR), back(5, WP, { r: 0.8 })];
     const plan = planCards(list, ALL);
-    expect(plan.order).toEqual([0, 0, 0, 2, 1, 1, 1, 0, 3, 1, 0, 4, 1, 0, 5, 1]);
-    expect(plan.types).toEqual([
-      ...INTRO,
-      'reverse_choice',
-      ...INTRO,
-      'multiple_choice',
-      'listen_choice',
-      'multiple_choice',
-      'reverse_choice',
-      'typed_meaning',
-      'reverse_choice',
-      'typed_translation',
-      'typed_translation',
-      'typed_translation',
+    for (const index of [0, 1]) expect(typesOf(plan, index)).toEqual(LADDER_ALL);
+    expect([typesOf(plan, 2), typesOf(plan, 3), typesOf(plan, 4), typesOf(plan, 5)]).toEqual([
+      ['reverse_choice'],
+      ['listen_choice'],
+      ['typed_meaning'],
+      ['typed_translation'],
     ]);
     // Still after every card that is neither a return nor a ladder's.
     expect(Math.min(...positionsOf(plan, 4), ...positionsOf(plan, 5))).toBeGreaterThan(Math.max(...positionsOf(plan, 2), ...positionsOf(plan, 3)));
@@ -874,5 +876,127 @@ describe('planCards: phase 68 on a target path', () => {
       expect(planCards([owed(0, WP), owed(1, WP), owed(2, WP), pick(3, { ladder: true })], PURE).board).toBeNull();
       expect(planCards([owed(0, WP), owed(1, WP), owed(2, WP), owed(3, WP, { translation: 'מילה0' })], PURE).board).toBeNull();
     });
+  });
+});
+
+// Order by word (2026-10-23, spec D2–D4, rulings R1–R3). A word's cards are one sequence, placed in
+// one pass: a new word's other cards follow its ladder, and nothing of it comes before its meet.
+describe('planCards: order by word', () => {
+  const TARGET: PlanInput = { ...ALL, target: true };
+  const INTRO: readonly QuestionType[] = ['meet', 'read_aloud', 'letter_tiles'];
+  const PRACTICE: readonly QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_translation'];
+  const ladder = (n: number): PlanPick => pick(n, { ladder: true });
+  /** Phase 67b's say card: a target pick on speaking, of the word a ladder meets. */
+  const say = (n: number): PlanPick => pick(n, { dimension: SK, rung: 2, level: 1, r: 1 });
+  /** A target pick: recall at R 1, as the target picker makes one. */
+  const owed = (n: number, dimension: Dimension, over: Partial<PlanPick> = {}): PlanPick =>
+    pick(n, { dimension, rung: dimension === SP ? 1 : 2, level: 1, r: 1, ...over });
+  /** A word's cards, in plan order. */
+  const cardsOf = (plan: ReturnType<typeof planCards>, picks: readonly PlanPick[], glossId: string) =>
+    plan.types.filter((_, position) => picks[plan.order[position]].glossId === glossId);
+
+  it("asks a new word's say card after its typed translation, never before its meet", () => {
+    // Lane 0's dad95389: a ladder, its say card, and four cards of two known words.
+    const picks = [ladder(0), say(0), owed(1, WP), owed(2, WP), owed(1, SP), owed(2, SP)];
+    const plan = planCards(picks, TARGET);
+    expect(cardsOf(plan, picks, 'g0')).toEqual([...INTRO, ...PRACTICE, 'say_translation']);
+    expect(plan.types[0]).toBe('meet');
+  });
+
+  it('ends two ladders with their say cards, after both typed translations', () => {
+    const picks = [ladder(0), ladder(1), say(0), say(1)];
+    const plan = planCards(picks, TARGET);
+    expect(plan.types.slice(0, 2 * INTRO.length)).toEqual([...INTRO, ...INTRO]);
+    expect(plan.types.slice(-2)).toEqual(['say_translation', 'say_translation']);
+    expect(plan.order.slice(-2).map((index) => picks[index].glossId)).toEqual(['g0', 'g1']);
+  });
+
+  it('asks a one-word session in its sequence: intro, practice, say', () => {
+    expect(planCards([ladder(0), say(0)], TARGET).types).toEqual([...INTRO, ...PRACTICE, 'say_translation']);
+  });
+
+  it('keeps the fallback of a say card that cannot be said last in its word, after the meet', () => {
+    // A device that cannot record: the say pick falls back to a multiple choice.
+    const picks = [ladder(0), say(0), owed(1, WP), owed(2, WP), owed(1, SP), owed(2, SP)];
+    const plan = planCards(picks, { listening: true, speaking: false, target: true });
+    expect(cardsOf(plan, picks, 'g0')).toEqual(['meet', 'letter_tiles', ...PRACTICE, 'multiple_choice']);
+    expect(plan.types[0]).toBe('meet');
+  });
+
+  it("keeps a target board away from its words' cards when another card can go between", () => {
+    const picks = [owed(0, WP), owed(1, SK), owed(2, SP), owed(3, WP), owed(4, SR)];
+    const plan = planCards(picks, { ...TARGET, board: true });
+    const start = plan.board!.start;
+    const onBoard = new Set(plan.order.slice(start, start + BOARD_SIZE).map((index) => picks[index].glossId));
+    const beside = [plan.order[start - 1], plan.order[start + BOARD_SIZE]].filter((index) => index !== undefined);
+    expect(beside.map((index) => picks[index].glossId).filter((glossId) => onBoard.has(glossId))).toEqual([]);
+  });
+
+  it('counts only the cards that can go before the returns when it keeps the types apart', () => {
+    // Spec D4. Counting the waiting return too, the say card went first and the two typed meanings met.
+    const known = (n: number, dimension: Dimension, r: number, step = false) => pick(n, { dimension, rung: 2, level: 1, r, step });
+    const picks = [known(0, WR, 0.7), known(1, SK, 0.9), known(2, WR, 0.8), known(3, SR, 0.8, true)];
+    expect(planCards(picks, ALL).types).toEqual(['typed_meaning', 'say_translation', 'typed_meaning', 'dictation']);
+  });
+
+  it('holds every rule over a seeded sweep of random sessions', () => {
+    const rng = testRng(20261023);
+    const one = <T,>(values: readonly T[]): T => values[Math.floor(rng() * values.length)];
+    const DIMENSIONS: readonly Dimension[] = [WR, WP, SP, SR, SK];
+    const broken: string[] = [];
+    for (let session = 0; session < 2000; session++) {
+      const rule = (ok: boolean, what: string) => {
+        if (!ok) broken.push(`session ${session}: ${what}`);
+      };
+      const target = rng() < 0.5;
+      const input: PlanInput = { listening: rng() < 0.8, speaking: rng() < 0.7, target, board: target && rng() < 0.3 };
+      const picks: PlanPick[] = [];
+      let n = 0;
+      const word = (over: Partial<PlanPick>): PlanPick =>
+        pick(n++, {
+          tiles: rng() < 0.8,
+          speakable: rng() < 0.85,
+          clozeGap: rng() < 0.6,
+          dimension: one(DIMENSIONS),
+          rung: one([1, 2] as const),
+          r: target ? 1 : 0.3 + rng() * 0.7,
+          ...over,
+        });
+      for (let i = Math.floor(rng() * 3); i > 0; i--) {
+        const met = word({ dimension: WR, rung: 1, r: null, ladder: true });
+        picks.push(met);
+        if (target && rng() < 0.7) picks.push({ ...met, ladder: false, dimension: SK, rung: 2, r: 1 });
+      }
+      for (let i = Math.floor(rng() * 3); i > 0; i--) picks.push(word({ dimension: WR, rung: 1, r: null, knownMeanings: ['ידוע'] }));
+      for (let i = 2 + Math.floor(rng() * 9); i > 0; i--) {
+        const known = word({});
+        picks.push(known);
+        if (target && rng() < 0.3) picks.push({ ...known, dimension: one(DIMENSIONS.filter((d) => d !== known.dimension)) });
+      }
+      if (!target) for (let i = Math.floor(rng() * 4); i > 0; i--) picks.push(word({ step: true, rung: 2, r: 0.5 + rng() * 0.5 }));
+      if (target) for (let i = Math.floor(rng() * 3); i > 0; i--) picks.push(word({ relearn: one(['counts', 'practice'] as const), r: 1 }));
+
+      const plan = planCards(picks, input);
+      const onBoard = (position: number) => plan.board !== null && position >= plan.board.start && position < plan.board.start + BOARD_SIZE;
+      rule(new Set(plan.order).size === picks.length, 'a pick is not asked');
+      if (plan.board) rule(plan.types.slice(plan.board.start, plan.board.start + BOARD_SIZE).every((type) => type === 'matching'), 'the board is apart');
+      picks.forEach((p, index) => {
+        const at = plan.order.flatMap((i, position) => (i === index && !onBoard(position) ? [position] : []));
+        if (p.ladder) {
+          const { intro, practice } = ladderCards(p, input.speaking);
+          rule(at.map((position) => plan.types[position]).join() === [...intro, ...practice].join(), 'a ladder is out of order');
+          rule(at.slice(0, intro.length).every((position, k) => position === at[0] + k), 'an intro stage is apart');
+          rule(!plan.order.slice(0, at[0]).some((i) => picks[i].glossId === p.glossId), 'a card comes before its meet');
+        }
+        if (p.relearn === 'counts') rule(at.every((position, k) => plan.intro[position] === k < at.length - 1), 'a step-down is out of order');
+        if (p.relearn === 'practice') rule(at.every((position) => plan.intro[position]), 'a practice step-down counts');
+      });
+      // Phase 37 D6: the returns follow every unit that is neither a return nor of a ladder's or a step-down's word.
+      const streamed = new Set(picks.filter((p) => p.ladder || p.relearn).map((p) => p.glossId));
+      const others = plan.order.flatMap((index, position) => (onBoard(position) || (!picks[index].step && !streamed.has(picks[index].glossId)) ? [position] : []));
+      const returns = plan.order.flatMap((index, position) => (!onBoard(position) && picks[index].step ? [position] : []));
+      rule(Math.min(Infinity, ...returns) > Math.max(-1, ...others), 'a return comes early');
+    }
+    expect(broken.slice(0, 5)).toEqual([]);
   });
 });

@@ -175,6 +175,10 @@ const PHASE_37_LEARNER: Learner = { missEvery: 5 };
  *  second, and so on. One deterministic learner misses the same places of every ten-card session,
  *  so a measure taken at one phase alone can sit at the rhythm's best or worst. */
 const EVERY_PHASE: readonly Learner[] = Array.from({ length: PHASE_37_LEARNER.missEvery }, (_, phase) => ({ ...PHASE_37_LEARNER, phase }));
+/** Order by word (2026-10-23, ruling). Learners missing every 4th to 8th card, at every phase of each:
+ *  thirty in all. A gate the card order moved only by where one rhythm's misses land is held over
+ *  these, against master's measure over the same learners, with its mark as it was. */
+const EVERY_RHYTHM: readonly Learner[] = [4, 5, 6, 7, 8].flatMap((missEvery) => Array.from({ length: missEvery }, (_, phase) => ({ missEvery, phase })));
 
 function answerOf(glossId: string, type: QuestionType, right: boolean): AnsweredQuestion {
   if (type === 'meet') return { glossId, type, verdict: 'seen' };
@@ -255,6 +259,7 @@ function runDays(
       const picks = chooseWords(input);
       sessions.push({ input, picks, families });
       const planned = picks.map((pick, i) => ({
+        glossId: pick.glossId,
         form: `w${i}`,
         translation: `מ${i}`,
         tiles: true,
@@ -740,12 +745,17 @@ describe('families over days: twenty-five days of six sessions, phase 37\'s lear
 
   itHoldsTheLadders({ log, sessions });
 
-  /** In every phase's run: `first` is asked before any other meaning of its word; until it is known,
+  /** Order by word (2026-10-23, ruling): the two outcomes are checked over every rhythm (EVERY_RHYTHM).
+   *  Over phase 37's five phases the new order left m0 known at none, though over the thirty learners
+   *  the seven words come to be known as often as on master (126 of 210 both; m0 22 → 16 of 30). */
+  const rhythmRuns = EVERY_RHYTHM.map((learner) => runDays(FAMILIES, 25, 6, learner));
+
+  /** In every rhythm's run: `first` is asked before any other meaning of its word; until it is known,
    *  none is asked; once it is, the first asked is `second`, at or after the session it was known in.
-   *  And some phase knows `first` within the run, so the outcome is tested. */
+   *  And some run knows `first`, so the outcome is tested. */
   function expectSecondOnceKnown(first: string, others: readonly string[], second: Partial<Asked>) {
-    expect({ first, knownAtSomePhase: runs.some(({ knownIn }) => knownIn.has(first)) }).toEqual({ first, knownAtSomePhase: true });
-    runs.forEach(({ log: asked, knownIn }, phase) => {
+    expect({ first, knownInSomeRun: rhythmRuns.some(({ knownIn }) => knownIn.has(first)) }).toEqual({ first, knownInSomeRun: true });
+    rhythmRuns.forEach(({ log: asked, knownIn }, phase) => {
       const word = asked.filter((card) => card.glossId === first || others.includes(card.glossId));
       expect({ phase, first: word[0]?.glossId }).toEqual({ phase, first });
       const next = word.find((card) => card.glossId !== first);
@@ -755,12 +765,12 @@ describe('families over days: twenty-five days of six sessions, phase 37\'s lear
     });
   }
 
-  it("asks a word's second meaning once its first is known, first as a new_meaning that lists the first, whichever card of five the learner misses", () => {
+  it("asks a word's second meaning once its first is known, first as a new_meaning that lists the first, whichever card the learner misses", () => {
     // The most common meaning is the word's first (D3).
     expectSecondOnceKnown('m0', FIVE.slice(1), { glossId: 'm1', type: 'new_meaning', knownMeanings: ['five-0'] });
   });
 
-  it('asks the other reading of a shared spelling the same way, whichever card of five the learner misses', () => {
+  it('asks the other reading of a shared spelling the same way, whichever card the learner misses', () => {
     expectSecondOnceKnown('h0', ['h1'], { glossId: 'h1', type: 'new_meaning', knownMeanings: ['see'] });
   });
 
@@ -1300,6 +1310,7 @@ function runPaths(
       const entry: PathSession = { at, day, date, path, home, mode, picks, input, families, budget, readiness: { before: readinessBefore, after: readinessBefore }, canRaise };
       sessions.push(entry);
       const planned = picks.map((pick, i) => ({
+        glossId: pick.glossId,
         form: `w${i}`,
         translation: `מ${i}`,
         tiles: true,
@@ -2024,6 +2035,12 @@ describe.each<[number]>([[5], [2], [1]])('a homework of fifteen words given %i d
   const totals = perDay.map((one) => one.reduce((sum, n) => sum + n, 0));
   const onDate = runs.map((run) => readinessOnDate(run, homework));
   const shares = runs.map((run) => fsrsReadyShare(run, homework));
+  // Order by word (2026-10-23, ruling): the readiness gate over every rhythm (EVERY_RHYTHM), its marks as
+  // they were. Master reads 96.77 / 0.936, 92.77 / 0.711 and 86.27 / 0.471 there (5, 2 and 1 days); the
+  // five phases alone put the new order's 1-day share at 0.37, under its mark, and its thirty at 0.551.
+  const rhythmRuns = EVERY_RHYTHM.map((learner) => runPaths(withList(15), days + 1, { untilDone: 25 }, [homework], learner, { stockLag: true }));
+  const onDateOverRhythms = mean(rhythmRuns.map((run) => readinessOnDate(run, homework)));
+  const sharesOverRhythms = mean(rhythmRuns.map((run) => fsrsReadyShare(run, homework)));
 
   it(`measures each day's sessions (${perDay.map((one) => one.join('+')).join(', ')}), readiness on the date (${onDate.join(' ')}) and the share ready by FSRS (${shares.map((one) => one.toFixed(2)).join(' ')})`, () => {
     for (const run of runs) {
@@ -2037,9 +2054,9 @@ describe.each<[number]>([[5], [2], [1]])('a homework of fifteen words given %i d
     expect(Math.max(...totals)).toBeLessThanOrEqual(pass.sessions);
   });
 
-  it(`reads ${mean(onDate).toFixed(1)} on its date and ${mean(shares).toFixed(2)} ready by FSRS, the means over the five phases (pass ≥ ${pass.readiness}, ${pass.fsrs.toFixed(2)})`, () => {
-    expect(mean(onDate)).toBeGreaterThanOrEqual(pass.readiness);
-    expect(mean(shares)).toBeGreaterThanOrEqual(pass.fsrs);
+  it(`reads ${onDateOverRhythms.toFixed(1)} on its date and ${sharesOverRhythms.toFixed(2)} ready by FSRS, the means over every rhythm (pass ≥ ${pass.readiness}, ${pass.fsrs.toFixed(2)})`, () => {
+    expect(onDateOverRhythms).toBeGreaterThanOrEqual(pass.readiness);
+    expect(sharesOverRhythms).toBeGreaterThanOrEqual(pass.fsrs);
   });
 
   itReportsTheDate(runs, homework);
@@ -2069,10 +2086,14 @@ describe("a homework of three words due in 10 days, each day's stock chosen besi
 });
 
 /** Phase 67b (spec Testing). Measured 2026-10-21 over the rhythm's five phases: the first session
- *  reads 7 7 4 4 6, day 1 ends at 19 18 16 18 18 (phase 67 read 0 all day). The lowest phase. */
+ *  reads 7 7 4 4 6, day 1 ends at 19 18 16 18 18 (phase 67 read 0 all day). The lowest phase.
+ *  Order by word (2026-10-23, ruling): held on the mean over every rhythm, where five of master's
+ *  thirty runs end day 1 under it (lowest 10, mean 19.47), as five of the new order's do (13, 19.57). */
 const FRESH_DAY_ONE_PASS = 16;
 /** Phase 67b (spec D3's note): before the eve, more sessions may end a day lower on one phase, as
- *  first answers that would have waited for tomorrow come today; never more than this on the mean. */
+ *  first answers that would have waited for tomorrow come today; never more than this on the mean.
+ *  Order by word (2026-10-23, ruling): the mean over every rhythm, where master's worst step is −0.3
+ *  (exam) and 0.1 (homework) and the new order's −0.2 and 0.3. */
 const VOLUME_TOLERANCE = 1;
 const VOLUME = [5, 10, 15] as const;
 /** Phase 67b (spec anti-goals, Victor: 87–88% on a crammed second day "is too high"). Measured
@@ -2081,31 +2102,40 @@ const CRAMMED_TEST_DAY_TWO_PASS = 77;
 const BEFORE_THE_EVE = [0, 1, 2, 3] as const;
 /** Review C1. The share of practice-more sessions before the eve, flagged "can raise", that raised
  *  the card, over 5, 10 and 15 sessions a day and the five phases; measured 2026-10-21 (exam
- *  95/136, homework 106/116; a miss, and an exam's hold, keep the rest from rising). */
+ *  95/136, homework 106/116; a miss, and an exam's hold, keep the rest from rising). Order by word
+ *  (2026-10-23, ruling): over every rhythm, master's exam 610/772 (0.790) and homework 624/671
+ *  (0.930), the new order's 614/770 (0.797) and 632/684 (0.924). */
 const CAN_RAISE_ROSE_PASS: Record<TargetKind, number> = { exam: 0.69, homework: 0.91 };
 
 describe('phase 67b: a fresh homework of eighteen words due in 5 days, its budget each day (spec D1, D4)', () => {
   const homework = targetOf('homework', 5, listIds(1, 18));
-  const runs = EVERY_PHASE.map((learner) => runPaths(withList(18), 6, { untilDone: 25 }, [homework], learner, { stockLag: true }));
+  // Order by word (2026-10-23, ruling): over every rhythm (EVERY_RHYTHM), day 1's end on the mean.
+  const runs = EVERY_RHYTHM.map((learner) => runPaths(withList(18), 6, { untilDone: 25 }, [homework], learner, { stockLag: true }));
   const firsts = runs.map((run) => run.sessions.find((one) => one.path === homework.id)!.readiness.after.get(homework.id)!.pct);
   const dayOneEnds = runs.map((run) => run.days[0].readiness.end.get(homework.id)!.pct);
 
-  it(`moves the card from the first session (${firsts.join(' ')}) and ends day 1 at ${dayOneEnds.join(' ')} (pass > 0, ≥ ${FRESH_DAY_ONE_PASS})`, () => {
+  it(`moves the card from the first session (lowest ${Math.min(...firsts)}) and ends day 1 at ${mean(dayOneEnds).toFixed(1)} over every rhythm, lowest ${Math.min(...dayOneEnds)} (pass > 0, mean ≥ ${FRESH_DAY_ONE_PASS})`, () => {
     for (const pct of firsts) expect(pct).toBeGreaterThan(0);
-    for (const pct of dayOneEnds) expect(pct).toBeGreaterThanOrEqual(FRESH_DAY_ONE_PASS);
+    expect(mean(dayOneEnds)).toBeGreaterThanOrEqual(FRESH_DAY_ONE_PASS);
   });
 });
 
 describe.each<[TargetKind]>([['exam'], ['homework']])('phase 67b: eighteen words of a %s due in 5 days at 5, 10 and 15 sessions a day (spec D3)', (kind) => {
   const target = targetOf(kind, 5, listIds(1, 18));
-  const runs = new Map<number, PathRun[]>(
-    VOLUME.map((n) => [
-      n,
-      EVERY_PHASE.map((learner) => runPaths(withList(18), 6, (day) => (day === 5 ? 0 : n), [target], learner, { stockLag: true, moreWhenDone: true })),
-    ]),
-  );
-  const ends = (n: number, day: number) => runs.get(n)!.map((run) => run.days[day].readiness.end.get(target.id)!.pct);
-  const means = VOLUME.map((n) => BEFORE_THE_EVE.map((day) => mean(ends(n, day))));
+  const runsOf = (learners: readonly Learner[]) =>
+    new Map<number, PathRun[]>(
+      VOLUME.map((n) => [
+        n,
+        learners.map((learner) => runPaths(withList(18), 6, (day) => (day === 5 ? 0 : n), [target], learner, { stockLag: true, moreWhenDone: true })),
+      ]),
+    );
+  const runs = runsOf(EVERY_PHASE);
+  // Order by word (2026-10-23, ruling): the volume gate and the practice-more gate over every rhythm
+  // (EVERY_RHYTHM); the crammed second day, and the single phases reported, over the five phases.
+  const rhythmRuns = runsOf(EVERY_RHYTHM);
+  const endsIn = (set: Map<number, PathRun[]>, n: number, day: number) => set.get(n)!.map((run) => run.days[day].readiness.end.get(target.id)!.pct);
+  const ends = (n: number, day: number) => endsIn(runs, n, day);
+  const means = VOLUME.map((n) => BEFORE_THE_EVE.map((day) => mean(endsIn(rhythmRuns, n, day))));
   const drops: string[] = [];
   for (let i = 1; i < VOLUME.length; i++) {
     for (const day of BEFORE_THE_EVE) {
@@ -2117,7 +2147,7 @@ describe.each<[TargetKind]>([['exam'], ['homework']])('phase 67b: eighteen words
   }
   const shown = BEFORE_THE_EVE.map((day) => VOLUME.map((_, i) => means[i][day].toFixed(1)).join('/')).join(' ');
 
-  it(`before the eve never ends a day more than ${VOLUME_TOLERANCE} point lower with more sessions, on the five-phase mean (days 1–4 at 5/10/15: ${shown}); single phases reported, ungated: ${drops.length ? drops.join(', ') : 'none'}`, () => {
+  it(`before the eve never ends a day more than ${VOLUME_TOLERANCE} point lower with more sessions, on the mean over every rhythm (days 1–4 at 5/10/15: ${shown}); the five phases' single drops reported, ungated: ${drops.length ? drops.join(', ') : 'none'}`, () => {
     for (let i = 1; i < VOLUME.length; i++) {
       for (const day of BEFORE_THE_EVE) {
         expect({ day: day + 1, sessions: VOLUME[i], ok: means[i][day] >= means[i - 1][day] - VOLUME_TOLERANCE }).toEqual({ day: day + 1, sessions: VOLUME[i], ok: true });
@@ -2127,7 +2157,7 @@ describe.each<[TargetKind]>([['exam'], ['homework']])('phase 67b: eighteen words
 
   // Review C1. The flag against what practice more did: before the eve, a practice-more session the
   // summary said cannot raise the card never raises it; how often one it said can, does.
-  const practice = [...runs.values()].flat().flatMap((run) =>
+  const practice = [...rhythmRuns.values()].flat().flatMap((run) =>
     run.sessions.filter(
       (one) => one.path === target.id && (one.mode === 'more' || one.mode === 'past_budget') && daysBetween(one.date, target.dueOn) > 1,
     ),

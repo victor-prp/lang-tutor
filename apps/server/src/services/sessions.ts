@@ -1771,6 +1771,8 @@ export function createSessionService({
             read.context.map((row, index) => {
               const { dimension, rung, level, r, step, known_meanings, ladder, relearn } = read.picked[index];
               return {
+                // Order by word (2026-10-23, spec D1): the plan keeps each word's cards as one sequence.
+                glossId: row.glossId,
                 form: row.form,
                 translation: row.translation,
                 // Phase 61: tiles, speakable and the cloze gap, as the question-types read finds them.
