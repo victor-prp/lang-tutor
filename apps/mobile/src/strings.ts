@@ -318,9 +318,6 @@ export const strings = {
   remindersEntry: 'תזכורות',
   remindersTitle: 'תזכורות',
   remindersEnabled: 'תזכורות לתרגול',
-  remindersTargetLabel: 'תרגולים ביום',
-  remindersTargetLess: 'פחות תרגולים',
-  remindersTargetMore: 'יותר תרגולים',
   remindersDaysLabel: 'ימים',
   remindersTimesLabel: 'שעות',
   /** `day` is an ISO weekday: 1 = Monday ... 7 = Sunday. */

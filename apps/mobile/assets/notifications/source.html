@@ -1,0 +1,56 @@
+<!doctype html>
+<!--
+  Phase 75 (spec D4). The source of a reminder's pictures, drawn by
+  scripts/render-notification-images.mjs: each [data-out] element is one PNG, on a transparent
+  background. The side pictures (option 2: the kind's tile with a small WordsPal badge) go to
+  apps/mobile/public/notifications/, which the web export serves; the top line's icon (a white W,
+  which Android draws as a silhouette) to apps/mobile/assets/images/.
+
+  The kinds' icons are Ionicons 7 (MIT, https://ionic.io/ionicons), the ones TargetCard and
+  MyWordsCard draw: calendar-outline, document-text-outline, book-outline. The W is a vector
+  redrawn from Victor's logo (the open book over a looped W, in its blue).
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin: 0; padding: 16px; background: transparent; display: flex; gap: 16px; flex-wrap: wrap; }
+  .side { position: relative; width: 192px; height: 192px; }
+  .tile { position: absolute; left: 22px; top: 4px; width: 166px; height: 166px; border-radius: 44px;
+          background: linear-gradient(160deg, #3B5BDB, #5B7BF0); color: #fff; }
+  .urgent .tile { background: linear-gradient(160deg, #F79009, #FDB022); }
+  /* The glyph sits up and right of the tile's centre, clear of the badge's corner. */
+  .tile svg { position: absolute; left: 46px; top: 30px; width: 88px; height: 88px; }
+  .badge { position: absolute; left: 4px; top: 114px; width: 74px; height: 74px; border-radius: 50%; background: #fff; }
+  .badge svg { position: absolute; left: 13px; top: 14px; width: 48px; height: 48px; }
+  .small { width: 96px; height: 96px; }
+  .small svg { width: 96px; height: 96px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="logo-blue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1A7BF4"/>
+      <stop offset="1" stop-color="#0350DD"/>
+    </linearGradient>
+    <symbol id="w" viewBox="191 132 1600 1600">
+      <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path stroke-width="105" d="M415 297 C640 300 890 420 1005 668 C1120 420 1370 298 1595 292"/>
+        <path stroke-width="150" d="M1000 842 C1130 842 1220 720 1380 600 C1480 525 1580 470 1660 478 C1745 487 1745 565 1712 625 L1180 1490 C1150 1545 1080 1560 1060 1495 L905 1150 C890 1100 845 1095 820 1130 L690 1215 C655 1245 612 1240 595 1200 L300 590 C270 525 300 470 360 475 C520 490 650 610 800 730 C880 795 940 842 1000 842 Z"/>
+      </g>
+    </symbol>
+    <symbol id="calendar" viewBox="0 0 512 512"><rect fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="32" x="48" y="80" width="416" height="384" rx="48"/><circle fill="currentColor" cx="296" cy="232" r="24"/><circle fill="currentColor" cx="376" cy="232" r="24"/><circle fill="currentColor" cx="296" cy="312" r="24"/><circle fill="currentColor" cx="376" cy="312" r="24"/><circle fill="currentColor" cx="136" cy="312" r="24"/><circle fill="currentColor" cx="216" cy="312" r="24"/><circle fill="currentColor" cx="136" cy="392" r="24"/><circle fill="currentColor" cx="216" cy="392" r="24"/><circle fill="currentColor" cx="296" cy="392" r="24"/><path fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="32" stroke-linecap="round" d="M128 48v32M384 48v32"/><path fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="32" d="M464 160H48"/></symbol>
+    <symbol id="document" viewBox="0 0 512 512"><path d="M416 221.25V416a48 48 0 01-48 48H144a48 48 0 01-48-48V96a48 48 0 0148-48h98.75a32 32 0 0122.62 9.37l141.26 141.26a32 32 0 019.37 22.62z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="32"/><path d="M256 56v120a32 32 0 0032 32h120M176 288h160M176 368h160" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/></symbol>
+    <symbol id="book" viewBox="0 0 512 512"><path d="M256 160c16-63.16 76.43-95.41 208-96a15.94 15.94 0 0116 16v288a16 16 0 01-16 16c-128 0-177.45 25.81-208 64-30.37-38-80-64-208-64-9.88 0-16-8.05-16-17.93V80a15.94 15.94 0 0116-16c131.57.59 192 32.84 208 96zM256 160v288" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/></symbol>
+  </defs>
+</svg>
+
+<div class="side" data-out="public/notifications/exam.png"><div class="tile"><svg><use href="#calendar"/></svg></div><div class="badge"><svg stroke="url(#logo-blue)"><use href="#w"/></svg></div></div>
+<div class="side urgent" data-out="public/notifications/exam-urgent.png"><div class="tile"><svg><use href="#calendar"/></svg></div><div class="badge"><svg stroke="url(#logo-blue)"><use href="#w"/></svg></div></div>
+<div class="side" data-out="public/notifications/homework.png"><div class="tile"><svg><use href="#document"/></svg></div><div class="badge"><svg stroke="url(#logo-blue)"><use href="#w"/></svg></div></div>
+<div class="side urgent" data-out="public/notifications/homework-urgent.png"><div class="tile"><svg><use href="#document"/></svg></div><div class="badge"><svg stroke="url(#logo-blue)"><use href="#w"/></svg></div></div>
+<div class="side" data-out="public/notifications/my-words.png"><div class="tile"><svg><use href="#book"/></svg></div><div class="badge"><svg stroke="url(#logo-blue)"><use href="#w"/></svg></div></div>
+<div class="small" data-out="assets/images/notification-icon.png"><svg stroke="#fff"><use href="#w"/></svg></div>
+</body>
+</html>

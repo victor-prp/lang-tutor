@@ -21,14 +21,11 @@ import { useReminders } from '@/hooks/useReminders';
 import type { Permission } from '@/reminders';
 import {
   HOURS,
-  MAX_TARGET,
   MAX_TIMES,
-  MIN_TARGET,
   WEEK_DAYS,
   createSaver,
   hourId,
   sameSettings,
-  stepTarget,
   timeOf,
   toggleDay,
   toggleHour,
@@ -42,6 +39,8 @@ import { colors, fontSizes, lineHeights, radii, spacing, shadows } from '@/theme
 // was refused or never answered.
 type Load = { kind: 'loading' } | { kind: 'failed' } | { kind: 'ready' };
 
+// Phase 75 (spec D5, D7). daily_target is no longer shown and no longer read by the tick; it is
+// sent back as it was read, for apps that still show it.
 const toWire = ({ enabled, daily_target, days, times }: ReminderSettingsResponse): ReminderSettings => ({
   enabled,
   daily_target,
@@ -239,39 +238,6 @@ export default function RemindersScreen() {
                   trackColor={{ true: colors.primary, false: colors.border }}
                 />
               </View>
-
-              <View style={styles.row}>
-                <Text style={styles.rowLabel}>{strings.remindersTargetLabel}</Text>
-                <View style={styles.stepper}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={strings.remindersTargetLess}
-                    testID="reminders-target-minus"
-                    disabled={settings.daily_target <= MIN_TARGET}
-                    onPress={() =>
-                      change((current) => ({ ...current, daily_target: stepTarget(current.daily_target, -1) }))
-                    }
-                    style={[styles.stepButton, settings.daily_target <= MIN_TARGET && styles.disabled]}
-                  >
-                    <Text style={styles.stepLabel}>−</Text>
-                  </Pressable>
-                  <Text testID="reminders-target" style={styles.target}>
-                    {String(settings.daily_target)}
-                  </Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={strings.remindersTargetMore}
-                    testID="reminders-target-plus"
-                    disabled={settings.daily_target >= MAX_TARGET}
-                    onPress={() =>
-                      change((current) => ({ ...current, daily_target: stepTarget(current.daily_target, 1) }))
-                    }
-                    style={[styles.stepButton, settings.daily_target >= MAX_TARGET && styles.disabled]}
-                  >
-                    <Text style={styles.stepLabel}>+</Text>
-                  </Pressable>
-                </View>
-              </View>
             </View>
 
             <View style={styles.card}>
@@ -342,25 +308,6 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   rowLabel: { fontSize: fontSizes.md, color: colors.text, writingDirection: 'rtl' },
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  stepButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radii.md,
-    ...shadows.card,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepLabel: { color: colors.primary, fontSize: fontSizes.lg, lineHeight: lineHeights.lg, fontWeight: '700' },
-  target: {
-    minWidth: 24,
-    textAlign: 'center',
-    fontSize: fontSizes.lg,
-    lineHeight: lineHeights.lg,
-    fontWeight: '700',
-    color: colors.text,
-  },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingBottom: spacing.sm },
   notice: {
     fontSize: fontSizes.md,

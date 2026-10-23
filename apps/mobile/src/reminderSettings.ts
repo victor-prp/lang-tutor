@@ -1,12 +1,8 @@
 /**
  * Phase 52 (spec D2, D8). The pure parts of the Reminders screen: the chips it
- * offers, what a tap on one does to the lists, the daily target's range, and the
- * saver that keeps a quick run of changes in order.
+ * offers, what a tap on one does to the lists, and the saver that keeps a quick
+ * run of changes in order. Phase 75 (spec D7): the daily target is no longer offered.
  */
-
-/** The daily target is offered from 1 to 5, though the wire accepts up to 10 (spec D2). */
-export const MIN_TARGET = 1;
-export const MAX_TARGET = 5;
 
 /** The day chips in order, Sunday first like the Israeli week; the values are ISO weekdays (1 = Monday ... 7 = Sunday). */
 export const WEEK_DAYS: readonly number[] = [7, 1, 2, 3, 4, 5, 6];
@@ -58,11 +54,6 @@ export const sameSettings = (a: Schedule, b: Schedule): boolean =>
   a.daily_target === b.daily_target &&
   sameList(a.days, b.days) &&
   sameList(a.times, b.times);
-
-export const clampTarget = (target: number): number =>
-  Math.min(MAX_TARGET, Math.max(MIN_TARGET, Math.round(target)));
-
-export const stepTarget = (target: number, step: 1 | -1): number => clampTarget(target + step);
 
 /**
  * Saves each change as it is made, one request at a time. A change made while

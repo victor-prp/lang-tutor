@@ -123,7 +123,6 @@ describe('the Reminders screen (phase 52 D8)', () => {
     expect(strings.remindersEntry).toBe('תזכורות');
     expect(strings.remindersTitle).toBe('תזכורות');
     expect(strings.remindersEnabled).toBe('תזכורות לתרגול');
-    expect(strings.remindersTargetLabel).toBe('תרגולים ביום');
     expect(strings.remindersDaysLabel).toBe('ימים');
     expect(strings.remindersTimesLabel).toBe('שעות');
     expect(strings.remindersDeniedNotice).toBe('התזכורות כבויות בהגדרות של אנדרואיד.');
@@ -132,8 +131,6 @@ describe('the Reminders screen (phase 52 D8)', () => {
     expect(strings.remindersWebNotice).toBe('התזכורות מגיעות לאפליקציה באנדרואיד.');
     expect(strings.remindersLoadFailed).toBe('טעינת התזכורות נכשלה. אפשר לנסות שוב.');
     expect(strings.remindersSaveFailed).toBe('שמירת התזכורות נכשלה. אפשר לנסות שוב.');
-    expect(strings.remindersTargetLess).toBe('פחות תרגולים');
-    expect(strings.remindersTargetMore).toBe('יותר תרגולים');
   });
 
   it('names the days by their ISO weekday, Monday 1 to Sunday 7, by the Hebrew letter of the day', () => {
