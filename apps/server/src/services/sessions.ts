@@ -1,4 +1,4 @@
-import type { AnswerRecord, Enrollment, LlmDistractors, SentenceTranslationQuestion, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
+import type { AnswerRecord, Enrollment, LlmDistractors, MyWordsToday, SentenceTranslationQuestion, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
 import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/schemas';
 import {
   LIVE_DIMENSIONS,
@@ -23,6 +23,7 @@ import {
 } from '@lang-tutor/core/domain';
 
 import { usableAnswerForm } from '../domain/answerForm';
+import { goalMinutes, goalOf } from '../domain/myWordsGoal';
 import {
   buildCheckPrompt,
   contextKeyOf,
@@ -899,6 +900,21 @@ export function createSessionService({
    * has none, the one readTodayBudget reads now; a day set already keeps its own, so the count
    * never grows. A target no longer active, or with no saved word, gets none. Takes no lock.
    */
+  /** Phase 73 (spec D4). The main path's day: the recorded row's counts, or zeros before the day's
+   *  first counted session; the goal is the one in force now, not the row's. */
+  async function myWordsToday(repos: Repos, enrolled: Enrollment): Promise<MyWordsToday> {
+    const day = await learnerDay(repos, enrolled.user_id, now());
+    const row = await repos.myWordsDays.find(enrolled.id, day);
+    const goal = goalOf(await repos.enrollment.findMyWordsGoal(enrolled.id));
+    return {
+      goal,
+      sessions_done: row?.sessionsDone ?? 0,
+      new_words: row?.newWords ?? 0,
+      moved_up: row?.movedUp ?? 0,
+      minutes: goal ? goalMinutes(goal) : 0,
+    };
+  }
+
   async function setTodayBudget(repos: Repos, enrolled: Enrollment, targetId: string, devices: Devices): Promise<void> {
     const today = await learnerDay(repos, enrolled.user_id, now());
     if (await repos.targetBudgets.find(targetId, today)) return;
@@ -1017,7 +1033,7 @@ export function createSessionService({
       actorUserId: string,
       enrollmentId: string,
       path: Path = null,
-    ): Promise<{ current: (SessionSummary & { started: boolean }) | null; nextSource: SessionSource; savedCount: number; dueCount: number }> => {
+    ): Promise<{ current: (SessionSummary & { started: boolean }) | null; nextSource: SessionSource; savedCount: number; dueCount: number; today?: MyWordsToday }> => {
       const read = await transaction(async (repos) => {
         const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
         const target = path === null ? null : await pathTarget(repos, actorUserId, enrolled, path);
@@ -1048,6 +1064,7 @@ export function createSessionService({
           nextSource: path === null ? nextSource(any !== undefined) : ('list' as const),
           savedCount: await savedOn(repos, enrolled, path),
           dueCount: await waitingOn(repos, enrolled, target),
+          today: path === null ? await myWordsToday(repos, enrolled) : undefined,
           replaced,
         };
       });

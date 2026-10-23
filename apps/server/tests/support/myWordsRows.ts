@@ -17,3 +17,9 @@ export async function storeMyWordsGoal(db: Db, enrollmentId: string, stored: num
 export async function markQuestionTypes(db: Db, sessionId: string): Promise<void> {
   await db.execute(sql`update sessions set kind = 'question_types' where id = ${sessionId}`);
 }
+
+/** Phase 73. The goal as stored (null the default, 0 off). */
+export async function readStoredMyWordsGoal(db: Db, enrollmentId: string): Promise<number | null> {
+  const [row] = await db.select({ goal: enrollments.myWordsGoal }).from(enrollments).where(eq(enrollments.id, enrollmentId));
+  return row.goal;
+}

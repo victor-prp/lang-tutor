@@ -25,6 +25,8 @@ export const PERMISSIONS = [
   'targets.manage',
   // Phase 69 (spec D10). Words for me: the profile, its runs and their lists. In no role.
   'discovery.manage',
+  // Phase 73 (spec D1). The My words goal of a course: its owner's alone. In no role.
+  'my_words_goal.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 

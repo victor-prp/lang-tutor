@@ -472,6 +472,9 @@ export const SessionViewSchema = z.object({
   // Phase 72 (spec D1). The target whose path the session is on; absent on the main path's, the
   // seed's and a question-types session's. The results screen continues on that path.
   target_id: z.string().min(1).optional(),
+  // Phase 73 (spec D7). Which kind of session this is, so the app can tell a counted My words session
+  // (practice) from a tester's question-types one. Absent on none: every session read carries it.
+  kind: z.enum(['practice', 'question_types']).optional(),
 });
 
 // Phase 23. A choice is answered by index, a typed card by its text. Empty
@@ -661,6 +664,19 @@ export const CurrentSessionQuerySchema = z.object({
   target_id: z.string().min(1).optional(),
 });
 
+// Phase 73 (spec D1, D4). The My words goal of one course: sessions a day (1 to 20), null for off.
+export const MyWordsGoalSchema = z.object({ goal: z.number().int().min(1).max(20).nullable() });
+
+// Phase 73 (spec D4). What the main path's day holds: the goal in force (null for off), the counted
+// sessions done, the words first answered and the words moved up, and the goal's cost in minutes.
+export const MyWordsTodaySchema = z.object({
+  goal: z.number().int().nullable(),
+  sessions_done: z.number().int(),
+  new_words: z.number().int(),
+  moved_up: z.number().int(),
+  minutes: z.number().int(),
+});
+
 export const CurrentSessionResponseSchema = z.object({
   current: CurrentSessionSchema.nullable(),
   next_source: SessionSourceSchema,
@@ -669,6 +685,8 @@ export const CurrentSessionResponseSchema = z.object({
   // review (their weakest skill's recall today at or below the picker's bar); on a target's,
   // those with work owed today.
   due_count: z.number().int(),
+  // Phase 73 (spec D4). The main path's day; absent on a target's.
+  today: MyWordsTodaySchema.optional(),
 });
 
 export const SkipSessionResponseSchema = z.object({

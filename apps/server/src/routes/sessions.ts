@@ -108,6 +108,8 @@ function sessionView(sessionId: string, result: SessionResult): z.infer<typeof S
     ...(result.held_new_words ? { held_new_words: result.held_new_words } : {}),
     // Phase 72 (spec D1): a target path's session names its target.
     ...(result.target_id ? { target_id: result.target_id } : {}),
+    // Phase 73 (spec D7): a counted My words session is a practice one.
+    ...(result.kind ? { kind: result.kind } : {}),
   };
 }
 
@@ -314,7 +316,7 @@ const currentSessionRoute = createRoute({
   tags: ['sessions'],
   summary: "An enrollment's current session",
   description:
-    "Of one path (phase 57): the main path's, or with `target_id` the target's. Its started session, else the one in stock (not yet started: preparing or ready), else its newest session if it failed; where the next one will come from; how many glosses are saved; and how many of the path's words wait (`due_count`): on the main path those due for review, on a target's those with work owed today.",
+    "Of one path (phase 57): the main path's, or with `target_id` the target's. Its started session, else the one in stock (not yet started: preparing or ready), else its newest session if it failed; where the next one will come from; how many glosses are saved; and how many of the path's words wait (`due_count`): on the main path those due for review, on a target's those with work owed today. On the main path, `today` (phase 73) holds the My words day: the goal in force (null for off), the counted sessions done, the words first answered and moved up today, and the goal's cost in minutes; a target's has none.",
   request: { params: z.object({ id: z.string() }), query: CurrentSessionQuerySchema },
   responses: {
     200: {
@@ -547,7 +549,7 @@ export function createSessionsRouter(sessions: SessionService) {
     const { id } = c.req.valid('param');
     const { target_id } = c.req.valid('query');
     try {
-      const { current, nextSource, savedCount, dueCount } = await sessions.currentSession(c.var.actor, id, target_id ?? null);
+      const { current, nextSource, savedCount, dueCount, today } = await sessions.currentSession(c.var.actor, id, target_id ?? null);
       return c.json(
         {
           current: current
@@ -563,6 +565,7 @@ export function createSessionsRouter(sessions: SessionService) {
           next_source: nextSource,
           saved_count: savedCount,
           due_count: dueCount,
+          ...(today ? { today } : {}),
         },
         200,
       );

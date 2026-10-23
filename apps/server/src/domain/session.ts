@@ -41,6 +41,8 @@ export type SessionRecord = {
   skipped_types?: SkippedType[];
   /** Phase 72 (spec D1). The target whose path the session is on; absent on the main path's. */
   target_id?: string;
+  /** Phase 73 (spec D7). What the session was made for, as stored; every loaded session has it. */
+  kind?: 'practice' | 'question_types';
 };
 
 /** Phase 61 (spec D5). A chosen question type no card could be generated for. */

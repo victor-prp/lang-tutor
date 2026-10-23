@@ -531,6 +531,7 @@ export function createSessionRepo(tx: Tx) {
           source: sessions.source,
           skippedTypes: sessions.skippedTypes,
           targetId: sessions.targetId,
+          kind: sessions.kind,
         })
         .from(sessions)
         .where(eq(sessions.id, sessionId))
@@ -600,6 +601,7 @@ export function createSessionRepo(tx: Tx) {
         source: session.source as SessionSource,
         ...(session.skippedTypes === null ? {} : { skipped_types: session.skippedTypes as SkippedType[] }),
         ...(session.targetId === null ? {} : { target_id: session.targetId }),
+        kind: session.kind as 'practice' | 'question_types',
       };
     },
 

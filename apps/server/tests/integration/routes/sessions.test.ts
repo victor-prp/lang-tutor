@@ -16,8 +16,12 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
 import { createTestServerDeps } from '../../support/serverDeps';
+import { goalMinutes } from '../../../src/domain/myWordsGoal';
 import { createSessionsRouter } from '../../../src/routes/sessions';
 import { ACT_AS, actAs } from '../../support/actAs';
+
+// Phase 73 (spec D4). The main path's read carries the day: nothing counted yet, the default goal.
+const TODAY_ZERO = { goal: 3, sessions_done: 0, new_words: 0, moved_up: 0, minutes: goalMinutes(3) };
 
 let t: TestDb;
 
@@ -562,7 +566,7 @@ describe('phase 19 session routes', () => {
   it('GET current answers before, during and after a session, and 404s an unknown enrollment', async () => {
     const app = buildTestApp();
     const before = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
-    expect(before).toEqual({ current: null, next_source: 'seed', saved_count: 0, due_count: 0 });
+    expect(before).toEqual({ current: null, next_source: 'seed', saved_count: 0, due_count: 0, today: TODAY_ZERO });
 
     const { session_id } = await startSeed(app, E());
     const during = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
@@ -572,6 +576,7 @@ describe('phase 19 session routes', () => {
       next_source: 'list',
       saved_count: 0,
       due_count: 0,
+      today: TODAY_ZERO,
     });
 
     const missing = await getJson(app, '/api/enrollments/e_nobody/sessions/current');
@@ -658,7 +663,7 @@ describe('another learner', () => {
     expect(await answered(await postJson(app, '/api/sessions', { enrollment_id: E() }, 'u_2'))).toEqual(FORBIDDEN);
     expect(await answered(await getJson(app, `/api/enrollments/${E()}/sessions/current`, 'u_2'))).toEqual(FORBIDDEN);
     const mine = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
-    expect(mine).toEqual({ current: null, next_source: 'seed', saved_count: 0, due_count: 0 });
+    expect(mine).toEqual({ current: null, next_source: 'seed', saved_count: 0, due_count: 0, today: TODAY_ZERO });
   });
 
   it("is answered 403 on someone else's session, which stays as it was", async () => {

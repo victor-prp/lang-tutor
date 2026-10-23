@@ -159,6 +159,7 @@ export function createFakeAppDeps(): AppDeps {
     reminders,
     photoImports,
     discovery,
+    myWordsGoal: { goal: unreachable, putGoal: unreachable },
     targets,
     glosses: { mergeLexeme: unreachable, planMerges: unreachable, applyMerges: unreachable },
     health: { ping: unreachable },

@@ -91,6 +91,8 @@ export type {
   Question,
   ReadAloudQuestion,
   MeetQuestion,
+  MyWordsGoal,
+  MyWordsToday,
   NewWordLimits,
   ReminderSettings,
   ReminderSettingsResponse,

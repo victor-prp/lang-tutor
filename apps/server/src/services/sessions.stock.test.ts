@@ -21,6 +21,7 @@ import { FSRS6_DEFAULT, type QuestionType } from '@lang-tutor/core/domain';
 import { NoSavedWords, SessionNotFound, SessionNotReady, SessionOpen, TargetClosed } from '../errors';
 import type { DictRepo } from '../repo/dictionary';
 import type { EnrollmentRepo } from '../repo/enrollments';
+import type { MyWordsDayRepo } from '../repo/myWordsDays';
 import type { GlossFamiliesRepo } from '../repo/glossFamilies';
 import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
@@ -66,7 +67,8 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
   const locked: string[] = [];
   const service = createSessionService({
     transaction: createFakeTransaction({
-      enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
+      enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT, findMyWordsGoal: async () => null }),
+      myWordsDays: stub<MyWordsDayRepo>({ find: async () => undefined }),
       user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }), findNewWordLimits: async () => ({ dayCap: null, perSession: null }) }),
       session: stub<SessionRepo>({
         findAnswersOn: async () => [],
@@ -283,6 +285,7 @@ describe('currentSession (spec D6, D8)', () => {
       nextSource: 'list',
       savedCount: 2,
       dueCount: 0,
+      today: expect.objectContaining({ goal: 3, sessions_done: 0 }),
     });
     expect(eventsOf(logger, 'session_offered')).toEqual([{ event: 'session_offered', enrollment_id: E, session_id: 's_stock', status: 'preparing' }]);
   });
