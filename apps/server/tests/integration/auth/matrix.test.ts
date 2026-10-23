@@ -169,6 +169,13 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
   }),
   'post /api/discovery/runs/{id}/save': () => ({ url: `/api/discovery/runs/${ids.discoveryRun}/save` }),
   'post /api/discovery/runs/{id}/discard': () => ({ url: `/api/discovery/runs/${ids.discoveryRun}/discard` }),
+  // Phase 73 (spec D1). The My words goal is its course owner's alone, a tutor included. A PUT that
+  // got through would show in enrollments.my_words_goal.
+  'get /api/enrollments/{id}/my-words-goal': () => ({ url: `/api/enrollments/${ids.enrollment}/my-words-goal` }),
+  'put /api/enrollments/{id}/my-words-goal': () => ({
+    url: `/api/enrollments/${ids.enrollment}/my-words-goal`,
+    body: { goal: 9 },
+  }),
   // Phase 53 (spec D2). A target is its list owner's alone, a tutor of the list included: the
   // tutor loop below is refused on all seven too. A call that got through would show in the
   // counts of targets, target_words, target_events or vocabulary_entries (the add aims at a gloss
@@ -253,6 +260,7 @@ async function written() {
     (select answer from discovery_cards where run_id = ${ids.discoveryRun} and position = 0) as discovery_answer,
     (select ticked from discovery_cards where run_id = ${ids.discoveryRun} and position = 1) as discovery_ticked,
     (select level from discovery_profiles where enrollment_id = ${ids.enrollment}) as discovery_level,
+    (select my_words_goal from enrollments where id = ${ids.enrollment}) as my_words_goal,
     (select accepted_at::text from enrollment_grants where id = ${ids.grant}) as grant_accepted_at,
     (select ended_at::text from targets where id = ${ids.target}) as target_ended_at,
     (select due_on::text from targets where id = ${ids.target}) as target_due_on`);

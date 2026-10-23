@@ -40,6 +40,9 @@ import {
   sessionGlossEntries,
 } from '../../support/progressRows';
 
+// Phase 73 (spec D4). A new learner's day on the main path: the default goal, nothing counted.
+const TODAY_ZERO = { goal: 3, sessions_done: 0, new_words: 0, moved_up: 0, minutes: 15 };
+
 // The other half of this file's tests is src/services/sessions.test.ts, which
 // covers the cases the repository-factory seam makes reachable without Postgres.
 
@@ -84,6 +87,13 @@ describe('createNextSession', () => {
     const record = await service.getSession('u_1', created.sessionId);
     expect(record.questions).toHaveLength(SESSION_LENGTH);
     expect(record.answers).toEqual([]);
+  });
+
+  // Phase 73 (spec D6). An enrollment with a word of its own goes straight to its list.
+  it('prepares a list session, not the seed, for a first create with a saved word', async () => {
+    await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
+    const created = await service.createNextSession('u_1', E, { listening: false, speaking: false });
+    expect(created).toMatchObject({ status: 'preparing', source: 'list', created: true });
   });
 
   // The regression test for deleting upsertUser. Before phase 8 a session for
@@ -193,7 +203,12 @@ describe('currentSession', () => {
   const E = enrollmentOf('u_1');
 
   it('is empty before any session, and points at the seed', async () => {
-    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'seed', savedCount: 0, dueCount: 0 });
+    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'seed', savedCount: 0, dueCount: 0, today: TODAY_ZERO });
+  });
+
+  it('points at the list before any session when a word is saved', async () => {
+    await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
+    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'list', savedCount: 1, dueCount: 0, today: TODAY_ZERO });
   });
 
   it('shows the open session with its progress', async () => {
@@ -205,6 +220,7 @@ describe('currentSession', () => {
       nextSource: 'list',
       savedCount: 0,
       dueCount: 0,
+      today: expect.anything(),
     });
   });
 
@@ -218,7 +234,7 @@ describe('currentSession', () => {
   it("keeps one enrollment's session out of another's", async () => {
     await seedEnrollment(t.db, { id: 'e_ru', userId: 'u_1', targetLanguage: 'ru' });
     await service.createNextSession('u_1', E, { listening: false, speaking: false });
-    expect(await service.currentSession('u_1', 'e_ru')).toEqual({ current: null, nextSource: 'seed', savedCount: 0, dueCount: 0 });
+    expect(await service.currentSession('u_1', 'e_ru')).toEqual({ current: null, nextSource: 'seed', savedCount: 0, dueCount: 0, today: TODAY_ZERO });
   });
 
   it('refuses an enrollment that does not exist', async () => {

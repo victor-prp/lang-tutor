@@ -44,10 +44,15 @@ export async function signUpLearner(page: Page, username: string, targetLanguage
   return user;
 }
 
-/** Opens the app signed in. Retried: a static export serves markup before React hydrates. */
-export async function openApp(page: Page, landing = 'start-button'): Promise<void> {
+/** Opens the app signed in. Retried: a static export serves markup before React hydrates. By
+ *  default it lands on My words' button: a session to start, or, with no words of the learner's own,
+ *  the way to Words for me (phase 73: its own testID, so `start-button` always means a session). */
+export async function openApp(page: Page, landing?: string): Promise<void> {
+  const target = landing
+    ? page.getByTestId(landing)
+    : page.getByTestId('start-button').or(page.getByTestId('my-words-discover'));
   await expect(async () => {
     await page.goto('/');
-    await expect(page.getByTestId(landing)).toBeVisible({ timeout: 5_000 });
+    await expect(target).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 30_000 });
 }

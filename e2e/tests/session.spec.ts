@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import { API_URL } from '../urls';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
+import { enrollmentIdOf, makeSeed } from './support/sessions';
 import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
 
@@ -17,6 +18,9 @@ test('a full session scores exactly the answers given', async ({ page, request }
   const report = () => diagnosticReport(diagnostics);
 
   await signUpLearner(page, 'e2e_session');
+  // The seed, made over the API: the card never starts it (phase 73, spec D6), and home offers it
+  // as any ready session.
+  await makeSeed(page.request, await enrollmentIdOf(page.request));
   await openApp(page);
   await expect(page.getByTestId('start-button'), `home never rendered\n${report()}`).toBeVisible();
   // web.output: "static" pre-renders start-button in the raw HTML before React

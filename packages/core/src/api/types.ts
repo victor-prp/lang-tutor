@@ -90,6 +90,8 @@ import type {
   StartSessionRequestSchema,
   StartSessionResponseSchema,
   TimeZoneRequestSchema,
+  MyWordsGoalSchema,
+  MyWordsTodaySchema,
   NewWordLimitsSchema,
   ReminderSettingsSchema,
   ReminderSettingsResponseSchema,
@@ -189,6 +191,8 @@ export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type User = z.infer<typeof UserSchema>;
 export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
 export type TimeZoneRequest = z.infer<typeof TimeZoneRequestSchema>;
+export type MyWordsGoal = z.infer<typeof MyWordsGoalSchema>;
+export type MyWordsToday = z.infer<typeof MyWordsTodaySchema>;
 export type NewWordLimits = z.infer<typeof NewWordLimitsSchema>;
 export type ReminderSettings = z.infer<typeof ReminderSettingsSchema>;
 export type ReminderSettingsResponse = z.infer<typeof ReminderSettingsResponseSchema>;

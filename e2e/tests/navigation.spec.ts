@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { expectGeneration } from './support/cards';
 import { BOARD_WORDS } from './support/lexemes';
 import { clearGemini } from './support/mockServer';
-import { enrollmentIdOf } from './support/sessions';
+import { enrollmentIdOf, makeSeed } from './support/sessions';
 import { addDays, createTarget, lookUpEntries, readTargets, saveEntries } from './support/targets';
 import { openApp, signUpLearner } from './support/users';
 
@@ -24,6 +24,9 @@ async function startSession(page: Page) {
 
 test('the four tabs reach each other, translate returns to its tab, and a session has no bar', async ({ page }) => {
   await signUpLearner(page, 'e2e_tabs_walk', 'ru');
+  // A session to open at the end: the seed, made over the API, since the card never starts it
+  // (phase 73, spec D6).
+  await makeSeed(page.request, await enrollmentIdOf(page.request));
   await openApp(page);
 
   // Each tab from the one before, never through home.

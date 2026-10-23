@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
+import { expectGeneration } from './support/cards';
 import { lookUp, tapAndWaitForWrite } from './support/interactions';
 import { LUK } from './support/lexemes';
 import { clearGemini } from './support/mockServer';
@@ -53,6 +54,9 @@ test('a tutor invites a student, adds a word to their list, and the student ends
   const add = tutorPage.getByTestId('translate-save').first();
   await tapAndWaitForWrite(tutorPage, add);
   await expect(add).toHaveText('נוסף ✓');
+  // Phase 73 (spec D6). A word of their own and no session: the student's home makes the list's
+  // first session as it opens, never the seed. Its generation is stubbed, so home offers it.
+  await expectGeneration(request);
 
   // 4. The student's saved list says who added it.
   await openApp(page);

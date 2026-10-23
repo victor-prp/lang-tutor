@@ -6,6 +6,7 @@ import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
 import { expectGeneration, playOut, readCard, rightOption } from './support/cards';
 import { clearGemini } from './support/mockServer';
+import { enrollmentIdOf, makeSeed } from './support/sessions';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
@@ -14,21 +15,20 @@ test.setTimeout(180_000);
 // The saved form of each meaning, for reversed, typed and tiles cards (phase 23).
 const FORM_OF: Record<string, string> = { קראה: 'прочитала', הקריאה: 'прочитала', בצל: 'лук', קשת: 'лук' };
 
-test('past the seed, a session is built from the saved words', async ({ page, request }) => {
+test('with nothing saved the card offers Words for me, and a session is built from the saved words', async ({ page, request }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
-  page.on('dialog', (dialog) => void dialog.accept());
 
   await withVoices(page, []);
   await signUpLearner(page, 'e2e_next_ru', 'ru');
   await openApp(page);
 
-  // 1. The seed comes first. Enter it, then skip it.
-  await tapUntil(page, 'start-button', 'progress-label');
-  await page.getByTestId('session-skip').click();
-
-  // 2. Past the seed with nothing saved: the empty-list state, not a quiz.
-  await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
+  // 1–2. Nothing saved: the card never starts the seed (phase 73, spec D6). Its button opens Words
+  // for me, not a quiz, and closing it is home again.
+  await tapUntil(page, 'my-words-discover', 'discover-close');
+  await expect(page.getByTestId('progress-label'), report()).toHaveCount(0);
+  await page.getByTestId('discover-close').click();
+  await expect(page.getByTestId('home-my-words'), report()).toBeVisible();
 
   // 3. Save four senses of two words.
   await tapUntil(page, 'translate-entry', 'translate-input');
@@ -64,10 +64,14 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   }
   expect([...words].sort(), words.join(', ')).toEqual([...Array(5).fill('лук'), ...Array(5).fill('прочитала')]);
 
-  // 6. Results lead home, to the next session: built in stock while this one
-  // was played (phase 43, spec D2, D3), so home offers start, not create.
+  // 6. The next session was built in stock while this one was played (phase 43, spec D2, D3). A
+  // My words session's results continue into it (phase 73, spec D7); סיום leads home, which offers
+  // it: start, not create.
   await expect(page.getByTestId('results-score')).toBeVisible();
-  await page.getByTestId('results-next-session').click();
+  await expect(page.getByTestId('results-my-words')).toBeVisible();
+  await expect(page.getByTestId('results-continue')).toBeVisible();
+  await expect(page.getByTestId('results-next-session')).toHaveCount(0);
+  await page.getByTestId('results-done').click();
   await expect(page.getByTestId('results-score')).toBeHidden();
   await expect(page.getByTestId('start-button'), `no session in stock\n${report()}`).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('start-button')).toHaveText('לתרגל עכשיו');
@@ -79,6 +83,9 @@ test('past the seed, a session is built from the saved words', async ({ page, re
 test('leaving mid-session offers it again, where it was left', async ({ page, request }) => {
   await withVoices(page, []);
   await signUpLearner(page, 'e2e_resume_ru', 'ru');
+  // The seed's ten fixed choices, made over the API: the card never starts it (phase 73, spec D6),
+  // and home offers it as any ready session.
+  await makeSeed(page.request, await enrollmentIdOf(page.request));
   await openApp(page);
 
   await tapUntil(page, 'start-button', 'progress-label');

@@ -53,6 +53,8 @@ const BASE: QuizState = {
   explanation: null,
   heldNewWords: null,
   targetId: null,
+  source: null,
+  kind: undefined,
 };
 
 describe('applyQueued (spec D9, Review Focus 3)', () => {

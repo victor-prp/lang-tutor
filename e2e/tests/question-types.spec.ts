@@ -44,16 +44,12 @@ const MEMORY: MemorySeed[] = [
   { gloss: MEANING.translation, dimension: 'written_receptive', stability: 10, daysAgo: 19, level: 3 },
 ];
 
-/** Past the seed, four saved words, their memory seeded, and a list session
- *  started. */
+/** Four saved words, saved before any session so none is the seed (phase 73, spec D6),
+ *  their memory seeded, and a list session started. */
 async function startMixedSession(page: Page, request: APIRequestContext, username: string, report: () => string) {
   await withVoices(page, []);
   await signUpLearner(page, username, 'ru');
   await openApp(page);
-
-  await tapUntil(page, 'start-button', 'progress-label');
-  await page.getByTestId('session-skip').click();
-  await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
 
   await tapUntil(page, 'translate-entry', 'translate-input');
   for (const [index, word] of WORDS.entries()) {

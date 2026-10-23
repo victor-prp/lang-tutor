@@ -64,6 +64,19 @@ export default function SettingsTab() {
             </View>
             <Ionicons name="chevron-back" size={18} color={colors.tabInactive} />
           </Pressable>
+          {/* Phase 73 (spec D1): the active course's daily My words goal. */}
+          <Pressable
+            accessibilityRole="button"
+            testID="settings-my-words-goal"
+            onPress={() => router.push('/my-words-goal')}
+            style={groupStyles.row}
+          >
+            <View style={styles.lead}>
+              <Ionicons name="flag-outline" size={19} color={colors.primary} />
+              <Text style={groupStyles.label}>{strings.myWordsGoalEntry}</Text>
+            </View>
+            <Ionicons name="chevron-back" size={18} color={colors.tabInactive} />
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             testID="app-version"

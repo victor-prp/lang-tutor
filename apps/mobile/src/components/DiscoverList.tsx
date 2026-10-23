@@ -29,6 +29,7 @@ export function DiscoverList({
   run,
   wordDirection,
   busy,
+  preparing = false,
   onRun,
   onSave,
   onDiscard,
@@ -37,6 +38,8 @@ export function DiscoverList({
   wordDirection: 'rtl' | 'ltr';
   /** A save or a discard in flight. */
   busy: boolean;
+  /** Phase 73 (spec D6). Saved, and the first session is being prepared: the save button says so. */
+  preparing?: boolean;
   onRun: (run: DiscoveryRun) => void;
   onSave: (count: number) => void;
   onDiscard: () => void;
@@ -126,7 +129,8 @@ export function DiscoverList({
             onPress={() => onSave(count)}
             style={[cardButton.solid, (blocked || count === 0) && cardButton.disabled]}
           >
-            <Text style={cardButton.solidLabel}>{strings.discoverSave(count)}</Text>
+            {preparing ? <ActivityIndicator color={colors.onPrimary} /> : null}
+            <Text style={cardButton.solidLabel}>{preparing ? strings.preparingQuestions : strings.discoverSave(count)}</Text>
           </Pressable>
         ) : null}
         <Pressable

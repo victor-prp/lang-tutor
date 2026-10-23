@@ -2,7 +2,9 @@ import type { CurrentSessionResponse } from '@lang-tutor/core/api';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BandCard, cardButton } from '@/components/BandCard';
-import { mainButtonSolid, myWordsBand, type HomeAction, type mainEmptyNote } from '@/nextSession';
+import { MyWordsToday } from '@/components/MyWordsToday';
+import { hasToday, myWordsButton } from '@/myWordsToday';
+import { myWordsBand, type HomeAction, type mainEmptyNote } from '@/nextSession';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
@@ -20,8 +22,12 @@ export function MyWordsCard({
 }: {
   current: CurrentSessionResponse | null;
   language: string;
-} & Omit<SessionActionProps, 'filled'>) {
+} & Omit<SessionActionProps, 'filled' | 'label'>) {
   const band = current ? myWordsBand(current, language) : null;
+  // Phase 73 (spec D5). Today's line, dots and tiles above the button; an older server sends
+  // none and the card is as it was. Once the goal is met the button offers more, pale.
+  const today = current?.today;
+  const button = myWordsButton(today, session.action);
   return (
     <BandCard
       testID="home-my-words"
@@ -30,7 +36,8 @@ export function MyWordsCard({
       big={band?.big ?? '…'}
       unit={null}
       line={band?.line ?? null}
-      footer={<SessionAction {...session} filled={mainButtonSolid(session.action)} />}
+      info={today && hasToday(today) ? <MyWordsToday today={today} testID="home-my-words-today" /> : null}
+      footer={<SessionAction {...session} filled={button.filled} label={button.label} />}
     />
   );
 }
@@ -42,12 +49,15 @@ type SessionActionProps = {
   emptyNote: ReturnType<typeof mainEmptyNote>;
   /** Phase 64 (spec D4). Solid when pressing it starts or resumes a session, else pale. */
   filled: boolean;
+  /** Phase 73 (spec D5). לתרגל עכשיו, or לתרגל עוד once the day's goal is met. */
+  label: string;
   loadFailed: boolean;
   busy: boolean;
   onRetry: () => void;
   /** Phase 43 (spec D7). Home's own create for the `create` state failed. */
   makeFailed: boolean;
-  onStartSeed: () => void;
+  /** Phase 73 (spec D6). With no words of its own: on to Words for me. */
+  onDiscover: () => void;
   onMake: () => void;
   onEnter: (sessionId: string, fresh: boolean) => void;
   onSkip: (sessionId: string) => void;
@@ -57,11 +67,12 @@ function SessionAction({
   action,
   emptyNote,
   filled,
+  label,
   loadFailed,
   busy,
   onRetry,
   makeFailed,
-  onStartSeed,
+  onDiscover,
   onMake,
   onEnter,
   onSkip,
@@ -121,17 +132,22 @@ function SessionAction({
     );
   }
   switch (action.kind) {
-    case 'start-seed':
-      return primary('start-button', strings.practiceNow, onStartSeed);
+    case 'discover':
+      return (
+        <>
+          {emptyNote.kind === 'all-in-targets' && (
+            <Text testID="all-words-in-targets" style={styles.notice}>
+              {emptyNote.text}
+            </Text>
+          )}
+          {/* Its own testID: a read from before a save draws this until the reload lands, and
+              `start-button` must mean a session to start (phase 73, CI on PR #242). */}
+          {primary('my-words-discover', label, onDiscover)}
+        </>
+      );
     case 'create':
       // Phase 43 (spec D7). Home sends create itself: this is how it looks.
       return makeFailed ? retry : preparingLabel;
-    case 'save-words-first':
-      return (
-        <Text testID={emptyNote.kind === 'all-in-targets' ? 'all-words-in-targets' : 'save-words-first'} style={styles.notice}>
-          {emptyNote.text}
-        </Text>
-      );
     case 'preparing':
       return (
         <>
@@ -143,7 +159,7 @@ function SessionAction({
     case 'resume':
       return (
         <>
-          {primary('start-button', strings.practiceNow, () => onEnter(action.sessionId, action.kind === 'start'))}
+          {primary('start-button', label, () => onEnter(action.sessionId, action.kind === 'start'))}
           {skip(action.sessionId)}
         </>
       );

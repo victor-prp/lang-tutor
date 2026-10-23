@@ -45,6 +45,16 @@ export function createEnrollmentRepo(tx: Tx) {
       }
     },
 
+    /** Phase 73 (spec D1). The stored My words goal: null the default, 0 off, 1-20 a choice. */
+    findMyWordsGoal: async (enrollmentId: string): Promise<number | null> => {
+      const [row] = await tx.select({ goal: enrollments.myWordsGoal }).from(enrollments).where(eq(enrollments.id, enrollmentId));
+      return row?.goal ?? null;
+    },
+
+    setMyWordsGoal: async (enrollmentId: string, stored: number | null): Promise<void> => {
+      await tx.update(enrollments).set({ myWordsGoal: stored }).where(eq(enrollments.id, enrollmentId));
+    },
+
     /** Newest first: the app falls back to the newest when it remembers none. */
     listByUser: async (userId: string): Promise<Enrollment[]> =>
       (

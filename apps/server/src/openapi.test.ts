@@ -115,7 +115,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all fifty-three paths and nothing else', async () => {
+  it('contains all fifty-four paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/auth/email-otp/send-verification-otp',
@@ -133,6 +133,7 @@ describe('the document as a whole', () => {
       '/api/enrollments/{id}/discovery',
       '/api/enrollments/{id}/discovery/profile',
       '/api/enrollments/{id}/discovery/runs',
+      '/api/enrollments/{id}/my-words-goal',
       '/api/enrollments/{id}/photo-imports',
       '/api/enrollments/{id}/photo-imports/save',
       '/api/enrollments/{id}/question-type-sessions',
@@ -786,6 +787,9 @@ describe('the 403 of an owner-only or granted route in the published document', 
     ['/api/discovery/runs/{id}/items/{position}', 'patch', /another learner's/],
     ['/api/discovery/runs/{id}/save', 'post', /another learner's/],
     ['/api/discovery/runs/{id}/discard', 'post', /another learner's/],
+    // Phase 73 (spec D1).
+    ['/api/enrollments/{id}/my-words-goal', 'get', /another learner's/],
+    ['/api/enrollments/{id}/my-words-goal', 'put', /another learner's/],
     ['/api/enrollments/{id}/targets', 'get', OWNER_ONLY],
     ['/api/enrollments/{id}/targets', 'post', OWNER_ONLY],
     ['/api/targets/{id}', 'get', OWNER_ONLY],

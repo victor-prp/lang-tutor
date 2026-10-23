@@ -24,17 +24,13 @@ const { jug: FIRST, camel: SECOND } = SINGLE_WORDS;
 const FORM_OF: Record<string, string> = { [FIRST.translation]: FIRST.form, [SECOND.translation]: SECOND.form };
 const MEANING_OF: Record<string, string> = { [FIRST.form]: FIRST.translation, [SECOND.form]: SECOND.translation };
 
-/** Past the seed, `words` saved, their session stubbed, ready, and started. The
- *  browser speaks Russian, so a card's voice is heard. */
+/** `words` saved before any session, so the first is the list's and never the seed (phase 73,
+ *  spec D6), their session stubbed, ready, and started. The browser speaks Russian, so a card's
+ *  voice is heard. */
 async function startSession(page: Page, request: APIRequestContext, username: string, words: (typeof FIRST)[], report: () => string) {
-  page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, ['ru-RU']);
   await signUpLearner(page, username, 'ru');
   await openApp(page);
-
-  await tapUntil(page, 'start-button', 'progress-label');
-  await page.getByTestId('session-skip').click();
-  await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
 
   await tapUntil(page, 'translate-entry', 'translate-input');
   for (const [index, word] of words.entries()) {

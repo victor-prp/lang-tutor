@@ -1,4 +1,4 @@
-import type { AnswerRecord, Enrollment, LlmDistractors, SentenceTranslationQuestion, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
+import type { AnswerRecord, Enrollment, LlmDistractors, MyWordsToday, SentenceTranslationQuestion, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
 import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/schemas';
 import {
   LIVE_DIMENSIONS,
@@ -23,6 +23,7 @@ import {
 } from '@lang-tutor/core/domain';
 
 import { usableAnswerForm } from '../domain/answerForm';
+import { goalMinutes, goalOf } from '../domain/myWordsGoal';
 import {
   buildCheckPrompt,
   contextKeyOf,
@@ -147,6 +148,7 @@ import {
   WrongScript,
 } from '../errors';
 import type { Logger } from '../logger';
+import { recordMyWordsDay } from './myWordsDay';
 import { authorizeEnrollment } from './access';
 import { learnerDay } from './learnerDay';
 import { readFamilies, readTargetDay, readTargetPickInput, readTodayBudget } from './targetDayRead';
@@ -893,6 +895,21 @@ export function createSessionService({
     return dueGlosses(memory, liveDimensions(devices.listening, devices.speaking), today).length;
   }
 
+  /** Phase 73 (spec D4). The main path's day: the recorded row's counts, or zeros before the day's
+   *  first counted session; the goal is the one in force now, not the row's. */
+  async function myWordsToday(repos: Repos, enrolled: Enrollment): Promise<MyWordsToday> {
+    const day = await learnerDay(repos, enrolled.user_id, now());
+    const row = await repos.myWordsDays.find(enrolled.id, day);
+    const goal = goalOf(await repos.enrollment.findMyWordsGoal(enrolled.id));
+    return {
+      goal,
+      sessions_done: row?.sessionsDone ?? 0,
+      new_words: row?.newWords ?? 0,
+      moved_up: row?.movedUp ?? 0,
+      minutes: goal ? goalMinutes(goal) : 0,
+    };
+  }
+
   /**
    * Phase 65 (spec D7.1, D7.2). A target's budget for the learner's today, set once: when the day
    * has none, the one readTodayBudget reads now; a day set already keeps its own, so the count
@@ -946,7 +963,13 @@ export function createSessionService({
         }
 
         // Phase 57 (spec D2). The seed is the main path's: a target's path never plays it.
-        if (path === null && nextSource((await session.findLatest(enrollmentId, 'any')) !== undefined) === 'seed') {
+        // Phase 73 (spec D6): and only for an enrollment with no word of its own either; the
+        // count is read only here, where the session check has passed.
+        if (
+          path === null &&
+          (await session.findLatest(enrollmentId, 'any')) === undefined &&
+          nextSource(false, (await savedOn(repos, enrolled, null)) > 0) === 'seed'
+        ) {
           const pool = await question.loadQuestionPool(
             enrolled.target_language,
             enrolled.source_language,
@@ -1016,7 +1039,7 @@ export function createSessionService({
       actorUserId: string,
       enrollmentId: string,
       path: Path = null,
-    ): Promise<{ current: (SessionSummary & { started: boolean }) | null; nextSource: SessionSource; savedCount: number; dueCount: number }> => {
+    ): Promise<{ current: (SessionSummary & { started: boolean }) | null; nextSource: SessionSource; savedCount: number; dueCount: number; today?: MyWordsToday }> => {
       const read = await transaction(async (repos) => {
         const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
         const target = path === null ? null : await pathTarget(repos, actorUserId, enrolled, path);
@@ -1034,6 +1057,7 @@ export function createSessionService({
         const latest = await repos.session.findLatest(enrollmentId, path);
         // The seed is the main path's (phase 57, spec D2): any session at all puts it behind.
         const any = latest ?? (await repos.session.findLatest(enrollmentId, 'any'));
+        const savedCount = await savedOn(repos, enrolled, path);
         return {
           // Final review N1: whether it was started, which a session left before any answer is.
           current: open.started
@@ -1044,9 +1068,10 @@ export function createSessionService({
                 ? { ...latest, started: false }
                 : null,
           offered: open.started ? undefined : open.stock,
-          nextSource: path === null ? nextSource(any !== undefined) : ('list' as const),
-          savedCount: await savedOn(repos, enrolled, path),
+          nextSource: path === null ? nextSource(any !== undefined, savedCount > 0) : ('list' as const),
+          savedCount,
           dueCount: await waitingOn(repos, enrolled, target),
+          today: path === null ? await myWordsToday(repos, enrolled) : undefined,
           replaced,
         };
       });
@@ -1242,6 +1267,12 @@ export function createSessionService({
           const reminderId = reminderForSession(await repos.reminders.sentOnDay(enrolled.user_id, day), endedAt);
           if (reminderId) await repos.reminders.markSession(reminderId, sessionId);
           await recordProgress(repos, sessionId, enrolled.id);
+          // Phase 73 (spec D2). A counted My words session (main path, a practice of the list) writes
+          // its day; the repo's own definition of "counted" decides, so a target's session, a seed
+          // and a tester's question-types session write none.
+          if ((await repos.session.findCountedMainSessions(enrolled.id, day)).includes(sessionId)) {
+            await recordMyWordsDay(repos, logger, { enrollmentId: enrolled.id, day, sessionId, reason: 'session' });
+          }
           // Phase 43 (spec D3). A stock that failed, or was never built, is
           // built now; one already there makes this a no-op. Its path's (phase 57).
           await requestStock(repos, { enrollment_id: enrolled.id, reason: 'complete', ...pathPayload(await pathOf()) });
@@ -2698,7 +2729,14 @@ export function createSessionService({
           const { stock } = await repos.session.findOpen(enrollmentId, path);
           // Phase 68 (spec D6, ruling 2026-10-22): a stock is kept whatever step-downs it asks.
           if (stock) return { why: 'stocked' };
-          if (path === null && !(await repos.session.findLatest(enrollmentId, 'any'))) return { why: 'seed_next' };
+          // Phase 73 (spec D6): the seed is next only for an enrollment with no word of its own either.
+          if (
+            path === null &&
+            !(await repos.session.findLatest(enrollmentId, 'any')) &&
+            nextSource(false, (await savedOn(repos, enrolled, null)) > 0) === 'seed'
+          ) {
+            return { why: 'seed_next' };
+          }
           if (path !== null) {
             const target = await repos.target.findTarget(path);
             const today = await learnerDay(repos, enrolled.user_id, now());

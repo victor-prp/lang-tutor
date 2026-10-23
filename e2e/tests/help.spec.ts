@@ -23,16 +23,12 @@ const WORD = SINGLE_WORDS.camel;
 /** Far from the word, so wrong and not a near miss; Cyrillic, so the script gate lets it through. */
 const WRONG = 'неверно';
 
-/** Past the seed, the word saved, its session stubbed, ready, and started. */
+/** The word saved before any session, so the first is the list's and never the seed (phase 73,
+ *  spec D6), its session stubbed, ready, and started. */
 async function startSession(page: Page, request: APIRequestContext, username: string, report: () => string) {
-  page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, ['ru-RU']);
   await signUpLearner(page, username, 'ru');
   await openApp(page);
-
-  await tapUntil(page, 'start-button', 'progress-label');
-  await page.getByTestId('session-skip').click();
-  await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
 
   await tapUntil(page, 'translate-entry', 'translate-input');
   await lookUp(page, request, WORD.form, WORD.payload);

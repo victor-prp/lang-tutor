@@ -1,5 +1,4 @@
 import type { CurrentSessionResponse, SessionStatus, TargetSummary } from '@lang-tutor/core/api';
-import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import { strings } from '@/strings';
 import { homeOrder } from '@/targets';
@@ -10,9 +9,9 @@ export const POLL_INTERVAL_MS = 3_000;
 /** What the home screen's primary area offers. The server decides the state,
  *  and this only names it, so the screen is a switch over one value. */
 export type HomeAction =
-  | { kind: 'start-seed' }
   | { kind: 'create' }
-  | { kind: 'save-words-first' }
+  /** Phase 73 (spec D6). No words of its own: Words for me, not a session. */
+  | { kind: 'discover' }
   | { kind: 'preparing'; sessionId: string }
   | { kind: 'start'; sessionId: string }
   | { kind: 'resume'; sessionId: string }
@@ -28,10 +27,10 @@ export function homeActionOf(state: CurrentSessionResponse): HomeAction {
   }
   if (current?.status === 'failed') {
     // Offering create with nothing saved would answer 409 no_saved_words and loop.
-    return state.saved_count > 0 ? { kind: 'failed' } : { kind: 'save-words-first' };
+    return state.saved_count > 0 ? { kind: 'failed' } : { kind: 'discover' };
   }
-  if (state.next_source === 'seed') return { kind: 'start-seed' };
-  return state.saved_count > 0 ? { kind: 'create' } : { kind: 'save-words-first' };
+  if (state.next_source === 'seed') return { kind: 'discover' };
+  return state.saved_count > 0 ? { kind: 'create' } : { kind: 'discover' };
 }
 
 /** Phase 57 (spec D1, D11). What a target's card offers, read from its own path's session
@@ -92,25 +91,21 @@ export function mainEmptyNote(
   return { kind: 'all-in-targets', text: strings.allWordsInTargets(holding.map((target) => target.kind)) };
 }
 
-/** Phase 57 (spec D11). The line under My words' title: the seed's words before the first
- *  session, else how many words wait for review, else (none waiting) the meanings saved. */
+/** Phase 57 (spec D11). The line under My words' title: how many words wait for review, else
+ *  (none waiting) the meanings saved. */
 export function myWordsLine(state: CurrentSessionResponse, language: string): string {
-  if (homeActionOf(state).kind === 'start-seed') return strings.homeSetLabel(SESSION_LENGTH, language);
   return state.due_count > 0 ? strings.wordsWaiting(state.due_count) : strings.homeSavedLabel(state.saved_count, language);
 }
 
 /** Phase 64 (spec D4). My words' button is solid whenever pressing it starts or resumes a
  *  session; pale while one is made or prepared, after a failure, and with nothing to start. */
 export function mainButtonSolid(action: HomeAction | null): boolean {
-  return action?.kind === 'start-seed' || action?.kind === 'start' || action?.kind === 'resume';
+  return action?.kind === 'start' || action?.kind === 'resume';
 }
 
-/** Phase 64 (spec D4). My words' blue header: the seed's set before the first session, else
- *  the words due for review, else the meanings saved, each with what it counts. */
+/** Phase 64 (spec D4). My words' blue header: the words due for review, else the meanings
+ *  saved, each with what it counts. */
 export function myWordsBand(state: CurrentSessionResponse, language: string): { big: string; line: string } {
-  if (homeActionOf(state).kind === 'start-seed') {
-    return { big: strings.countNumber(SESSION_LENGTH), line: strings.myWordsSeed(language) };
-  }
   if (state.due_count > 0) return { big: strings.countNumber(state.due_count), line: strings.myWordsDue(state.due_count) };
   return { big: strings.countNumber(state.saved_count), line: strings.myWordsSaved(language) };
 }
@@ -178,8 +173,7 @@ export function reminderStartOf(
       return { kind: 'wait' };
     case 'create':
       return failed ? { kind: 'clear' } : { kind: 'wait' };
-    case 'start-seed':
-    case 'save-words-first':
+    case 'discover':
     case 'failed':
       return { kind: 'clear' };
   }

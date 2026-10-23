@@ -20,17 +20,13 @@ const KEEP = new Set(['multiple_choice', 'typed_translation']);
 test('a tester starts a session of the question types they chose for one word', async ({ page, request }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
-  // Skipping the seed asks first.
-  page.on('dialog', (dialog) => void dialog.accept());
   const username = 'e2e_word_types';
   await withVoices(page, []);
   await signUpLearner(page, username, 'ru');
   await openApp(page);
 
-  // Past the seed, which nothing retires, and one word saved.
-  await tapUntil(page, 'start-button', 'progress-label');
-  await page.getByTestId('session-skip').click();
-  await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
+  // One word saved before any session: the main path's first is the list's, never the seed (phase
+  // 73, spec D6).
   await tapUntil(page, 'translate-entry', 'translate-input');
   await lookUp(page, request, WORD.form, WORD.payload);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save'));

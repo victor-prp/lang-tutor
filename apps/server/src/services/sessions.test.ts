@@ -14,6 +14,7 @@ import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { TargetRepo } from '../repo/targets';
 import type { DiscoveryRepo } from '../repo/discovery';
+import type { MyWordsDayRepo } from '../repo/myWordsDays';
 import type { TargetBudgetRepo } from '../repo/targetBudgets';
 import type { TargetReadinessRepo } from '../repo/targetReadiness';
 import type { TargetSkillRepo } from '../repo/targetSkills';
@@ -55,6 +56,9 @@ describe('repos', () => {
       findRecentAnswers: notStubbed,
       countCompletedOn: notStubbed,
       findIntroducedOn: notStubbed,
+      // Phase 73 (spec D2, D3).
+      findCountedMainSessions: notStubbed,
+      findFirstAnswerSessions: notStubbed,
       // Phase 34 (spec D9).
       resolveRetry: notStubbed,
       resolvePendingRetry: notStubbed,
@@ -152,6 +156,12 @@ describe('repos', () => {
     },
     findByUserAndTarget: () => {
       throw new Error('the submit-answer use case must not look an enrollment up by target');
+    },
+    findMyWordsGoal: () => {
+      throw new Error('the session service must not read the My words goal here');
+    },
+    setMyWordsGoal: () => {
+      throw new Error('the session service must not set the My words goal');
     },
     findById: async () => ({ id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'en', created_at: '' }),
   };
@@ -354,6 +364,7 @@ describe('repos', () => {
         targetSkills: stub<TargetSkillRepo>({}),
         targetReadiness: stub<TargetReadinessRepo>({}),
         targetBudgets: stub<TargetBudgetRepo>({}),
+        myWordsDays: stub<MyWordsDayRepo>({}),
         discovery: stub<DiscoveryRepo>({}),
         // Phase 43 (spec D3). The one job an answer may ask for: the next session in stock.
         jobs,

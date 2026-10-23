@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { clearGemini } from './support/mockServer';
+import { enrollmentIdOf, makeSeed } from './support/sessions';
 import { openApp, signUpLearner } from './support/users';
 import { spoken, withVoices, type Utterance } from './support/voices';
 
@@ -75,6 +76,9 @@ test('a lookup speaks the Italian in both directions, and never the Hebrew', asy
 test('a session prompt speaks', async ({ page, request }) => {
   await withVoices(page, ['it-IT']);
   await signUpLearner(page, 'e2e_voice_session', 'it');
+  // The seed, made over the API: the card never starts it (phase 73, spec D6), and home offers it
+  // as any ready session.
+  await makeSeed(page.request, await enrollmentIdOf(page.request));
   await openApp(page);
   await tapUntil(page, 'start-button', 'progress-label');
 

@@ -23,6 +23,8 @@ export type NextSessionValue = {
   /** The first read for the active enrollment failed and nothing is shown. */
   loadFailed: boolean;
   reload: () => void;
+  /** Phase 73 (spec D7). The same read as `reload`, resolving whether it landed. */
+  refresh: () => Promise<boolean>;
   /** `waitForVoices: false` for the seed, whose cards are fixed: tapping start
    *  must not wait on the voices (phase 43). */
   create: (options?: { waitForVoices?: boolean }) => Promise<CreateSessionResponse>;
@@ -52,19 +54,25 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
   const [failedFor, setFailedFor] = useState<string | null>(null);
   const loadFailed = loadFailedFor(failedFor, active?.id, current);
 
-  const reload = useCallback(() => {
-    if (!active) return;
+  const refresh = useCallback(async (): Promise<boolean> => {
+    if (!active) return false;
     const enrollmentId = active.id;
-    void api
-      .currentSession(enrollmentId)
-      .then((state) => {
-        setStored({ enrollmentId, state });
-        setFailedFor((failed) => (failed === enrollmentId ? null : failed));
-      })
+    try {
+      const state = await api.currentSession(enrollmentId);
+      setStored({ enrollmentId, state });
+      setFailedFor((failed) => (failed === enrollmentId ? null : failed));
+      return true;
+    } catch {
       // A state already shown stays as it was and the next focus or poll tries
       // again; with none shown, home offers a retry instead of a spinner.
-      .catch(() => setFailedFor(enrollmentId));
+      setFailedFor(enrollmentId);
+      return false;
+    }
   }, [api, active]);
+
+  const reload = useCallback(() => {
+    void refresh();
+  }, [refresh]);
 
   const create = useCallback(async (options?: { waitForVoices?: boolean }) => {
     if (!active) throw new Error('cannot create a session with no active enrollment');
@@ -98,8 +106,8 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
   );
 
   const value = useMemo(
-    () => ({ current, loadFailed, reload, create, start, skip, devices }),
-    [current, loadFailed, reload, create, start, skip, devices],
+    () => ({ current, loadFailed, reload, refresh, create, start, skip, devices }),
+    [current, loadFailed, reload, refresh, create, start, skip, devices],
   );
   return <NextSessionContext.Provider value={value}>{children}</NextSessionContext.Provider>;
 }

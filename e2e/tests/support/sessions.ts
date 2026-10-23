@@ -20,12 +20,24 @@ export async function skipSession(request: APIRequestContext, sessionId: string)
   expect((await request.post(`${API_URL}/api/sessions/${sessionId}/skip`)).ok()).toBe(true);
 }
 
-/** An enrollment's first session is the seed: made and skipped unplayed, so a spec starts
- *  past it. */
-export async function skipSeed(request: APIRequestContext, enrollmentId: string): Promise<void> {
+/** Phase 73 (spec D6). The seed, made over the API and left ready to play: home's card never
+ *  starts it, and create answers it only for an enrollment with no session and no saved word.
+ *  Home then offers it as any ready session, so a spec about the seed's fixed cards enters it
+ *  with the card's button. */
+export async function makeSeed(request: APIRequestContext, enrollmentId: string): Promise<string> {
   const made = await request.post(`${API_URL}/api/sessions`, { data: { enrollment_id: enrollmentId } });
   expect(made.ok(), await made.text()).toBe(true);
-  await skipSession(request, ((await made.json()) as CreateSessionResponse).session_id);
+  const created = (await made.json()) as CreateSessionResponse;
+  expect(created.source, JSON.stringify(created)).toBe('seed');
+  return created.session_id;
+}
+
+/** An enrollment's first session is the seed: made and skipped unplayed, so a spec starts
+ *  past it. Phase 73 (spec D6): only a real seed. An enrollment with a word of its own has none
+ *  to pass, and create would answer its first list session, which is left alone. */
+export async function skipSeed(request: APIRequestContext, enrollmentId: string): Promise<void> {
+  if ((await readCurrent(request, enrollmentId)).next_source !== 'seed') return;
+  await skipSession(request, await makeSeed(request, enrollmentId));
 }
 
 /** Phase 57 (spec D1). A path's current session: a target's with `targetId`, else My

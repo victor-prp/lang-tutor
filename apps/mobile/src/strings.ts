@@ -600,6 +600,14 @@ export const strings = {
     (bonus > 0 ? ` ועוד ${isolateLtr(String(bonus))} בונוס` : ''),
   targetReadinessPct: (kind: TargetKind, pct: number) => `מוכנות ${TARGET_FOR[kind]}: ${isolateLtr(`${pct}%`)}`,
   practiceNow: 'לתרגל עכשיו',
+  // Phase 73 (spec D5). My words' day: what is left, what was done, the tiles and the button
+  // once the goal is met. The goal and the minutes are targetSessionsGoal and targetSessionsMinutes.
+  myWordsTodayLeft: (left: number) =>
+    left === 1 ? 'כל הכבוד! עוד תרגול אחד להיום' : `כל הכבוד! עוד ${isolateLtr(String(left))} תרגולים להיום`,
+  myWordsTodayDone: (done: number) =>
+    done === 1 ? 'כל הכבוד! עשית תרגול אחד היום' : `כל הכבוד! עשית ${isolateLtr(String(done))} תרגולים היום`,
+  myWordsTileNew: (count: number) => (count === 1 ? 'מילה חדשה היום' : 'מילים חדשות היום'),
+  myWordsTileMovedUp: (count: number) => (count === 1 ? 'עלתה רמה היום' : 'עלו רמה היום'),
   // Phase 64 (spec D4, D5). The card's blue header: the countdown's big line, the fuse's label
   // in the last two days, the "not ready" line and the line once every word is ready.
   countdownDays: 'ימים',
@@ -634,6 +642,8 @@ export const strings = {
   practiceMore: 'לתרגל עוד',
   // Phase 72 (spec D3). A target session's results screen, while today still owes work.
   continuePractising: 'להמשיך לתרגל',
+  // Phase 73 (spec D7). The title of the day's block on a My words session's results screen.
+  myWordsResultsTitle: 'המילים שלי · היום',
   // Phase 65 (spec D9). The sheet that asks before practising past the day's budget; no number.
   // Phase 67b (spec D8, Victor).
   practiceMoreSheetTitle: 'עשית עבודה מצוינת להיום',
@@ -653,6 +663,15 @@ export const strings = {
   newWordsNoticeSwitch: 'להציג הודעה כשהמכסה מתמלאה',
   newWordsLoadFailed: 'טעינת ההגדרות נכשלה. אפשר לנסות שוב.',
   newWordsSaveFailed: 'השמירה נכשלה. אפשר לנסות שוב.',
+  // Phase 73 (spec D1). The My words daily goal screen.
+  myWordsGoalEntry: 'יעד יומי',
+  myWordsGoalTitle: (language: string) => `יעד יומי · ${languageName(language)}`,
+  myWordsGoalSwitch: 'יעד יומי',
+  myWordsGoalValue: (goal: number) => (goal === 1 ? 'תרגול אחד' : `${isolateLtr(String(goal))} תרגולים`),
+  myWordsGoalLess: 'פחות תרגולים',
+  myWordsGoalMore: 'יותר תרגולים',
+  myWordsGoalLoadFailed: 'טעינת היעד נכשלה. אפשר לנסות שוב.',
+  myWordsGoalSaveFailed: 'השמירה נכשלה. אפשר לנסות שוב.',
   // Phase 70 (spec D6, Victor: a short message with "don't show again").
   capNoticeTitle: 'הגעת למכסת המילים החדשות',
   capNoticeBody: (cap: number) =>

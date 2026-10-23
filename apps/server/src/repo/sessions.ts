@@ -389,6 +389,42 @@ export function createSessionRepo(tx: Tx) {
       return rows.rows.map((row) => row.gloss_id);
     },
 
+    /** Phase 73 (spec D2). The sessions that count for a My words `day`: completed, on the main
+     *  path, a practice of the learner's list (no seed, no tester's question-types session),
+     *  ended on that learner day. Oldest first. */
+    findCountedMainSessions: async (enrollmentId: string, day: string): Promise<string[]> => {
+      const rows = await tx.execute<{ id: string }>(sql`
+        SELECT s.id
+        FROM sessions s
+        WHERE s.enrollment_id = ${enrollmentId}
+          AND ${onPath(null)}
+          AND s.kind = 'practice'
+          AND s.source = 'list'
+          AND s.status = 'completed'
+          AND s.practice_day = ${day}::date
+        ORDER BY s.completed_at, s.id`);
+      return rows.rows.map((row) => row.id);
+    },
+
+    /** Phase 73 (spec D3). Per saved gloss, the session of its first answer given while saved,
+     *  over every session of every path, open ones too (as findIntroducedOn reads it), by
+     *  answer time, kept when that session counts for `day` (an open one never does): the words a day's My words sessions introduced. */
+    findFirstAnswerSessions: async (enrollmentId: string, day: string): Promise<{ glossId: string; sessionId: string }[]> => {
+      const rows = await tx.execute<{ gloss_id: string; session_id: string; practice_day: string | null }>(sql`
+        SELECT DISTINCT ON (q.gloss_id) q.gloss_id, s.id AS session_id, s.practice_day::text AS practice_day
+        FROM answers a
+        JOIN sessions s            ON s.id = a.session_id
+        JOIN questions q           ON q.id = a.question_id
+        JOIN vocabulary_entries ve ON ve.enrollment_id = s.enrollment_id AND ve.gloss_id = q.gloss_id
+        WHERE s.enrollment_id = ${enrollmentId}
+          AND a.answered_at >= ve.created_at
+          AND (s.practice_day IS NOT NULL OR s.status IN ('preparing', 'ready'))
+        ORDER BY q.gloss_id, a.answered_at`);
+      return rows.rows
+        .filter((row) => row.practice_day === day)
+        .map((row) => ({ glossId: row.gloss_id, sessionId: row.session_id }));
+    },
+
     /** Phase 29 (spec D13). Whose list a session belongs to, so a use case
      *  addressed by a session id can authorize before it reads anything else.
      *  A malformed id is an absent one, as everywhere in this module. */
@@ -495,6 +531,7 @@ export function createSessionRepo(tx: Tx) {
           source: sessions.source,
           skippedTypes: sessions.skippedTypes,
           targetId: sessions.targetId,
+          kind: sessions.kind,
         })
         .from(sessions)
         .where(eq(sessions.id, sessionId))
@@ -564,6 +601,7 @@ export function createSessionRepo(tx: Tx) {
         source: session.source as SessionSource,
         ...(session.skippedTypes === null ? {} : { skipped_types: session.skippedTypes as SkippedType[] }),
         ...(session.targetId === null ? {} : { target_id: session.targetId }),
+        kind: session.kind as 'practice' | 'question_types',
       };
     },
 

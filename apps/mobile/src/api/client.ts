@@ -33,6 +33,7 @@ import type {
   PushDeviceRequest,
   PushDeviceUnregisterRequest,
   QuestionTypesResponse,
+  MyWordsGoal,
   NewWordLimits,
   ReminderSettings,
   ReminderSettingsResponse,
@@ -351,6 +352,11 @@ export function createApiClient({
     // Phase 70 (spec D5). The learner's new-word limits.
     newWordLimits: () => getJson<NewWordLimits>('/api/me/new-words'),
     putNewWordLimits: (limits: NewWordLimits) => putJson<NewWordLimits>('/api/me/new-words', limits),
+    // Phase 73 (spec D1). A course's daily My words goal: sessions a day, null for off.
+    myWordsGoal: (enrollmentId: string) =>
+      getJson<MyWordsGoal>(`/api/enrollments/${encodeURIComponent(enrollmentId)}/my-words-goal`),
+    putMyWordsGoal: (enrollmentId: string, body: MyWordsGoal) =>
+      putJson<MyWordsGoal>(`/api/enrollments/${encodeURIComponent(enrollmentId)}/my-words-goal`, body),
     reminderSettings: () => getJson<ReminderSettingsResponse>('/api/me/reminders'),
     putReminderSettings: (settings: ReminderSettings) =>
       putJson<ReminderSettingsResponse>('/api/me/reminders', settings),

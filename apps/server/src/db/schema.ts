@@ -181,14 +181,48 @@ export const enrollments = pgTable(
     sourceLanguage: varchar('source_language', { length: 10 }).notNull(),
     targetLanguage: varchar('target_language', { length: 10 }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Phase 73 (spec D1). The daily goal for My words, in completed sessions: null is the default
+    // (DEFAULT_MY_WORDS_GOAL, so a learner who never chose follows a change of it), 0 is off,
+    // 1–20 is the learner's choice.
+    myWordsGoal: smallint('my_words_goal'),
   },
   (t) => [
     foreignKey({ name: 'enrollments_user_fk', columns: [t.userId], foreignColumns: [users.id] }),
     unique('enrollments_user_target_key').on(t.userId, t.targetLanguage),
     unique('enrollments_user_id_id_key').on(t.userId, t.id),
+    check('enrollments_my_words_goal_range', sql`${t.myWordsGoal} between 0 and 20`),
     check('enrollments_languages_differ', sql`${t.sourceLanguage} <> ${t.targetLanguage}`),
     check('enrollments_source_known', sql`${t.sourceLanguage} in ('he', 'en')`),
     check('enrollments_target_known', sql`${t.targetLanguage} in ('he', 'en', 'ru', 'it')`),
+  ],
+);
+
+/**
+ * Phase 73 (spec D2–D3). One row per enrollment and learner-day of My words: the sessions done,
+ * the words first answered and the words moved up, recorded as the day goes (phase 39 "derive,
+ * then record"). `goal` is the goal in force when the row was last written, null when it was off;
+ * `last_session_id` is the last session that wrote it.
+ */
+export const myWordsDays = pgTable(
+  'my_words_days',
+  {
+    enrollmentId: text('enrollment_id').notNull(),
+    day: date('day', { mode: 'string' }).notNull(),
+    goal: smallint('goal'),
+    sessionsDone: smallint('sessions_done').notNull(),
+    newWords: smallint('new_words').notNull(),
+    movedUp: smallint('moved_up').notNull(),
+    lastSessionId: uuid('last_session_id'),
+    updatedAt: timestamp('updated_at', tz).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'my_words_days_pk', columns: [t.enrollmentId, t.day] }),
+    foreignKey({
+      name: 'my_words_days_enrollment_fk',
+      columns: [t.enrollmentId],
+      foreignColumns: [enrollments.id],
+    }).onDelete('cascade'),
+    check('my_words_days_goal_range', sql`${t.goal} between 1 and 20`),
   ],
 );
 

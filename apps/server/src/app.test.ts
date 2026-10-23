@@ -152,6 +152,7 @@ function depsWithPing(ok: boolean, logger = createFakeLogger()): AppDeps {
     vocabulary: unreachableVocabulary,
     photoImports: unreachablePhotoImports,
     discovery: createFakeAppDeps().discovery,
+    myWordsGoal: createFakeAppDeps().myWordsGoal,
     targets: createFakeAppDeps().targets,
     glosses: createFakeAppDeps().glosses,
     health: { ping: async () => ok },

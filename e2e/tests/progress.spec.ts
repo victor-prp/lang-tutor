@@ -39,16 +39,13 @@ test('a session moves the words it practised up the ladder, and the list filters
 }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
-  page.on('dialog', (dialog) => void dialog.accept());
 
   await withVoices(page, []);
   await signUpLearner(page, 'e2e_progress_ru', 'ru');
   await openApp(page);
 
-  // 1. Past the seed, with four saved senses of two words.
-  await tapUntil(page, 'start-button', 'progress-label');
-  await page.getByTestId('session-skip').click();
-  await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
+  // 1. Four saved senses of two words, saved before any session: the first is the list's, never
+  // the seed (phase 73, spec D6).
   await tapUntil(page, 'translate-entry', 'translate-input');
   await lookUp(page, request, 'прочитала', PROCHITALA);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));

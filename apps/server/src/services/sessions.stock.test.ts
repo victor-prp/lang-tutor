@@ -21,6 +21,7 @@ import { FSRS6_DEFAULT, type QuestionType } from '@lang-tutor/core/domain';
 import { NoSavedWords, SessionNotFound, SessionNotReady, SessionOpen, TargetClosed } from '../errors';
 import type { DictRepo } from '../repo/dictionary';
 import type { EnrollmentRepo } from '../repo/enrollments';
+import type { MyWordsDayRepo } from '../repo/myWordsDays';
 import type { GlossFamiliesRepo } from '../repo/glossFamilies';
 import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
@@ -66,7 +67,8 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
   const locked: string[] = [];
   const service = createSessionService({
     transaction: createFakeTransaction({
-      enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
+      enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT, findMyWordsGoal: async () => null }),
+      myWordsDays: stub<MyWordsDayRepo>({ find: async () => undefined }),
       user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }), findNewWordLimits: async () => ({ dayCap: null, perSession: null }) }),
       session: stub<SessionRepo>({
         findAnswersOn: async () => [],
@@ -166,11 +168,21 @@ describe('stockSession (spec D3, D4)', () => {
     ['a stock is there', { findOpen: async () => ({ stock: summary('s_stock', 'ready') }) }, 'stocked'],
     ['the seed comes next', { findOpen: async () => ({}), findLatest: async () => undefined }, 'seed_next'],
   ])('does nothing when %s', async (_, session, why) => {
-    const { service, jobs, logger, inserted } = world(session as Partial<SessionRepo>);
+    // Phase 73 (spec D6): the seed comes next only for a learner with no word of their own.
+    const { service, jobs, logger, inserted } = world(session as Partial<SessionRepo>, {
+      vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => [], countEntries: async () => 0 }),
+    });
     await service.stockSession({ enrollment_id: E, reason: 'skip' });
     expect(inserted).toEqual([]);
     expect(jobs.enqueued).toEqual([]);
     expect(eventsOf(logger, 'session_stock_skipped')).toEqual([{ event: 'session_stock_skipped', enrollment_id: E, reason: 'skip', why }]);
+  });
+
+  it('builds a stock for a learner with a saved word and no session yet: the seed is not next (phase 73 D6)', async () => {
+    const { service, inserted, logger } = world({ findOpen: async () => ({}), findLatest: async () => undefined });
+    await service.stockSession({ enrollment_id: E, reason: 'save' });
+    expect(inserted).toHaveLength(1);
+    expect(eventsOf(logger, 'session_stock_skipped')).toEqual([]);
   });
 
   it('does nothing when the list has nothing to ask', async () => {
@@ -283,6 +295,7 @@ describe('currentSession (spec D6, D8)', () => {
       nextSource: 'list',
       savedCount: 2,
       dueCount: 0,
+      today: expect.objectContaining({ goal: 3, sessions_done: 0 }),
     });
     expect(eventsOf(logger, 'session_offered')).toEqual([{ event: 'session_offered', enrollment_id: E, session_id: 's_stock', status: 'preparing' }]);
   });

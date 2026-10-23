@@ -135,14 +135,9 @@ test('a dictation: Hebrew in a Russian answer is asked again, then the right wor
 test('a meaning card: Latin in a Hebrew answer is asked again, then the meaning is answered', async ({ page, request }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
-  page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
   await signUpLearner(page, 'e2e_script_meaning_ru', 'ru');
   await openApp(page);
-
-  await tapUntil(page, 'start-button', 'progress-label');
-  await page.getByTestId('session-skip').click();
-  await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
 
   await tapUntil(page, 'translate-entry', 'translate-input');
   await lookUp(page, request, 'прочитала', PROCHITALA);

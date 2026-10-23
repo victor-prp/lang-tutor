@@ -21,6 +21,7 @@ import { createDiscoveryRepo } from './repo/discovery';
 import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
+import { createMyWordsDayRepo } from './repo/myWordsDays';
 import { createTargetBudgetRepo } from './repo/targetBudgets';
 import { createTargetReadinessRepo } from './repo/targetReadiness';
 import { createTargetRepo } from './repo/targets';
@@ -40,6 +41,7 @@ import type { LlmClient, ModelCallRecorder, VisionClient } from './services/llm'
 import { createModelCallService } from './services/modelCalls';
 import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
 import { createDiscoveryService, type DiscoveryService } from './services/discovery';
+import { createMyWordsGoalService, type MyWordsGoalService } from './services/myWordsGoal';
 import { createReminderService, type PushSender, type ReminderService } from './services/reminders';
 import { createQuestionTypesService, type QuestionTypesService } from './services/questionTypes';
 import { createSessionService, type SessionService } from './services/sessions';
@@ -84,6 +86,7 @@ export type AppDeps = {
   photoImports: PhotoImportService;
   // Phase 69 (spec D10). Words for me: a learner's profile, runs, lists and their lookups.
   discovery: DiscoveryService;
+  myWordsGoal: MyWordsGoalService;
   // Phase 53 (spec D1, D2, D10, D11). A learner's targets: made, changed, ended and read.
   targets: TargetService;
   // Phase 31 (spec D7). The merge job's use case; no route reaches it. The
@@ -147,6 +150,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     targetSkills: createTargetSkillRepo(tx),
     targetReadiness: createTargetReadinessRepo(tx),
     targetBudgets: createTargetBudgetRepo(tx),
+    myWordsDays: createMyWordsDayRepo(tx),
     discovery: createDiscoveryRepo(tx),
   };
 }
@@ -470,6 +474,8 @@ export function createServerDeps(io: {
       logger: io.logger,
       stockSaveDelaySeconds: io.stockSaveDelaySeconds,
     }),
+    // Phase 73 (spec D1, D4). The My words goal per course.
+    myWordsGoal: createMyWordsGoalService({ transaction, logger: io.logger, now: io.now }),
     // Phase 53 (spec D10, D11). Saves photos and typed words with the target in one
     // transaction, through the photo-import and vocabulary saves' own functions.
     targets: createTargetService({
