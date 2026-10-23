@@ -46,7 +46,7 @@ import type {
   DiscoveryStateSchema,
   DiscoveryRunCreateSchema,
   DiscoveryAnswerRequestSchema,
-  DiscoveryAnswerResultSchema,
+  DiscoveryStartedBySchema,
   LlmDiscoverySchema,
   LlmPointSchema,
   LlmReconciliationSchema,
@@ -304,7 +304,7 @@ export type DiscoveryRun = z.infer<typeof DiscoveryRunSchema>;
 export type DiscoveryState = z.infer<typeof DiscoveryStateSchema>;
 export type DiscoveryRunCreate = z.infer<typeof DiscoveryRunCreateSchema>;
 export type DiscoveryAnswerRequest = z.infer<typeof DiscoveryAnswerRequestSchema>;
-export type DiscoveryAnswerResult = z.infer<typeof DiscoveryAnswerResultSchema>;
+export type DiscoveryStartedBy = z.infer<typeof DiscoveryStartedBySchema>;
 export type LlmDiscovery = z.infer<typeof LlmDiscoverySchema>;
 
 export type SendCodeRequest = z.infer<typeof SendCodeRequestSchema>;

@@ -69,7 +69,7 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
     transaction: createFakeTransaction({
       enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT, findMyWordsGoal: async () => null }),
       myWordsDays: stub<MyWordsDayRepo>({ find: async () => undefined }),
-      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }), findNewWordLimits: async () => ({ dayCap: null, perSession: null }) }),
+      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }), findNewWordLimits: async () => ({ dayCap: null, perSession: null, discoverCount: null }) }),
       session: stub<SessionRepo>({
         findAnswersOn: async () => [],
         findPathAnswers: async () => [],
@@ -90,7 +90,8 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
         },
         ...session,
       }),
-      vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => SAVED, countEntries: async () => SAVED.length, markKnown: async () => {} }),
+      // Phase 74 (spec D7): a word never met, so My words needs no new words.
+      vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => SAVED, countEntries: async () => SAVED.length, countNeverMet: async () => 1, markKnown: async () => {} }),
       memory: stub<MemoryRepo>({ findRows: async () => [], findEnrollmentRows: async () => [] }),
       // Phase 67 (spec D1): no readiness yet, so every target word reads below 90.
       targetReadiness: stub<TargetReadinessRepo>({ findRows: async () => [], findFirstEventsOn: async () => [] }),
@@ -296,6 +297,7 @@ describe('currentSession (spec D6, D8)', () => {
       savedCount: 2,
       dueCount: 0,
       today: expect.objectContaining({ goal: 3, sessions_done: 0 }),
+      needsNewWords: false,
     });
     expect(eventsOf(logger, 'session_offered')).toEqual([{ event: 'session_offered', enrollment_id: E, session_id: 's_stock', status: 'preparing' }]);
   });
@@ -505,7 +507,7 @@ describe('the main path (spec D1, D2)', () => {
     // counted from memory alone. Nor is a lock taken: the home read of the main path stays a read.
     const { service, retired, locked } = world(stockChosenOn(YESTERDAY), {
       target: createFakeTargetRepo({ listActive: async () => [target('t_exam', '2026-10-13', ['g_b'])] }),
-      vocabulary: stub<VocabularyRepo>({ countEntries: async () => SAVED.length }),
+      vocabulary: stub<VocabularyRepo>({ countEntries: async () => SAVED.length, countNeverMet: async () => 1 }),
     });
     expect((await service.currentSession('u1', E)).current?.id).toBe('s_stock');
     expect(retired).toEqual([]);

@@ -8,12 +8,16 @@ import type { NewWordLimits } from '@lang-tutor/core/api';
 export const DAY_CAP_OPTIONS: readonly number[] = [5, 10, 15, 20, 30, 50];
 export const PER_SESSION_OPTIONS: readonly NewWordLimits['per_session'][] = [null, 1, 2];
 
-/** The body a save sends: a tap changes one limit, the other as it is. */
+/** The body a save sends: a tap changes one limit, the others as they are. */
 export const withDayCap = (limits: NewWordLimits, dayCap: number): NewWordLimits => ({ ...limits, day_cap: dayCap });
 export const withPerSession = (limits: NewWordLimits, perSession: NewWordLimits['per_session']): NewWordLimits => ({
   ...limits,
   per_session: perSession,
 });
+
+/** Phase 74 (spec D10). How many words a run of Words for me the app starts collects. */
+export const DISCOVER_COUNT_OPTIONS: readonly number[] = [5, 10, 15, 20, 30];
+export const withDiscoverCount = (limits: NewWordLimits, discoverCount: number): NewWordLimits => ({ ...limits, discover_count: discoverCount });
 
 /** Spec D6. What a session's view says the cap held back, while it is news; null otherwise. */
 export type HeldNewWords = { count: number; dayCap: number };

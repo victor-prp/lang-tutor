@@ -655,42 +655,38 @@ describe('photo imports', () => {
   });
 });
 
-// Phase 69 (spec D10). Words for me's endpoints.
+// Phase 69 (spec D10), phase 74 (D11). Words for me's endpoints.
 describe('words for me', () => {
-  it('reads the state, answers the questions, runs rounds and cards, and saves or discards the list', async () => {
+  it('reads the state, answers the questions, starts runs, runs rounds and cards, and ends a run', async () => {
     const calls: { url: string; method?: string; body?: unknown }[] = [];
     const mockFetch = jest.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-      const status = url.endsWith('/discard') ? 204 : 200;
-      return { ok: true, status, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({}) };
     });
     const client = buildClient(mockFetch as unknown as jest.Mock);
     await client.discoveryState('e 1');
     await client.createDiscoveryProfile('e 1', { self_level: 'simple', learning_context: 'school' });
     await client.startDiscovery('e 1', 15);
+    await client.startDiscovery('e 1', null);
     await client.getDiscoveryRun('r1');
     await client.nextDiscoveryRound('r1');
-    await client.answerDiscoveryCard('r1', 4, { kind: 'typed', text: 'חתול' });
+    await client.answerDiscoveryCard('r1', 4, { pick: 2, add: true });
     await client.endDiscovery('r1');
-    await client.updateDiscoveryItem('r1', 4, { ticked: false });
-    await client.saveDiscovery('r1');
-    await client.discardDiscovery('r1');
     expect(calls.map(({ url, method }) => [method ?? 'GET', url.replace('http://test.local', '')])).toEqual([
       ['GET', '/api/enrollments/e%201/discovery'],
       ['POST', '/api/enrollments/e%201/discovery/profile'],
+      ['POST', '/api/enrollments/e%201/discovery/runs'],
       ['POST', '/api/enrollments/e%201/discovery/runs'],
       ['GET', '/api/discovery/runs/r1'],
       ['POST', '/api/discovery/runs/r1/rounds'],
       ['POST', '/api/discovery/runs/r1/cards/4/answer'],
       ['POST', '/api/discovery/runs/r1/end'],
-      ['PATCH', '/api/discovery/runs/r1/items/4'],
-      ['POST', '/api/discovery/runs/r1/save'],
-      ['POST', '/api/discovery/runs/r1/discard'],
     ]);
     expect(calls[1].body).toEqual({ self_level: 'simple', learning_context: 'school' });
     expect(calls[2].body).toEqual({ goal: 15 });
-    expect(calls[5].body).toEqual({ kind: 'typed', text: 'חתול' });
-    expect(calls[7].body).toEqual({ ticked: false });
+    // A run the app starts sends no goal of its own.
+    expect(calls[3].body).toEqual({ goal: null });
+    expect(calls[6].body).toEqual({ pick: 2, add: true });
   });
 });
 

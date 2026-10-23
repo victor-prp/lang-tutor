@@ -60,7 +60,7 @@ export type {
   DiscoveryState,
   DiscoveryRunCreate,
   DiscoveryAnswerRequest,
-  DiscoveryAnswerResult,
+  DiscoveryStartedBy,
   LlmDiscovery,
   LlmPoint,
   LlmReconciliation,

@@ -499,7 +499,7 @@ export async function expectSoundAlike(ns: string, ...scores: number[]): Promise
  */
 export async function expectDiscovery(
   ns: string,
-  words: { word: string; hebrew: string; alternatives?: string[]; part_of_speech?: string }[],
+  words: { word: string; hebrew: string; alternatives?: string[]; wrong?: string[]; part_of_speech?: string }[],
 ): Promise<void> {
   await expectation(ns, {
     match: { body: { type: 'REGEX', regex: `[\\s\\S]*${DISCOVERY_MARKER}[\\s\\S]*` } },
@@ -509,7 +509,8 @@ export async function expectDiscovery(
         headers: { 'content-type': ['application/json'] },
         body: JSON.stringify(
           geminiResponse({
-            words: words.map((word) => ({ part_of_speech: 'noun', alternatives: [], ...word })),
+            // Phase 74 (spec D4). Three wrong meanings, none a right one of these tests' words.
+            words: words.map((word) => ({ part_of_speech: 'noun', alternatives: [], wrong: ['אחר', 'שונה', 'רחוק'], ...word })),
           }),
         ),
       },

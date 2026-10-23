@@ -162,7 +162,7 @@ function world(opts: {
       session,
       progress,
       memory,
-      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner', timeZone: 'UTC' }), findNewWordLimits: async () => ({ dayCap: null, perSession: null }) }),
+      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner', timeZone: 'UTC' }), findNewWordLimits: async () => ({ dayCap: null, perSession: null, discoverCount: null }) }),
       enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
       reminders: stub<ReminderRepo>({
         sentOnDay: async (userId, day) => {

@@ -2206,8 +2206,9 @@ export const SOUND_ALIKE_CASES: SoundAlikeCase[] = [
  * Phase 69 (spec D4). One round of Words for me: the learner's language, level, age and how
  * they learn, and the words to leave out. Scored on shape only (Victor: whether the words fit
  * the level "we can't know now"): enough words, none left out returned, none repeated, each in
- * its language's script with a Hebrew meaning. Every label starts "discover ", so that filter
- * selects the group.
+ * its language's script with a Hebrew meaning. Phase 74: each with three wrong meanings in
+ * Hebrew, and from B2 some phrases. Every label starts "discover ", so that filter selects the
+ * group.
  */
 export type DiscoveryCase = { label: string; input: DiscoveryPromptInput };
 
@@ -2230,4 +2231,6 @@ export const DISCOVERY_CASES: DiscoveryCase[] = [
   { label: 'discover en A2 lower, a child at school', input: { target: 'en', level: 3, age: 10, learningContext: 'school', exclude: ['dog', 'cat', 'apple', 'school', 'book'] } },
   { label: 'discover en B2 lower, an adult with family', input: { target: 'en', level: 7, age: 45, learningContext: 'family', exclude: [] } },
   { label: 'discover ru A1 upper, a teen at school', input: { target: 'ru', level: 2, age: 15, learningContext: 'school', exclude: ['дом', 'мама', 'папа'] } },
+  // Phase 74 (spec D4). Phrases from B2: this case and the B2 one above score them.
+  { label: 'discover it C1 lower, an adult on their own', input: { target: 'it', level: 9, age: 38, learningContext: 'self', exclude: [] } },
 ];

@@ -467,12 +467,11 @@ export function createServerDeps(io: {
     discovery: createDiscoveryService({
       transaction,
       discover,
-      judge,
       llm,
       lookup: translations.translate,
       now: io.now,
+      rng: io.rng,
       logger: io.logger,
-      stockSaveDelaySeconds: io.stockSaveDelaySeconds,
     }),
     // Phase 73 (spec D1, D4). The My words goal per course.
     myWordsGoal: createMyWordsGoalService({ transaction, logger: io.logger, now: io.now }),

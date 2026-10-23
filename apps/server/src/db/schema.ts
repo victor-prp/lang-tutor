@@ -140,11 +140,15 @@ export const users = pgTable(
     // (DAY_NEW_CAP; automatic), so a learner who never chose follows a change of it.
     dayNewCap: integer('day_new_cap'),
     newPerSession: integer('new_per_session'),
+    // Phase 74 (spec D10). How many words a run of Words for me the app starts collects. Null is
+    // the default (DISCOVER_COUNT, 10).
+    discoverCount: smallint('discover_count'),
   },
   (t) => [
     check('users_kind_known', sql`${t.kind} in ('learner', 'bot')`),
     check('users_day_new_cap_range', sql`${t.dayNewCap} between 1 and 100`),
     check('users_new_per_session_known', sql`${t.newPerSession} in (1, 2)`),
+    check('users_discover_count_range', sql`${t.discoverCount} between 1 and 30`),
     check('users_bot_day_iff_bot', sql`(${t.kind} = 'bot') = (${t.botDay} is not null)`),
     // Mirrors UsernameSchema in packages/core exactly. Two enforcement points
     // for one rule is deliberate: the schema gives a 400 with a good message,
@@ -1434,6 +1438,8 @@ export const discoveryProfiles = pgTable(
  * Phase 69 (spec D8, D9). One run of Words for me: rounds of cards until the learner holds
  * `goal` words they did not know, then their list. `settled_round` is the last round that
  * moved the profile's level (spec D3), so a round moves it once.
+ * Phase 74 (spec D6, D11). The goal counts words added, and a run ends `saved` with no list;
+ * `started_by` is the learner (the מילים tab) or the app (My words sending them).
  */
 export const discoveryRuns = pgTable(
   'discovery_runs',
@@ -1443,12 +1449,14 @@ export const discoveryRuns = pgTable(
     goal: smallint('goal').notNull(),
     status: text('status').notNull(),
     settledRound: smallint('settled_round').notNull().default(0),
+    startedBy: text('started_by').notNull().default('learner'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp('ended_at', { withTimezone: true }),
   },
   (t) => [
     foreignKey({ name: 'discovery_runs_enrollment_fk', columns: [t.enrollmentId], foreignColumns: [enrollments.id] }),
     check('discovery_runs_status_known', sql`${t.status} in ('asking', 'listing', 'saved', 'discarded')`),
+    check('discovery_runs_started_by_known', sql`${t.startedBy} in ('learner', 'app')`),
     check('discovery_runs_goal_known', sql`${t.goal} between 1 and 30`),
     // One open run per enrollment: starting again resumes it (spec D8).
     uniqueIndex('discovery_runs_one_open_per_enrollment')
@@ -1463,6 +1471,9 @@ export const discoveryRuns = pgTable(
  * the learner's answer and who judged it, and, once the learner did not know it, the photo
  * row's lookup fields, which the list is reviewed by. The cards are the log of every answer.
  * Gloss ids are snapshots, without keys (ADR 0011 R1).
+ * Phase 74 (spec D1, D2, D5, D11). A card's four Hebrew meanings in the order shown and which is
+ * right; the answer's pick (null is "אין לי מושג"), the suggestion the learner saw, whether they
+ * added the word, and when its lookup saved it to My words.
  */
 export const discoveryCards = pgTable(
   'discovery_cards',
@@ -1489,11 +1500,20 @@ export const discoveryCards = pgTable(
     ticked: boolean('ticked').notNull().default(false),
     hebrewMismatch: boolean('hebrew_mismatch').notNull().default(false),
     reason: text('reason'),
+    choices: jsonb('choices').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    rightChoice: smallint('right_choice'),
+    picked: smallint('picked'),
+    suggested: text('suggested'),
+    added: boolean('added'),
+    savedAt: timestamp('saved_at', { withTimezone: true }),
   },
   (t) => [
     primaryKey({ name: 'discovery_cards_pkey', columns: [t.runId, t.position] }),
     foreignKey({ name: 'discovery_cards_run_fk', columns: [t.runId], foreignColumns: [discoveryRuns.id] }).onDelete('cascade'),
-    check('discovery_cards_answer_known', sql`${t.answer} is null or ${t.answer} in ('unknown', 'typed')`),
+    check('discovery_cards_answer_known', sql`${t.answer} is null or ${t.answer} in ('unknown', 'typed', 'choice')`),
+    check('discovery_cards_right_choice_range', sql`${t.rightChoice} is null or ${t.rightChoice} between 0 and 3`),
+    check('discovery_cards_picked_range', sql`${t.picked} is null or ${t.picked} between 0 and 3`),
+    check('discovery_cards_suggested_known', sql`${t.suggested} is null or ${t.suggested} in ('add', 'skip')`),
     check('discovery_cards_verdict_known', sql`${t.verdict} is null or ${t.verdict} in ('exact', 'alternative', 'wrong')`),
     check('discovery_cards_judged_by_known', sql`${t.judgedBy} is null or ${t.judgedBy} in ('rule', 'model', 'unavailable')`),
     check('discovery_cards_lookup_status_known', sql`${t.lookupStatus} is null or ${t.lookupStatus} in ('pending', 'ready', 'failed')`),

@@ -5,7 +5,7 @@ import { answerChoice, answerMeaning, answerTyped, buildTiles, expectGeneration,
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
-import { seedMemory, seededR, type MemorySeed } from './support/memory';
+import { declineWordsForMe, type MemorySeed, seededR, seedMemory } from './support/memory';
 import { clearGemini, expectGeminiMatching, expectSoundAlike, expectTranscription, userText } from './support/mockServer';
 import { continueMeet } from './support/sessions';
 import { stripIsolates } from './support/text';
@@ -275,6 +275,8 @@ test("speaking: can't speak now passes the read aloud, and say the translation t
   await signUpLearner(page, 'e2e_speak_cant_ru', 'ru');
   await saveFourWords(page.request);
   await seedMemory('e2e_speak_cant_ru', CANT_SPEAK);
+  // Phase 74 (spec D7): every word met, so Words for me first; this learner declined it today.
+  await declineWordsForMe('e2e_speak_cant_ru');
 
   // Review M4. Each card the server sends, by position: what a position the counter
   // stepped over held. Read once the session is played.

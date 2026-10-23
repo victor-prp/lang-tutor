@@ -333,19 +333,19 @@ const ROUND: [string, string][] = [
   ['утюг', 'מגהץ'],
   ['веник', 'מטאטא'],
 ];
-const KEPT = ROUND.slice(0, 5).map(([word]) => word);
+const KEPT = ROUND.slice(0, 2).map(([word]) => word);
 
 const lookupOf = (lemma: string, translation: string) => ({
   kind: 'word',
   entries: [{ lemma, part_of_speech: 'noun', senses: [{ translation, sense_code: lemma }] }],
 });
 
-/** The round, each unknown word's lookup, then the generation for the session saving makes. */
+/** The round, each added word's lookup, then the generation for the session the saves stock. */
 async function stubRun(request: APIRequestContext): Promise<void> {
   await expectGeminiMatching(
     request,
     'propose new words for a learner',
-    { words: ROUND.map(([word, hebrew]) => ({ word, part_of_speech: 'noun', hebrew, alternatives: [] })) },
+    { words: ROUND.map(([word, hebrew]) => ({ word, part_of_speech: 'noun', hebrew, alternatives: [], wrong: ['אחר', 'שונה', 'רחוק'] })) },
     { once: true, priority: 10 },
   );
   for (const [lemma, hebrew] of ROUND) await expectGeminiMatching(request, `"text":"${lemma}"`, lookupOf(lemma, hebrew));
@@ -358,7 +358,10 @@ async function savedLemmas(request: APIRequestContext, enrollmentId: string): Pr
   return ((await res.json()) as VocabularyPage).items.map((word) => word.lemma).sort();
 }
 
-test('with no words of their own, the card opens Words for me, and saving there goes straight into a session', async ({ page, request }) => {
+test('with no words of their own, the card opens Words for me with no count to choose, and its end goes straight into a session', async ({
+  page,
+  request,
+}) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
   await withVoices(page, []);
@@ -382,19 +385,32 @@ test('with no words of their own, the card opens Words for me, and saving there 
   await expect(page.getByTestId('discover-question')).toHaveText('כמה רוסית אתם כבר יודעים?');
   await page.getByTestId('discover-option-basic').click();
   await page.getByTestId('discover-option-self').click();
-  await page.getByTestId('discover-goal-5').click();
-  await page.getByTestId('discover-start').click();
+
+  // 2. Phase 74 (spec D6): the app started the run, so no count to choose; 10 by default.
+  await expect(page.getByTestId('discover-word')).toHaveText(ROUND[0][0]);
+  await expect(page.getByTestId('discover-goal-5')).toHaveCount(0);
+  await expect(page.getByTestId('discover-found')).toHaveText(/נוספו\D*0\D*מתוך\D*10/);
+
+  // 3. ✕ with fewer than two words added warns first, and going on stays on the card.
+  await page.getByTestId('discover-close').click();
+  await expect(page.getByText('צריך עוד מילים')).toBeVisible();
+  await page.getByTestId('discover-warn-continue').click();
+  await expect(page.getByText('צריך עוד מילים')).toBeHidden();
   for (const word of KEPT) {
     await expect(page.getByTestId('discover-word')).toHaveText(word);
     await page.getByTestId('discover-dont-know').click();
+    await page.getByTestId('discover-add').click();
   }
-  const rows = page.getByTestId('photo-import-row');
-  await expect(rows).toHaveCount(KEPT.length);
-  await expect(page.getByTestId('discover-looking-up')).toHaveCount(0, { timeout: 60_000 });
-  expect(await savedLemmas(page.request, enrollmentId)).toEqual([]);
+  await expect(page.getByTestId('discover-word')).toHaveText(ROUND[2][0]);
 
-  // 2. Save: straight into the first session, home never shown on the way. Home stays mounted under
-  // Words for me on the web, hidden; every frame from the press to the first card is checked.
+  // 4. ✕ with two: the end, and the session the second save stocked comes ready.
+  await page.getByTestId('discover-close').click();
+  await expect(page.getByTestId('discover-end-count')).toHaveText('2');
+  await expect.poll(() => savedLemmas(page.request, enrollmentId), { timeout: 60_000 }).toEqual([...KEPT].sort());
+  await expect(page.getByTestId('discover-end-start'), report()).toBeVisible({ timeout: 90_000 });
+
+  // 5. להתחיל תרגול: straight into the session, home never shown on the way. Home stays mounted
+  // under Words for me on the web, hidden; every frame from the press to the first card is checked.
   const homeShown = () => page.evaluate(() => {
     const home = document.querySelector('[data-testid="home-my-words"]');
     return home instanceof HTMLElement && home.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
@@ -411,23 +427,18 @@ test('with no words of their own, the card opens Words for me, and saving there 
     };
     requestAnimationFrame(sample);
   });
-  const creates = diagnostics.apiRequests.filter((sent) => /^POST \S+\/api\/sessions$/.test(sent)).length;
-  await page.getByTestId('discover-save').click();
+  await page.getByTestId('discover-end-start').click();
   await expect(page.getByTestId('progress-label'), report()).toHaveText(/^\D*1\s*\/\s*\d+/, { timeout: 60_000 });
   const seen = await page.evaluate(() => {
     const w = window as unknown as { homeSeen: boolean; watching: boolean };
     w.watching = false;
     return w.homeSeen;
   });
-  expect(seen, `home was shown between the save and the first card\n${report()}`).toBe(false);
-  await expect(page.getByTestId('home-photo-saved')).toHaveCount(0);
-  // Saving made the main path's session: the list's, of the words just saved.
-  expect(diagnostics.apiRequests.filter((sent) => /^POST \S+\/api\/sessions$/.test(sent)).length, report()).toBe(creates + 1);
-  expect(await savedLemmas(page.request, enrollmentId)).toEqual([...KEPT].sort());
+  expect(seen, `home was shown between the end and the first card\n${report()}`).toBe(false);
   const { current } = await readCurrent(page.request, enrollmentId);
   expect(current, report()).toMatchObject({ source: 'list', status: 'ready' });
 
-  // 3. Back from it lands on home.
+  // 6. Back from it lands on home.
   await page.getByTestId('session-back').click();
   await expect(page.getByTestId('progress-label')).toBeHidden();
   await expect(card).toBeVisible();

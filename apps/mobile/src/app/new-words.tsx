@@ -8,14 +8,15 @@ import { Chip } from '@/components/Chip';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { useApi } from '@/hooks/useApi';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { DAY_CAP_OPTIONS, PER_SESSION_OPTIONS, withDayCap, withPerSession } from '@/newWordLimits';
+import { DAY_CAP_OPTIONS, DISCOVER_COUNT_OPTIONS, PER_SESSION_OPTIONS, withDayCap, withDiscoverCount, withPerSession } from '@/newWordLimits';
 import { createAskSwitch } from '@/practiceMoreAsk';
 import { createSaver } from '@/reminderSettings';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, shadows, spacing } from '@/theme';
 
 // Phase 70 (spec D7). The learner's new-word limits: how many a day, how many a session, and
-// whether a session the day's cap held words back from says so. Each tap is saved as it is
+// whether a session the day's cap held words back from says so. Phase 74 (spec D10): how many
+// words Words for me adds when the app sends the learner there. Each tap is saved as it is
 // made, the newest only, as the reminders screen saves.
 type Load = { kind: 'loading' } | { kind: 'failed' } | { kind: 'ready' };
 
@@ -81,7 +82,12 @@ export default function NewWordsScreen() {
   function change(update: (current: NewWordLimits) => NewWordLimits) {
     if (!latest.current) return;
     const next = update(latest.current);
-    if (next.day_cap === latest.current.day_cap && next.per_session === latest.current.per_session) return;
+    if (
+      next.day_cap === latest.current.day_cap &&
+      next.per_session === latest.current.per_session &&
+      next.discover_count === latest.current.discover_count
+    )
+      return;
     latest.current = next;
     setLimits(next);
     setSaveFailed(false);
@@ -151,6 +157,23 @@ export default function NewWordsScreen() {
                 ))}
               </View>
               <Text style={styles.hint}>{strings.newWordsSessionHint}</Text>
+            </View>
+
+            {/* Phase 74 (spec D10): how many words a run of Words for me the app starts collects. */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>{strings.discoverEntry}</Text>
+              <Text style={styles.hint}>{strings.newWordsDiscoverLabel}</Text>
+              <View style={styles.chips}>
+                {DISCOVER_COUNT_OPTIONS.map((count) => (
+                  <Chip
+                    key={count}
+                    label={String(count)}
+                    selected={limits.discover_count === count}
+                    testID={`settings-discover-count-${count}`}
+                    onPress={() => change((current) => withDiscoverCount(current, count))}
+                  />
+                ))}
+              </View>
             </View>
 
             <View style={styles.card}>

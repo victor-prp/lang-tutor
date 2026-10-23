@@ -42,7 +42,7 @@ test('the new-word limits save from הגדרות, and read back', async ({ page 
   await page.getByTestId('new-words-session-2').click();
   await expect(page.getByTestId('new-words-day-30')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('new-words-session-2')).toHaveAttribute('aria-selected', 'true');
-  await expect.poll(() => readLimits(page.request)).toEqual({ day_cap: 30, per_session: 2 });
+  await expect.poll(() => readLimits(page.request)).toEqual({ day_cap: 30, per_session: 2, discover_count: 10 });
 
   // Opened again from a fresh load: what was stored.
   await openApp(page, 'settings-tab');
@@ -61,7 +61,7 @@ test('a session the cap held words back from says so; the tick keeps it closed, 
   const enrollmentId = await enrollmentIdOf(page.request);
   await skipSeed(page.request, enrollmentId);
   // A cap of one new word a day, set before any word is saved.
-  const put = await page.request.put(`${API_URL}/api/me/new-words`, { data: { day_cap: 1, per_session: null } });
+  const put = await page.request.put(`${API_URL}/api/me/new-words`, { data: { day_cap: 1, per_session: null, discover_count: 10 } });
   expect(put.ok(), await put.text()).toBe(true);
   const entries = await lookUpEntries(page.request, enrollmentId, BOARD_WORDS.slice(0, 3));
   await expectGeneration(request);

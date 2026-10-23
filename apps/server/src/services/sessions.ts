@@ -150,7 +150,7 @@ import {
 import type { Logger } from '../logger';
 import { recordMyWordsDay } from './myWordsDay';
 import { authorizeEnrollment } from './access';
-import { learnerDay } from './learnerDay';
+import { learnerDay, learnerDays } from './learnerDay';
 import { readFamilies, readTargetDay, readTargetPickInput, readTodayBudget } from './targetDayRead';
 import type { LlmClient, ModelCallRecord } from './llm';
 import type { SpeechTranscriber } from './speech';
@@ -875,6 +875,26 @@ export function createSessionService({
   }
 
   /**
+   * Phase 74 (spec D7, builder check B1, B4). Whether My words sends the learner to Words for me
+   * first: the main path has words (`savedCount`, less a target's), every one of them met (a
+   * memory row, or introduced today, a meaning its family holds back included), and no run of
+   * Words for me the app started was made on the learner's day, so a learner who declined is
+   * sent once a day at most. Counts only: the home read reads no list (phase 43 R5).
+   */
+  async function needsNewWords(repos: Repos, enrolled: Enrollment, savedCount: number): Promise<boolean> {
+    if (savedCount === 0) return false;
+    const at = now();
+    const today = await learnerDay(repos, enrolled.user_id, at);
+    const held = (await repos.target.listActive(enrolled.id, today)).flatMap((active) => active.glossIds);
+    const introduced = await repos.session.findIntroducedOn(enrolled.id, today);
+    if ((await repos.vocabulary.countNeverMet(enrolled.id, [...held, ...introduced])) > 0) return false;
+    // A learner day is at most a day and some hours of the clock: two days back covers it.
+    const created = await repos.discovery.appRunsCreatedSince(enrolled.id, new Date(at - 2 * 24 * 3600_000));
+    if (created.length === 0) return true;
+    return !(await learnerDays(repos, enrolled.user_id, created.map((date) => date.getTime()))).includes(today);
+  }
+
+  /**
    * Phase 57 (spec D11). How many words wait on a path: on the main path, its words chooseWords
    * calls due (dueGlosses), with the live skills of the enrollment's newest session; on a
    * target's, its words with work owed today (none once it ended).
@@ -1034,12 +1054,19 @@ export function createSessionService({
      *  replaced when its day is stale. The path's lock is taken only when the cheap half
      *  holds (a target's stock chosen on an earlier day, or as practice more: final review
      *  C1), and the stock is read again under it. Phase 57 (spec D11): and how many of the
-     *  path's words wait (waitingOn). */
+     *  path's words wait (waitingOn). Phase 74 (spec D7): whether the main path needs new words. */
     currentSession: async (
       actorUserId: string,
       enrollmentId: string,
       path: Path = null,
-    ): Promise<{ current: (SessionSummary & { started: boolean }) | null; nextSource: SessionSource; savedCount: number; dueCount: number; today?: MyWordsToday }> => {
+    ): Promise<{
+      current: (SessionSummary & { started: boolean }) | null;
+      nextSource: SessionSource;
+      savedCount: number;
+      dueCount: number;
+      today?: MyWordsToday;
+      needsNewWords: boolean;
+    }> => {
       const read = await transaction(async (repos) => {
         const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
         const target = path === null ? null : await pathTarget(repos, actorUserId, enrolled, path);
@@ -1072,6 +1099,7 @@ export function createSessionService({
           savedCount,
           dueCount: await waitingOn(repos, enrolled, target),
           today: path === null ? await myWordsToday(repos, enrolled) : undefined,
+          needsNewWords: path === null ? await needsNewWords(repos, enrolled, savedCount) : false,
           replaced,
         };
       });

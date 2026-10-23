@@ -10,21 +10,23 @@ export const POLL_INTERVAL_MS = 3_000;
  *  and this only names it, so the screen is a switch over one value. */
 export type HomeAction =
   | { kind: 'create' }
-  /** Phase 73 (spec D6). No words of its own: Words for me, not a session. */
+  /** Phase 73 (spec D6). No words of its own: Words for me, not a session. Phase 74 (spec D7):
+   *  or every word already met. */
   | { kind: 'discover' }
   | { kind: 'preparing'; sessionId: string }
   | { kind: 'start'; sessionId: string }
   | { kind: 'resume'; sessionId: string }
   | { kind: 'failed' };
 
-export function homeActionOf(state: CurrentSessionResponse): HomeAction {
+/** Phase 74 (spec D7). `forReminder`: a reminder tap's read, which enters the waiting session
+ *  even when My words needs new words. */
+export function homeActionOf(state: CurrentSessionResponse, { forReminder = false }: { forReminder?: boolean } = {}): HomeAction {
   const { current } = state;
+  if (current?.status === 'ready' && current.answered > 0) return { kind: 'resume', sessionId: current.session_id };
+  // Phase 74 (spec D7). Every word met: Words for me first, a waiting session after it.
+  if (!forReminder && state.needs_new_words) return { kind: 'discover' };
   if (current?.status === 'preparing') return { kind: 'preparing', sessionId: current.session_id };
-  if (current?.status === 'ready') {
-    return current.answered > 0
-      ? { kind: 'resume', sessionId: current.session_id }
-      : { kind: 'start', sessionId: current.session_id };
-  }
+  if (current?.status === 'ready') return { kind: 'start', sessionId: current.session_id };
   if (current?.status === 'failed') {
     // Offering create with nothing saved would answer 409 no_saved_words and loop.
     return state.saved_count > 0 ? { kind: 'failed' } : { kind: 'discover' };

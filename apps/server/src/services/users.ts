@@ -1,5 +1,6 @@
 import type { CreateUserRequest, NewWordLimits, User } from '@lang-tutor/core/api';
 
+import { DISCOVER_COUNT } from '../domain/discovery';
 import { isTimeZone } from '../domain/learnerClock';
 import { limitsOf, storedDayCap } from '../domain/newWordLimits';
 import { InvalidTimeZone } from '../errors';
@@ -45,11 +46,16 @@ export function createUserService({
     newWordLimits: (actorUserId: string): Promise<NewWordLimits> =>
       transaction(async ({ user }) => wireLimits(await user.findNewWordLimits(actorUserId))),
 
-    /** PUT /api/me/new-words (phase 70, spec D1, D5): replaces both; the default cap is stored as
-     *  null, so the learner keeps following it. Answers what it stored. */
+    /** PUT /api/me/new-words (phase 70, spec D1, D5; phase 74 D10): replaces every limit; a default
+     *  is stored as null, so the learner keeps following it. Answers what it stored. */
     putNewWordLimits: (actorUserId: string, input: NewWordLimits): Promise<NewWordLimits> =>
       transaction(async ({ user }) => {
-        const stored = { dayCap: storedDayCap(input.day_cap), perSession: input.per_session };
+        // Phase 74 (spec D10). The default Words for me count is stored as null too.
+        const stored = {
+          dayCap: storedDayCap(input.day_cap),
+          perSession: input.per_session,
+          discoverCount: input.discover_count === DISCOVER_COUNT ? null : input.discover_count,
+        };
         await user.setNewWordLimits(actorUserId, stored);
         return wireLimits(stored);
       }),
@@ -60,10 +66,11 @@ export function createUserService({
   };
 }
 
-/** Phase 70 (spec D5). Stored limits on the wire: the cap in force, per session as chosen. */
-function wireLimits(stored: { dayCap: number | null; perSession: number | null }): NewWordLimits {
+/** Phase 70 (spec D5). Stored limits on the wire: the cap in force, per session as chosen;
+ *  phase 74 (spec D10): the Words for me count in force. */
+function wireLimits(stored: { dayCap: number | null; perSession: number | null; discoverCount: number | null }): NewWordLimits {
   const limits = limitsOf(stored);
-  return { day_cap: limits.dayCap, per_session: limits.perSession };
+  return { day_cap: limits.dayCap, per_session: limits.perSession, discover_count: stored.discoverCount ?? DISCOVER_COUNT };
 }
 
 export type UserService = ReturnType<typeof createUserService>;

@@ -1,14 +1,16 @@
 import type { VocabularyPage } from '@lang-tutor/core/api';
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
+import { expectGeneration } from './support/cards';
 import { tapUntil } from './support/interactions';
 import { clearGemini, expectGeminiMatching } from './support/mockServer';
 import { enrollmentIdOf } from './support/sessions';
 import { openApp, signUpLearner } from './support/users';
 
-// Phase 69. Words for me, from מילים: the two questions, how many, the cards, the list and
-// My words. The model's round, the judge and each word's lookup are stubbed.
+// Phase 69, phase 74. Words for me, from מילים: the two questions, how many, the choice cards
+// with their add or not and its sheets, ✕ to the end, and the session the saves stocked. The
+// model's round, each word's lookup and the session's generation are stubbed.
 test.setTimeout(180_000);
 test.beforeEach(async ({ request }) => {
   await clearGemini(request);
@@ -25,6 +27,8 @@ const ROUND: [string, string][] = [
   ['zaino', 'תיק גב'],
   ['cassetto', 'מגירה'],
 ];
+// Phase 74 (spec D4). Every word's three wrong meanings: none is a right meaning of the round.
+const WRONG = ['אחר', 'שונה', 'רחוק'];
 
 const lookupOf = (lemma: string, translation: string) => ({
   kind: 'word',
@@ -35,14 +39,14 @@ async function stubRun(request: APIRequestContext) {
   await expectGeminiMatching(
     request,
     'propose new words for a learner',
-    { words: ROUND.map(([word, hebrew]) => ({ word, part_of_speech: 'noun', hebrew, alternatives: [] })) },
+    { words: ROUND.map(([word, hebrew]) => ({ word, part_of_speech: 'noun', hebrew, alternatives: [], wrong: WRONG })) },
     { once: true, priority: 10 },
   );
-  // Only lampada's answer reaches the judge: cuscino's matches its meaning by rule.
-  await expectGeminiMatching(request, "judge the learner's answer", { verdict: 'wrong' }, { once: true, priority: 10 });
-  // Each word the learner did not know is looked up; its one sense is the round's Hebrew,
-  // so no match call is needed.
+  // Each word the learner adds is looked up; its one sense is the round's Hebrew, so no match
+  // call is needed.
   for (const [lemma, hebrew] of ROUND) await expectGeminiMatching(request, `"text":"${lemma}"`, lookupOf(lemma, hebrew));
+  // The session the run's second saved word stocks.
+  await expectGeneration(request);
 }
 
 async function savedLemmas(request: APIRequestContext, enrollmentId: string): Promise<string[]> {
@@ -51,7 +55,10 @@ async function savedLemmas(request: APIRequestContext, enrollmentId: string): Pr
   return ((await res.json()) as VocabularyPage).items.map((word) => word.lemma).sort();
 }
 
-test('a learner finds five new words and keeps four', async ({ page, request }) => {
+/** The card's row whose meaning is `text`, whatever place the shuffle gave it. */
+const choice = (page: Page, text: string) => page.locator('[data-testid^="discover-choice-"]').filter({ hasText: new RegExp(`^${text}$`) });
+
+test('a learner picks meanings, adds three words against and with the suggestions, and starts the session they made', async ({ page, request }) => {
   await signUpLearner(page, 'e2e_discover_it', 'it');
   const enrollmentId = await enrollmentIdOf(page.request);
   await openApp(page);
@@ -69,40 +76,41 @@ test('a learner finds five new words and keeps four', async ({ page, request }) 
   await page.getByTestId('discover-goal-5').click();
   await page.getByTestId('discover-start').click();
 
-  // A right meaning, by rule.
+  // A right pick: the suggestion is not to add, and it moves on with no sheet.
   await expect(page.getByTestId('discover-word')).toHaveText('cuscino');
-  await expect(page.getByTestId('discover-to-list')).toHaveCount(0);
-  await page.getByTestId('discover-input').fill('כרית');
-  await page.getByTestId('discover-check').click();
-  await expect(page.getByTestId('discover-verdict')).toHaveText('✓ נכון');
-  await page.getByTestId('discover-next').click();
+  await expect(page.getByTestId('discover-found')).toHaveText(/נוספו\D*0\D*מתוך\D*5/);
+  await expect(page.locator('[data-testid^="discover-choice-"]')).toHaveCount(4);
+  await expect(page.getByTestId('discover-add')).toHaveCount(0);
+  await choice(page, 'כרית').click();
+  await page.getByTestId('discover-skip').click();
 
-  // A wrong one, judged: it counts as not known, and its meaning shows.
+  // A wrong pick, then not adding against the suggestion: the sheet explains, and adding stays.
   await expect(page.getByTestId('discover-word')).toHaveText('lampada');
-  await page.getByTestId('discover-input').fill('שולחן');
-  await page.getByTestId('discover-check').click();
-  await expect(page.getByTestId('discover-verdict')).toHaveText('לא בדיוק — מנורה');
-  await page.getByTestId('discover-next').click();
+  await choice(page, 'אחר').click();
+  await page.getByTestId('discover-skip').click();
+  await expect(page.getByText('מומלץ להוסיף מילים שאתם לא מכירים, כדי לתרגל אותן ולזכור אותן.')).toBeVisible();
+  await page.getByTestId('discover-sheet-add').click();
 
-  // "Don't know" until five are not known: the fifth opens the list, so cassetto never shows.
-  for (const word of ['ombrello', 'forchetta', 'scarpa', 'zaino']) {
-    await expect(page.getByTestId('discover-word')).toHaveText(word);
-    await expect(page.getByTestId('discover-to-list')).toBeVisible();
-    await page.getByTestId('discover-dont-know').click();
-  }
+  // A right pick added anyway: the sheet asks, and adding is kept.
+  await expect(page.getByTestId('discover-word')).toHaveText('ombrello');
+  await expect(page.getByTestId('discover-found')).toHaveText(/נוספו\D*1\D*מתוך/);
+  await choice(page, 'מטרייה').click();
+  await page.getByTestId('discover-add').click();
+  await expect(page.getByText('נראה שאתם כבר מכירים את המילה הזאת.')).toBeVisible();
+  await page.getByTestId('discover-sheet-add').click();
 
-  const rows = page.getByTestId('photo-import-row');
-  await expect(rows).toHaveCount(5);
-  await expect(page.getByTestId('discover-looking-up')).toHaveCount(0, { timeout: 60_000 });
-  await expect(rows.filter({ hasText: 'lampada' }).getByTestId('photo-import-meaning')).toContainText('מנורה');
-  const zaino = rows.filter({ hasText: 'zaino' }).getByTestId('photo-import-tick');
-  await zaino.click();
-  await expect(zaino).toHaveAttribute('aria-checked', 'false');
-  await expect(page.getByTestId('discover-save')).toContainText('הוספת');
+  // "אין לי מושג", then the suggestion: added at once.
+  await expect(page.getByTestId('discover-word')).toHaveText('forchetta');
+  await page.getByTestId('discover-dont-know').click();
+  await page.getByTestId('discover-add').click();
+  await expect(page.getByTestId('discover-word')).toHaveText('scarpa');
 
-  // Nothing joins the list before Continue.
-  expect(await savedLemmas(page.request, enrollmentId)).toEqual([]);
-  await page.getByTestId('discover-save').click();
-  await expect(page.getByTestId('home-photo-saved')).toContainText('נשמרו');
-  expect(await savedLemmas(page.request, enrollmentId)).toEqual(['forchetta', 'lampada', 'ombrello', 'scarpa']);
+  // ✕ with three added ends the run: the end lists them and the session comes ready.
+  await page.getByTestId('discover-close').click();
+  await expect(page.getByTestId('discover-end-count')).toHaveText('3');
+  await expect(page.getByTestId('discover-end-word')).toHaveText(['lampada', 'ombrello', 'forchetta']);
+  await expect.poll(() => savedLemmas(page.request, enrollmentId), { timeout: 60_000 }).toEqual(['forchetta', 'lampada', 'ombrello']);
+  await expect(page.getByTestId('discover-end-start')).toBeVisible({ timeout: 90_000 });
+  await page.getByTestId('discover-end-start').click();
+  await expect(page.getByTestId('progress-label')).toHaveText(/^\D*1\s*\/\s*\d+/, { timeout: 60_000 });
 });

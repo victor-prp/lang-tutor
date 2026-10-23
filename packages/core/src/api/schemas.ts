@@ -687,6 +687,9 @@ export const CurrentSessionResponseSchema = z.object({
   due_count: z.number().int(),
   // Phase 73 (spec D4). The main path's day; absent on a target's.
   today: MyWordsTodaySchema.optional(),
+  // Phase 74 (spec D7). The main path's words are all met and no run of Words for me the app
+  // started was made today: My words sends the learner there first. False on a target's.
+  needs_new_words: z.boolean(),
 });
 
 export const SkipSessionResponseSchema = z.object({
@@ -796,6 +799,8 @@ export const ReminderSettingsResponseSchema = ReminderSettingsSchema.extend({ ti
 export const NewWordLimitsSchema = z.object({
   day_cap: z.number().int().min(1).max(100),
   per_session: z.union([z.literal(1), z.literal(2)]).nullable(),
+  // Phase 74 (spec D10). How many words a run of Words for me the app starts collects.
+  discover_count: z.number().int().min(1).max(30),
 });
 
 // Phase 52 (spec D4). An Expo push token, registered after the permission is granted.
@@ -1752,16 +1757,35 @@ export const DiscoveryProfileSchema = DiscoveryProfileCreateSchema.extend({
 
 export const DiscoveryRunStatusSchema = z.enum(['asking', 'listing', 'saved', 'discarded']);
 
-// Phase 69 (spec D10). A run: its unanswered cards, in order, and its list, the cards the
-// learner did not know, in a photo row's shape so the app reviews them the same way.
+// Phase 74 (spec D6). Who started a run: the learner from the מילים tab, or the app sending them.
+export const DiscoveryStartedBySchema = z.enum(['learner', 'app']);
+
+// Phase 74 (spec D11). A run: its unanswered cards, in order, each with its four Hebrew
+// meanings and which one is right, and the words the learner added, each as far as its lookup
+// got. `saved` is a run that ended; its added words are saved as their lookups land.
 export const DiscoveryRunSchema = z.object({
   id: z.string(),
   goal: z.number().int().min(1).max(30),
   status: DiscoveryRunStatusSchema,
-  unknown_count: z.number().int().nonnegative(),
+  started_by: DiscoveryStartedBySchema,
+  added_count: z.number().int().nonnegative(),
   round: z.number().int().nonnegative(),
-  cards: z.array(z.object({ position: z.number().int().nonnegative(), word: z.string() })),
-  items: z.array(PhotoImportItemSchema),
+  cards: z.array(
+    z.object({
+      position: z.number().int().nonnegative(),
+      word: z.string(),
+      choices: z.array(z.string()),
+      right: z.number().int().nonnegative(),
+    }),
+  ),
+  added: z.array(
+    z.object({
+      position: z.number().int().nonnegative(),
+      word: z.string(),
+      meaning: z.string(),
+      status: z.enum(['pending', 'saved', 'failed']),
+    }),
+  ),
 });
 
 export const DiscoveryStateSchema = z.object({
@@ -1769,23 +1793,20 @@ export const DiscoveryStateSchema = z.object({
   run: DiscoveryRunSchema.nullable(),
 });
 
-export const DiscoveryRunCreateSchema = z.object({ goal: z.number().int().min(1).max(30) });
+// Phase 74 (spec D6). The learner's chosen goal, or null: the app started the run, and the
+// goal is the learner's setting.
+export const DiscoveryRunCreateSchema = z.object({ goal: z.number().int().min(1).max(30).nullable() });
 
-// Phase 69 (spec D5). "אין לי מושג", or the meaning typed in Hebrew.
-export const DiscoveryAnswerRequestSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('unknown') }),
-  z.object({ kind: z.literal('typed'), text: z.string().min(1).max(300) }),
-]);
-
-// `meaning` is the word's Hebrew, shown after a typed answer.
-export const DiscoveryAnswerResultSchema = z.object({
-  known: z.boolean(),
-  meaning: z.string(),
-  run: DiscoveryRunSchema,
+// Phase 74 (spec D2). One card's answer: the meaning picked (null is "אין לי מושג") and whether
+// the word joins My words.
+export const DiscoveryAnswerRequestSchema = z.object({
+  pick: z.number().int().min(0).max(3).nullable(),
+  add: z.boolean(),
 });
 
-// Phase 69 (spec D4). The model's proposals. Every field required: optional strings
-// can hang a call (phase 34); an empty `alternatives` is none.
+// Phase 69 (spec D4), phase 74 (D4). The model's proposals. Every field required: optional
+// strings can hang a call (phase 34); an empty `alternatives` is none. `wrong` holds three
+// Hebrew meanings that are not the item's.
 export const LlmDiscoverySchema = z.object({
   words: z.array(
     z.object({
@@ -1793,6 +1814,7 @@ export const LlmDiscoverySchema = z.object({
       part_of_speech: PartOfSpeechSchema,
       hebrew: z.string(),
       alternatives: z.array(z.string()),
+      wrong: z.array(z.string()),
     }),
   ),
 });

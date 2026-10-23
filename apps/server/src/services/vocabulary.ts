@@ -54,7 +54,8 @@ export async function saveEntriesInTx(
     enrolled: Enrollment;
     actorUserId: string;
     entries: readonly VocabularyEntryInput[];
-    stockSaveDelaySeconds: number;
+    /** Phase 74 (spec D5). Null asks for no stock: the caller asks for its own. */
+    stockSaveDelaySeconds: number | null;
   },
 ): Promise<string[]> {
   const { enrolled, actorUserId } = input;
@@ -105,7 +106,7 @@ export async function saveEntriesInTx(
   }
   // Phase 43 (spec D3). A list with no session in stock gets one, once the
   // burst of saves this may be the first of has landed (ruling R3).
-  await requestStockAfterSave(repos, enrolled.id, input.stockSaveDelaySeconds);
+  if (input.stockSaveDelaySeconds !== null) await requestStockAfterSave(repos, enrolled.id, input.stockSaveDelaySeconds);
   return toSave.map((entry) => entry.gloss_id);
 }
 

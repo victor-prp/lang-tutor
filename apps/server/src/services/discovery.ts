@@ -1,39 +1,26 @@
 import type {
   DiscoveryAnswerRequest,
-  DiscoveryAnswerResult,
   DiscoveryProfile,
   DiscoveryProfileCreate,
   DiscoveryRun,
   DiscoveryState,
   Enrollment,
-  PhotoImportItem,
-  PhotoImportItemUpdate,
-  SaveVocabularyResponse,
   TranslationRequest,
   TranslationResponse,
-  TypedVerdict,
 } from '@lang-tutor/core/api';
-import { wrongScript } from '@lang-tutor/core/domain';
 
-import { MAX_ROUNDS, buildDiscoveryPrompt, firstLevel, levelAfter, parseDiscovery, wordKey } from '../domain/discovery';
+import { DISCOVER_COUNT, MAX_ROUNDS, buildDiscoveryPrompt, choicesOf, firstLevel, levelAfter, parseDiscovery, wordKey } from '../domain/discovery';
 import { LOOK_UP_DISCOVERED_WORD, LookUpDiscoveredWordPayloadSchema } from '../domain/jobs';
-import { buildMeaningJudgePrompt, meaningRuleVerdict, parseMeaningJudge } from '../domain/judge';
-import { LANGUAGES, type LanguageCode } from '../domain/languages';
-import { entriesToSave, refuseItemUpdate, type ImportItemState } from '../domain/photoImports';
+import { type LanguageCode } from '../domain/languages';
+import { entriesToSave, type ImportItemState } from '../domain/photoImports';
 import { firstPerGloss } from '../domain/vocabulary';
-import {
-  DiscoveryConflict,
-  DiscoveryNotFound,
-  InvalidDiscoveryItem,
-  LlmUnavailable,
-  SenseMatchUnreadable,
-  WrongScript,
-} from '../errors';
+import { DiscoveryConflict, DiscoveryNotFound, InvalidDiscoveryAnswer, LlmUnavailable, SenseMatchUnreadable } from '../errors';
 import type { Logger } from '../logger';
-import type { CardRow, CardVerdict, JudgedBy, ProfileRow, RunRow } from '../repo/discovery';
+import type { CardRow, ProfileRow, RunRow, Suggestion } from '../repo/discovery';
 import { authorizeEnrollment } from './access';
 import type { LlmClient } from './llm';
 import { lookUpRow } from './rowLookup';
+import { requestStock } from './stock';
 import { saveEntriesInTx } from './vocabulary';
 import type { Repos, Transaction } from './transaction';
 
@@ -41,23 +28,7 @@ function toProfile(row: ProfileRow): DiscoveryProfile {
   return { self_level: row.selfLevel, learning_context: row.learningContext, level: row.level };
 }
 
-/** A card the learner did not know, as a photo row: the list is reviewed the same way. */
-function toItem(card: CardRow): PhotoImportItem {
-  return {
-    position: card.position,
-    text: card.word,
-    hebrew: card.hebrew,
-    status: card.lookupStatus ?? 'pending',
-    corrected_form: card.correctedForm,
-    options: card.options,
-    chosen_gloss_id: card.chosenGlossId,
-    ticked: card.ticked,
-    hebrew_mismatch: card.hebrewMismatch,
-    reason: card.reason,
-  };
-}
-
-/** A list row as the photo import's rules read it. */
+/** An added card as the photo import's save rule reads it. */
 function asRowState(card: CardRow): ImportItemState {
   return {
     position: card.position,
@@ -70,18 +41,51 @@ function asRowState(card: CardRow): ImportItemState {
 }
 
 const lastRoundOf = (cards: readonly CardRow[]) => cards.reduce((max, card) => Math.max(max, card.round), 0);
-const unknownOf = (cards: readonly CardRow[]) => cards.filter((card) => card.known === false);
+const addedOf = (cards: readonly CardRow[]) => cards.filter((card) => card.added === true);
+const savedCountOf = (cards: readonly CardRow[]) => cards.filter((card) => card.savedAt !== null).length;
+const lookingUp = (cards: readonly CardRow[]) => cards.some((card) => card.added === true && card.lookupStatus === 'pending');
 
-/** Spec D10. A run on the wire: its unanswered cards while it asks, and its list. */
+/** Phase 74 (spec D5, final review I2). An ended run asks for its session once none of its added
+ *  words is still looked up and one was saved: a session stocked sooner would hold only the
+ *  words saved by then, and a waiting session is never replaced. */
+const endedRunReady = (cards: readonly CardRow[]) => savedCountOf(cards) > 0 && !lookingUp(cards);
+
+/** Phase 74 (spec D9, D11). An added word as far as its lookup got: saved, still looked up, or
+ *  failed (its lookup gave no gloss, or ran out of retries). */
+function addedStatus(card: CardRow): 'pending' | 'saved' | 'failed' {
+  if (card.savedAt !== null) return 'saved';
+  return card.lookupStatus === 'pending' ? 'pending' : 'failed';
+}
+
+/** Phase 74 (spec D9, builder check B2). A saved word shows the meaning saved; until then the
+ *  card's own. */
+function addedMeaning(card: CardRow): string {
+  const saved = card.savedAt === null ? undefined : card.options.find((option) => option.gloss_id === card.chosenGlossId);
+  return saved?.translation ?? card.hebrew;
+}
+
+/** Phase 74 (spec D11). A run on the wire: its unanswered cards while it asks, and what was added. */
 export function toRun(run: RunRow, cards: readonly CardRow[]): DiscoveryRun {
+  const added = addedOf(cards);
   return {
     id: run.id,
     goal: run.goal,
     status: run.status,
-    unknown_count: unknownOf(cards).length,
+    started_by: run.startedBy,
+    added_count: added.length,
     round: lastRoundOf(cards),
-    cards: run.status === 'asking' ? cards.filter((card) => card.answer === null).map((card) => ({ position: card.position, word: card.word })) : [],
-    items: unknownOf(cards).map(toItem),
+    cards:
+      run.status === 'asking'
+        ? cards
+            .filter((card) => card.answer === null)
+            .map((card) => ({ position: card.position, word: card.word, choices: card.choices, right: card.rightChoice ?? 0 }))
+        : [],
+    added: added.map((card) => ({
+      position: card.position,
+      word: card.correctedForm ?? card.word,
+      meaning: addedMeaning(card),
+      status: addedStatus(card),
+    })),
   };
 }
 
@@ -117,8 +121,10 @@ function excludeOf(answered: readonly string[], saved: readonly string[]): strin
 }
 
 /**
- * Phase 69. Words for me: a learner's profile, a run's rounds and answers, its list, its
- * save, and the job that looks a word up (spec D2–D10).
+ * Phase 69. Words for me: a learner's profile, a run's rounds and answers, and the job that
+ * looks a word up (spec D2–D10). Phase 74: a card's answer is a pick and whether to add the
+ * word; an added word is looked up and saved to My words as the lookup lands, and the run's
+ * 2nd saved word, or a save after it ended, asks for the session at once (spec D2–D6).
  *
  * Every learner use case is the list owner's alone (`discovery.manage`, in no role),
  * checked inside its transaction. The model is called between transactions, never inside
@@ -128,24 +134,22 @@ function excludeOf(answered: readonly string[], saved: readonly string[]): strin
 export function createDiscoveryService({
   transaction,
   discover,
-  judge,
   llm,
   lookup,
   now,
+  rng,
   logger,
-  stockSaveDelaySeconds,
 }: {
   transaction: Transaction;
   /** Spec D4. The round's own client. */
   discover: LlmClient;
-  /** Spec D5. The session's meaning judge client. */
-  judge: LlmClient;
-  /** The lookup's client, for a row's sense match, as a photo row's. */
+  /** The lookup's client, for a word's sense match, as a photo row's. */
   llm: LlmClient;
   lookup: (actorUserId: string, input: TranslationRequest) => Promise<TranslationResponse>;
   now: () => number;
+  /** Phase 74 (spec D4). Shuffles each card's four meanings. */
+  rng: () => number;
   logger: Logger;
-  stockSaveDelaySeconds: number;
 }) {
   /** A run is addressed by its own id; its enrollment decides. Locked when asked. */
   const authorizeRun = async (repos: Repos, actorUserId: string, runId: string, lock: boolean): Promise<{ run: RunRow; enrolled: Enrollment }> => {
@@ -155,18 +159,25 @@ export function createDiscoveryService({
     return { run, enrolled };
   };
 
-  /** Moves an asking run to its list, settling its round first. The caller holds the row. */
-  const toList = async (repos: Repos, run: RunRow, cards: readonly CardRow[], reason: string): Promise<RunRow> => {
+  /**
+   * Phase 74 (spec D5, D6). Ends an asking run, settling its round first; with a word of it
+   * saved and none still looked up, asks for the session at once (a run that ends at one word
+   * still gets one). Otherwise the last lookup to land asks. The caller holds the row.
+   */
+  const endRun = async (repos: Repos, run: RunRow, cards: readonly CardRow[], reason: string): Promise<RunRow> => {
     const settled = await settle(repos, run, cards);
-    await repos.discovery.transition(run.id, ['asking'], 'listing');
+    await repos.discovery.transition(run.id, ['asking'], 'saved');
+    const savedCount = savedCountOf(cards);
+    if (endedRunReady(cards)) await requestStock(repos, { enrollment_id: run.enrollmentId, reason: 'discovery' });
     logger.info({
-      event: 'discovery_listing',
+      event: 'discovery_ended',
       run_id: run.id,
       reason,
-      unknown_count: unknownOf(cards).length,
+      added_count: addedOf(cards).length,
+      saved_count: savedCount,
       ...(settled ? { level_before: settled.before, level_after: settled.after } : {}),
     });
-    return { ...run, status: 'listing' };
+    return { ...run, status: 'saved' };
   };
 
   return {
@@ -204,19 +215,29 @@ export function createDiscoveryService({
       return toProfile(profile);
     },
 
-    /** Spec D6, D8. A new run, or the open one: starting again resumes it. */
-    start: async (actorUserId: string, enrollmentId: string, goal: number): Promise<{ run: DiscoveryRun; created: boolean }> => {
+    /**
+     * Phase 74 (spec D6, D8). A new run, or the open one: starting again resumes it. A goal is
+     * the learner's choice; null is a run the app started, whose goal is the learner's setting.
+     */
+    start: async (actorUserId: string, enrollmentId: string, goal: number | null): Promise<{ run: DiscoveryRun; created: boolean }> => {
       const started = await transaction(async (repos) => {
-        await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'discovery.manage' });
+        const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'discovery.manage' });
         if (!(await repos.discovery.findProfile(enrollmentId))) throw new DiscoveryConflict(enrollmentId, 'no profile');
-        const inserted = await repos.discovery.insertRun({ enrollmentId, goal });
+        const chosen = goal ?? (await repos.user.findNewWordLimits(enrolled.user_id)).discoverCount ?? DISCOVER_COUNT;
+        const inserted = await repos.discovery.insertRun({ enrollmentId, goal: chosen, startedBy: goal === null ? 'app' : 'learner' });
         if (inserted) return { run: toRun(inserted, []), created: true };
         // The open-run index refused it: answer the open one.
         const open = await repos.discovery.findOpenRun(enrollmentId);
         if (!open) throw new DiscoveryConflict(enrollmentId, 'no open run');
         return { run: toRun(open, await repos.discovery.listCards(open.id)), created: false };
       });
-      logger.info({ event: started.created ? 'discovery_started' : 'discovery_resumed', enrollment_id: enrollmentId, run_id: started.run.id, goal: started.run.goal });
+      logger.info({
+        event: started.created ? 'discovery_started' : 'discovery_resumed',
+        enrollment_id: enrollmentId,
+        run_id: started.run.id,
+        goal: started.run.goal,
+        started_by: started.run.started_by,
+      });
       return started;
     },
 
@@ -230,7 +251,8 @@ export function createDiscoveryService({
      * Spec D3, D4, D8. The next round, when the run asks and every card is answered;
      * otherwise the run as it is. Reads, calls the model outside any transaction, then
      * writes under the run's lock, unless a card was written meanwhile. At MAX_ROUNDS, or
-     * when the model has no word left, the run goes to its list instead.
+     * when the model has no word left, the run ends instead. Phase 74: each card's four
+     * meanings are shuffled as it is written.
      */
     nextRound: async (actorUserId: string, runId: string): Promise<DiscoveryRun> => {
       const read = await transaction(async (repos) => {
@@ -255,7 +277,7 @@ export function createDiscoveryService({
       });
       if (read.kind === 'asIs') return read.run;
 
-      let words: { word: string; partOfSpeech: CardRow['partOfSpeech']; hebrew: string; alternatives: string[] }[] = [];
+      let words: { word: string; partOfSpeech: CardRow['partOfSpeech']; hebrew: string; alternatives: string[]; wrong: string[] }[] = [];
       let dropped = 0;
       let ms = 0;
       if (read.kind === 'ask') {
@@ -272,7 +294,7 @@ export function createDiscoveryService({
         });
         ms = now() - started;
         // An empty string is the provider's "no content", a refusal of the app's own prompt:
-        // unavailable, so the learner can try again, never a run ended with nothing on its list.
+        // unavailable, so the learner can try again, never a run ended with nothing in it.
         const parsed = raw === '' ? null : parseDiscovery(raw, new Set(read.exclude.map(wordKey)));
         if (!parsed) {
           logger.info({ event: 'discovery_round_unreadable', run_id: runId, ms });
@@ -290,8 +312,8 @@ export function createDiscoveryService({
           return toRun(run, cards);
         }
         if (words.length === 0) {
-          const listed = await toList(repos, run, cards, read.kind === 'atCap' ? 'rounds' : 'no_words');
-          return toRun(listed, cards);
+          const ended = await endRun(repos, run, cards, read.kind === 'atCap' ? 'rounds' : 'no_words');
+          return toRun(ended, cards);
         }
         const settled = await settle(repos, run, cards);
         const level = settled?.after ?? (await repos.discovery.findProfile(run.enrollmentId))!.level;
@@ -299,7 +321,20 @@ export function createDiscoveryService({
         const start = cards.reduce((max, card) => Math.max(max, card.position + 1), 0);
         await repos.discovery.insertCards(
           runId,
-          words.map((word, index) => ({ position: start + index, round, level, ...word })),
+          words.map((word, index) => {
+            const { choices, right } = choicesOf(word.hebrew, word.wrong, rng);
+            return {
+              position: start + index,
+              round,
+              level,
+              word: word.word,
+              partOfSpeech: word.partOfSpeech,
+              hebrew: word.hebrew,
+              alternatives: word.alternatives,
+              choices,
+              rightChoice: right,
+            };
+          }),
         );
         logger.info({
           event: 'discovery_round',
@@ -316,174 +351,68 @@ export function createDiscoveryService({
     },
 
     /**
-     * Spec D5. One card's answer. "Don't know" is unknown. A typed meaning is checked: the
-     * alphabet, then the rule, then the meaning judge; a judge that fails counts unknown.
-     * An unknown card starts its lookup. The answer that reaches the goal moves the run
-     * to its list. A card answered before answers its first verdict.
+     * Phase 74 (spec D2, D3, D5, D6). One card's answer: the meaning picked (null is "אין לי
+     * מושג") and whether the word joins My words. The suggestion the learner saw is "don't add"
+     * after a right pick, "add" otherwise; a card is known for the level when its pick was right
+     * and it was not added. An added card starts its lookup, which saves it. The answer that
+     * adds the goal's last word ends the run. A card answered before answers the run: its first
+     * answer stands.
      */
-    answer: async (actorUserId: string, runId: string, position: number, request: DiscoveryAnswerRequest): Promise<DiscoveryAnswerResult> => {
-      const checked = await transaction(async (repos) => {
-        const { run, enrolled } = await authorizeRun(repos, actorUserId, runId, false);
+    answer: async (actorUserId: string, runId: string, position: number, request: DiscoveryAnswerRequest): Promise<DiscoveryRun> =>
+      transaction(async (repos) => {
+        const { run } = await authorizeRun(repos, actorUserId, runId, true);
         const cards = await repos.discovery.listCards(runId);
         const card = cards.find((candidate) => candidate.position === position);
         if (!card) throw new DiscoveryNotFound(runId, position);
-        if (card.answer !== null) return { kind: 'replay' as const, answer: { known: card.known === true, meaning: card.hebrew, run: toRun(run, cards) } };
+        if (card.answer !== null) return toRun(run, cards);
         if (run.status !== 'asking') throw new DiscoveryConflict(runId, 'not asking');
-        return { kind: 'fresh' as const, card, enrolled };
-      });
-      if (checked.kind === 'replay') return checked.answer;
-      const { card, enrolled } = checked;
+        if (request.pick !== null && request.pick >= card.choices.length) throw new InvalidDiscoveryAnswer(runId, position, request.pick);
 
-      let verdict: CardVerdict | null = null;
-      let judgedBy: JudgedBy | null = null;
-      if (request.kind === 'typed') {
-        const source = enrolled.source_language as LanguageCode;
-        if (wrongScript(request.text, source)) {
-          logger.info({ event: 'discovery_wrong_script', run_id: runId, position });
-          throw new WrongScript(`${runId}/${position}`, LANGUAGES[source].name);
-        }
-        const rule = meaningRuleVerdict(card.hebrew, request.text, card.alternatives);
-        if (rule !== null) {
-          verdict = asCardVerdict(rule);
-          judgedBy = 'rule';
-        } else {
-          try {
-            const raw = await judge({
-              ...buildMeaningJudgePrompt(
-                {
-                  language: enrolled.target_language as LanguageCode,
-                  explanation: source,
-                  form: card.word,
-                  lemma: card.word,
-                  partOfSpeech: card.partOfSpeech,
-                  meaning: card.hebrew,
-                  example: null,
-                  exampleTranslation: null,
-                  alternatives: card.alternatives,
-                },
-                request.text,
-              ),
-              record: { kind: 'judge', enrollmentId: enrolled.id, userId: enrolled.user_id },
-            });
-            const judged = parseMeaningJudge(raw);
-            if (judged === null) throw new LlmUnavailable('the verdict was unreadable');
-            verdict = asCardVerdict(judged);
-            judgedBy = 'model';
-          } catch (error) {
-            logger.info({
-              event: 'discovery_judge_failed',
-              run_id: runId,
-              position,
-              reason: error instanceof Error ? error.name : 'unknown',
-            });
-            judgedBy = 'unavailable';
-          }
-        }
-      }
-      const known = verdict === 'exact' || verdict === 'alternative';
-
-      const outcome = await transaction(async (repos): Promise<{ answer: DiscoveryAnswerResult; wrote: boolean }> => {
-        const { run } = await authorizeRun(repos, actorUserId, runId, true);
-        const asAnswered = (cards: readonly CardRow[], at: RunRow) => {
-          const answered = cards.find((candidate) => candidate.position === position)!;
-          return { answer: { known: answered.known === true, meaning: answered.hebrew, run: toRun(at, cards) }, wrote: false };
-        };
-        if (run.status !== 'asking') {
-          const cards = await repos.discovery.listCards(runId);
-          if (cards.find((candidate) => candidate.position === position)?.answer) return asAnswered(cards, run);
-          throw new DiscoveryConflict(runId, 'not asking');
-        }
-        const wrote = await repos.discovery.answerCard(runId, position, {
-          answer: request.kind,
-          typedText: request.kind === 'typed' ? request.text : null,
-          verdict,
+        const pickRight = request.pick !== null && request.pick === card.rightChoice;
+        const suggested: Suggestion = pickRight ? 'skip' : 'add';
+        const known = pickRight && !request.add;
+        await repos.discovery.answerCard(runId, position, {
+          answer: request.pick === null ? 'unknown' : 'choice',
+          picked: request.pick,
+          suggested,
+          added: request.add,
           known,
-          judgedBy,
-          lookupStatus: known ? null : 'pending',
+          lookupStatus: request.add ? 'pending' : null,
           answeredAt: new Date(now()),
         });
-        const cards = await repos.discovery.listCards(runId);
-        // Another answer of this card landed first: it stands.
-        if (!wrote) return asAnswered(cards, run);
-        if (!known) await repos.jobs.enqueue(LOOK_UP_DISCOVERED_WORD, { run_id: runId, position });
-        const reached = unknownOf(cards).length >= run.goal;
-        const current = reached ? await toList(repos, run, cards, 'goal') : run;
-        return { answer: { known, meaning: card.hebrew, run: toRun(current, cards) }, wrote: true };
-      });
-      if (outcome.wrote) {
-        logger.info({ event: 'discovery_answered', run_id: runId, position, answer: request.kind, judged_by: judgedBy, known });
-      }
-      return outcome.answer;
-    },
-
-    /** Spec D8. A tick or a meaning changed on the list, as a photo row's, while the run lists. */
-    updateItem: async (actorUserId: string, runId: string, position: number, update: PhotoImportItemUpdate): Promise<PhotoImportItem> =>
-      transaction(async (repos) => {
-        const { run } = await authorizeRun(repos, actorUserId, runId, true);
-        if (run.status !== 'listing') throw new DiscoveryConflict(runId, 'not listing');
-        const card = (await repos.discovery.listCards(runId)).find((candidate) => candidate.position === position);
-        if (!card || card.known !== false) throw new DiscoveryNotFound(runId, position);
-        const refusal = refuseItemUpdate(asRowState(card), update);
-        if (refusal === 'not_ready') throw new DiscoveryConflict(runId, `row ${position} is not ready`);
-        if (refusal) throw new InvalidDiscoveryItem(runId, position, refusal);
-        const updated = await repos.discovery.updateItem(runId, position, {
-          ...(update.ticked !== undefined ? { ticked: update.ticked } : {}),
-          ...(update.gloss_id !== undefined ? { chosenGlossId: update.gloss_id } : {}),
-        });
-        if (!updated) throw new DiscoveryNotFound(runId, position);
-        return toItem(updated);
+        if (request.add) await repos.jobs.enqueue(LOOK_UP_DISCOVERED_WORD, { run_id: runId, position });
+        logger.info({ event: 'discovery_answered', run_id: runId, position, pick_right: pickRight, added: request.add, suggested, known });
+        const answered = await repos.discovery.listCards(runId);
+        const current = addedOf(answered).length >= run.goal ? await endRun(repos, run, answered, 'goal') : run;
+        return toRun(current, answered);
       }),
 
     /**
-     * Spec D8. Continue: the ticked rows' glosses saved to My words (saveEntriesInTx, as a
-     * typed save checks them) and the run marked saved, in one transaction: dependent
-     * writes. Refused while a row is looked up. A repeated save answers the same ids.
+     * Phase 74 (spec D8). ✕ with words added: the run ends now. An ended run answers as it is;
+     * a discarded one is refused.
      */
-    save: async (actorUserId: string, runId: string): Promise<SaveVocabularyResponse> => {
-      const outcome = await transaction(async (repos) => {
-        const { run, enrolled } = await authorizeRun(repos, actorUserId, runId, true);
-        const rows = unknownOf(await repos.discovery.listCards(runId));
-        const entries = firstPerGloss(entriesToSave(rows.map(asRowState)));
-        if (run.status === 'saved') return { entries, rows, repeated: true };
-        if (run.status !== 'listing') throw new DiscoveryConflict(runId, 'not listing');
-        if (rows.some((row) => row.lookupStatus === 'pending')) throw new DiscoveryConflict(runId, 'a row is still looked up');
-        await saveEntriesInTx(repos, logger, { enrolled, actorUserId, entries, stockSaveDelaySeconds });
-        if (!(await repos.discovery.transition(runId, ['listing'], 'saved'))) throw new DiscoveryConflict(runId, 'not listing');
-        return { entries, rows, repeated: false };
-      });
-      if (!outcome.repeated) {
-        logger.info({
-          event: 'discovery_saved',
-          run_id: runId,
-          saved_count: outcome.entries.length,
-          unticked_count: outcome.rows.filter((row) => row.lookupStatus === 'ready' && row.options.length > 0 && !row.ticked).length,
-          row_count: outcome.rows.length,
-        });
-      }
-      return { saved_gloss_ids: outcome.entries.map((entry) => entry.gloss_id) };
-    },
-
-    /** Spec D8. ביטול: the run is discarded; its answers stay. Idempotent; a saved run is refused. */
-    discard: async (actorUserId: string, runId: string): Promise<void> => {
-      const discarded = await transaction(async (repos) => {
+    end: async (actorUserId: string, runId: string): Promise<DiscoveryRun> =>
+      transaction(async (repos) => {
         const { run } = await authorizeRun(repos, actorUserId, runId, true);
-        if (run.status === 'discarded') return false;
-        if (run.status === 'saved') throw new DiscoveryConflict(runId, 'already saved');
-        return repos.discovery.transition(runId, ['asking', 'listing'], 'discarded');
-      });
-      if (discarded) logger.info({ event: 'discovery_discarded', run_id: runId });
-    },
+        const cards = await repos.discovery.listCards(runId);
+        if (run.status === 'saved') return toRun(run, cards);
+        if (run.status !== 'asking') throw new DiscoveryConflict(runId, `already ${run.status}`);
+        return toRun(await endRun(repos, run, cards, 'end'), cards);
+      }),
 
     /**
-     * Spec D7. The look-up-discovered-word job: a card the learner did not know, looked up
-     * as a photo row is (lookUpRow), then one write. A run saved or discarded, or a card no
-     * longer pending, costs no lookup and takes no write.
+     * Spec D7, phase 74 (D5). The look-up-discovered-word job: an added card looked up as a
+     * photo row is (lookUpRow), then one transaction under the run's lock: the lookup written
+     * and, when it found a gloss, the word saved to My words (as its owner) and the card
+     * stamped. The run's 2nd saved word, or any save after the run ended, asks for the session
+     * at once; a discovery save asks for no delayed stock (builder check B3). A run discarded,
+     * or a card no longer pending, costs no lookup and takes no write.
      */
     lookUpWord: async (data: unknown): Promise<void> => {
       const { run_id: runId, position } = LookUpDiscoveredWordPayloadSchema.parse(data);
       const read = await transaction(async ({ discovery, enrollment }) => {
         const run = await discovery.findRun(runId);
-        if (!run || (run.status !== 'asking' && run.status !== 'listing')) return undefined;
+        if (!run || (run.status !== 'asking' && run.status !== 'saved')) return undefined;
         const card = (await discovery.listCards(runId)).find((candidate) => candidate.position === position);
         if (!card || card.lookupStatus !== 'pending') return undefined;
         const enrolled = await enrollment.findById(run.enrollmentId);
@@ -503,45 +432,58 @@ export function createDiscoveryService({
           onUnreadable: () => new SenseMatchUnreadable(runId, position),
         },
       );
-      const written = await transaction(async ({ discovery }) => {
-        const run = await discovery.findRunForUpdate(runId);
-        if (!run || (run.status !== 'asking' && run.status !== 'listing')) return false;
-        return discovery.writeLookup(runId, position, result);
+      const outcome = await transaction(async (repos) => {
+        const run = await repos.discovery.findRunForUpdate(runId);
+        if (!run || (run.status !== 'asking' && run.status !== 'saved')) return { written: false as const };
+        if (!(await repos.discovery.writeLookup(runId, position, result))) return { written: false as const };
+        const card = (await repos.discovery.listCards(runId)).find((candidate) => candidate.position === position);
+        const entries = card?.added ? firstPerGloss(entriesToSave([asRowState(card)])) : [];
+        if (entries.length === 0) return { written: true as const, saved: false };
+        await saveEntriesInTx(repos, logger, { enrolled: read.enrolled, actorUserId: read.enrolled.user_id, entries, stockSaveDelaySeconds: null });
+        await repos.discovery.markSaved(runId, position);
+        const after = await repos.discovery.listCards(runId);
+        const savedCount = savedCountOf(after);
+        // While the run asks, its 2nd saved word (Victor); once it ended, its last lookup.
+        const stocked = run.status === 'asking' ? savedCount === 2 : endedRunReady(after);
+        if (stocked) await requestStock(repos, { enrollment_id: run.enrollmentId, reason: 'discovery' });
+        return { written: true as const, saved: true, savedCount, stocked };
       });
       logger.info({
-        event: written ? 'discovered_word_looked_up' : 'discovered_word_dropped',
+        event: outcome.written ? 'discovered_word_looked_up' : 'discovered_word_dropped',
         run_id: runId,
         position,
         matched_by: matchedBy,
         corrected: result.correctedForm !== null,
         option_count: result.options.length,
         reason: result.reason,
-        ...(written ? {} : { stage: 'write' }),
+        ...(outcome.written ? {} : { stage: 'write' }),
       });
+      if (outcome.written && outcome.saved) {
+        logger.info({
+          event: 'discovered_word_saved',
+          run_id: runId,
+          position,
+          hebrew_mismatch: result.hebrewMismatch,
+          saved_count: outcome.savedCount,
+          stocked: outcome.stocked,
+        });
+      }
     },
 
-    /** The lookup's dead letter: the row is marked failed, unticked; the rest unaffected. */
+    /** The lookup's dead letter: the word is marked failed; the rest unaffected. Phase 74 (final
+     *  review I2): when it was an ended run's last lookup, the words saved get their session. */
     failWord: async (data: unknown): Promise<void> => {
       const { run_id: runId, position } = LookUpDiscoveredWordPayloadSchema.parse(data);
-      const marked = await transaction(({ discovery }) => discovery.markLookupFailed(runId, position));
-      logger.info({ event: 'discovered_word_failed', run_id: runId, position, marked });
+      const { marked, stocked } = await transaction(async (repos) => {
+        const run = await repos.discovery.findRunForUpdate(runId);
+        const marked = await repos.discovery.markLookupFailed(runId, position);
+        const stocked = marked && run?.status === 'saved' && endedRunReady(await repos.discovery.listCards(runId));
+        if (stocked) await requestStock(repos, { enrollment_id: run.enrollmentId, reason: 'discovery' });
+        return { marked, stocked };
+      });
+      logger.info({ event: 'discovered_word_failed', run_id: runId, position, marked, stocked });
     },
-
-    /** Spec D8. "לרשימה": the run goes to its list now. A listing run answers as it is. */
-    end: async (actorUserId: string, runId: string): Promise<DiscoveryRun> =>
-      transaction(async (repos) => {
-        const { run } = await authorizeRun(repos, actorUserId, runId, true);
-        const cards = await repos.discovery.listCards(runId);
-        if (run.status === 'listing') return toRun(run, cards);
-        if (run.status !== 'asking') throw new DiscoveryConflict(runId, `already ${run.status}`);
-        return toRun(await toList(repos, run, cards, 'end'), cards);
-      }),
   };
-}
-
-/** The judge's three verdicts are the card's. */
-function asCardVerdict(verdict: TypedVerdict): CardVerdict {
-  return verdict === 'exact' || verdict === 'alternative' ? verdict : 'wrong';
 }
 
 export type DiscoveryService = ReturnType<typeof createDiscoveryService>;

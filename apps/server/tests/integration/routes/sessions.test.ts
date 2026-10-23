@@ -566,7 +566,7 @@ describe('phase 19 session routes', () => {
   it('GET current answers before, during and after a session, and 404s an unknown enrollment', async () => {
     const app = buildTestApp();
     const before = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
-    expect(before).toEqual({ current: null, next_source: 'seed', saved_count: 0, due_count: 0, today: TODAY_ZERO });
+    expect(before).toEqual({ current: null, next_source: 'seed', saved_count: 0, due_count: 0, today: TODAY_ZERO, needs_new_words: false });
 
     const { session_id } = await startSeed(app, E());
     const during = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
@@ -577,6 +577,7 @@ describe('phase 19 session routes', () => {
       saved_count: 0,
       due_count: 0,
       today: TODAY_ZERO,
+      needs_new_words: false,
     });
 
     const missing = await getJson(app, '/api/enrollments/e_nobody/sessions/current');
@@ -636,7 +637,8 @@ describe('a target path on create and current', () => {
     expect(await answered(await getJson(app, `/api/enrollments/${E()}/sessions/current?target_id=${target}`))).toEqual({
       status: 200,
       // Far off, the plan's first day meets its one word (spec D6).
-      body: { current: null, next_source: 'list', saved_count: 1, due_count: 1 },
+      // Phase 74 (spec D7): a target's path never needs new words.
+      body: { current: null, next_source: 'list', saved_count: 1, due_count: 1, needs_new_words: false },
     });
   });
 
@@ -663,7 +665,7 @@ describe('another learner', () => {
     expect(await answered(await postJson(app, '/api/sessions', { enrollment_id: E() }, 'u_2'))).toEqual(FORBIDDEN);
     expect(await answered(await getJson(app, `/api/enrollments/${E()}/sessions/current`, 'u_2'))).toEqual(FORBIDDEN);
     const mine = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
-    expect(mine).toEqual({ current: null, next_source: 'seed', saved_count: 0, due_count: 0, today: TODAY_ZERO });
+    expect(mine).toEqual({ current: null, next_source: 'seed', saved_count: 0, due_count: 0, today: TODAY_ZERO, needs_new_words: false });
   });
 
   it("is answered 403 on someone else's session, which stays as it was", async () => {
