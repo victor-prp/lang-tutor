@@ -24,16 +24,19 @@ const none = (next_source: 'seed' | 'list', saved_count = 0): CurrentSessionResp
   next_source,
   saved_count,
   due_count: 0,
+  needs_new_words: false,
 });
 const withCurrent = (
   status: 'preparing' | 'ready' | 'failed',
   answered = 0,
   saved_count = 4,
+  needs_new_words = false,
 ): CurrentSessionResponse => ({
   current: { session_id: 's1', status, source: 'list', answered, total: status === 'preparing' ? 0 : 4, started: answered > 0 },
   next_source: 'list',
   saved_count,
   due_count: 0,
+  needs_new_words,
 });
 
 describe('homeActionOf — the seven home states', () => {
@@ -49,6 +52,22 @@ describe('homeActionOf — the seven home states', () => {
     ['failed, with nothing saved', withCurrent('failed', 0, 0), { kind: 'discover' }],
   ])('%s', (_label, state, action) => {
     expect(homeActionOf(state)).toEqual(action);
+  });
+});
+
+describe('homeActionOf — when My words needs new words (phase 74, spec D7)', () => {
+  it('sends the learner to Words for me before a session waiting or to make', () => {
+    expect(homeActionOf(withCurrent('ready', 0, 4, true))).toEqual({ kind: 'discover' });
+    expect(homeActionOf(withCurrent('preparing', 0, 4, true))).toEqual({ kind: 'discover' });
+    expect(homeActionOf({ ...none('list', 3), needs_new_words: true })).toEqual({ kind: 'discover' });
+  });
+
+  it('resumes a started session first', () => {
+    expect(homeActionOf(withCurrent('ready', 2, 4, true))).toEqual({ kind: 'resume', sessionId: 's1' });
+  });
+
+  it('leaves a reminder tap to start the waiting session', () => {
+    expect(homeActionOf(withCurrent('ready', 0, 4, true), { forReminder: true })).toEqual({ kind: 'start', sessionId: 's1' });
   });
 });
 

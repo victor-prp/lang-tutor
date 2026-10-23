@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { DAY_CAP_OPTIONS, PER_SESSION_OPTIONS, capNoticeDue, withDayCap, withPerSession } from './newWordLimits';
+import { DAY_CAP_OPTIONS, DISCOVER_COUNT_OPTIONS, PER_SESSION_OPTIONS, capNoticeDue, withDayCap, withDiscoverCount, withPerSession } from './newWordLimits';
 
 describe('the new-word limits screen (phase 70, spec D7)', () => {
   it('offers the caps and the per-session choices the spec names, automatic first', () => {
@@ -9,10 +9,15 @@ describe('the new-word limits screen (phase 70, spec D7)', () => {
   });
 
   it('builds the whole body a save sends from one tap', () => {
-    const limits = { day_cap: 15, per_session: null };
-    expect(withDayCap(limits, 30)).toEqual({ day_cap: 30, per_session: null });
-    expect(withPerSession({ day_cap: 30, per_session: 2 }, null)).toEqual({ day_cap: 30, per_session: null });
-    expect(withPerSession(limits, 1)).toEqual({ day_cap: 15, per_session: 1 });
+    const limits = { day_cap: 15, per_session: null, discover_count: 10 };
+    expect(withDayCap(limits, 30)).toEqual({ day_cap: 30, per_session: null, discover_count: 10 });
+    expect(withPerSession({ ...limits, day_cap: 30, per_session: 2 }, null)).toEqual({ day_cap: 30, per_session: null, discover_count: 10 });
+    expect(withPerSession(limits, 1)).toEqual({ day_cap: 15, per_session: 1, discover_count: 10 });
+    expect(withDiscoverCount(limits, 20)).toEqual({ day_cap: 15, per_session: null, discover_count: 20 });
+  });
+
+  it("offers Words for me's counts the spec names (phase 74, spec D10)", () => {
+    expect(DISCOVER_COUNT_OPTIONS).toEqual([5, 10, 15, 20, 30]);
   });
 });
 

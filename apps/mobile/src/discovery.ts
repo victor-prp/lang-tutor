@@ -1,31 +1,31 @@
 import type {
-  DiscoveryAnswerResult,
+  CurrentSession,
   DiscoveryLearningContext,
   DiscoveryRun,
   DiscoverySelfLevel,
   DiscoveryState,
-  PhotoImportItem,
 } from '@lang-tutor/core/api';
 
 import { strings } from './strings';
 
 /**
- * Phase 69. Words for me, the screen's pure half: which step a run is at, the choices it
- * offers, and what the card and the list show (spec D1–D8).
+ * Phase 69. Words for me, the screen's pure half: which step a run is at and the choices it
+ * offers (spec D1–D8). Phase 74: a card's suggestion and its sheet, what ✕ does, and the end
+ * screen's state (spec D2, D8, D9).
  */
 
-/** Spec D1. The screen's steps, in order: the questions once, then how many, then the cards
- *  and the fetch of each round, then the list. */
-export type DiscoverStep = 'questions' | 'goal' | 'fetching' | 'card' | 'list';
+/** Spec D1, phase 74 D6. The screen's steps, in order: the questions once, then how many (a run
+ *  the learner starts) or straight to the start (one the app starts), then the cards and the
+ *  fetch of each round, then the end. */
+export type DiscoverStep = 'questions' | 'goal' | 'starting' | 'fetching' | 'card' | 'end';
 
 /** Where the screen opens: a run open resumes at its step. A run asking with no card
- *  unanswered needs its next round, never an empty card. */
-export function stepOf(state: DiscoveryState): DiscoverStep {
+ *  unanswered needs its next round, never an empty card. `fromApp` is a run the app starts. */
+export function stepOf(state: DiscoveryState, fromApp: boolean): DiscoverStep {
   if (state.profile === null) return 'questions';
   const run = state.run;
-  if (run === null) return 'goal';
-  if (run.status === 'listing') return 'list';
-  if (run.status !== 'asking') return 'goal';
+  if (run !== null && run.status === 'saved') return 'end';
+  if (run === null || run.status !== 'asking') return fromApp ? 'starting' : 'goal';
   return run.cards.length > 0 ? 'card' : 'fetching';
 }
 
@@ -48,27 +48,58 @@ export const LEARNING_CONTEXTS: readonly { value: DiscoveryLearningContext; labe
   { value: 'family', label: strings.discoverContextFamily },
 ];
 
-/** Spec D5. The line a typed answer leaves on its card. */
-export function verdictLine(result: DiscoveryAnswerResult): { tone: 'right' | 'wrong'; text: string } {
-  return result.known ? { tone: 'right', text: strings.discoverRight } : { tone: 'wrong', text: strings.discoverWrong(result.meaning) };
+export type AddChoice = 'add' | 'skip';
+
+/** Phase 74 (spec D2). After a right pick the app suggests not adding; otherwise adding. */
+export function suggestionOf(pick: number | null, right: number): AddChoice {
+  return pick === right ? 'skip' : 'add';
 }
 
-/** Spec D8. The list polls while a row is still looked up, and cannot be saved till then. */
-export function itemsWaiting(run: DiscoveryRun): boolean {
-  return run.items.some((row) => row.status === 'pending');
+/** Phase 74 (spec D2). The sheet a choice against the suggestion opens: `knew`, the learner knew
+ *  the word and adds it; `new`, they did not and skip it. The suggestion itself opens none. */
+export function sheetCaseOf(suggested: AddChoice, chosen: AddChoice): 'knew' | 'new' | null {
+  if (suggested === chosen) return null;
+  return chosen === 'add' ? 'knew' : 'new';
 }
 
-/** The rows Continue would add: ticked, and looked up with a gloss. */
-export function tickedCount(run: DiscoveryRun): number {
-  return run.items.filter((row) => row.status === 'ready' && row.ticked).length;
+/** Phase 74 (spec D8). What ✕ does: during the cards (a later round being fetched counts) it ends
+ *  the run with two words added or more, and warns with fewer; anywhere else it leaves. */
+export function closeStep(run: DiscoveryRun | null, step: DiscoverStep): 'end' | 'warn' | 'leave' {
+  const duringCards = run !== null && run.status === 'asking' && (step === 'card' || (step === 'fetching' && run.round > 0));
+  if (!duringCards) return 'leave';
+  return run.added_count >= 2 ? 'end' : 'warn';
 }
 
-/** One row as the server now has it, the others as they were. */
-export function withItem(run: DiscoveryRun, row: PhotoImportItem): DiscoveryRun {
-  return { ...run, items: run.items.map((current) => (current.position === row.position ? row : current)) };
+/** Phase 74 (spec D8). The warning's second button: a learner the app sent who has words of their
+ *  own practises without new ones; anyone else leaves, the run open. */
+export function warnEscape(fromApp: boolean, wordsBefore: number): 'practise' | 'leave' {
+  return fromApp && wordsBefore > 0 ? 'practise' : 'leave';
 }
 
-/** Spec D8. "לרשימה" shows from the first word not known, while the run asks. */
-export function canEnd(run: DiscoveryRun): boolean {
-  return run.status === 'asking' && run.unknown_count > 0;
+/** Phase 74 (spec D8). The learner's words from before this run: My words' count less what the
+ *  run has saved. */
+export function savedBefore(savedCount: number, run: DiscoveryRun | null): number {
+  const saved = run ? run.added.filter((word) => word.status === 'saved').length : 0;
+  return Math.max(0, savedCount - saved);
+}
+
+/**
+ * Phase 74 (spec D9). The end screen's bottom, from My words' session: start it once ready;
+ * wait while it is prepared or a word is still looked up; with a word saved and no session,
+ * ask for one once (`created`), then wait; nothing to offer with no word saved; a failure says so.
+ */
+export function endStep(run: DiscoveryRun, current: CurrentSession | null, created: boolean): 'start' | 'wait' | 'create' | 'empty' | 'failed' {
+  if (current?.status === 'ready') return 'start';
+  if (current?.status === 'preparing') return 'wait';
+  if (current?.status === 'failed') return 'failed';
+  if (run.added.some((word) => word.status === 'pending')) return 'wait';
+  if (run.added.some((word) => word.status === 'saved')) return created ? 'wait' : 'create';
+  return 'empty';
+}
+
+/** Phase 73 (spec D6). While waiting on a session asked for: what the re-read `current` says. */
+export function waitStep(current: { session_id: string; status: string } | null | undefined, sessionId: string): 'open' | 'wait' | 'home' {
+  if (!current || current.session_id !== sessionId) return 'wait';
+  if (current.status === 'ready') return 'open';
+  return current.status === 'failed' ? 'home' : 'wait';
 }

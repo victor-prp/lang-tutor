@@ -104,6 +104,8 @@ export function LearningSection({ active }: { active: Enrollment }) {
   );
 
   const action: HomeAction | null = next.current ? homeActionOf(next.current) : null;
+  // Phase 74 (spec D7). A reminder tap enters the waiting session even when My words needs new words.
+  const reminderAction: HomeAction | null = next.current ? homeActionOf(next.current, { forReminder: true }) : null;
   // Phase 57 (spec D11). One card per path, by priority; phase 64 (spec D3) shows them as a
   // stack, one at a time, in that order.
   const targets = targetList?.targets ?? [];
@@ -192,7 +194,7 @@ export function LearningSection({ active }: { active: Enrollment }) {
     const held = reminderHeld.current;
     const step = homeReminderStartOf(
       held.targets,
-      action,
+      reminderAction,
       {
         failed: next.loadFailed || makeFailed,
         read: next.current !== held.read,

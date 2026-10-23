@@ -1,21 +1,30 @@
 import type { DiscoveryRun, DiscoverySelfLevel, DiscoveryState } from '@lang-tutor/core/api';
 import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ApiError } from '@/api/client';
 import { cardButton } from '@/components/BandCard';
 import { DiscoverCard } from '@/components/DiscoverCard';
-import { DiscoverList } from '@/components/DiscoverList';
+import { DiscoverEnd } from '@/components/DiscoverEnd';
+import { DiscoverSheet } from '@/components/DiscoverSheet';
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { confirm } from '@/confirm';
-import { DEFAULT_GOAL, GOAL_CHOICES, LEARNING_CONTEXTS, SELF_LEVELS, canEnd, stepOf, verdictLine } from '@/discovery';
+import {
+  DEFAULT_GOAL,
+  GOAL_CHOICES,
+  LEARNING_CONTEXTS,
+  SELF_LEVELS,
+  closeStep,
+  endStep,
+  savedBefore,
+  stepOf,
+  waitStep,
+  warnEscape,
+} from '@/discovery';
 import { useApi } from '@/hooks/useApi';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
-import { afterSave, waitStep } from '@/discoverAfterSave';
 import { POLL_INTERVAL_MS } from '@/nextSession';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, shadows, spacing } from '@/theme';
@@ -38,8 +47,10 @@ function Choice({ label, selected, testID, onPress }: { label: string; selected:
 
 /**
  * Phase 69. Words for me, one screen over the tabs (spec D1): the two questions the first
- * time (D2), how many words (D6), then rounds of cards (D5) until the run lists its words (D8).
- * Opening it again resumes the open run at its step; ✕ leaves it open.
+ * time (D2), how many words (D6), then rounds of cards (D5). Opening it again resumes the open
+ * run at its step. Phase 74: a run the app starts (`from=my-words`, spec D6) skips how many;
+ * each card is a choice and an add (D1, D2); ✕ ends a run with two words added or warns with
+ * fewer (D8); the end shows what was added and starts the session once it is ready (D9).
  */
 export default function DiscoverScreen() {
   const api = useApi();
@@ -49,16 +60,18 @@ export default function DiscoverScreen() {
   const [busy, setBusy] = useState(false);
   const [selfLevel, setSelfLevel] = useState<DiscoverySelfLevel | null>(null);
   const [goal, setGoal] = useState<number>(DEFAULT_GOAL);
-  // A typed answer's verdict, and the run it left, shown until הבא.
-  const [answered, setAnswered] = useState<{ verdict: { tone: 'right' | 'wrong'; text: string }; run: DiscoveryRun } | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const [warning, setWarning] = useState(false);
+  // Spec D9. The end asked for the session once; practising without new words waits on one.
+  const [created, setCreated] = useState(false);
+  const [waitingFor, setWaitingFor] = useState<string | null>(null);
   const fetching = useRef(false);
+  const starting = useRef(false);
   const enrollmentId = active?.id ?? null;
-  // Phase 73 (spec D6). Opened from the My words card, saving goes on into the first session.
   const { from } = useLocalSearchParams<{ from?: string }>();
+  // Phase 73 (spec D6), phase 74 (D6). Opened from the My words card, the app starts the run.
+  const fromApp = from === 'my-words';
   const nextSession = useNextSession();
   const { enter } = useSession();
-  const [waitingFor, setWaitingFor] = useState<{ sessionId: string; photoSaved: string } | null>(null);
   const live = useRef(true);
   const opened = useRef(false);
   useEffect(() => {
@@ -82,10 +95,11 @@ export default function DiscoverScreen() {
   }, [load]);
 
   const setRun = useCallback((run: DiscoveryRun) => setState((current) => (current ? { ...current, run } : current)), []);
-  const step = state ? stepOf(state) : null;
+  const step = state ? stepOf(state, fromApp) : null;
+  const run = state?.run ?? null;
+  const runId = run?.id ?? null;
 
   // A run asking with every card answered fetches its next round, once at a time.
-  const runId = state?.run?.id ?? null;
   const nextRound = useCallback(async () => {
     if (!runId || fetching.current) return;
     fetching.current = true;
@@ -102,11 +116,28 @@ export default function DiscoverScreen() {
     if (step === 'fetching' && !failed) void nextRound();
   }, [step, failed, nextRound]);
 
+  // Spec D6. A run the app starts has no chips: it starts as soon as the questions are behind.
+  useEffect(() => {
+    if (step !== 'starting' || !enrollmentId || starting.current || failed) return;
+    starting.current = true;
+    api
+      .startDiscovery(enrollmentId, null)
+      .then((started) => {
+        if (live.current) setRun(started);
+      })
+      .catch(() => {
+        if (live.current) setFailed(true);
+      })
+      .finally(() => {
+        starting.current = false;
+      });
+  }, [step, enrollmentId, failed, api, setRun]);
+
   const openSession = useCallback(
-    (sessionId: string) => {
+    (sessionId: string, fresh: boolean) => {
       if (!live.current || opened.current) return;
       opened.current = true;
-      void nextSession.start(sessionId);
+      if (fresh) void nextSession.start(sessionId);
       enter(sessionId);
       // Replace, not push: back from the session lands on home, where discover sat.
       router.replace('/session');
@@ -114,22 +145,47 @@ export default function DiscoverScreen() {
     [nextSession, enter],
   );
 
-  // A first session still being prepared is read again until it is ready; the learner leaving stops it.
-  const waitingId = waitingFor?.sessionId ?? null;
+  // Spec D9. The end reads My words' session afresh, then follows it and the run's lookups.
+  const current = nextSession.current?.current ?? null;
+  const ending = step === 'end' && run ? endStep(run, current, created) : null;
+  const atEnd = step === 'end';
+  const { refresh, create } = nextSession;
+  useEffect(() => {
+    if (atEnd) void refresh();
+  }, [atEnd, refresh]);
+  const polling = ending === 'wait' || waitingFor !== null;
   useFocusEffect(
     useCallback(() => {
-      if (!waitingId) return undefined;
+      if (!polling) return undefined;
       const timer = setInterval(() => {
-        if (live.current) void nextSession.refresh();
+        if (!live.current) return;
+        void refresh();
+        if (runId) {
+          api
+            .getDiscoveryRun(runId)
+            .then((read) => {
+              if (live.current) setRun(read);
+            })
+            .catch(() => {});
+        }
       }, POLL_INTERVAL_MS);
       return () => clearInterval(timer);
-    }, [waitingId, nextSession]),
+    }, [polling, refresh, runId, api, setRun]),
   );
-  const waitingStep = waitingFor ? waitStep(nextSession.current?.current ?? null, waitingFor.sessionId) : 'wait';
+  useEffect(() => {
+    if (ending !== 'create') return;
+    setCreated(true);
+    create()
+      .then(() => refresh())
+      .catch(() => {});
+  }, [ending, create, refresh]);
+
+  // Spec D8. Practising without new words: the session asked for opens once it is ready.
+  const waitingStep = waitingFor ? waitStep(current, waitingFor) : 'wait';
   useEffect(() => {
     if (!waitingFor || !live.current) return;
-    if (waitingStep === 'open') openSession(waitingFor.sessionId);
-    else if (waitingStep === 'home') router.dismissTo({ pathname: '/', params: { photoSaved: waitingFor.photoSaved } });
+    if (waitingStep === 'open') openSession(waitingFor, true);
+    else if (waitingStep === 'home') router.dismissTo('/');
   }, [waitingFor, waitingStep, openSession]);
 
   if (!active) return <Redirect href="/" />;
@@ -158,79 +214,52 @@ export default function DiscoverScreen() {
 
   const start = () =>
     guard(async () => {
-      const run = await api.startDiscovery(active.id, goal);
-      setState((current) => (current ? { ...current, run } : current));
+      setRun(await api.startDiscovery(active.id, goal));
     });
 
-  const run = state?.run ?? null;
   const card = run?.cards[0] ?? null;
 
-  const answerUnknown = () =>
+  const answer = (pick: number | null, add: boolean) =>
     guard(async () => {
       if (!run || !card) return;
-      setNote(null);
-      setRun((await api.answerDiscoveryCard(run.id, card.position, { kind: 'unknown' })).run);
+      setRun(await api.answerDiscoveryCard(run.id, card.position, { pick, add }));
     });
 
-  const answerTyped = (text: string) => {
-    if (busy || !run || !card) return;
-    setBusy(true);
-    setFailed(false);
-    setNote(null);
-    api
-      .answerDiscoveryCard(run.id, card.position, { kind: 'typed', text })
-      .then((result) => setAnswered({ verdict: verdictLine(result), run: result.run }))
-      .catch((error: unknown) => {
-        // A 422 is an answer in the wrong alphabet: nothing was recorded.
-        if (error instanceof ApiError && error.status === 422) setNote(strings.discoverWriteHebrew);
-        else setFailed(true);
-      })
-      .finally(() => setBusy(false));
-  };
-
-  const next = () => {
-    if (!answered) return;
-    setRun(answered.run);
-    setAnswered(null);
-  };
-
-  const end = () =>
+  const endRun = () =>
     guard(async () => {
-      if (!run) return;
-      setRun(await api.endDiscovery(run.id));
+      if (run) setRun(await api.endDiscovery(run.id));
     });
 
-  const save = (count: number) =>
-    guard(async () => {
-      if (!run) return;
-      const { saved_gloss_ids } = await api.saveDiscovery(run.id);
-      const photoSaved = String(saved_gloss_ids.length || count);
-      const goHome = () => router.dismissTo({ pathname: '/', params: { photoSaved } });
-      if (from !== 'my-words') {
-        goHome();
+  const close = () => {
+    const what = closeStep(run, step ?? 'questions');
+    if (what === 'leave') router.back();
+    else if (what === 'warn') setWarning(true);
+    else void endRun();
+  };
+
+  const escape = warnEscape(fromApp, savedBefore(nextSession.current?.saved_count ?? 0, run));
+  const leaveAnyway = () => {
+    setWarning(false);
+    if (escape === 'leave') {
+      router.back();
+      return;
+    }
+    // Spec D8 (my call). The app sent a learner who has words: the run ends and the session they
+    // came for opens, waiting while it is prepared.
+    void guard(async () => {
+      if (run) await api.endDiscovery(run.id);
+      const session = await create().catch(() => null);
+      if (!session) {
+        router.dismissTo('/');
         return;
       }
-      // The rare refusal (no_saved_words, not enough questions, anything) goes home as before.
-      const created = await nextSession.create().catch(() => null);
-      const step = afterSave(from, created ? (created.status === 'ready' ? 'ready' : 'preparing') : 'error');
-      if (step === 'open' && created) openSession(created.session_id);
-      else if (step === 'wait' && created) setWaitingFor({ sessionId: created.session_id, photoSaved });
-      else goHome();
+      if (session.status === 'ready') openSession(session.session_id, true);
+      else setWaitingFor(session.session_id);
     });
+  };
 
-  const discard = async () => {
-    if (!run || busy) return;
-    const sure = await confirm({
-      title: strings.discoverDiscardTitle,
-      message: strings.discoverDiscardMessage,
-      confirm: strings.discoverDiscardConfirm,
-      cancel: strings.discoverDiscardCancel,
-    });
-    if (!sure) return;
-    await guard(async () => {
-      await api.discardDiscovery(run.id);
-      router.back();
-    });
+  const startEnd = () => {
+    if (current?.status === 'ready') openSession(current.session_id, current.answered === 0);
   };
 
   // Nothing read yet: read again. A round that failed: clearing the failure fetches it again.
@@ -241,8 +270,8 @@ export default function DiscoverScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView style={styles.avoid} behavior="padding">
-        <ScreenHeader title={strings.discoverTitle} onBack={() => router.back()} backTestID="discover-close" close />
+      <View style={styles.column}>
+        <ScreenHeader title={strings.discoverTitle} onBack={close} backTestID="discover-close" close />
 
         {failed ? (
           <View style={styles.failedRow}>
@@ -255,7 +284,7 @@ export default function DiscoverScreen() {
           </View>
         ) : null}
 
-        {step === null || step === 'fetching' ? (
+        {step === null || step === 'fetching' || step === 'starting' ? (
           failed ? null : (
             <View testID="discover-fetching" style={styles.center}>
               <ActivityIndicator color={colors.primary} />
@@ -330,37 +359,46 @@ export default function DiscoverScreen() {
             key={card.position}
             word={card.word}
             wordDirection={wordDirection}
-            found={strings.discoverFound((answered?.run ?? run).unknown_count, run.goal)}
-            verdict={answered?.verdict ?? null}
-            note={note}
+            choices={card.choices}
+            right={card.right}
+            added={strings.discoverAddedCount(run.added_count, run.goal)}
             busy={busy}
-            canEnd={answered === null && canEnd(run)}
-            onCheck={answerTyped}
-            onDontKnow={() => void answerUnknown()}
-            onNext={next}
-            onEnd={() => void end()}
+            onAnswer={(pick, add) => void answer(pick, add)}
           />
         ) : null}
 
-        {step === 'list' && run ? (
-          <DiscoverList
+        {step === 'end' && run && ending ? (
+          <DiscoverEnd
             run={run}
             wordDirection={wordDirection}
-            busy={busy || waitingFor !== null}
-            preparing={waitingFor !== null}
-            onRun={setRun}
-            onSave={(count) => void save(count)}
-            onDiscard={() => void discard()}
+            step={waitingFor ? 'wait' : ending}
+            busy={busy}
+            onStart={startEnd}
+            onHome={() => router.back()}
           />
         ) : null}
-      </KeyboardAvoidingView>
+      </View>
+
+      <DiscoverSheet
+        visible={warning}
+        testID="discover-warn"
+        title={strings.discoverWarnTitle}
+        body={strings.discoverWarnBody}
+        first={{
+          label: escape === 'practise' ? strings.discoverWarnPractise : strings.discoverWarnLeave,
+          testID: 'discover-warn-leave',
+          onPress: leaveAnyway,
+        }}
+        second={{ label: strings.discoverWarnContinue, testID: 'discover-warn-continue', onPress: () => setWarning(false) }}
+        onDismiss={() => setWarning(false)}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background, paddingHorizontal: spacing.md },
-  avoid: { flex: 1, gap: spacing.sm },
+  column: { flex: 1, gap: spacing.sm },
   body: { gap: spacing.md, paddingVertical: spacing.md },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   muted: { fontSize: fontSizes.md, color: colors.muted, writingDirection: 'rtl' },
