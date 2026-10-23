@@ -96,7 +96,7 @@ A new table **`my_words_days`**, one row per enrollment and learner day:
 | `enrollment_id`, `day` | the key (`day` a date, the learner's day) |
 | `goal` | the goal in force at the last write: 1–20, or null when off |
 | `sessions_done`, `new_words`, `moved_up` | D2's counts for that day |
-| `last_session_id` | the session whose end wrote it last; null after a goal change alone |
+| `last_session_id` | the session whose end wrote it last; kept by a goal change (the PUT rewrites only a row a session wrote) |
 | `updated_at` | when |
 
 - **Written** by the transaction that completes a counted session, after `recordProgress` (so under
