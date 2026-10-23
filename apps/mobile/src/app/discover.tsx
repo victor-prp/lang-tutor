@@ -1,5 +1,5 @@
 import type { DiscoveryRun, DiscoverySelfLevel, DiscoveryState } from '@lang-tutor/core/api';
-import { Redirect, router } from 'expo-router';
+import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +13,10 @@ import { confirm } from '@/confirm';
 import { DEFAULT_GOAL, GOAL_CHOICES, LEARNING_CONTEXTS, SELF_LEVELS, canEnd, stepOf, verdictLine } from '@/discovery';
 import { useApi } from '@/hooks/useApi';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useNextSession } from '@/hooks/useNextSession';
+import { useSession } from '@/hooks/useSession';
+import { afterSave, waitStep } from '@/discoverAfterSave';
+import { POLL_INTERVAL_MS } from '@/nextSession';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, shadows, spacing } from '@/theme';
 
@@ -50,6 +54,19 @@ export default function DiscoverScreen() {
   const [note, setNote] = useState<string | null>(null);
   const fetching = useRef(false);
   const enrollmentId = active?.id ?? null;
+  // Phase 73 (spec D6). Opened from the My words card, saving goes on into the first session.
+  const { from } = useLocalSearchParams<{ from?: string }>();
+  const nextSession = useNextSession();
+  const { enter } = useSession();
+  const [waitingFor, setWaitingFor] = useState<{ sessionId: string; photoSaved: string } | null>(null);
+  const live = useRef(true);
+  const opened = useRef(false);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     if (!enrollmentId) return;
@@ -84,6 +101,36 @@ export default function DiscoverScreen() {
   useEffect(() => {
     if (step === 'fetching' && !failed) void nextRound();
   }, [step, failed, nextRound]);
+
+  const openSession = useCallback(
+    (sessionId: string) => {
+      if (!live.current || opened.current) return;
+      opened.current = true;
+      void nextSession.start(sessionId);
+      enter(sessionId);
+      // Replace, not push: back from the session lands on home, where discover sat.
+      router.replace('/session');
+    },
+    [nextSession, enter],
+  );
+
+  // A first session still being prepared is read again until it is ready; the learner leaving stops it.
+  const waitingId = waitingFor?.sessionId ?? null;
+  useFocusEffect(
+    useCallback(() => {
+      if (!waitingId) return undefined;
+      const timer = setInterval(() => {
+        if (live.current) void nextSession.refresh();
+      }, POLL_INTERVAL_MS);
+      return () => clearInterval(timer);
+    }, [waitingId, nextSession]),
+  );
+  const waitingStep = waitingFor ? waitStep(nextSession.current?.current ?? null, waitingFor.sessionId) : 'wait';
+  useEffect(() => {
+    if (!waitingFor || !live.current) return;
+    if (waitingStep === 'open') openSession(waitingFor.sessionId);
+    else if (waitingStep === 'home') router.dismissTo({ pathname: '/', params: { photoSaved: waitingFor.photoSaved } });
+  }, [waitingFor, waitingStep, openSession]);
 
   if (!active) return <Redirect href="/" />;
   const language = active.target_language;
@@ -157,7 +204,18 @@ export default function DiscoverScreen() {
     guard(async () => {
       if (!run) return;
       const { saved_gloss_ids } = await api.saveDiscovery(run.id);
-      router.dismissTo({ pathname: '/', params: { photoSaved: String(saved_gloss_ids.length || count) } });
+      const photoSaved = String(saved_gloss_ids.length || count);
+      const goHome = () => router.dismissTo({ pathname: '/', params: { photoSaved } });
+      if (from !== 'my-words') {
+        goHome();
+        return;
+      }
+      // The rare refusal (no_saved_words, not enough questions, anything) goes home as before.
+      const created = await nextSession.create().catch(() => null);
+      const step = afterSave(from, created ? (created.status === 'ready' ? 'ready' : 'preparing') : 'error');
+      if (step === 'open' && created) openSession(created.session_id);
+      else if (step === 'wait' && created) setWaitingFor({ sessionId: created.session_id, photoSaved });
+      else goHome();
     });
 
   const discard = async () => {
@@ -288,7 +346,8 @@ export default function DiscoverScreen() {
           <DiscoverList
             run={run}
             wordDirection={wordDirection}
-            busy={busy}
+            busy={busy || waitingFor !== null}
+            preparing={waitingFor !== null}
             onRun={setRun}
             onSave={(count) => void save(count)}
             onDiscard={() => void discard()}
