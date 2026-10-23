@@ -23,7 +23,8 @@ export function resultsScreenOf({
 export function myWordsContinue(
   read: 'reading' | 'landed' | 'failed',
   action: HomeAction | null,
-): 'waiting' | 'open' | 'preparing' | 'retry' | 'home' {
+): 'waiting' | 'retry-read' | 'open' | 'preparing' | 'retry' | 'home' {
+  if (read === 'failed') return 'retry-read';
   if (read !== 'landed' || action === null) return 'waiting';
   switch (action.kind) {
     case 'start':

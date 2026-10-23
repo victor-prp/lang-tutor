@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { MyWordsToday } from '@lang-tutor/core/api';
 
-import { myWordsButton, todayDots, todayLine, todaySpoken, todayTiles } from '@/myWordsToday';
+import { hasToday, myWordsButton, todayDots, todayLine, todaySpoken, todayTiles } from '@/myWordsToday';
 
 const ltr = (text: string) => `⁦${text}⁩`;
 const today = (over: Partial<MyWordsToday> = {}): MyWordsToday => ({
@@ -89,5 +89,18 @@ describe('myWordsButton', () => {
     expect(myWordsButton(today({ sessions_done: 1 }), { kind: 'start', sessionId: 's' })).toEqual({ label: 'לתרגל עכשיו', filled: true });
     expect(myWordsButton(undefined, { kind: 'create' })).toEqual({ label: 'לתרגל עכשיו', filled: false });
     expect(myWordsButton(today({ goal: null, sessions_done: 9 }), { kind: 'resume', sessionId: 's' })).toEqual({ label: 'לתרגל עכשיו', filled: true });
+  });
+});
+
+describe('hasToday', () => {
+  it('is false with the goal off and no tiles', () => {
+    expect(hasToday(today({ goal: null }))).toBe(false);
+  });
+  it('is true with the goal off and a tile', () => {
+    expect(hasToday(today({ goal: null, new_words: 2 }))).toBe(true);
+    expect(hasToday(today({ goal: null, moved_up: 1 }))).toBe(true);
+  });
+  it('is true with the goal on', () => {
+    expect(hasToday(today())).toBe(true);
   });
 });

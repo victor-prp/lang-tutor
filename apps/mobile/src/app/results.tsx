@@ -19,6 +19,7 @@ import { useSession } from '@/hooks/useSession';
 import { useTargets } from '@/hooks/useTargets';
 import { homeActionOf, POLL_INTERVAL_MS, targetSessionAction } from '@/nextSession';
 import { missedPair, practisedRows } from '@/progress';
+import { hasToday } from '@/myWordsToday';
 import { myWordsContinue, resultsScreenOf } from '@/resultsMyWords';
 import { strings } from '@/strings';
 import { continueButton, resultsTarget, targetCardState } from '@/targets';
@@ -91,6 +92,11 @@ export default function ResultsScreen() {
       void refresh().then((landed) => setMyWordsRead((was) => (landed ? 'landed' : was === 'landed' ? was : 'failed')));
     }, [myWordsScreen, refresh]),
   );
+  // A failed read is read again on a press; while it is in flight the button waits.
+  const rereadMyWords = () => {
+    setMyWordsRead('reading');
+    void refresh().then((landed) => setMyWordsRead(landed ? 'landed' : 'failed'));
+  };
   const myWordsLanded = myWordsScreen && myWordsRead === 'landed';
   const myWordsAction = myWordsLanded && next.current ? homeActionOf(next.current) : null;
   const myWordsState = myWordsContinue(myWordsScreen ? myWordsRead : 'reading', myWordsAction);
@@ -185,7 +191,7 @@ export default function ResultsScreen() {
         <Text style={styles.score} testID="results-score">{strings.scoreLabel(correctCount, total)}</Text>
 
         {target ? <TargetBlock target={target} /> : null}
-        {myWordsLanded && next.current?.today ? (
+        {myWordsLanded && next.current?.today && hasToday(next.current.today) ? (
           <MyWordsBlock today={next.current.today} />
         ) : null}
         {view.kind === 'reading' ? (
@@ -253,7 +259,9 @@ export default function ResultsScreen() {
           <MyWordsContinueButton
             state={myWordsState}
             busy={busy}
-            onPress={() => myWordsAction && (myWordsState === 'retry' ? void myWords.makeNext() : myWords.press(myWordsAction))}
+            onPress={() =>
+              myWordsState === 'retry-read' ? rereadMyWords() : myWordsAction && (myWordsState === 'retry' ? void myWords.makeNext() : myWords.press(myWordsAction))
+            }
           />
         ) : view.kind === 'none' ? (
           <Pressable
@@ -338,7 +346,7 @@ function MyWordsContinueButton({
   onPress: () => void;
 }) {
   const preparing = state === 'preparing';
-  const disabled = state === 'waiting' || preparing || busy;
+  const disabled = state === 'waiting' || preparing || busy;  // 'retry-read' stays pressable
   return (
     <>
       {state === 'retry' ? <Text style={styles.failed}>{strings.preparationFailed}</Text> : null}

@@ -1,7 +1,7 @@
 import type { MyWordsToday as Today } from '@lang-tutor/core/api';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { todayDots, todayLine, todaySpoken, todayTiles } from '@/myWordsToday';
+import { hasToday, todayDots, todayLine, todaySpoken, todayTiles } from '@/myWordsToday';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 /**
@@ -15,7 +15,7 @@ export function MyWordsToday({ today, testID }: { today: Today; testID: string }
   const line = todayLine(today);
   const dots = todayDots(today);
   const tiles = todayTiles(today);
-  if (!line && !tiles) return null;
+  if (!hasToday(today)) return null;
   const met = line?.tone === 'done';
   return (
     <View testID={testID} style={styles.block}>

@@ -8,6 +8,11 @@ import { strings } from '@/strings';
 
 const goalMet = (today: MyWordsToday): boolean => today.goal !== null && today.sessions_done >= today.goal;
 
+/** Whether there is anything to draw of the day: a line (goal on) or a tile. */
+export function hasToday(today: MyWordsToday): boolean {
+  return todayLine(today) !== null || todayTiles(today) !== null;
+}
+
 export function todayLine(today: MyWordsToday): { text: string; side: string | null; tone: 'plain' | 'done' } | null {
   const { goal, sessions_done: done } = today;
   if (goal === null) return null;

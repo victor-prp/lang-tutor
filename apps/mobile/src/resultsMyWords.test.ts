@@ -20,7 +20,7 @@ describe('resultsScreenOf — which results screen a finished session gets', () 
 describe('myWordsContinue — the continue button per read and action', () => {
   it.each<['reading' | 'landed' | 'failed', HomeAction | null, string]>([
     ['reading', null, 'waiting'],
-    ['failed', null, 'waiting'],
+    ['failed', null, 'retry-read'],
     ['reading', { kind: 'start', sessionId: 's' }, 'waiting'],
     ['landed', null, 'waiting'],
     ['landed', { kind: 'start', sessionId: 's' }, 'open'],
