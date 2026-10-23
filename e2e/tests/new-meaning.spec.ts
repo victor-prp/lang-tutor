@@ -34,14 +34,9 @@ test('a new meaning of a known word: the card names what is known and shows the 
   const report = () => diagnosticReport(diagnostics);
   const username = 'e2e_new_meaning_ru';
 
-  page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
   await signUpLearner(page, username, 'ru');
   await openApp(page);
-
-  await tapUntil(page, 'start-button', 'progress-label');
-  await page.getByTestId('session-skip').click();
-  await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
 
   await tapUntil(page, 'translate-entry', 'translate-input');
   await lookUp(page, request, 'лук', LUK);

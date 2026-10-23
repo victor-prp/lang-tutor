@@ -1,6 +1,8 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
+import { API_URL } from '../urls';
 import { clearGemini, expectGemini } from './support/mockServer';
+import { enrollmentIdOf, makeSeed } from './support/sessions';
 import { openApp, signIn, signUpLearner } from './support/users';
 
 test.setTimeout(120_000);
@@ -23,6 +25,16 @@ async function startSession(page: Page) {
   }).toPass({ timeout: 30_000 });
 }
 
+/** Phase 73 (spec D6). The card never starts the seed: a spec about a course's seed session makes
+ *  it over the API, for the course in `language`, and home offers it as any ready session. */
+async function seedFor(request: APIRequestContext, language: string): Promise<void> {
+  const res = await request.get(`${API_URL}/api/enrollments`);
+  expect(res.ok(), await res.text()).toBe(true);
+  const enrollment = ((await res.json()) as { id: string; target_language: string }[]).find((one) => one.target_language === language);
+  expect(enrollment, `no ${language} course`).toBeDefined();
+  await makeSeed(request, enrollment!.id);
+}
+
 async function openTranslate(page: Page) {
   await expect(async () => {
     await page.getByTestId('translate-entry').click();
@@ -32,6 +44,7 @@ async function openTranslate(page: Page) {
 
 test('a Russian learner gets a Russian session', async ({ page, request }) => {
   await signUpLearner(page, 'e2e_ru_session', 'ru');
+  await makeSeed(page.request, await enrollmentIdOf(page.request));
   await openApp(page);
 
   await expect(page.getByTestId('enrollment-switcher')).toHaveText('רוסית ▾');
@@ -110,12 +123,17 @@ test('a learner adds English, switches both ways, and the choice survives signin
   request,
 }) => {
   await signUpLearner(page, 'e2e_switcher', 'ru');
+  await makeSeed(page.request, await enrollmentIdOf(page.request));
   await openApp(page);
 
   await page.getByTestId('enrollment-switcher').click();
   await page.getByTestId('enrollment-add').click();
   await page.getByTestId('enroll-en').click();
   await page.getByTestId('enroll-submit').click();
+  await expect(page.getByTestId('enrollment-switcher')).toHaveText('אנגלית ▾');
+  // English's seed, and home opened again so it reads it.
+  await seedFor(page.request, 'en');
+  await openApp(page);
   await expect(page.getByTestId('enrollment-switcher')).toHaveText('אנגלית ▾');
 
   await startSession(page);
@@ -154,6 +172,10 @@ test('a learner adds Italian from the switcher and gets an Italian session', asy
   await page.getByTestId('enrollment-add').click();
   await page.getByTestId('enroll-it').click();
   await page.getByTestId('enroll-submit').click();
+  await expect(page.getByTestId('enrollment-switcher')).toHaveText('איטלקית ▾');
+  // Italian's seed, and home opened again so it reads it.
+  await seedFor(page.request, 'it');
+  await openApp(page);
   await expect(page.getByTestId('enrollment-switcher')).toHaveText('איטלקית ▾');
 
   await startSession(page);

@@ -62,20 +62,15 @@ const MEMORY: MemorySeed[] = [
 ];
 
 /**
- * Past the seed, six saved senses of four words, their memory seeded, the stubs
- * for one session, and the session started at its typed card (2 of 4), past a
- * new meaning of прочитала. The checker reads the typed card's sentence as
+ * Six saved senses of four words, saved before any session so none is the seed
+ * (phase 73, spec D6), their memory seeded, the stubs for one session, and the
+ * session started at its typed card (2 of 4), past a new meaning of прочитала. The checker reads the typed card's sentence as
  * either saved word, so it keeps the sentence the context call wrote.
  */
 async function reachTypedCard(page: Page, request: APIRequestContext, username: string, report: () => string): Promise<Card> {
-  page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
   await signUpLearner(page, username, 'ru');
   await openApp(page);
-
-  await tapUntil(page, 'start-button', 'progress-label');
-  await page.getByTestId('session-skip').click();
-  await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
 
   await tapUntil(page, 'translate-entry', 'translate-input');
   await lookUp(page, request, 'прочитала', PROCHITALA);

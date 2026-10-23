@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
+import { expectGeneration } from './support/cards';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { PROCHITALA } from './support/lexemes';
 import { codeFor, expectEmails } from './support/mockServer';
@@ -44,6 +45,9 @@ test('a new learner signs up with a code, onboards, signs out and back in, and k
   await tapUntil(page, 'translate-entry', 'translate-input');
   await lookUp(page, request, 'прочитала', PROCHITALA);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save').first());
+  // Phase 73 (spec D6). With a word of its own and no session, home's first session is the list's,
+  // made as home opens: its generation is stubbed, so home offers it.
+  await expectGeneration(request);
 
   await openApp(page);
   await page.getByTestId('profile-button').click();

@@ -24,8 +24,9 @@ const SYNONYM = 'מילה';
  *  and лук's due meaning is one card: six. */
 const CARDS = 6;
 
-/** Past the seed, four saved senses of two words, and the session on its
- *  meaning card, every card before it answered right. Phase 35 (spec D5, D6):
+/** Four saved senses of two words, saved before any session so none is the seed
+ *  (phase 73, spec D6), and the session on its meaning card, every card before it
+ *  answered right. Phase 35 (spec D5, D6):
  *  בצל is due on written recognition, WR at R 0.85 (S 10, 19 days) and level 3,
  *  so it is asked by recall, a typed meaning. Phase 39 (spec D3): practised,
  *  it is лук's current meaning, and קשת waits; one of прочитала's two new
@@ -33,14 +34,9 @@ const CARDS = 6;
  *  (a ladder's cards are spread through the session, spec D5), so the meaning
  *  card is found by its type. */
 async function reachMeaningCard(page: Page, request: APIRequestContext, username: string, report: () => string) {
-  page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
   await signUpLearner(page, username, 'ru');
   await openApp(page);
-
-  await tapUntil(page, 'start-button', 'progress-label');
-  await page.getByTestId('session-skip').click();
-  await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
 
   await tapUntil(page, 'translate-entry', 'translate-input');
   await lookUp(page, request, 'прочитала', PROCHITALA);
