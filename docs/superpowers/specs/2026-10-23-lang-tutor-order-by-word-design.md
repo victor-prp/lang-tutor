@@ -57,7 +57,8 @@ Every unit the plan places belongs to the sequence of its word, in the order the
 3. its other cards, in pick order. **(Victor)** The 67b say card is one of these, so it is the new
    word's last card, after its typed translation.
 
-A board is a sequence of its own. It holds four words, and counts as each of them below.
+A board is a sequence of its own. It holds four words: criterion 1 below counts it as each of them,
+criterion 2 as one sequence.
 
 ## D3. One pass places the cards
 
@@ -65,8 +66,8 @@ At each position, every sequence with a unit left offers its next one. Of those,
 decided by these criteria in turn, the first that tells two units apart deciding:
 
 1. **Not the word just placed.** No unit of a word placed in the last unit, when another can go.
-2. **Every word can still be kept apart.** After the unit, no word holds more units than the rest
-   can separate: the same test `separable()` makes for types, over each word's units left.
+2. **Every word can still be kept apart.** After the unit, no sequence holds more units than the rest
+   can separate: the same test `separable()` makes for types, over each sequence's units left.
 3. **Not the type just placed.** The unit's first card is not the last card's type.
 4. **Every type can still be kept apart** (`separable()`).
 5. **The word furthest behind an even spread.** A word whose `k` of `n` units are placed, at
@@ -125,9 +126,17 @@ today. The day simulation passed 223 of 224 checks; the other is miss-rhythm noi
   gives, an intro stage together and first, the ladder's practice order, a step-down's order, returns
   last, the board in one piece, no card before its meet.
 
-The day simulation passes its planned picks' `glossId`. Its one moved gate is measured across miss
-rhythms (missEvery 4 to 8, every phase) on this branch and on master, as the day-simulation note
-says, and held to master's aggregate.
+`sessions.prepare.test.ts`: the ladder's intro-mark test pins the new order (the meet first, R1). Its
+"a card before it is dropped" case moves to a step-down's marked cards, since nothing can come before a
+ladder's intro stage any more.
+
+The day simulation passes its planned picks' `glossId`. With words grouped, five of its gates moved at
+phase 37's five phases (a homework's FSRS share, the fresh homework's day 1, the exam's volume step, the
+homework's practice-more share, and the families' "some phase knows m0"). Over thirty learners (missing
+every 4th to 8th card, every phase), the new order matches or beats master on each, marks unchanged:
+1-day homework FSRS share 0.471 → 0.551, fresh day 1 mean 19.47 → 19.57, words known in the families run
+126 → 126. Those five gates are held over the thirty learners (`EVERY_RHYTHM`), with their marks as they
+were; the rest stay at the five phases. **(my call)**
 
 ## Left to the builder
 
