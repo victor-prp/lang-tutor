@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { DiscoveryRun, DiscoveryState } from '@lang-tutor/core/api';
-import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { PgBoss } from 'pg-boss';
 
@@ -9,7 +8,7 @@ import { createDiscoveryRouter } from '../../../src/routes/discovery';
 import { registerWorkers } from '../../../src/worker';
 import { ACT_AS, actAs } from '../../support/actAs';
 import { insertLexeme } from '../../support/dictRows';
-import { seedDiscoveryProfile, seedDiscoveryRun } from '../../support/discoveryRows';
+import { clearCardChoices, seedDiscoveryProfile, seedDiscoveryRun, setRunStatus } from '../../support/discoveryRows';
 import { createFakeLogger } from '../../support/fakes';
 import { startTestBoss, stockJobKeys, stopTestBoss, waitFor } from '../../support/jobs';
 import { assertMockServerReachable, clearNamespace, countGeminiRequests, expectDiscovery, geminiBaseUrlFor, mockNamespace } from '../../support/mockServer';
@@ -234,14 +233,14 @@ describe('Words for me over HTTP (phase 69, spec D2–D10; phase 74)', () => {
       ],
     });
     // A card of phase 69 has no choices: no pick is one of them.
-    await t.db.execute(sql`update discovery_cards set choices = '[]'::jsonb where run_id = ${id} and position = 1`);
+    await clearCardChoices(t.db, id, 1);
     const bad = await send('POST', `/discovery/runs/${id}/cards/1/answer`, { pick: 0, add: false });
     expect(bad.status).toBe(400);
     expect(await bad.json()).toEqual({ error: 'invalid pick' });
 
     expect(await ok(send('POST', `/discovery/runs/${id}/end`))).toMatchObject({ status: 'saved', added_count: 1, cards: [] });
     expect(await ok(send('POST', `/discovery/runs/${id}/end`))).toMatchObject({ status: 'saved' });
-    await t.db.execute(sql`update discovery_runs set status = 'discarded' where id = ${id}`);
+    await setRunStatus(t.db, id, 'discarded');
     expect((await send('POST', `/discovery/runs/${id}/end`)).status).toBe(409);
     expect((await send('GET', `/discovery/runs/nope`)).status).toBe(404);
   });

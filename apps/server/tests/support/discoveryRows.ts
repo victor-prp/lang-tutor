@@ -1,5 +1,7 @@
 import type { DiscoveryRunStatus, DiscoveryStartedBy, PhotoImportOption } from '@lang-tutor/core/api';
 
+import { and, eq } from 'drizzle-orm';
+
 import type { Db } from '../../src/db/client';
 import { discoveryCards, discoveryProfiles, discoveryRuns } from '../../src/db/schema';
 
@@ -94,4 +96,17 @@ export async function seedDiscoveryProfile(db: Db, input: { enrollmentId: string
   await db
     .insert(discoveryProfiles)
     .values({ enrollmentId: input.enrollmentId, selfLevel: 'simple', learningContext: 'self', level: input.level ?? 3 });
+}
+
+/** Phase 74. A card as phase 69 wrote it, with no choices: no pick is one of them. */
+export async function clearCardChoices(db: Db, runId: string, position: number): Promise<void> {
+  await db
+    .update(discoveryCards)
+    .set({ choices: [], rightChoice: null })
+    .where(and(eq(discoveryCards.runId, runId), eq(discoveryCards.position, position)));
+}
+
+/** Phase 74. A run moved to a status no use case moves it to any more (discarded). */
+export async function setRunStatus(db: Db, runId: string, status: DiscoveryRunStatus): Promise<void> {
+  await db.update(discoveryRuns).set({ status }).where(eq(discoveryRuns.id, runId));
 }

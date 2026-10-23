@@ -275,7 +275,7 @@ export class FakeServer {
       },
       currentSession: async (): Promise<CurrentSessionResponse> => {
         this.record(bot, 'current-session');
-        return { current: null, next_source: 'list', saved_count: savedOf().length, due_count: 0 };
+        return { current: null, next_source: 'list', saved_count: savedOf().length, due_count: 0, needs_new_words: false };
       },
       session: async (id) => {
         this.record(bot, 'get-session');
