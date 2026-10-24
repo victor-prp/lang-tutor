@@ -15,6 +15,7 @@ import { expectGeneration } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapUntil } from './support/interactions';
 import { BOARD_WORDS, SINGLE_WORDS } from './support/lexemes';
+import { clearOfMidnight } from './support/clock';
 import { clearGemini, expectGeminiMatching, userText } from './support/mockServer';
 import { answerSessionRight, enrollmentIdOf, readCurrent, readyPathSession, skipSeed } from './support/sessions';
 import {
@@ -69,6 +70,9 @@ import { withVoices } from './support/voices';
 // the card (phase 67b, spec D7). The sheet before practising past the budget is practice-more.spec.ts.
 test.setTimeout(240_000);
 test.beforeEach(async ({ request }) => {
+  // Every test here reads the learner's today and acts on it (CI run 40041866540: a date chosen
+  // at 23:59:58 was today by 00:00:03): none starts in the day's last minutes.
+  await clearOfMidnight();
   await clearGemini(request);
 });
 
