@@ -6,6 +6,7 @@ import {
   currentFor,
   homeActionOf,
   homeReminderStartOf,
+  keptRead,
   loadFailedFor,
   mainButtonSolid,
   mainEmptyNote,
@@ -19,6 +20,7 @@ import {
   shouldPoll,
   targetPress,
   targetSessionAction,
+  type StoredCurrent,
 } from './nextSession';
 
 const none = (next_source: 'seed' | 'list', saved_count = 0): CurrentSessionResponse => ({
@@ -523,5 +525,24 @@ describe('makeMyWords', () => {
       ),
     ).toBe('failed');
     expect(await makeMyWords(async () => undefined, async () => false)).toBe('failed');
+  });
+});
+
+// Phase 75 CI (build-image run 40041866540). The provider keeps one read: a read about another
+// course that lands late must not push out the active course's, or a screen that read it waits on
+// a read it already has.
+describe('keptRead', () => {
+  const read = (enrollmentId: string): StoredCurrent => ({ enrollmentId, state: none('list', 1) });
+
+  it("keeps the active course's read when one about another course lands after it", () => {
+    const italian = read('it');
+    expect(keptRead(italian, read('ru'), 'it')).toBe(italian);
+  });
+
+  it("stores the active course's read, and one about another course when none for the active is kept", () => {
+    const fresh = read('it');
+    expect(keptRead(read('ru'), fresh, 'it')).toBe(fresh);
+    const russian = read('ru');
+    expect(keptRead(null, russian, 'it')).toBe(russian);
   });
 });

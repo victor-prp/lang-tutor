@@ -325,6 +325,14 @@ export function shouldPoll(state: CurrentSessionResponse | null): boolean {
 /** A read of the current session, tagged with the enrollment it was about. */
 export type StoredCurrent = { enrollmentId: string; state: CurrentSessionResponse };
 
+/** Phase 75 (CI run 40041866540). What the provider keeps when a read lands: the read, unless it
+ *  is about a course that is not the active one while the read kept is the active one's. A slow
+ *  read about the course just switched from must not push out the new course's, which a screen
+ *  that waited on that read (the practice screen) would otherwise never see. */
+export function keptRead(stored: StoredCurrent | null, landed: StoredCurrent, activeId: string | undefined): StoredCurrent | null {
+  return landed.enrollmentId !== activeId && stored?.enrollmentId === activeId ? stored : landed;
+}
+
 /** What to show for the active enrollment. A read stored for any other
  *  enrollment (a slow answer that landed after a switch) is never shown. */
 export function currentFor(

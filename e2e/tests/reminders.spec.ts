@@ -123,7 +123,7 @@ test('a reminder that names its path opens that path’s session, not the first 
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
   await clearGemini(request);
-  const { enrollmentId, target } = await homework(page, request, 'e2e_reminders_named');
+  const { enrollmentId, target } = await homework(page, request, `e2e_reminders_named${test.info().repeatEachIndex || ''}`);
   const targetSession = await readyPathSession(page.request, enrollmentId, target.id);
   const mainSession = await readyPathSession(page.request, enrollmentId);
 
@@ -154,7 +154,7 @@ test('a reminder about the other course switches to it before opening its path',
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
   await clearGemini(request);
-  const { enrollmentId: russian, target } = await homework(page, request, 'e2e_reminders_course');
+  const { enrollmentId: russian, target } = await homework(page, request, `e2e_reminders_course${test.info().repeatEachIndex || ''}`);
   const enrolled = await page.request.post(`${API_URL}/api/enrollments`, { data: { source_language: 'he', target_language: 'it' } });
   expect(enrolled.ok(), await enrolled.text()).toBe(true);
   const italian = ((await enrolled.json()) as { id: string }).id;
