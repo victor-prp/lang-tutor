@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -11,7 +12,7 @@ import {
 import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useSessionDevices } from '@/hooks/useSessionDevices';
-import { currentFor, loadFailedFor, type StoredCurrent } from '@/nextSession';
+import { currentFor, keptRead, loadFailedFor, type StoredCurrent } from '@/nextSession';
 
 // Phase 19. The active enrollment's session state for the home screen: what
 // is current, where the next session comes from, and the two actions on it.
@@ -49,6 +50,10 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
   // the home screen's own focus effect (children first) and discard its read.
   const [stored, setStored] = useState<StoredCurrent | null>(null);
   const current = currentFor(stored, active?.id);
+  // Phase 75 (CI run 40041866540). The active enrollment when a read lands, not when it started:
+  // a read about the course switched from never pushes out the new course's (keptRead).
+  const activeId = useRef(active?.id);
+  activeId.current = active?.id;
   // Keyed the same way, so a failure about one enrollment is never shown for
   // another. A successful read for it clears the failure.
   const [failedFor, setFailedFor] = useState<string | null>(null);
@@ -59,7 +64,7 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
     const enrollmentId = active.id;
     try {
       const state = await api.currentSession(enrollmentId);
-      setStored({ enrollmentId, state });
+      setStored((kept) => keptRead(kept, { enrollmentId, state }, activeId.current));
       setFailedFor((failed) => (failed === enrollmentId ? null : failed));
       return true;
     } catch {

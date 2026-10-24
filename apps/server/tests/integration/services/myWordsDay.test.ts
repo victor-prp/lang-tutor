@@ -175,3 +175,35 @@ describe('a counted My words session records its day', () => {
     expect(await readMyWordsDays(t.db, E)).toMatchObject([{ goal: null, sessionsDone: 1 }]);
   });
 });
+
+// Phase 75 (spec D1). Home's My words read without its writes, for a reminder: the day's goal and
+// sessions, the words waiting, and the words of the course's own.
+describe('myWordsDay', () => {
+  it("answers the goal in force, the day's sessions, the words waiting and the saved count, as home's read does", async () => {
+    await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'cheese', translations: ['גבינה'] });
+    const [apple, bread] = [await word(E, 'apple', 'תפוח'), await word(E, 'bread', 'לחם')];
+    await storeMyWordsGoal(t.db, E, 4);
+    await complete(await mainSession(E, [apple, bread]));
+
+    const day = await service.myWordsDay('u_1', E);
+    const home = await service.currentSession('u_1', E);
+
+    expect(day).toEqual({ today: home.today, waiting: home.dueCount, saved: home.savedCount });
+    expect(day.today).toMatchObject({ goal: 4, sessions_done: 1 });
+    expect(day.saved).toBe(3);
+  });
+
+  it('answers a course with no words of its own with nothing saved and nothing waiting', async () => {
+    expect(await service.myWordsDay('u_1', E)).toEqual({
+      today: { goal: 3, sessions_done: 0, new_words: 0, moved_up: 0, minutes: expect.any(Number) },
+      waiting: 0,
+      saved: 0,
+    });
+  });
+
+  it("refuses another learner's enrollment, as home's read does", async () => {
+    await seedUser(t.db, 'u_2');
+    await expect(service.myWordsDay('u_2', E)).rejects.toThrow();
+    await expect(service.currentSession('u_2', E)).rejects.toThrow();
+  });
+});

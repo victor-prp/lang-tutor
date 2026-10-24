@@ -8,7 +8,14 @@ import {
   createInMemoryUserRepo,
   stub,
 } from '../../tests/support/fakes';
-import { DEFAULT_REMINDER_SETTINGS, type ReminderSettings } from '../domain/reminders';
+import {
+  DEFAULT_REMINDER_SETTINGS,
+  pathEvidence,
+  type MyWordsPath,
+  type ReminderPath,
+  type ReminderSettings,
+  type TargetPath,
+} from '../domain/reminders';
 import { PushUnavailable, ReminderNotFound } from '../errors';
 import type { ReminderRepo, ReminderResult } from '../repo/reminders';
 import {
@@ -56,6 +63,11 @@ function build(opts: { tapOwners?: Record<string, string> } = {}) {
     push: stub<PushSender>({}),
     logger,
     now: createFakeClock(NOW),
+    // The learner's use cases read no path.
+    paths: async () => {
+      throw new Error('the learner use cases must not read paths');
+    },
+    imageBaseUrl: null,
   });
   return { service, settings, devices, taps, user, logger };
 }
@@ -210,8 +222,6 @@ describe('tap', () => {
 
 /** Wednesday 2026-10-14, 13:05 UTC: the default 13:00 slot is due for a learner in UTC. */
 const AT = Date.parse('2026-10-14T13:05:00Z');
-const TITLE = 'הגיע הזמן לתרגל';
-const BODY = 'כמה דקות עכשיו, והמילים נשארות בזיכרון.';
 
 type Candidate = Awaited<ReturnType<ReminderRepo['candidates']>>[number];
 type Recorded = { id: string; outcome: ReminderResult; evidence: unknown; tickets: unknown };
@@ -224,14 +234,51 @@ const learner = (userId: string, overrides: Partial<Candidate> = {}): Candidate 
   ...overrides,
 });
 
+// Phase 75 (spec D1). A learner's paths: by default one course whose My words owes today.
+const myWordsPath = (userId: string, over: Partial<MyWordsPath> = {}): MyWordsPath => ({
+  kind: 'my_words',
+  enrollmentId: `e_${userId}`,
+  language: 'it',
+  goal: 3,
+  sessionsDone: 0,
+  waiting: 5,
+  saved: 10,
+  ...over,
+});
+const homeworkPath = (userId: string, over: Partial<TargetPath> = {}): TargetPath => ({
+  kind: 'homework',
+  enrollmentId: `e_${userId}`,
+  language: 'it',
+  targetId: `t_${userId}`,
+  daysLeft: 1,
+  state: 'owed',
+  wordCount: 9,
+  readyCount: 3,
+  readinessPct: 40,
+  sessionsOffer: 2,
+  sessionsDone: 0,
+  minutes: 6,
+  ...over,
+});
+const MY_WORDS_TITLE = 'המילים שלי';
+const MY_WORDS_BODY = 'היעד של היום: 3 תרגולים · 5 מילים מחכות לחזרה';
+/** The evidence of a learner reminded about the default My words path. */
+const myWordsEvidence = (userId: string, devices = 1) => ({
+  time_zone: 'UTC',
+  devices,
+  paths: [pathEvidence(myWordsPath(userId))],
+  chosen: { enrollment_id: `e_${userId}`, target_id: null, kind: 'my_words', rank: 3, title: MY_WORDS_TITLE, body: MY_WORDS_BODY, image: 'my-words' },
+});
+
 /** Accepts every message, under a ticket id that names its token. */
 const acceptAll = async (messages: PushMessage[]): Promise<PushTicket[]> =>
   messages.map((message) => ({ status: 'ok', id: `ticket-${message.to}` }));
 
 function buildTick(opts: {
   candidates: Candidate[];
-  /** Completed sessions by learner, on whatever day is asked. */
-  completed?: Record<string, number>;
+  /** Each learner's paths, or the error reading them throws; the default My words path otherwise. */
+  paths?: Record<string, ReminderPath[] | Error>;
+  imageBaseUrl?: string | null;
   /** `userId|day|slot` keys an earlier tick already claimed. */
   claimed?: string[];
   /** A learner whose claim throws this. */
@@ -242,7 +289,7 @@ function buildTick(opts: {
   at?: number;
 }) {
   const claims: { userId: string; localDay: string; slot: string; id: string }[] = [];
-  const counted: { userId: string; day: string }[] = [];
+  const read: string[] = [];
   const records: Recorded[] = [];
   const deleted: string[] = [];
   const awaitingAsked: { olderThan: Date; newerThan: Date }[] = [];
@@ -262,10 +309,6 @@ function buildTick(opts: {
       const id = `r-${claims.length + 1}`;
       claims.push({ userId, localDay, slot, id });
       return id;
-    },
-    countCompletedOnDay: async (userId, day) => {
-      counted.push({ userId, day });
-      return opts.completed?.[userId] ?? 0;
     },
     record: async (id, result) => {
       records.push({ id, ...result });
@@ -310,12 +353,25 @@ function buildTick(opts: {
       return opts.receipts ? opts.receipts(ids) : {};
     },
   };
+  const paths = async (userId: string): Promise<ReminderPath[]> => {
+    read.push(userId);
+    const found = opts.paths?.[userId] ?? [myWordsPath(userId)];
+    if (found instanceof Error) throw found;
+    return found;
+  };
   const logger = createFakeLogger();
-  const service = createReminderService({ transaction, push, logger, now: createFakeClock(opts.at ?? AT) });
+  const service = createReminderService({
+    transaction,
+    push,
+    logger,
+    now: createFakeClock(opts.at ?? AT),
+    paths,
+    imageBaseUrl: opts.imageBaseUrl ?? null,
+  });
   return {
     service,
     claims,
-    counted,
+    read,
     records,
     deleted,
     awaitingAsked,
@@ -348,17 +404,20 @@ describe('tick: a slot that is due', () => {
     const summary = await service.tick();
 
     expect(claims).toEqual([{ userId: 'u_dana', localDay: '2026-10-14', slot: '13:00', id: 'r-1' }]);
-    expect(sends).toEqual([
-      [
-        { to: 'ExponentPushToken[a]', title: TITLE, body: BODY, channelId: 'reminders', priority: 'high', data: { reminder_id: 'r-1' } },
-        { to: 'ExponentPushToken[b]', title: TITLE, body: BODY, channelId: 'reminders', priority: 'high', data: { reminder_id: 'r-1' } },
-      ],
-    ]);
+    const message = {
+      title: MY_WORDS_TITLE,
+      body: MY_WORDS_BODY,
+      channelId: 'reminders',
+      priority: 'high',
+      tag: 'reminder',
+      data: { reminder_id: 'r-1', enrollment_id: 'e_u_dana' },
+    };
+    expect(sends).toEqual([[{ to: 'ExponentPushToken[a]', ...message }, { to: 'ExponentPushToken[b]', ...message }]]);
     expect(records).toEqual([
       {
         id: 'r-1',
         outcome: 'sent',
-        evidence: { completed_today: 0, daily_target: 1, time_zone: 'UTC', devices: 2 },
+        evidence: myWordsEvidence('u_dana', 2),
         tickets: [
           { status: 'ok', id: 'ticket-ExponentPushToken[a]', to: 'ExponentPushToken[a]' },
           { status: 'ok', id: 'ticket-ExponentPushToken[b]', to: 'ExponentPushToken[b]' },
@@ -369,20 +428,16 @@ describe('tick: a slot that is due', () => {
     expect(summary).toEqual({ candidates: 1, claimed: 1, sent: 1, skipped: 0, failed: 0 });
   });
 
-  it('claims and counts in one transaction, and records and deletes in another, with the send between them', async () => {
-    const { service, transactions } = buildTick({ candidates: [learner('u_dana')] });
+  it('claims in one transaction and records and deletes in another, with the read and the send between them', async () => {
+    const { service, transactions, read } = buildTick({ candidates: [learner('u_dana')] });
 
     await service.tick();
 
-    expect(transactions).toEqual([
-      ['candidates'],
-      ['claim', 'countCompletedOnDay'],
-      ['record', 'deleteDevicesByToken'],
-      ['awaitingReceipts'],
-    ]);
+    expect(transactions).toEqual([['candidates'], ['claim'], ['record', 'deleteDevicesByToken'], ['awaitingReceipts']]);
+    expect(read).toEqual(['u_dana']);
   });
 
-  it("reads the slot and the day on the learner's own clock, and counts that day's sessions", async () => {
+  it("reads the slot and the day on the learner's own clock", async () => {
     // 13:05 UTC is 03:05 the next day in Kiritimati (UTC+14), and 16:05 in Jerusalem (UTC+3).
     const east = learner('u_east', {
       timeZone: 'Pacific/Kiritimati',
@@ -392,7 +447,7 @@ describe('tick: a slot that is due', () => {
       timeZone: 'Asia/Jerusalem',
       settings: { enabled: true, dailyTarget: 1, days: [3], times: ['13:00', '16:00'] },
     });
-    const { service, claims, counted, records } = buildTick({ candidates: [east, israel] });
+    const { service, claims, records } = buildTick({ candidates: [east, israel] });
 
     await service.tick();
 
@@ -400,16 +455,84 @@ describe('tick: a slot that is due', () => {
       { userId: 'u_east', localDay: '2026-10-15', slot: '03:00', id: 'r-1' },
       { userId: 'u_il', localDay: '2026-10-14', slot: '16:00', id: 'r-2' },
     ]);
-    expect(counted).toEqual([
-      { userId: 'u_east', day: '2026-10-15' },
-      { userId: 'u_il', day: '2026-10-14' },
-    ]);
     expect(records.map((r) => (r.evidence as { time_zone: string }).time_zone)).toEqual(['Pacific/Kiritimati', 'Asia/Jerusalem']);
   });
 
-  it('skips a slot whose daily target is met: the evidence is recorded and nothing is sent', async () => {
-    const dana = learner('u_dana', { settings: { enabled: true, dailyTarget: 2, days: [3], times: ['13:00'] } });
-    const { service, sends, records, deleted } = buildTick({ candidates: [dana], completed: { u_dana: 2 } });
+  it('decides nothing for a slot an earlier tick claimed: no read, no send, no record', async () => {
+    const { service, read, sends, records } = buildTick({
+      candidates: [learner('u_dana')],
+      claimed: ['u_dana|2026-10-14|13:00'],
+    });
+
+    const summary = await service.tick();
+
+    expect(read).toEqual([]);
+    expect(sends).toEqual([]);
+    expect(records).toEqual([]);
+    expect(summary).toEqual({ candidates: 1, claimed: 0, sent: 0, skipped: 0, failed: 0 });
+  });
+});
+
+// Phase 75 (Done means 1–4). What the reminder is about, and what the log keeps of why.
+describe('tick: the most pressing path', () => {
+  it('names the homework due tomorrow, with its picture and its path, after a My words session (Done means 1, 4)', async () => {
+    const paths = [homeworkPath('u_dana'), myWordsPath('u_dana', { sessionsDone: 1 })];
+    const { service, sends, records } = buildTick({
+      candidates: [learner('u_dana')],
+      paths: { u_dana: paths },
+      imageBaseUrl: 'https://app.example/notifications',
+    });
+
+    await service.tick();
+
+    expect(sends).toEqual([
+      [
+        {
+          to: 'ExponentPushToken[u_dana]',
+          title: 'שיעורי הבית מחר',
+          body: '6 מילים צריכות חיזוק · מוכנות לשיעורי הבית: 40%',
+          channelId: 'reminders',
+          priority: 'high',
+          tag: 'reminder',
+          richContent: { image: 'https://app.example/notifications/homework-urgent.png' },
+          data: { reminder_id: 'r-1', enrollment_id: 'e_u_dana', target_id: 't_u_dana' },
+        },
+      ],
+    ]);
+    expect(records).toMatchObject([
+      {
+        outcome: 'sent',
+        evidence: {
+          paths: paths.map(pathEvidence),
+          chosen: {
+            enrollment_id: 'e_u_dana',
+            target_id: 't_u_dana',
+            kind: 'homework',
+            rank: 1,
+            title: 'שיעורי הבית מחר',
+            body: '6 מילים צריכות חיזוק · מוכנות לשיעורי הבית: 40%',
+            image: 'homework-urgent',
+          },
+        },
+      },
+    ]);
+  });
+
+  it("names My words once only its goal is left, and its data names no target (Done means 2)", async () => {
+    const { service, sends } = buildTick({
+      candidates: [learner('u_dana')],
+      paths: { u_dana: [homeworkPath('u_dana', { state: 'done' }), myWordsPath('u_dana', { sessionsDone: 2 })] },
+    });
+
+    await service.tick();
+
+    expect(sends[0][0]).toMatchObject({ title: 'המילים שלי', body: 'כל הכבוד! עוד תרגול אחד להיום' });
+    expect(sends[0][0].data).toEqual({ reminder_id: 'r-1', enrollment_id: 'e_u_dana' });
+  });
+
+  it('skips the slot when nothing is owed on any path, and keeps the paths it read (Done means 3, 4)', async () => {
+    const paths = [homeworkPath('u_dana', { state: 'done' }), myWordsPath('u_dana', { sessionsDone: 3 })];
+    const { service, sends, records } = buildTick({ candidates: [learner('u_dana')], paths: { u_dana: paths } });
 
     const summary = await service.tick();
 
@@ -418,35 +541,31 @@ describe('tick: a slot that is due', () => {
       {
         id: 'r-1',
         outcome: 'skip_target_met',
-        evidence: { completed_today: 2, daily_target: 2, time_zone: 'UTC', devices: 1 },
+        evidence: { time_zone: 'UTC', devices: 1, paths: paths.map(pathEvidence), chosen: null },
         tickets: null,
       },
     ]);
-    expect(deleted).toEqual([]);
     expect(summary).toEqual({ candidates: 1, claimed: 1, sent: 0, skipped: 1, failed: 0 });
   });
 
-  it('still sends to a learner one session short of a target above one', async () => {
-    const dana = learner('u_dana', { settings: { enabled: true, dailyTarget: 3, days: [3], times: ['13:00'] } });
-    const { service, records } = buildTick({ candidates: [dana], completed: { u_dana: 2 } });
+  it('names the course for a learner with two', async () => {
+    const english = myWordsPath('u_dana', { enrollmentId: 'e_en', language: 'en' });
+    const { service, sends } = buildTick({
+      candidates: [learner('u_dana')],
+      paths: { u_dana: [myWordsPath('u_dana', { sessionsDone: 3 }), english] },
+    });
 
     await service.tick();
 
-    expect(records).toMatchObject([{ outcome: 'sent', evidence: { completed_today: 2, daily_target: 3 } }]);
+    expect(sends[0][0]).toMatchObject({ title: 'המילים שלי באנגלית', data: { enrollment_id: 'e_en' } });
   });
 
-  it('decides nothing for a slot an earlier tick claimed: no count, no send, no record', async () => {
-    const { service, counted, sends, records } = buildTick({
-      candidates: [learner('u_dana')],
-      claimed: ['u_dana|2026-10-14|13:00'],
-    });
+  it('sends no picture without a base URL', async () => {
+    const { service, sends } = buildTick({ candidates: [learner('u_dana')], paths: { u_dana: [homeworkPath('u_dana')] } });
 
-    const summary = await service.tick();
+    await service.tick();
 
-    expect(counted).toEqual([]);
-    expect(sends).toEqual([]);
-    expect(records).toEqual([]);
-    expect(summary).toEqual({ candidates: 1, claimed: 0, sent: 0, skipped: 0, failed: 0 });
+    expect(sends[0][0]).not.toHaveProperty('richContent');
   });
 });
 
@@ -491,13 +610,13 @@ describe('tick: one learner going wrong', () => {
       {
         id: 'r-1',
         outcome: 'failed',
-        evidence: { completed_today: 0, daily_target: 1, time_zone: 'UTC', devices: 1, error: 'push service unavailable (500)' },
+        evidence: { ...myWordsEvidence('u_a'), error: 'push service unavailable (500)' },
         tickets: null,
       },
       {
         id: 'r-2',
         outcome: 'sent',
-        evidence: { completed_today: 0, daily_target: 1, time_zone: 'UTC', devices: 1 },
+        evidence: myWordsEvidence('u_b'),
         tickets: [{ status: 'ok', id: 'ticket-ExponentPushToken[u_b]', to: 'ExponentPushToken[u_b]' }],
       },
     ]);
@@ -514,6 +633,24 @@ describe('tick: one learner going wrong', () => {
     });
     await service.tick();
     expect(records).toMatchObject([{ outcome: 'failed', evidence: { error: 'push service unavailable (timeout)' } }]);
+  });
+
+  // Phase 75, plan review focus 1: one course's read fails.
+  it('records failed when the paths cannot be read, sends nothing for that learner, and reminds the next', async () => {
+    const { service, sends, records, logger } = buildTick({
+      candidates: [learner('u_a'), learner('u_b')],
+      paths: { u_a: new Error('read failed') },
+    });
+
+    const summary = await service.tick();
+
+    expect(sends.map((batch) => batch.map((message) => message.to))).toEqual([['ExponentPushToken[u_b]']]);
+    expect(records).toMatchObject([
+      { id: 'r-1', outcome: 'failed', evidence: { time_zone: 'UTC', devices: 1, error: 'read failed' }, tickets: null },
+      { id: 'r-2', outcome: 'sent' },
+    ]);
+    expect(summary).toEqual({ candidates: 2, claimed: 2, sent: 1, skipped: 0, failed: 1 });
+    expect(logger.events.filter((e) => e.event === 'reminder_tick_error')).toEqual([]);
   });
 
   // Review focus 1.
@@ -702,7 +839,7 @@ describe('tick: the summary', () => {
     let calls = 0;
     const { service, logger } = buildTick({
       candidates: [learner('u_sent'), learner('u_met'), learner('u_failed'), learner('u_mars', { timeZone: 'Mars/Olympus' })],
-      completed: { u_met: 1 },
+      paths: { u_met: [myWordsPath('u_met', { sessionsDone: 3 })] },
       send: async (messages) => {
         calls += 1;
         if (calls === 2) throw new PushUnavailable(503);

@@ -1,7 +1,7 @@
-import { and, asc, count, eq, exists, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, exists, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import { enrollments, pushDevices, reminderSettings, reminders, sessions, users } from '../db/schema';
+import { enrollments, pushDevices, reminderSettings, reminders, users } from '../db/schema';
 import type { MarkCandidate, ReminderSettings } from '../domain/reminders';
 
 /** What a tick decides for a slot it has claimed. `claimed` is the claim itself, never a result. */
@@ -116,22 +116,6 @@ export function createReminderRepo(tx: Tx) {
         .onConflictDoNothing({ target: [reminders.userId, reminders.localDay, reminders.slot] })
         .returning({ id: reminders.id });
       return row?.id ?? null;
-    },
-
-    /**
-     * Sessions the learner completed with `practice_day = day`, across every enrollment they
-     * own. A skipped or failed session is not completed, and a tutor finishing a session on
-     * the learner's list counts for the learner, whose enrollment it is. Goes through
-     * `enrollments` because that is where the learner's rows are indexed: `sessions` has no
-     * index on `user_id`, only on `enrollment_id`.
-     */
-    countCompletedOnDay: async (userId: string, day: string): Promise<number> => {
-      const [row] = await tx
-        .select({ completed: count() })
-        .from(sessions)
-        .innerJoin(enrollments, eq(enrollments.id, sessions.enrollmentId))
-        .where(and(eq(enrollments.userId, userId), eq(sessions.status, 'completed'), eq(sessions.practiceDay, day)));
-      return row?.completed ?? 0;
     },
 
     /** Writes what the tick decided for a claimed slot, and stamps `decided_at` with the moment it did. */

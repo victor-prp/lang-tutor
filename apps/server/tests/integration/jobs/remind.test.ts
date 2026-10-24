@@ -7,10 +7,11 @@ import { registerWorkers } from '../../../src/worker';
 import { createFakeLogger } from '../../support/fakes';
 import { countJobs, startTestBoss, stopTestBoss, waitFor } from '../../support/jobs';
 import { clearNamespace, mockNamespace, pushBaseUrlFor, pushSends, stubPushSend } from '../../support/mockServer';
-import { seedUser, setTimeZone } from '../../support/seedUser';
+import { enrollmentOf, seedUser, setTimeZone } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
+import { seedSavedSenses } from '../../support/vocabularyRows';
 
 // Phase 52 (spec D5). The whole chain, once: EventBridge's tick queues the job, the worker runs
 // it, and the learner whose slot is due is reminded. The tick's decisions are
@@ -50,6 +51,8 @@ describe('the remind job', () => {
     });
     await seedUser(t.db, 'u_1');
     await setTimeZone(t.db, 'u_1', 'Asia/Jerusalem');
+    // Phase 75 (spec D1): a word of their own, so My words owes its goal today.
+    await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'apple', translations: ['תפוח'] });
     await deps.reminders.registerDevice('u_1', { token: TOKEN, platform: 'android' });
     await stubPushSend(ns, [{ status: 'ok', id: 'ticket-1' }]);
 

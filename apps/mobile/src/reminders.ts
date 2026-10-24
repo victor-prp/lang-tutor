@@ -12,6 +12,19 @@ import type { ApiClient } from '@/api/client';
  */
 export type Permission = 'granted' | 'denied' | 'undetermined';
 
+/** Phase 75 (spec D6). A tapped reminder: its id, and the path it was about (the enrollment and,
+ *  for a target, the target). A reminder sent before phase 75 names no path. */
+export type ReminderTap = { reminderId: string | null; enrollmentId: string | null; targetId: string | null };
+
+/** The tap a notification's `data` describes (spec D5): a field that is not a string is absent. */
+export function reminderTapOf(data: unknown): ReminderTap {
+  const field = (name: string): string | null => {
+    const value = typeof data === 'object' && data !== null ? (data as Record<string, unknown>)[name] : undefined;
+    return typeof value === 'string' ? value : null;
+  };
+  return { reminderId: field('reminder_id'), enrollmentId: field('enrollment_id'), targetId: field('target_id') };
+}
+
 export type NotificationsEngine = {
   /** Creates the `reminders` channel. On Android 13+ the permission dialog needs one first. */
   setChannel(): Promise<void>;
@@ -21,10 +34,10 @@ export type NotificationsEngine = {
   requestPermission(): Promise<Permission>;
   /** The Expo push token. Throws until the build carries a Firebase file. */
   token(): Promise<string>;
-  /** Hears every tapped notification while the app runs, with its `reminder_id`. */
-  onTap(listener: (reminderId: string | null) => void): () => void;
-  /** The tap that launched the app from closed, cleared once read. */
-  lastTap(): Promise<string | null>;
+  /** Hears every tapped notification while the app runs, with its id and path. */
+  onTap(listener: (tap: ReminderTap) => void): () => void;
+  /** The tap that launched the app from closed, cleared once read; null when there was none. */
+  lastTap(): Promise<ReminderTap | null>;
   /** This app's page in Android's settings, where a refusal is undone. */
   openSettings(): Promise<void>;
 };
@@ -48,7 +61,7 @@ export function createReminders({ engine, api, platform, isExpoGo, timeZone, log
   /** The token this launch registered, so sign-out need not fetch it again. */
   let knownToken: string | null = null;
   /** Read once per launch, however often onTap subscribes. */
-  let lastTapRead: Promise<string | null> | null = null;
+  let lastTapRead: Promise<ReminderTap | null> | null = null;
   /** The listener and the last response can both carry the tap that launched the app. */
   const tapped = new Set<string>();
 
@@ -140,15 +153,16 @@ export function createReminders({ engine, api, platform, isExpoGo, timeZone, log
     },
 
     /**
-     * Reports a tapped reminder, then calls `go`, without waiting on the report:
+     * Reports a tapped reminder, then calls `go` with it, without waiting on the report:
      * the session is marked by finishing it, not by the tap (spec D6). The tap
      * that launched the app is read from the last response, once per launch.
      */
-    onTap(go: () => void): () => void {
+    onTap(go: (tap: ReminderTap) => void): () => void {
       if (!supported) return () => {};
       let listening = true;
-      const handle = (reminderId: string | null) => {
+      const handle = (tap: ReminderTap) => {
         if (!listening) return;
+        const { reminderId } = tap;
         if (reminderId !== null) {
           if (tapped.has(reminderId)) return;
           tapped.add(reminderId);
@@ -156,7 +170,7 @@ export function createReminders({ engine, api, platform, isExpoGo, timeZone, log
         }
         // The app is open by now either way; only the session would not start.
         try {
-          go();
+          go(tap);
         } catch (error) {
           log('reminder_open_failed', error);
         }
@@ -166,8 +180,8 @@ export function createReminders({ engine, api, platform, isExpoGo, timeZone, log
         log('reminder_last_tap_failed', error);
         return null;
       });
-      void lastTapRead.then((reminderId) => {
-        if (reminderId !== null) handle(reminderId);
+      void lastTapRead.then((tap) => {
+        if (tap !== null) handle(tap);
       });
       return () => {
         listening = false;
@@ -184,8 +198,9 @@ export function createReminders({ engine, api, platform, isExpoGo, timeZone, log
 
 export type Reminders = ReturnType<typeof createReminders>;
 
-/** Where a tapped reminder goes: בית, told to start the ready session. */
-export type ReminderHref = { pathname: '/'; params: { start: 'reminder' } };
+/** Where a tapped reminder goes: בית, told to start the ready session (phase 52), or, for a
+ *  reminder that names its path (phase 75, spec D6), told to open that path's practice screen. */
+export type ReminderHref = { pathname: '/'; params: { start: 'reminder'; enrollment?: string; target?: string } };
 
 /** The part of expo-router's router a tapped reminder uses. */
 export type ReminderRouter = {
@@ -201,9 +216,19 @@ export type ReminderRouter = {
  * session. With a tab on top there is nothing to dismiss, and dismissTo's POP_TO is lost on the
  * tab navigator (its router has no such action), so the tap navigates, which jumps to בית and
  * sets the param.
+ *
+ * Phase 75 (spec D6). A reminder that names its path hands it over too, and home opens the
+ * practice screen over itself, which goes straight into that path's session: back from it lands
+ * on בית. One sent before phase 75 names none, and home starts its first card as before.
  */
-export function openReminderTap(router: ReminderRouter): void {
-  const href: ReminderHref = { pathname: '/', params: { start: 'reminder' } };
+export function openReminderTap(router: ReminderRouter, tap: ReminderTap): void {
+  const params: ReminderHref['params'] =
+    tap.enrollmentId === null
+      ? { start: 'reminder' }
+      : tap.targetId === null
+        ? { start: 'reminder', enrollment: tap.enrollmentId }
+        : { start: 'reminder', enrollment: tap.enrollmentId, target: tap.targetId };
+  const href: ReminderHref = { pathname: '/', params };
   if (router.canDismiss()) router.dismissTo(href);
   else router.navigate(href);
 }

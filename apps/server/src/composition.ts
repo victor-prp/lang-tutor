@@ -42,6 +42,7 @@ import { createModelCallService } from './services/modelCalls';
 import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
 import { createDiscoveryService, type DiscoveryService } from './services/discovery';
 import { createMyWordsGoalService, type MyWordsGoalService } from './services/myWordsGoal';
+import { createReminderPaths } from './services/reminderPaths';
 import { createReminderService, type PushSender, type ReminderService } from './services/reminders';
 import { createQuestionTypesService, type QuestionTypesService } from './services/questionTypes';
 import { createSessionService, type SessionService } from './services/sessions';
@@ -207,6 +208,8 @@ export function createServerDeps(io: {
   botSecret: string | null;
   // Phase 52 (spec D7). Expo's push service; tests and e2e point it at MockServer.
   pushBaseUrl: string;
+  // Phase 75 (spec D4). Where a reminder's side pictures are served, or null for none.
+  reminderImageBaseUrl: string | null;
   // Phase 52 (spec D5, D9). REMINDER_SECRET, or null where it is unset: the tick route's
   // secret, which leaves the route unmounted, as botSecret does.
   reminderSecret: string | null;
@@ -420,32 +423,51 @@ export function createServerDeps(io: {
   });
 
   const translations = createTranslationService({ llm, transaction, logger: io.logger, now: io.now });
-  const reminders = createReminderService({ transaction, push, logger: io.logger, now: io.now });
+  const sessions = createSessionService({
+    transaction,
+    rng: io.rng,
+    now: io.now,
+    logger: io.logger,
+    llm: sessionLlm,
+    contextLlm,
+    checkerLlm,
+    gapCheckLlm,
+    gapRewriteLlm,
+    pointCheckLlm,
+    transcriber,
+    judge,
+    translationJudge,
+    explainer,
+    soundAlikeThreshold: io.soundAlikeThreshold,
+  });
+  const enrollments = createEnrollmentService({ transaction, logger: io.logger });
+  // Phase 53 (spec D10, D11). Saves photos and typed words with the target in one
+  // transaction, through the photo-import and vocabulary saves' own functions.
+  const targets = createTargetService({
+    transaction,
+    logger: io.logger,
+    now: io.now,
+    stockSaveDelaySeconds: io.stockSaveDelaySeconds,
+  });
+  // Phase 75 (spec D1). The tick reads a learner's day through the use cases home reads it with,
+  // handed in as closures, as the photo import is handed its lookup.
+  const reminders = createReminderService({
+    transaction,
+    push,
+    logger: io.logger,
+    now: io.now,
+    paths: createReminderPaths({ enrollments: enrollments.list, targets: targets.list, myWordsDay: sessions.myWordsDay }),
+    imageBaseUrl: io.reminderImageBaseUrl,
+  });
   // Phase 35 (spec D12). The one place that hands Better Auth's session minting
   // to the use case that needs it (ADR 0001 R13).
   const mintSession: MintSession = authModule.mintSession;
 
   return {
-    sessions: createSessionService({
-      transaction,
-      rng: io.rng,
-      now: io.now,
-      logger: io.logger,
-      llm: sessionLlm,
-      contextLlm,
-      checkerLlm,
-      gapCheckLlm,
-      gapRewriteLlm,
-      pointCheckLlm,
-      transcriber,
-      judge,
-      translationJudge,
-      explainer,
-      soundAlikeThreshold: io.soundAlikeThreshold,
-    }),
+    sessions,
     questionTypes: createQuestionTypesService({ transaction, logger: io.logger, now: io.now }),
     users: createUserService({ transaction, logger: io.logger }),
-    enrollments: createEnrollmentService({ transaction, logger: io.logger }),
+    enrollments,
     translations,
     vocabulary: createVocabularyService({ transaction, logger: io.logger, now: io.now, stockSaveDelaySeconds: io.stockSaveDelaySeconds }),
     grants: createGrantService({ transaction, logger: io.logger }),
@@ -476,14 +498,7 @@ export function createServerDeps(io: {
     }),
     // Phase 73 (spec D1, D4). The My words goal per course.
     myWordsGoal: createMyWordsGoalService({ transaction, logger: io.logger, now: io.now }),
-    // Phase 53 (spec D10, D11). Saves photos and typed words with the target in one
-    // transaction, through the photo-import and vocabulary saves' own functions.
-    targets: createTargetService({
-      transaction,
-      logger: io.logger,
-      now: io.now,
-      stockSaveDelaySeconds: io.stockSaveDelaySeconds,
-    }),
+    targets,
     // No model composed here: the tool's tier 2 is built by createGlossTools.
     glosses: createGlossService({ transaction, logger: io.logger, llm: null }),
     health: createHealthRepo(io.db, io.logger),

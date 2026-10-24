@@ -69,6 +69,8 @@ export function createTestServerDeps(io: {
   botSecret?: string | null;
   /** Phase 52. Expo's base URL; defaults to an unroutable one, as Gemini's does. */
   pushBaseUrl?: string;
+  /** Phase 75. Where a reminder's pictures are served; none by default, as on every lane. */
+  reminderImageBaseUrl?: string | null;
   /** Phase 52 (spec D5). Mounts the reminder tick route; unset, as on every lane. */
   reminderSecret?: string | null;
 }): AppDeps {
@@ -110,6 +112,7 @@ export function createTestServerDeps(io: {
     webDistDir: null,
     botSecret: io.botSecret ?? null,
     pushBaseUrl: io.pushBaseUrl ?? 'http://127.0.0.1:9/never-registered',
+    reminderImageBaseUrl: io.reminderImageBaseUrl ?? null,
     reminderSecret: io.reminderSecret ?? null,
     boss: io.boss ?? unstartedBoss(io.db),
   });

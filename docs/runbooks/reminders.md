@@ -4,11 +4,21 @@ The app reminds a learner to practise with a push notification (phase 52,
 [design](../superpowers/specs/2026-10-14-lang-tutor-phase-52-practice-reminders-design.md)). An
 EventBridge rule, `wordspal-reminders-every-5-minutes` in `eu-central-1`, posts to the server's
 `/api/internal/reminders/tick` every five minutes. The route queues one run of the `remind` job,
-which finds each learner's slots that came due in the last 30 minutes, skips a learner whose daily
-target is met, and sends the rest through Expo's push service to Firebase and the phone. The push
-is in Hebrew: the title is "הגיע הזמן לתרגל". Every decision is a row in the `reminders` table,
-which is what the queries below read. Only the Android app receives them; the web shows the
-settings and says so.
+which finds each learner's slots that came due in the last 30 minutes, reads the learner's day the
+way home's cards read it, and sends through Expo's push service to Firebase and the phone one
+notification about the most pressing thing (phase 75,
+[design](../superpowers/specs/2026-10-24-lang-tutor-phase-75-reminders-what-matters-design.md)):
+a target due tomorrow, then another target owed today, then My words' goal, a בוחן before
+homework. Its words are the cards' ("שיעורי הבית מחר", "6 מילים צריכות חיזוק · מוכנות לשיעורי
+הבית: 72%", "המילים שלי"), with a picture of its kind on the side, and a tap opens that path's
+session. A slot with nothing owed on any path, in any course, is skipped. Every decision is a row
+in the `reminders` table, which is what the queries below read. Only the Android app receives
+them; the web shows the settings and says so.
+
+The pictures are `/notifications/<kind>.png` of the web export the container serves
+(`apps/mobile/public/notifications/`, drawn by `scripts/render-notification-images.mjs`). The
+server sends them from `<AUTH_BASE_URL>/notifications`; `REMINDER_IMAGE_BASE_URL` in the container's
+environment overrides that, and `REMINDER_IMAGE_BASE_URL=off` sends reminders with no picture.
 
 The rule is Terraform in `terraform/bootstrap/reminders.tf`, applied from the laptop like the
 rest of `bootstrap`. The call carries `REMINDER_SECRET` as a bearer token, kept in the EventBridge
@@ -148,7 +158,8 @@ needs the Android phone.
    3. Pick the time. The hour chips are whole hours, 06:00 to 23:00, so the plain way is to leave
       the days on, select only the next hour, and wait for it: the reminder arrives within five
       minutes after the hour. To not wait, set the schedule in the database to the current minute;
-      the next tick sends it. A target already met today is skipped, which is why this sets 5:
+      the next tick sends it, when something is owed today (a target, or My words short of its
+      goal; `daily_target` is no longer read):
 
       ```bash
       psql "$PROD_DB" -c "
@@ -163,8 +174,9 @@ needs the Android phone.
 
       Set the real schedule again in the app afterwards: this one has a single slot, at a minute
       that has passed.
-   4. When it arrives, the push reads "הגיע הזמן לתרגל". Tap it: the app opens and starts, or
-      resumes, today's session. Finish the session.
+   4. When it arrives, the push names what matters most today (a target due tomorrow, another
+      target, or My words), with its picture on the side. Tap it: the app opens a short "פותחים
+      את התרגול…" screen and goes straight into that path's session. Finish the session.
    5. Check the row:
 
       ```bash
@@ -255,10 +267,14 @@ means:
 - **A phone, and no `reminders` row.** The settings are off or leave out today's weekday (1 is
   Monday, on the learner's clock), or no slot fell in the last 30 minutes of a tick that ran. A
   learner who never reported a time zone is read in UTC (`time_zone` says `UTC`).
-- **`skip_target_met`.** `evidence` has `completed_today` at or over `daily_target`: nothing is
-  sent, on purpose.
-- **`failed`.** `evidence.error` is the push service's answer. The slot is not retried; the next
-  slot is.
+- **`skip_target_met`.** Nothing was owed on any path: `evidence.paths` lists each target and each
+  course's My words as the tick read them, and `evidence.chosen` is null. A target is owed while
+  its `state` is `owed`; My words while `sessions_done < goal` and the course has words of its own
+  (`saved > 0`). `daily_target` is no longer read (phase 75).
+- **`sent`.** `evidence.chosen` is the path the reminder was about (`kind`, `rank`, `title`, `body`,
+  `image`), beside every path it was chosen from.
+- **`failed`.** `evidence.error` is the push service's answer, or the error reading the learner's
+  day. The slot is not retried; the next slot is.
 - **`claimed`** for more than a minute. The container stopped between the claim and the send.
   That reminder is lost, never sent twice.
 - **`sent`, and the phone saw nothing.** `receipts` is filled 15 minutes to a day after the send,

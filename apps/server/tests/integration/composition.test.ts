@@ -63,6 +63,7 @@ describe('createServerDeps', () => {
       webDistDir: null,
       botSecret: null,
       pushBaseUrl: 'http://127.0.0.1:9/never-registered',
+      reminderImageBaseUrl: null,
       reminderSecret: null,
       boss: unstartedBoss(t.db),
     });

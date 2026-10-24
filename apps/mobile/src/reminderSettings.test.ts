@@ -2,15 +2,11 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   HOURS,
-  MAX_TARGET,
   MAX_TIMES,
-  MIN_TARGET,
   WEEK_DAYS,
-  clampTarget,
   createSaver,
   hourId,
   sameSettings,
-  stepTarget,
   timeOf,
   toggleDay,
   toggleHour,
@@ -114,30 +110,6 @@ describe('sameSettings', () => {
     expect(sameSettings(base, { ...base, days: [7] })).toBe(false);
     expect(sameSettings(base, { ...base, times: ['13:00'] })).toBe(false);
     expect(sameSettings(base, { ...base, times: ['13:00', '21:00'] })).toBe(false);
-  });
-});
-
-describe('the target', () => {
-  it('is clamped to 1 to 5', () => {
-    expect(MIN_TARGET).toBe(1);
-    expect(MAX_TARGET).toBe(5);
-    expect(clampTarget(0)).toBe(1);
-    expect(clampTarget(-3)).toBe(1);
-    expect(clampTarget(3)).toBe(3);
-    expect(clampTarget(6)).toBe(5);
-    expect(clampTarget(10)).toBe(5);
-  });
-
-  it('steps by one and stops at both ends', () => {
-    expect(stepTarget(1, 1)).toBe(2);
-    expect(stepTarget(2, -1)).toBe(1);
-    expect(stepTarget(1, -1)).toBe(1);
-    expect(stepTarget(5, 1)).toBe(5);
-  });
-
-  it('brings a target another client stored above 5 back into range on the next step', () => {
-    expect(stepTarget(8, -1)).toBe(5);
-    expect(stepTarget(8, 1)).toBe(5);
   });
 });
 

@@ -42,11 +42,16 @@ export function LearningSection({ active }: { active: Enrollment }) {
   const next = useNextSession();
   const { list: targetList, reload: reloadTargets, create: createTargetSession } = useTargets();
   // Set by the review after a save (spec D13): "28 words saved".
-  const { photoSaved, start } = useLocalSearchParams<{ photoSaved?: string; start?: string }>();
+  const { photoSaved, start, enrollment, target } = useLocalSearchParams<{
+    photoSaved?: string;
+    start?: string;
+    enrollment?: string;
+    target?: string;
+  }>();
   // Phase 52 (spec D8). Home's own route, so the param is cleared here even if
   // another screen has been opened over home since: router.setParams would clear
   // the focused screen's.
-  const navigation = useNavigation<{ setParams: (params: { start?: string }) => void }>();
+  const navigation = useNavigation<{ setParams: (params: { start?: string; enrollment?: string; target?: string }) => void }>();
   const focused = useIsFocused();
   // A ref guards re-entry (state is stale between two taps in one frame); the
   // state only drives the disabled look.
@@ -179,6 +184,14 @@ export function LearningSection({ active }: { active: Enrollment }) {
       return;
     }
     if (!focused || reminderHandled.current || inFlight.current) return;
+    // Phase 75 (spec D6). A reminder that names its path opens the practice screen over home,
+    // which goes straight into that path's session; nothing here waits on home's reads.
+    if (enrollment) {
+      reminderHandled.current = true;
+      navigation.setParams({ start: undefined, enrollment: undefined, target: undefined });
+      router.push({ pathname: '/practice', params: target ? { enrollment, target } : { enrollment } });
+      return;
+    }
     if (reminderHeld.current === null) {
       const fresh: ReminderHeld = { read: next.current, targets: 'reading', created: { kind: 'none' } };
       reminderHeld.current = fresh;

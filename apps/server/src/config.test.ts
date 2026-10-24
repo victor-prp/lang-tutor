@@ -46,6 +46,7 @@ describe('loadConfig', () => {
       commit: 'unknown',
       webDistDir: null,
       pushBaseUrl: 'https://exp.host',
+      reminderImageBaseUrl: null,
     });
   });
 
@@ -71,6 +72,16 @@ describe('loadConfig', () => {
     expect(loadConfig({}).pushBaseUrl).toBe('https://exp.host');
     expect(loadConfig({ PUSH_BASE_URL: ' http://localhost:1080/ns ' }).pushBaseUrl).toBe('http://localhost:1080/ns');
     expect(loadConfig({ PUSH_BASE_URL: '  ' }).pushBaseUrl).toBe('https://exp.host');
+  });
+
+  it("reads where a reminder's pictures are served, or none (phase 75)", () => {
+    const served = { WEB_DIST_DIR: '/app/web', AUTH_BASE_URL: 'https://app.wordspal.ai' };
+    expect(loadConfig({ REMINDER_IMAGE_BASE_URL: ' https://cdn.example/n ' }).reminderImageBaseUrl).toBe('https://cdn.example/n');
+    expect(loadConfig({ ...served, REMINDER_IMAGE_BASE_URL: 'off' }).reminderImageBaseUrl).toBeNull();
+    expect(loadConfig(served).reminderImageBaseUrl).toBe('https://app.wordspal.ai/notifications');
+    expect(loadConfig({ ...served, AUTH_BASE_URL: 'https://app.wordspal.ai/' }).reminderImageBaseUrl).toBe('https://app.wordspal.ai/notifications');
+    expect(loadConfig({ AUTH_BASE_URL: 'http://192.168.1.10:3001' }).reminderImageBaseUrl).toBeNull();
+    expect(loadConfig({ WEB_DIST_DIR: '/app/web' }).reminderImageBaseUrl).toBeNull();
   });
 
   it('reads the speech budget, defaulting to 8 s (phase 25)', () => {
@@ -125,6 +136,7 @@ describe('loadConfig', () => {
       commit: 'unknown',
       webDistDir: null,
       pushBaseUrl: 'https://exp.host',
+      reminderImageBaseUrl: null,
     });
   });
 

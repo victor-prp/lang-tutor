@@ -46,6 +46,8 @@ export type Config = {
   // Phase 52 (spec D7). Expo's push service. Tests and e2e point it at a MockServer
   // namespace, as RESEND_BASE_URL is.
   pushBaseUrl: string;
+  // Phase 75 (spec D4). Where a reminder's side pictures are served, or null for none.
+  reminderImageBaseUrl: string | null;
 };
 
 // The one place this default lives. Both composition roots read it from here.
@@ -119,7 +121,21 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     commit: env.APP_COMMIT?.trim() || 'unknown',
     webDistDir: env.WEB_DIST_DIR?.trim() || null,
     pushBaseUrl: env.PUSH_BASE_URL?.trim() || DEFAULT_PUSH_BASE_URL,
+    reminderImageBaseUrl: reminderImageBaseUrl(env),
   };
+}
+
+/**
+ * Phase 75 (spec D4). Where a reminder's side pictures are served: REMINDER_IMAGE_BASE_URL when
+ * set, `off` sending none; otherwise the web export's /notifications on the server's own public
+ * origin, where this server serves the export (WEB_DIST_DIR, production); otherwise none, and a
+ * reminder has no picture (a lane, CI, e2e).
+ */
+function reminderImageBaseUrl(env: NodeJS.ProcessEnv): string | null {
+  const set = env.REMINDER_IMAGE_BASE_URL?.trim();
+  if (set) return set === 'off' ? null : set;
+  const origin = env.AUTH_BASE_URL?.trim().replace(/\/+$/, '');
+  return env.WEB_DIST_DIR?.trim() && origin ? `${origin}/notifications` : null;
 }
 
 /**

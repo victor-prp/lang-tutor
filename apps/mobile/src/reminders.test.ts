@@ -1,6 +1,14 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { createReminders, openReminderTap, type NotificationsEngine, type Permission, type RemindersDeps } from './reminders';
+import {
+  createReminders,
+  openReminderTap,
+  reminderTapOf,
+  type NotificationsEngine,
+  type Permission,
+  type ReminderTap,
+  type RemindersDeps,
+} from './reminders';
 
 const TOKEN = 'ExponentPushToken[abc]';
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -15,12 +23,15 @@ type Over = {
   apiFails?: boolean;
 };
 
+/** A tap on a reminder about My words of e1, or with no id at all. */
+const tapOf = (reminderId: string | null): ReminderTap => ({ reminderId, enrollmentId: reminderId === null ? null : 'e1', targetId: null });
+
 // A recording engine and api, writing to one list, so the order across the two is visible.
 function setup(over: Over = {}, where: { platform?: string; isExpoGo?: boolean } = {}) {
   const calls: string[] = [];
   const logged: { event: string; detail: unknown }[] = [];
   let permission: Permission = over.permission ?? 'undetermined';
-  const tapListeners = new Set<(reminderId: string | null) => void>();
+  const tapListeners = new Set<(tap: ReminderTap) => void>();
 
   const engine: NotificationsEngine = {
     setChannel: async () => {
@@ -50,7 +61,7 @@ function setup(over: Over = {}, where: { platform?: string; isExpoGo?: boolean }
     },
     lastTap: async () => {
       calls.push('lastTap');
-      return over.lastTap ?? null;
+      return over.lastTap ? tapOf(over.lastTap) : null;
     },
     openSettings: async () => {
       calls.push('openSettings');
@@ -77,7 +88,7 @@ function setup(over: Over = {}, where: { platform?: string; isExpoGo?: boolean }
     log: (event, detail) => logged.push({ event, detail }),
   });
   const tap = (reminderId: string | null) => {
-    for (const listener of [...tapListeners]) listener(reminderId);
+    for (const listener of [...tapListeners]) listener(tapOf(reminderId));
   };
   return { reminders, calls, logged, tap, tapListeners };
 }
@@ -251,6 +262,17 @@ describe('a tapped reminder (spec D6, D8)', () => {
     expect(calls).toEqual(['tapReminder r1', 'go']);
   });
 
+  // Phase 75 (spec D6). The path the reminder was about reaches the navigation.
+  it('hands the tap, with its path, to the navigation', async () => {
+    const { reminders, tap } = setup();
+    const went: ReminderTap[] = [];
+    reminders.onTap((tapped) => went.push(tapped));
+    await flush();
+    tap('r1');
+    await flush();
+    expect(went).toEqual([{ reminderId: 'r1', enrollmentId: 'e1', targetId: null }]);
+  });
+
   it('just goes on a tap without an id', async () => {
     const { reminders, calls, tap } = setup();
     reminders.onTap(() => calls.push('go'));
@@ -356,6 +378,7 @@ describe('signing out (spec D4)', () => {
 // tap navigates instead, which jumps to בית and sets the param.
 describe('openReminderTap', () => {
   const HREF = { pathname: '/', params: { start: 'reminder' } };
+  const OLD: ReminderTap = { reminderId: 'r1', enrollmentId: null, targetId: null };
   const routerWith = (canDismiss: boolean) => {
     const calls: string[] = [];
     return {
@@ -370,13 +393,46 @@ describe('openReminderTap', () => {
 
   it('dismisses to home when a screen is open over the tabs', () => {
     const { router, calls } = routerWith(true);
-    openReminderTap(router);
+    openReminderTap(router, OLD);
     expect(calls).toEqual([`dismissTo ${JSON.stringify(HREF)}`]);
   });
 
   it('navigates to home when a tab is on top, whichever tab it is', () => {
     const { router, calls } = routerWith(false);
-    openReminderTap(router);
+    openReminderTap(router, OLD);
     expect(calls).toEqual([`navigate ${JSON.stringify(HREF)}`]);
+  });
+
+  // Phase 75 (spec D6). A reminder that names its path hands it to home with the same param, and
+  // home opens the practice screen over itself, so back from the session lands on home.
+  it("hands a target's reminder to home with its path", () => {
+    const { router, calls } = routerWith(true);
+    openReminderTap(router, { reminderId: 'r1', enrollmentId: 'e1', targetId: 't1' });
+    expect(calls).toEqual([
+      `dismissTo ${JSON.stringify({ pathname: '/', params: { start: 'reminder', enrollment: 'e1', target: 't1' } })}`,
+    ]);
+  });
+
+  it("hands My words' reminder to home with no target, from a tab too", () => {
+    const { router, calls } = routerWith(false);
+    openReminderTap(router, { reminderId: 'r1', enrollmentId: 'e1', targetId: null });
+    expect(calls).toEqual([`navigate ${JSON.stringify({ pathname: '/', params: { start: 'reminder', enrollment: 'e1' } })}`]);
+  });
+});
+
+describe('reminderTapOf', () => {
+  it("reads the reminder's id and path from the notification's data", () => {
+    expect(reminderTapOf({ reminder_id: 'r1', enrollment_id: 'e1', target_id: 't1' })).toEqual({
+      reminderId: 'r1',
+      enrollmentId: 'e1',
+      targetId: 't1',
+    });
+    expect(reminderTapOf({ reminder_id: 'r1', enrollment_id: 'e1' })).toEqual({ reminderId: 'r1', enrollmentId: 'e1', targetId: null });
+  });
+
+  it('reads an older reminder, with no path, and anything that is not a string as absent', () => {
+    expect(reminderTapOf({ reminder_id: 'r1' })).toEqual({ reminderId: 'r1', enrollmentId: null, targetId: null });
+    expect(reminderTapOf({ reminder_id: 7, enrollment_id: ['e1'] })).toEqual({ reminderId: null, enrollmentId: null, targetId: null });
+    expect(reminderTapOf(undefined)).toEqual({ reminderId: null, enrollmentId: null, targetId: null });
   });
 });

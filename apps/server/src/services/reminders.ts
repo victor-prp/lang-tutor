@@ -1,13 +1,14 @@
 import { REMIND } from '../domain/jobs';
 import { isTimeZone } from '../domain/learnerClock';
 import {
-  decide,
+  chooseReminder,
   DEFAULT_REMINDER_SETTINGS,
   dueSlots,
   normalizeSettings,
-  REMINDER_BODY,
+  pathEvidence,
   REMINDER_CHANNEL,
-  REMINDER_TITLE,
+  reminderMessage,
+  type ReminderPath,
   type ReminderSettings,
 } from '../domain/reminders';
 import { PushUnavailable, ReminderNotFound } from '../errors';
@@ -25,6 +26,10 @@ export type PushMessage = {
   body: string;
   channelId: string;
   priority: 'default' | 'normal' | 'high';
+  /** Phase 75 (spec D5). Android: a notification under the same tag replaces the one shown. */
+  tag?: string;
+  /** Phase 75 (spec D4). A picture by URL, which Android shows on the notification's side. */
+  richContent?: { image: string };
   data: Record<string, string>;
 };
 
@@ -72,6 +77,9 @@ const goneFor = (answer: PushTicket | PushReceipt | undefined): boolean =>
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+/** Phase 75 (spec D5). One tag for every reminder: the newest replaces the one in the shade. */
+const REMINDER_TAG = 'reminder';
+
 /**
  * The tickets Expo accepted, out of a sent reminder's stored ones: each ticket's id, and the
  * token the tick stored beside it, because a receipt names only the ticket and a
@@ -106,6 +114,8 @@ export function createReminderService({
   push,
   logger,
   now,
+  paths,
+  imageBaseUrl,
 }: {
   transaction: Transaction;
   // The tick sends through it; the learner's use cases do not.
@@ -114,6 +124,12 @@ export function createReminderService({
   // The tap's moment and the tick's. The repository takes them from here, not from its own
   // clock, so a test that pins the clock pins the stored instant and the slots that are due.
   now: () => number;
+  /** Phase 75 (spec D1). A learner's paths today, read as home reads them (reminderPaths.ts):
+   *  each read its own transaction, between the slot's claim and its record. */
+  paths: (userId: string) => Promise<ReminderPath[]>;
+  /** Phase 75 (spec D4). Where the side pictures are served (Config.reminderImageBaseUrl);
+   *  null sends none. */
+  imageBaseUrl: string | null;
 }) {
   /**
    * Receipts for reminders sent between 15 minutes and 23 hours before `at`, not yet fetched:
@@ -200,8 +216,11 @@ export function createReminderService({
      * reminders sent a while ago are fetched. One learner's failure is logged and the next
      * learner is still reminded.
      *
-     * The claim and the result are two transactions with the push call between them, never
-     * one held across it (ADR 0001 R8): each is idempotent, and a run that dies between them
+     * Phase 75 (spec D1–D5): what is decided is which path the reminder is about, over the
+     * learner's paths as home reads them; a slot with nothing owed anywhere is skipped.
+     *
+     * The claim and the result are two transactions with the reads and the push call between
+     * them, never one held across them (ADR 0001 R8): each is idempotent, and a run that dies between them
      * leaves the slot `claimed`, which no later run claims again. That costs one reminder,
      * never a duplicate.
      */
@@ -221,38 +240,65 @@ export function createReminderService({
           }
           const settings = stored ?? DEFAULT_REMINDER_SETTINGS;
           for (const { localDay, slot } of dueSlots(settings, timeZone, at)) {
-            const { id, completed } = await transaction(async ({ reminders }) => {
-              const claimed = await reminders.claim({ userId, localDay, slot });
-              return { id: claimed, completed: claimed === null ? 0 : await reminders.countCompletedOnDay(userId, localDay) };
-            });
+            const id = await transaction(({ reminders }) => reminders.claim({ userId, localDay, slot }));
             if (id === null) continue;
             summary.claimed += 1;
+            const base = { time_zone: timeZone, devices: tokens.length };
 
-            const decision = decide({
-              completedToday: completed,
-              dailyTarget: settings.dailyTarget,
-              timeZone,
-              devices: tokens.length,
-            });
-            if (decision.kind === 'skip_target_met') {
+            // Phase 75 (spec D1, D5). The day as home reads it. A read that fails is the slot's
+            // failure, as a push that fails is: the next slot reads again.
+            let day: ReminderPath[];
+            try {
+              day = await paths(userId);
+            } catch (error) {
               await transaction(({ reminders }) =>
-                reminders.record(id, { outcome: 'skip_target_met', evidence: decision.evidence, tickets: null }),
+                reminders.record(id, { outcome: 'failed', evidence: { ...base, error: reasonOf(error) }, tickets: null }),
               );
+              summary.failed += 1;
+              continue;
+            }
+
+            // Spec D2, D3. The most pressing path, in the cards' words; nothing owed anywhere skips
+            // the slot, under phase 52's name for "the day's work is met".
+            const choice = chooseReminder(day);
+            const withLanguage = new Set(day.map((path) => path.enrollmentId)).size > 1;
+            const message = choice === null ? null : reminderMessage(choice, { withLanguage });
+            const evidence = {
+              ...base,
+              paths: day.map(pathEvidence),
+              chosen:
+                choice === null || message === null
+                  ? null
+                  : {
+                      enrollment_id: choice.path.enrollmentId,
+                      target_id: choice.path.kind === 'my_words' ? null : choice.path.targetId,
+                      kind: choice.path.kind,
+                      rank: choice.rank,
+                      ...message,
+                    },
+            };
+            if (choice === null || message === null) {
+              await transaction(({ reminders }) => reminders.record(id, { outcome: 'skip_target_met', evidence, tickets: null }));
               summary.skipped += 1;
               continue;
             }
 
+            // Spec D6: the tap opens this path, so the data names it.
+            const data: Record<string, string> = { reminder_id: id, enrollment_id: choice.path.enrollmentId };
+            if (choice.path.kind !== 'my_words') data.target_id = choice.path.targetId;
             let tickets: PushTicket[];
             try {
               tickets = await push.send(
                 tokens.map((to) => ({
                   to,
-                  title: REMINDER_TITLE,
-                  body: REMINDER_BODY,
+                  title: message.title,
+                  body: message.body,
                   channelId: REMINDER_CHANNEL,
                   // A reminder is for a given hour: an idle phone must not hold it back (final review M1).
                   priority: 'high',
-                  data: { reminder_id: id },
+                  tag: REMINDER_TAG,
+                  ...(imageBaseUrl === null ? {} : { richContent: { image: `${imageBaseUrl}/${message.image}.png` } }),
+                  data,
                 })),
               );
             } catch (error) {
@@ -260,7 +306,7 @@ export function createReminderService({
               await transaction(({ reminders }) =>
                 reminders.record(id, {
                   outcome: 'failed',
-                  evidence: { ...decision.evidence, error: error.message },
+                  evidence: { ...evidence, error: error.message },
                   tickets: null,
                 }),
               );
@@ -273,7 +319,7 @@ export function createReminderService({
             await transaction(async ({ reminders }) => {
               await reminders.record(id, {
                 outcome: 'sent',
-                evidence: decision.evidence,
+                evidence,
                 tickets: tickets.map((ticket, index) => ({ ...ticket, to: tokens[index] })),
               });
               await reminders.deleteDevicesByToken(gone);

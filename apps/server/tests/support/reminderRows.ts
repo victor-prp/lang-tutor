@@ -1,7 +1,7 @@
 import { asc, eq, sql } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
-import { pushDevices, reminders, sessions } from '../../src/db/schema';
+import { myWordsDays, pushDevices, reminders, sessions, targets } from '../../src/db/schema';
 import { createReminderRepo, type ReminderResult } from '../../src/repo/reminders';
 import { enrollmentOf } from './seedUser';
 import { withTx } from './withTx';
@@ -97,4 +97,19 @@ export async function failReminderUpdates(db: Db): Promise<void> {
       create trigger fail_reminder_update before update on reminders
         for each row execute function fail_reminder_update();`),
   );
+}
+
+/** Phase 75. A learner's My words day as a completed counted session writes it (phase 73 D3):
+ *  `sessionsDone` of the goal in force, on `day`, in the learner's own enrollment. */
+export async function seedMyWordsDay(db: Db, input: { userId: string; day: string; sessionsDone: number }): Promise<void> {
+  await db
+    .insert(myWordsDays)
+    .values({ enrollmentId: enrollmentOf(input.userId), day: input.day, goal: 3, sessionsDone: input.sessionsDone, newWords: 0, movedUp: 0 })
+    .onConflictDoUpdate({ target: [myWordsDays.enrollmentId, myWordsDays.day], set: { sessionsDone: input.sessionsDone } });
+}
+
+/** Phase 75. A target made at `at`, rather than at the database's clock: a tick pinned in the past
+ *  reads it as made before its day. */
+export async function backdateTarget(db: Db, targetId: string, at: Date): Promise<void> {
+  await db.update(targets).set({ createdAt: at }).where(eq(targets.id, targetId));
 }

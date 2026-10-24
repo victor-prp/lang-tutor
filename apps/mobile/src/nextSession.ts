@@ -204,12 +204,25 @@ export function homeReminderStartOf(
   const { first } = homeOrder(held);
   const target = held.find((candidate) => candidate.id === first);
   if (!target) return reminderStartOf(main, flags);
+  return targetReminderStep(target, created, latest, 'clear');
+}
+
+/** The target half of a reminder's start, home's (phase 57) and the practice screen's (phase 75):
+ *  the target's button, then its create waited on until the session it answers is ready. A failed
+ *  session is left alone on home, as phase 52 leaves one ('clear'), and made again on the practice
+ *  screen, as the button retries ('create'). */
+function targetReminderStep(
+  target: TargetSummary,
+  created: TargetCreate,
+  latest: readonly TargetSummary[],
+  onFailed: 'clear' | 'create',
+): ReminderStart {
   const action = targetSessionAction(target);
   if (action.kind === 'resume') return { kind: 'enter', sessionId: action.sessionId, fresh: false };
-  if (action.kind === 'failed') return { kind: 'clear' };
+  if (action.kind === 'failed' && onFailed === 'clear') return { kind: 'clear' };
   switch (created.kind) {
     case 'none':
-      return { kind: 'create', targetId: target.id, waitForVoices: action.kind === 'create' };
+      return { kind: 'create', targetId: target.id, waitForVoices: action.kind === 'create' || action.kind === 'failed' };
     case 'sending':
       return { kind: 'wait' };
     case 'failed':
@@ -219,11 +232,89 @@ export function homeReminderStartOf(
     case 'answered': {
       if (created.status === 'ready') return { kind: 'enter', sessionId: created.sessionId, fresh: true };
       if (created.status !== 'preparing') return { kind: 'clear' };
-      const now = latest.find((candidate) => candidate.id === target.id)?.session;
-      if (now?.session_id !== created.sessionId) return { kind: 'wait' };
+      const listed = latest.find((candidate) => candidate.id === target.id);
+      const now = listed?.session;
+      if (now?.session_id !== created.sessionId) {
+        // Home's render can be from before create's own read, so it waits a different session out.
+        // The practice screen's list is read after its create (final review I1): a different
+        // session is the path's now, and none, or a failed one, is home's to explain.
+        if (onFailed === 'clear' || !listed) return { kind: 'wait' };
+        if (!now) return { kind: 'clear' };
+        if (now.status === 'ready') return { kind: 'enter', sessionId: now.session_id, fresh: !(now.started || now.answered > 0) };
+        return now.status === 'preparing' ? { kind: 'wait' } : { kind: 'clear' };
+      }
       if (now.status === 'ready') return { kind: 'enter', sessionId: created.sessionId, fresh: true };
       return now.status === 'preparing' ? { kind: 'wait' } : { kind: 'clear' };
     }
+  }
+}
+
+/** Phase 75 (spec D6). Where the practice screen's own My words create stands: not sent, out,
+ *  made and read again (final review I1), or failed. */
+export type MyWordsMade = 'none' | 'sending' | 'made' | 'failed';
+
+/** Final review I1. The practice screen's make: the create, then a read of what it made, so the
+ *  screen judges on that read; a create or a read that failed is `failed`, never left waiting. */
+export async function makeMyWords(create: () => Promise<unknown>, refresh: () => Promise<boolean>): Promise<'made' | 'failed'> {
+  try {
+    await create();
+  } catch {
+    return 'failed';
+  }
+  return (await refresh()) ? 'made' : 'failed';
+}
+
+/** Phase 75 (spec D6). What the practice screen does next. */
+export type PracticeStep =
+  | { kind: 'enter'; sessionId: string; fresh: boolean }
+  | { kind: 'wait' }
+  | { kind: 'home' }
+  | { kind: 'create'; targetId: string; waitForVoices: boolean }
+  | { kind: 'make' }
+  | { kind: 'discover' };
+
+/**
+ * Phase 75 (spec D6, builder check 2 and 5). The practice screen a tapped reminder opens, for the
+ * path it named: that card's button at the moment of the tap, judged on reads made after the
+ * screen opened, then the session waited for while it prepares. A target goes through the same
+ * steps home's reminder takes (targetReminderStep), except that a failed session is made again;
+ * one no longer in the read, or a read that failed, goes home. My words does what its button
+ * does, and makes a missing session itself (`made` is that create), since only home makes one
+ * on its own. Home, Words for me and the session are where the screen can lead.
+ */
+export function practiceStartOf(input: {
+  targetId: string | null;
+  targets: 'reading' | 'failed' | readonly TargetSummary[];
+  main: HomeAction | null;
+  flags: { failed: boolean; read: boolean };
+  created: TargetCreate;
+  made: MyWordsMade;
+  latest: readonly TargetSummary[];
+}): PracticeStep {
+  const { targetId, targets, main, flags, made } = input;
+  if (targetId !== null) {
+    if (targets === 'reading') return { kind: 'wait' };
+    if (targets === 'failed') return { kind: 'home' };
+    const target = targets.find((candidate) => candidate.id === targetId);
+    if (!target) return { kind: 'home' };
+    const step = targetReminderStep(target, input.created, input.latest, 'create');
+    return step.kind === 'clear' ? { kind: 'home' } : step;
+  }
+  if (main === null) return flags.failed ? { kind: 'home' } : { kind: 'wait' };
+  if (!flags.read) return { kind: 'wait' };
+  switch (main.kind) {
+    case 'start':
+      return { kind: 'enter', sessionId: main.sessionId, fresh: true };
+    case 'resume':
+      return { kind: 'enter', sessionId: main.sessionId, fresh: false };
+    case 'preparing':
+      return { kind: 'wait' };
+    case 'discover':
+      return { kind: 'discover' };
+    case 'create':
+    case 'failed':
+      // Made and read again, and still none, or failed to prepare: home's card explains it.
+      return made === 'none' ? { kind: 'make' } : made === 'sending' ? { kind: 'wait' } : { kind: 'home' };
   }
 }
 
@@ -233,6 +324,14 @@ export function shouldPoll(state: CurrentSessionResponse | null): boolean {
 
 /** A read of the current session, tagged with the enrollment it was about. */
 export type StoredCurrent = { enrollmentId: string; state: CurrentSessionResponse };
+
+/** Phase 75 (CI run 40041866540). What the provider keeps when a read lands: the read, unless it
+ *  is about a course that is not the active one while the read kept is the active one's. A slow
+ *  read about the course just switched from must not push out the new course's, which a screen
+ *  that waited on that read (the practice screen) would otherwise never see. */
+export function keptRead(stored: StoredCurrent | null, landed: StoredCurrent, activeId: string | undefined): StoredCurrent | null {
+  return landed.enrollmentId !== activeId && stored?.enrollmentId === activeId ? stored : landed;
+}
 
 /** What to show for the active enrollment. A read stored for any other
  *  enrollment (a slow answer that landed after a switch) is never shown. */
